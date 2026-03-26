@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Free LLM APIs — MCP Server Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d2e;
+      --surface2: #242740;
+      --border: #2e3250;
+      --accent: #6c63ff;
+      --accent2: #48c774;
+      --warn: #ffdd57;
+      --danger: #ff4757;
+      --text: #e2e8f0;
+      --text-muted: #8892a4;
+      --radius: 10px;
+      --font: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    header .logo {
+      font-size: 1.5rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    header .subtitle {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+
+    header .status-badge {
+      margin-left: auto;
+      background: #1a2e1a;
+      border: 1px solid var(--accent2);
+      color: var(--accent2);
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent2);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    main {
+      flex: 1;
+      padding: 2rem;
+      max-width: 1400px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+    }
+
+    .stat-card .label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .stat-card .value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .stat-card .sub {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    .section-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: var(--text);
+    }
+
+    .providers-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .provider-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      transition: border-color 0.2s;
+    }
+
+    .provider-card:hover {
+      border-color: var(--accent);
+    }
+
+    .provider-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.75rem;
+    }
+
+    .provider-name {
+      font-weight: 600;
+      font-size: 1rem;
+    }
+
+    .provider-id {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-family: monospace;
+    }
+
+    .badge {
+      padding: 0.2rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+
+    .badge-available {
+      background: #1a2e1a;
+      border: 1px solid var(--accent2);
+      color: var(--accent2);
+    }
+
+    .badge-unavailable {
+      background: #2e1a1a;
+      border: 1px solid var(--danger);
+      color: var(--danger);
+    }
+
+    .model-list {
+      list-style: none;
+      margin-top: 0.5rem;
+    }
+
+    .model-list li {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      padding: 0.2rem 0;
+      font-family: monospace;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .model-list li::before {
+      content: '▸';
+      color: var(--accent);
+      font-size: 0.65rem;
+    }
+
+    .rate-limits {
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .rate-chip {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.2rem 0.5rem;
+      font-size: 0.7rem;
+      color: var(--warn);
+      font-family: monospace;
+    }
+
+    .tools-section {
+      margin-bottom: 2rem;
+    }
+
+    .tool-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .tool-name {
+      font-size: 1rem;
+      font-weight: 700;
+      font-family: monospace;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+    }
+
+    .tool-desc {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+      line-height: 1.5;
+    }
+
+    .tool-params {
+      margin-top: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .param-chip {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.2rem 0.6rem;
+      font-size: 0.75rem;
+      font-family: monospace;
+      color: var(--text-muted);
+    }
+
+    .param-chip.required {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .quick-start {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      overflow-x: auto;
+      font-size: 0.8rem;
+      line-height: 1.6;
+      margin-top: 0.75rem;
+    }
+
+    code {
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      color: var(--text);
+    }
+
+    .kw { color: #c792ea; }
+    .str { color: #c3e88d; }
+    .num { color: #f78c6c; }
+    .cmt { color: #546e7a; font-style: italic; }
+    .fn { color: #82aaff; }
+
+    footer {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 1rem 2rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+    }
+
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    @media (max-width: 600px) {
+      main { padding: 1rem; }
+      .stats-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">⚡ Free LLM MCP Server</div>
+    <div class="subtitle">Model Context Protocol · 14 Providers · 42+ Models</div>
+  </div>
+  <div class="status-badge">
+    <span class="dot"></span>
+    Running on stdio
+  </div>
+</header>
+
+<main>
+
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="label">Total Providers</div>
+      <div class="value">14</div>
+      <div class="sub">Free-tier APIs</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Total Models</div>
+      <div class="value">42+</div>
+      <div class="sub">Across all providers</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">MCP Tools</div>
+      <div class="value">3</div>
+      <div class="sub">use_free_llm · list_models · code_mode</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Sandbox</div>
+      <div class="value" style="font-size:1.4rem">QuickJS</div>
+      <div class="sub">Safe JS execution</div>
+    </div>
+  </div>
+
+  <!-- MCP Tools -->
+  <div class="tools-section">
+    <div class="section-title">🔧 MCP Tools</div>
+
+    <div class="tool-card">
+      <div class="tool-name">use_free_llm</div>
+      <div class="tool-desc">
+        Call any free LLM API. Automatically routes to the correct provider based on model ID,
+        with intelligent fallback on failure and LRU response caching.
+      </div>
+      <div class="tool-params">
+        <span class="param-chip required">model *</span>
+        <span class="param-chip required">messages *</span>
+        <span class="param-chip">temperature</span>
+        <span class="param-chip">max_tokens</span>
+        <span class="param-chip">top_p</span>
+        <span class="param-chip">provider</span>
+        <span class="param-chip">fallback</span>
+        <span class="param-chip">stream</span>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-name">list_available_free_models</div>
+      <div class="tool-desc">
+        List all free LLM models and their providers. Filter by provider ID or show only providers
+        with configured API keys.
+      </div>
+      <div class="tool-params">
+        <span class="param-chip">provider</span>
+        <span class="param-chip">available_only</span>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-name">code_mode</div>
+      <div class="tool-desc">
+        Execute JavaScript code in a sandboxed QuickJS environment. Input data is available via
+        the <code>DATA</code> variable. Use <code>print()</code> to output results. Supports
+        timeout control and tracks compression ratios.
+      </div>
+      <div class="tool-params">
+        <span class="param-chip required">code *</span>
+        <span class="param-chip">data</span>
+        <span class="param-chip">command</span>
+        <span class="param-chip">timeout_ms</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Providers -->
+  <div class="section-title">🌐 Provider Registry</div>
+  <div class="providers-grid">
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">Google Gemini</div>
+          <div class="provider-id">gemini · GEMINI_API_KEY</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>gemini-2.5-pro</li>
+        <li>gemini-2.5-flash</li>
+        <li>gemini-2.5-flash-lite</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">15 RPM</span>
+        <span class="rate-chip">1000 RPD</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">Groq</div>
+          <div class="provider-id">groq · GROQ_API_KEY</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>llama-3.3-70b-versatile</li>
+        <li>llama-4-scout-17b-16e-instruct</li>
+        <li>moonshotai/kimi-k2-instruct</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">30 RPM</span>
+        <span class="rate-chip">14400 RPD</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">Mistral AI</div>
+          <div class="provider-id">mistral · MISTRAL_API_KEY</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>mistral-large-latest</li>
+        <li>mistral-small-latest</li>
+        <li>ministral-8b-latest</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">1 RPS</span>
+        <span class="rate-chip">1B tokens/month</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">Cohere</div>
+          <div class="provider-id">cohere · CO_API_KEY</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>command-a-03-2025</li>
+        <li>command-r-plus</li>
+        <li>aya-expanse-32b</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">20 RPM</span>
+        <span class="rate-chip">1000 req/month</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">Cerebras</div>
+          <div class="provider-id">cerebras · CEREBRAS_API_KEY</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>llama-3.3-70b</li>
+        <li>qwen3-235b</li>
+        <li>gpt-oss-120b</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">30 RPM</span>
+        <span class="rate-chip">14400 RPD</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">GitHub Models</div>
+          <div class="provider-id">github-models · GITHUB_TOKEN</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>gpt-4o</li>
+        <li>Llama-3.3-70B-Instruct</li>
+        <li>DeepSeek-R1</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">15 RPM</span>
+        <span class="rate-chip">150 RPD</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">NVIDIA NIM</div>
+          <div class="provider-id">nvidia · NVIDIA_API_KEY</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>meta/llama-3.3-70b-instruct</li>
+        <li>mistralai/mistral-large-2-instruct</li>
+        <li>Qwen/Qwen3-235B-A22B</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">40 RPM</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">Hugging Face</div>
+          <div class="provider-id">huggingface · HF_TOKEN</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>meta-llama/Llama-3.3-70B-Instruct</li>
+        <li>Qwen/Qwen2.5-72B-Instruct</li>
+        <li>mistralai/Mistral-7B-Instruct-v0.3</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">Free tier</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">OpenRouter</div>
+          <div class="provider-id">openrouter · OPENROUTER_API_KEY</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>deepseek/deepseek-r1:free</li>
+        <li>meta-llama/llama-3.3-70b-instruct:free</li>
+        <li>openai/gpt-4o-mini:free</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">20 RPM</span>
+        <span class="rate-chip">50 RPD</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">Cloudflare Workers AI</div>
+          <div class="provider-id">cloudflare · CLOUDFLARE_API_TOKEN</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>@cf/meta/llama-3.3-70b-instruct-fp8-fast</li>
+        <li>@cf/qwen/qwq-32b</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">Free tier</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">Zhipu AI</div>
+          <div class="provider-id">zhipu · ZHIPU_API_KEY</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>glm-4-flash</li>
+        <li>glm-4.5-flash</li>
+        <li>glm-4.6v-flash</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">Free tier</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">Kluster AI</div>
+          <div class="provider-id">kluster · KLUSTER_API_KEY</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>deepseek-ai/DeepSeek-R1</li>
+        <li>meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8</li>
+        <li>Qwen/Qwen3-235B-A22B</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">Free tier</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">LLM7.io</div>
+          <div class="provider-id">llm7 · LLM7_API_KEY</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>deepseek-r1</li>
+        <li>gemini-2.0-flash-lite</li>
+        <li>qwen2.5-coder-32b-instruct</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">30 RPM</span>
+      </div>
+    </div>
+
+    <div class="provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="provider-name">Ollama Cloud</div>
+          <div class="provider-id">ollama-cloud · OLLAMA_API_KEY</div>
+        </div>
+        <span class="badge badge-unavailable">Not configured</span>
+      </div>
+      <ul class="model-list">
+        <li>deepseek-v3.2</li>
+        <li>qwen3.5</li>
+        <li>kimi-k2.5</li>
+      </ul>
+      <div class="rate-limits">
+        <span class="rate-chip">Free tier</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Quick Start -->
+  <div class="quick-start">
+    <div class="section-title">🚀 Quick Start</div>
+    <pre><code><span class="cmt"># Install dependencies</span>
+npm install
+
+<span class="cmt"># Configure API keys</span>
+cp .env.example .env
+<span class="cmt"># Edit .env with your keys</span>
+
+<span class="cmt"># Run the MCP server</span>
+npm run dev
+
+<span class="cmt"># Build for production</span>
+npm run build && npm start
+
+<span class="cmt"># Run tests</span>
+npm test</code></pre>
+
+    <pre><code><span class="cmt">// Claude Desktop config (claude_desktop_config.json)</span>
+{
+  <span class="str">"mcpServers"</span>: {
+    <span class="str">"free-llm-apis"</span>: {
+      <span class="str">"command"</span>: <span class="str">"node"</span>,
+      <span class="str">"args"</span>: [<span class="str">"/path/to/mcp-server/dist/server.js"</span>],
+      <span class="str">"env"</span>: {
+        <span class="str">"GROQ_API_KEY"</span>: <span class="str">"your-key-here"</span>,
+        <span class="str">"GEMINI_API_KEY"</span>: <span class="str">"your-key-here"</span>
+      }
+    }
+  }
+}</code></pre>
+  </div>
+
+</main>
+
+<footer>
+  Free LLM APIs MCP Server &mdash;
+  <a href="https://github.com/zhu-weijie/awesome-free-llm-apis" target="_blank">GitHub</a> &mdash;
+  MIT License
+</footer>
+
+</body>
+</html>
