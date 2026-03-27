@@ -18,5 +18,6 @@ export const config = {
     nvidia: process.env.NVIDIA_API_KEY,
     ollama: process.env.OLLAMA_API_KEY,
     openrouter: process.env.OPENROUTER_API_KEY,
+    siliconflow: process.env.SILICONFLOW_API_KEY,
   },
 };
