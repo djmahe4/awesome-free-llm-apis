@@ -1,5 +1,7 @@
+import { join } from 'node:path';
 import { Router } from '../router/index.js';
 import { ResponseCache } from '../cache/index.js';
+import { WorkspaceScanner } from '../cache/workspace.js';
 import { MemoryManager } from '../memory/index.js';
 import type { ChatRequest, ChatResponse } from '../providers/types.js';
 
@@ -12,10 +14,12 @@ export interface UseFreeLLMInput {
   stream?: boolean;
   provider?: string;
   fallback?: boolean;
+  workspace_root?: string;
 }
 
 const router = new Router();
-const cache = new ResponseCache();
+const workspaceScanner = new WorkspaceScanner(process.cwd());
+const cache = new ResponseCache(500, join(process.cwd(), 'data/cache.json'));
 const memoryManager = new MemoryManager();
 
 export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> {
@@ -28,6 +32,7 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     stream = false,
     provider: providerId,
     fallback = true,
+    workspace_root: workspaceRoot,
   } = input;
 
   const request: ChatRequest = {
@@ -39,7 +44,8 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     stream,
   };
 
-  const cacheKey = cache.generateKey(request);
+  const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
+  const cacheKey = cache.generateKey(request, wsHash);
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
@@ -53,7 +59,7 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
   }
 
   cache.set(cacheKey, response);
-  await memoryManager.storeToolOutput('use_free_llm', { model, messages }, response);
+  await memoryManager.storeToolOutput('use_free_llm', { model, messages, _ws: wsHash }, response);
 
   return response;
 }

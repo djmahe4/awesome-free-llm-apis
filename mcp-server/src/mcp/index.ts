@@ -6,6 +6,7 @@ import {
 import { useFreeLLM } from '../tools/use-free-llm.js';
 import { listAvailableFreeModels } from '../tools/list-models.js';
 import { runCodeMode } from '../tools/code-mode.js';
+import { manageMemory } from '../tools/manage-memory.js';
 
 export async function createMCPServer(): Promise<Server> {
   const server = new Server(
@@ -40,6 +41,7 @@ export async function createMCPServer(): Promise<Server> {
             stream: { type: 'boolean', description: 'Stream response (default false)' },
             provider: { type: 'string', description: 'Override provider ID' },
             fallback: { type: 'boolean', description: 'Enable fallback (default true)' },
+            workspace_root: { type: 'string', description: 'Root directory of the workspace to scan for context' },
           },
           required: ['model', 'messages'],
         },
@@ -70,10 +72,24 @@ export async function createMCPServer(): Promise<Server> {
           required: ['code'],
         },
       },
+      {
+        name: 'manage_memory',
+        description: 'Manage persistent memory for a specific workspace.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            action: { type: 'string', enum: ['search', 'list', 'stats', 'clear'], description: 'Memory operation' },
+            workspace_root: { type: 'string', description: 'Space-aware root directory' },
+            query: { type: 'string', description: 'Search term for memory retrieval' },
+            limit: { type: 'number', description: 'Max results to return' },
+          },
+          required: ['action'],
+        },
+      },
     ],
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
     const { name, arguments: args } = request.params;
 
     try {
@@ -96,6 +112,14 @@ export async function createMCPServer(): Promise<Server> {
       if (name === 'code_mode') {
         const input = args as unknown as Parameters<typeof runCodeMode>[0];
         const result = await runCodeMode(input);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      if (name === 'manage_memory') {
+        const input = args as unknown as Parameters<typeof manageMemory>[0];
+        const result = await manageMemory(input);
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         };
