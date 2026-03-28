@@ -27,8 +27,8 @@ describe('Router', () => {
   });
 
   it('routeWithFallback retries on failure', async () => {
-    vi.stubEnv('GROQ_API_KEY', 'test-key');
-    vi.stubEnv('CEREBRAS_API_KEY', 'test-key');
+    vi.stubEnv('GROQ_API_KEY', 'test-key-long-enough');
+    vi.stubEnv('CEREBRAS_API_KEY', 'test-key-long-enough');
     (ProviderRegistry as unknown as { instance: undefined }).instance = undefined;
     const router = new Router();
 

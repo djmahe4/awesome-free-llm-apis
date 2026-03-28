@@ -48,7 +48,7 @@ describe('Pipeline Orchestration', () => {
     });
 
     it('IntelligentRouterMiddleware selects correct model for task', async () => {
-        vi.stubEnv('KLUSTER_API_KEY', 'test-key');
+        vi.stubEnv('KLUSTER_API_KEY', 'test-key-long-enough');
         const registry = ProviderRegistry.getInstance();
 
         const router = new IntelligentRouterMiddleware();

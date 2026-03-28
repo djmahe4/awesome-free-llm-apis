@@ -66,7 +66,7 @@ describe('use_free_llm input validation', () => {
   });
 
   it('uses cache on second call', async () => {
-    vi.stubEnv('GROQ_API_KEY', 'test-key');
+    vi.stubEnv('GROQ_API_KEY', 'test-key-long-enough');
     (ProviderRegistry as unknown as { instance: undefined }).instance = undefined;
 
     const mockResponse = {

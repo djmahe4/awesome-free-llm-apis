@@ -31,7 +31,7 @@ describe('ProviderRegistry', () => {
   });
 
   it('getAvailableProviders returns only providers with keys', () => {
-    vi.stubEnv('GROQ_API_KEY', 'test-key');
+    vi.stubEnv('GROQ_API_KEY', 'test-key-long-enough');
     const registry = ProviderRegistry.getInstance();
     const available = registry.getAvailableProviders();
     const groq = available.find((p) => p.id === 'groq');
