@@ -18,6 +18,18 @@
 - [Provider APIs](#provider-apis)
 - [Inference providers](#inference-providers)
 - [Setup & Installation](mcp-server/docs/setup.md)
+- [Architecture & Workflow Guide](mcp-server/docs/guide.md)
+- [Visual Dashboard](mcp-server/dashboard/index.html)
+
+## Intelligent Model Orchestration
+
+This MCP server features a Starlette-inspired **Intelligent Orchestration Pipeline** that automatically selects the best model for your task while managing tokens and costs.
+
+- **Task-Based Routing**: Coding tasks use DeepSeek R1/Gemini Pro, while lightweight chat uses Flash models.
+- **Proactive Token Management**: Local interpolation using `js-tiktoken` prevents rate limits before they happen.
+- **Auto-Fallback Cascading**: If a provider is down or lacks a key, the system automatically tries the next best model in the tier.
+- **Semantic Caching**: Zero-cost, zero-latency responses for repeated identical or semantically similar queries.
+- **Visual Dashboard**: Real-time monitoring of token balance, provider health, and model availability.
 
 ## Provider APIs
 
