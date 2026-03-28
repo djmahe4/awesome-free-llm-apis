@@ -8,7 +8,7 @@
 	</a>
 	<br>
 	<br>
-	<p>LLM APIs with permanent free tiers for text inference.</p>
+	<p>LLM APIs integrated with MCP server and permanent free tiers for text inference.</p>
 	<br>
 	<br>
 </div>
@@ -17,6 +17,7 @@
 
 - [Provider APIs](#provider-apis)
 - [Inference providers](#inference-providers)
+- [Setup & Installation](mcp-server/docs/setup.md)
 
 ## Provider APIs
 
@@ -41,6 +42,7 @@ Third-party platforms that host open-weight models from various sources.
 - [NVIDIA NIM](https://build.nvidia.com/explore/discover) 🇺🇸 - Llama 3.3 70B, Mistral Large, Qwen3 235B +more. 40 RPM.
 - [Ollama Cloud](https://ollama.com/settings/keys) 🇺🇸 - DeepSeek-V3.2, Qwen3.5, Kimi-K2.5 +17 more. 1 concurrent model, light usage. [^2]
 - [OpenRouter](https://openrouter.ai/keys) 🇺🇸 - DeepSeek R1, Llama 3.3 70B, GPT-OSS-120B +29 more. 20 RPM, 50 RPD (1K with $10+ in purchased credits). [^4]
+- [SiliconFlow](https://siliconflow.cn/zh-cn/) 🇨🇳 - Qwen 2.5, DeepSeek V3, GLM 4.7 +many more. Free tier available.
 
 ## Contributing
 
