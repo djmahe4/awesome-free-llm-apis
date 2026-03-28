@@ -27,6 +27,7 @@ export interface ChatResponse {
     completion_tokens: number;
     total_tokens: number;
   };
+  _headers?: Record<string, string>;
 }
 
 export interface RateLimits {

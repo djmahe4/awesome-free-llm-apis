@@ -7,6 +7,7 @@ import { useFreeLLM } from '../tools/use-free-llm.js';
 import { listAvailableFreeModels } from '../tools/list-models.js';
 import { runCodeMode } from '../tools/code-mode.js';
 import { manageMemory } from '../tools/manage-memory.js';
+import { getTokenStats } from '../tools/get-token-stats.js';
 
 export async function createMCPServer(): Promise<Server> {
   const server = new Server(
@@ -55,6 +56,14 @@ export async function createMCPServer(): Promise<Server> {
             provider: { type: 'string', description: 'Filter by provider ID' },
             available_only: { type: 'boolean', description: 'Only show providers with API keys configured' },
           },
+        },
+      },
+      {
+        name: 'get_token_stats',
+        description: 'Get real-time token tracking statistics and remaining limits for all loaded API providers.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {},
         },
       },
       {
@@ -120,6 +129,13 @@ export async function createMCPServer(): Promise<Server> {
       if (name === 'manage_memory') {
         const input = args as unknown as Parameters<typeof manageMemory>[0];
         const result = await manageMemory(input);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      if (name === 'get_token_stats') {
+        const result = await getTokenStats();
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         };

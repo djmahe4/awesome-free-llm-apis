@@ -59,9 +59,16 @@ npm run dev
 
 ## Running Smoke Tests
 
-To verify that your providers are correctly configured and reachable, run the smoke test:
-
 ```bash
 cd mcp-server
 npm run smoke-test
 ```
+
+## Orchestration Pipeline
+
+The server uses an intelligent pipeline for model selection and token management. For a deep dive into how routing, caching, and failover work, see the [Architecture & Workflow Guide](guide.md).
+
+### Performance Features
+- **Token Interpolation**: Uses `js-tiktoken` for local token counting.
+- **Header Synchronization**: Automatically adjusts quotas based on `x-ratelimit-*` response headers.
+- **Tiered Fallbacks**: Dynamically switches models based on task type (Coding, Chat, etc.).

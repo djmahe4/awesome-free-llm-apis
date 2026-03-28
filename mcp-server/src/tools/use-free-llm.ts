@@ -1,9 +1,14 @@
-import { join } from 'node:path';
-import { Router } from '../router/index.js';
-import { ResponseCache } from '../cache/index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
-import { MemoryManager } from '../memory/index.js';
 import type { ChatRequest, ChatResponse } from '../providers/types.js';
+import {
+  PipelineExecutor,
+  ResponseCacheMiddleware,
+  TokenManagerMiddleware,
+  IntelligentRouterMiddleware,
+  LLMExecutionMiddleware,
+  TaskType,
+  type PipelineContext
+} from '../pipeline/index.js';
 
 export interface UseFreeLLMInput {
   model: string;
@@ -15,12 +20,12 @@ export interface UseFreeLLMInput {
   provider?: string;
   fallback?: boolean;
   workspace_root?: string;
+  taskType?: TaskType | string;
 }
 
-const router = new Router();
+// Singleton instances for shared state across pipeline requests
 const workspaceScanner = new WorkspaceScanner(process.cwd());
-const cache = new ResponseCache(500, join(process.cwd(), 'data/cache.json'));
-const memoryManager = new MemoryManager();
+export const sharedTokenManager = new TokenManagerMiddleware();
 
 export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> {
   const {
@@ -44,22 +49,26 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     stream,
   };
 
-  const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
-  const cacheKey = cache.generateKey(request, wsHash);
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
+  const pipeline = new PipelineExecutor();
 
-  let response: ChatResponse;
+  pipeline.use(new ResponseCacheMiddleware());
+  pipeline.use(new IntelligentRouterMiddleware());
+  pipeline.use(sharedTokenManager);
+  pipeline.use(new LLMExecutionMiddleware());
 
-  if (fallback) {
-    response = await router.routeWithFallback(model, request);
-  } else {
-    const p = router.route(model, providerId);
-    response = await p.chat(request);
+  const context: PipelineContext = {
+    request,
+    taskType: (input as any).taskType as TaskType || TaskType.Chat,
+    workspaceRoot,
+    wsHash: workspaceScanner.getWorkspaceHash(workspaceRoot),
+    providerId: providerId
+  };
+
+  const finalContext = await pipeline.execute(context);
+
+  if (!finalContext.response) {
+    throw new Error('Pipeline completed but no response was generated.');
   }
 
-  cache.set(cacheKey, response);
-  await memoryManager.storeToolOutput('use_free_llm', { model, messages, _ws: wsHash }, response);
-
-  return response;
+  return finalContext.response;
 }

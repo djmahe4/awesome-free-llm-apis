@@ -58,7 +58,7 @@ describe('use_free_llm input validation', () => {
     (ProviderRegistry as unknown as { instance: undefined }).instance = undefined;
     await expect(
       useFreeLLM({
-        model: 'gemini-2.5-pro',
+        model: 'nonexistent-model',
         messages: [{ role: 'user', content: 'hello' }],
         fallback: false,
       })

@@ -15,6 +15,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "cohere-ai": "^7.21.0",
+    "js-tiktoken": "^1.0.21",
     "lru-cache": "^11.0.0",
     "node-fetch": "^3.3.2",
     "quickjs-emscripten": "^0.29.0",

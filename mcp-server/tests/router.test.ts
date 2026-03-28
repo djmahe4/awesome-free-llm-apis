@@ -10,7 +10,7 @@ describe('Router', () => {
 
   it('route() finds provider for known model', () => {
     const router = new Router();
-    const provider = router.route('gemini-2.5-pro');
+    const provider = router.route('gemini-3.1-pro-preview');
     expect(provider).toBeDefined();
     expect(provider.id).toBe('gemini');
   });
@@ -22,7 +22,7 @@ describe('Router', () => {
 
   it('route() uses specified provider override', () => {
     const router = new Router();
-    const provider = router.route('gemini-2.5-flash', 'gemini');
+    const provider = router.route('gemini-3.1-flash-preview', 'gemini');
     expect(provider.id).toBe('gemini');
   });
 
@@ -53,7 +53,7 @@ describe('Router', () => {
     const response = await router.routeWithFallback(
       'llama-3.3-70b-versatile',
       { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'hi' }] },
-      ['llama-3.3-70b']
+      ['llama3.1-8b']
     );
     expect(response).toBeDefined();
   });

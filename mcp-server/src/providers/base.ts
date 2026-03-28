@@ -67,7 +67,11 @@ export abstract class BaseProvider implements Provider {
       const text = await response.text();
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
-    return response.json() as Promise<ChatResponse>;
+    const json = await response.json() as ChatResponse;
+    const headers: Record<string, string> = {};
+    response.headers.forEach((val, key) => { headers[key] = val; });
+    json._headers = headers;
+    return json;
   }
 
   async *chatStream(request: ChatRequest): AsyncIterable<string> {
