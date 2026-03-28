@@ -37,4 +37,14 @@ describe('ProviderRegistry', () => {
     const groq = available.find((p) => p.id === 'groq');
     expect(groq).toBeDefined();
   });
+
+  it('siliconflow provider is correctly configured', () => {
+    const registry = ProviderRegistry.getInstance();
+    const sf = registry.getProvider('siliconflow');
+    expect(sf).toBeDefined();
+    expect(sf!.name).toBe('SiliconFlow');
+    expect(sf!.baseURL).toBe('https://api.siliconflow.cn/v1/');
+    expect(sf!.envVar).toBe('SILICONFLOW_API_KEY');
+    expect(sf!.models.length).toBeGreaterThan(0);
+  });
 });

@@ -9,20 +9,22 @@
     "start": "node dist/server.js",
     "dev": "tsx src/server.ts",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "smoke-test": "node --env-file=.env node_modules/.bin/tsx scripts/smoke-test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "quickjs-emscripten": "^0.29.0",
-    "node-fetch": "^3.3.2",
+    "cohere-ai": "^7.21.0",
     "lru-cache": "^11.0.0",
+    "node-fetch": "^3.3.2",
+    "quickjs-emscripten": "^0.29.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "typescript": "^5.4.5",
     "@types/node": "^20.12.0",
-    "vitest": "^1.6.0",
+    "@vitest/coverage-v8": "^1.6.0",
     "tsx": "^4.19.0",
-    "@vitest/coverage-v8": "^1.6.0"
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
   }
 }
