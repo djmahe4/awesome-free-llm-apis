@@ -15,7 +15,27 @@ export abstract class BaseProvider implements Provider {
   private dayWindowStart = Date.now();
 
   isAvailable(): boolean {
-    return Boolean(process.env[this.envVar]);
+    const key = process.env[this.envVar];
+    if (!key || key.trim() === '') return false;
+
+    const lowerKey = key.toLowerCase();
+    // Professional placeholder detection
+    const placeholders = [
+      'your_', 'insert_', 'token_here', 'key_here', 'example',
+      'sk-insert', 'ghp_insert', 'gsk_insert', 'ai_insert'
+    ];
+
+    if (placeholders.some(p => lowerKey.includes(p))) {
+      return false;
+    }
+
+    // Check for "min length" logic - most real keys are > 15 chars
+    // except for maybe very short ones, but 10 is a safe bet for modern APIs
+    if (key.trim().length < 10) {
+      return false;
+    }
+
+    return true;
   }
 
   protected getApiKey(): string {

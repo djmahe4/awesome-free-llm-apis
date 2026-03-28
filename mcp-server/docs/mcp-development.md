@@ -165,11 +165,56 @@ The `manage_memory` tool provides a way to interact with the persistent memory s
 
 ---
 
+## Middleware Pipeline Architecture
+
+The system uses a flexible, Starlette-inspired middleware pipeline to handle LLM requests. This allows for clean separation of concerns like caching, routing, and token management.
+
+### Key Components
+- **PipelineExecutor**: Manages the chain of middlewares and the execution context.
+- **Middleware Interface**: Every middleware must implement an `execute(context, next)` method.
+- **PipelineContext**: A shared object that carries the request, response, and metadata (like estimated tokens or selected provider) through the stack.
+
+### Default Pipeline Stack
+1.  **ResponseCacheMiddleware**: Checks if a result exists in the persistent workspace-aware cache.
+2.  **IntelligentRouterMiddleware**: Maps the task type to a prioritized list of models and handles failover.
+3.  **TokenManagerMiddleware**: Performs local token interpolation and synchronizes quotas from API headers.
+4.  **LLMExecutionMiddleware**: Performs the final HTTPS request to the provider.
+
+---
+
+## Adding New Middleware
+
+To extend the request life cycle, you can add new middleware components.
+
+### 1. Implement Middleware
+Create a class in `src/pipeline/middlewares/` that implements the `Middleware` interface.
+
+```typescript
+import { Middleware, PipelineContext, NextFunction } from '../middleware.js';
+
+export class LoggingMiddleware implements Middleware {
+  name = 'LoggingMiddleware';
+  async execute(context: PipelineContext, next: NextFunction): Promise<void> {
+    console.log(`Executing request for: ${context.request.model}`);
+    await next(); // Pass to the next middleware
+    console.log('Request completed');
+  }
+}
+```
+
+### 2. Register Middleware
+Update the tool implementation (e.g., `src/tools/use-free-llm.ts`) to include your middleware in the `PipelineExecutor` constructor.
+
+---
+
 ## Internal Workflow
 
-1.  **Request Arrival**: A tool call is received via the `StdioServerTransport`.
-2.  **Tool Dispatched**: The MCP server identifies the tool in `src/mcp/index.ts`.
-3.  **Routing**: For LLM tools, the `Router` chooses the best provider based on availability and priority.
-4.  **Cache Check**: Before calling an API, the `ResponseCache` is checked.
-5.  **API Execution**: The selected Provider makes a secure fetch request using its configured API key.
-6.  **Response Handling**: The result is cached, stored in the `MemoryManager`, and returned to the client.
+1.  **Request Arrival**: A tool call (e.g., `use_free_llm`) is received via SSE or Stdio.
+2.  **Pipeline Initialization**: The tool creates a `PipelineExecutor` with the standard stack.
+3.  **Middleware Chain**:
+    - **Cache**: Immediate return if a match is found.
+    - **Router**: Selects the best available model (ignoring placeholder keys).
+    - **Token Manager**: Ensures the request won't exceed remaining quotas.
+    - **Execution**: Performs the API call and captures response headers.
+4.  **Drift Correction**: The Token Manager updates the ground truth quota using `x-ratelimit-*` headers.
+5.  **Response**: The final result is returned to the client and stored in long-term memory.

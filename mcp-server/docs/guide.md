@@ -86,8 +86,56 @@ graph LR
 
 ## 4. MCP Tools Interaction
 
-The pipeline is exposed via the `use_free_llm` tool.
+The server exposes a suite of tools for LLM interaction, discovery, and system management.
 
-- **Request**: `{ model: string, prompt: string, task?: TaskType }`
-- **Logic**: The tool initializes the `PipelineExecutor` with a standard stack of middlewares.
-- **Monitoring**: Use the `get_token_stats` tool to view the current state of these quotas in real-time.
+### LLM Tools
+- **`use_free_llm`**: The primary gateway to the orchestration pipeline. 
+  - *Input*: `model`, `messages`, `task?` (coding, chat, etc.).
+  - *Logic*: Automatically routes through the `PipelineExecutor`.
+- **`list_available_free_models`**: Discover all supported models across all providers.
+  - *Option*: `available_only: true` filters for providers with active API keys.
+
+- **`run_code`**: Executes arbitrary JavaScript code in a sandboxed environment against data. The DATA variable contains the input data as a string. Use print() to output results.
+  - *Input*: `code: string`, `data?: string`
+  - *Logic*: Executes the code in a sandboxed environment and returns the output.
+
+- **`manage_memory`**: Interface for the persistent, workspace-aware semantic memory system.
+  - *Actions*: `search`, `list`, `stats`, `clear`.
+
+### Monitoring & Validation
+- **`get_token_stats`**: View real-time token tracking statistics and remaining limits for all loaded API providers. Used by the visual dashboard.
+- **`validate_provider`**: Runs a live, professional health check for a specific provider to confirm credential validity and latency.
+
+### System Tools
+- **`code_mode`**: Executes arbitrary JavaScript code in a secure, sandboxed QuickJS environment. 
+  - *Use Case*: Processing large data sets locally without sending everything to an LLM.
+- **`manage_memory`**: Interface for the persistent, workspace-aware semantic memory system.
+  - *Actions*: `search`, `list`, `stats`, `clear`.
+
+## 5. Visual Dashboard & SSE Bridge
+
+The server includes a Bootstrap 5 dashboard for real-time monitoring. 
+
+```mermaid
+graph LR
+    subgraph Browser
+        D[Dashboard UI] -->|Update UI| E[fetch /api/token-stats]
+        D -->|Manual Check| V[fetch /api/validate-provider]
+    end
+    subgraph Server
+        E -->|Call| F[getTokenStats Logic]
+        V -->|Execute| H[validateProvider Logic]
+        H -->|Minimal Call| P[LLM Provider]
+        F -->|Read| G[TokenManager State]
+    end
+```
+
+To enable the dashboard, start the server using the `--sse` flag or `npm run dashboard`. This switches the transport from `stdio` to `SSEServerTransport` and exposes the API bridge on port 3000.
+
+## 6. Professional Credential Validation
+
+The system implements a multi-tier validation strategy to ensure high reliability:
+
+1.  **Pattern Hardening**: `BaseProvider.isAvailable()` automatically filters out common placeholders (e.g., `your_github_token_here`) and extremely short keys.
+2.  **Live Health Checks**: The `validate_provider` tool/API executes a real, minimal chat completion call with `max_tokens: 1`. This confirms that the key is not only present but also valid and authorized by the provider.
+3.  **UI Feedback**: In the dashboard, each provider card features a **Verify Credential** button, allowing developers to immediately troubleshoot configuration issues without looking at server logs.

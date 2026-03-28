@@ -57,6 +57,46 @@ cd mcp-server
 npm run dev
 ```
 
+Then visit `http://localhost:3000` to view provider health and token tracking.
+
+## MCP Client Configuration
+
+To use this server with an MCP-compatible LLM client (like Claude Desktop), add the following to your configuration file:
+
+### Option A: Running with `dist` (After `npm run build`)
+
+```json
+{
+  "mcpServers": {
+    "free-llm-apis": {
+      "command": "node",
+      "args": [
+        "--env-file=</path/to/awesome-free-llm-apis>/mcp-server/.env",
+        "</path/to/awesome-free-llm-apis>/mcp-server/dist/server.js"
+      ]
+    }
+  }
+}
+```
+
+### Option B: Running with `tsx` (Development)
+
+```json
+{
+  "mcpServers": {
+    "free-llm-apis": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "tsx",
+        "--env-file=</path/to/awesome-free-llm-apis>/mcp-server/.env",
+        "</path/to/awesome-free-llm-apis>/mcp-server/src/server.ts"
+      ]
+    }
+  }
+}
+```
+
 ## Running Smoke Tests
 
 ```bash

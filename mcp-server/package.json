@@ -10,11 +10,14 @@
     "dev": "tsx src/server.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "smoke-test": "node --env-file=.env node_modules/.bin/tsx scripts/smoke-test.ts"
+    "smoke-test": "node --env-file=.env node_modules/.bin/tsx scripts/smoke-test.ts",
+    "dashboard": "node --env-file=.env node_modules/.bin/tsx src/server.ts --sse"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "cohere-ai": "^7.21.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "js-tiktoken": "^1.0.21",
     "lru-cache": "^11.0.0",
     "node-fetch": "^3.3.2",
@@ -22,6 +25,8 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/node": "^20.12.0",
     "@vitest/coverage-v8": "^1.6.0",
     "tsx": "^4.19.0",

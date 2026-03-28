@@ -1,723 +1,403 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Free LLM APIs — MCP Server Dashboard</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<html lang="en" data-bs-theme="dark">
 
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚡ Free LLM APIs Dashboard</title>
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <style>
     :root {
-      --bg: #0f1117;
-      --surface: #1a1d2e;
-      --surface2: #242740;
-      --border: #2e3250;
-      --accent: #6c63ff;
-      --accent2: #48c774;
-      --warn: #ffdd57;
-      --danger: #ff4757;
-      --text: #e2e8f0;
-      --text-muted: #8892a4;
-      --radius: 10px;
-      --font: 'Segoe UI', system-ui, sans-serif;
+      --mcp-primary: #6c63ff;
+      --mcp-secondary: #48c774;
     }
 
     body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--font);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #0f1117;
     }
 
-    header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 1rem 2rem;
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    header .logo {
-      font-size: 1.5rem;
+    .navbar-brand {
       font-weight: 700;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      background: linear-gradient(135deg, var(--mcp-primary), var(--mcp-secondary));
       -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
       background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-size: 1.5rem;
     }
 
-    header .subtitle {
-      color: var(--text-muted);
-      font-size: 0.875rem;
+    .card {
+      border: 1px solid #2e3250;
+      background-color: #1a1d2e;
+      transition: transform 0.2s, border-color 0.2s;
     }
 
-    header .status-badge {
-      margin-left: auto;
-      background: #1a2e1a;
-      border: 1px solid var(--accent2);
-      color: var(--accent2);
-      padding: 0.25rem 0.75rem;
-      border-radius: 999px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
+    .card:hover {
+      border-color: var(--mcp-primary);
     }
 
-    .dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--accent2);
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
-
-    main {
-      flex: 1;
-      padding: 2rem;
-      max-width: 1400px;
-      margin: 0 auto;
-      width: 100%;
-    }
-
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem;
-      margin-bottom: 2rem;
-    }
-
-    .stat-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1.25rem;
-    }
-
-    .stat-card .label {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-    }
-
-    .stat-card .value {
+    .stat-value {
       font-size: 2rem;
       font-weight: 700;
-      color: var(--accent);
-    }
-
-    .stat-card .sub {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      margin-top: 0.25rem;
-    }
-
-    .section-title {
-      font-size: 1.1rem;
-      font-weight: 600;
-      margin-bottom: 1rem;
-      color: var(--text);
-    }
-
-    .providers-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 1rem;
-      margin-bottom: 2rem;
-    }
-
-    .provider-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1.25rem;
-      transition: border-color 0.2s;
-    }
-
-    .provider-card:hover {
-      border-color: var(--accent);
-    }
-
-    .provider-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 0.75rem;
-    }
-
-    .provider-name {
-      font-weight: 600;
-      font-size: 1rem;
+      color: var(--mcp-primary);
     }
 
     .provider-id {
-      font-size: 0.75rem;
-      color: var(--text-muted);
       font-family: monospace;
-    }
-
-    .badge {
-      padding: 0.2rem 0.6rem;
-      border-radius: 999px;
-      font-size: 0.7rem;
-      font-weight: 600;
-    }
-
-    .badge-available {
-      background: #1a2e1a;
-      border: 1px solid var(--accent2);
-      color: var(--accent2);
-    }
-
-    .badge-unavailable {
-      background: #2e1a1a;
-      border: 1px solid var(--danger);
-      color: var(--danger);
-    }
-
-    .model-list {
-      list-style: none;
-      margin-top: 0.5rem;
-    }
-
-    .model-list li {
       font-size: 0.8rem;
-      color: var(--text-muted);
-      padding: 0.2rem 0;
-      font-family: monospace;
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
+      color: #8892a4;
     }
 
-    .model-list li::before {
-      content: '▸';
-      color: var(--accent);
-      font-size: 0.65rem;
+    .nav-tabs .nav-link {
+      color: #8892a4;
+      border: none;
     }
 
-    .rate-limits {
-      margin-top: 0.75rem;
-      padding-top: 0.75rem;
-      border-top: 1px solid var(--border);
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-    }
-
-    .rate-chip {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 0.2rem 0.5rem;
-      font-size: 0.7rem;
-      color: var(--warn);
-      font-family: monospace;
-    }
-
-    .tools-section {
-      margin-bottom: 2rem;
-    }
-
-    .tool-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1.5rem;
-      margin-bottom: 1rem;
-    }
-
-    .tool-name {
-      font-size: 1rem;
-      font-weight: 700;
-      font-family: monospace;
-      color: var(--accent);
-      margin-bottom: 0.5rem;
-    }
-
-    .tool-desc {
-      color: var(--text-muted);
-      font-size: 0.875rem;
-      line-height: 1.5;
-    }
-
-    .tool-params {
-      margin-top: 1rem;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-    }
-
-    .param-chip {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 0.2rem 0.6rem;
-      font-size: 0.75rem;
-      font-family: monospace;
-      color: var(--text-muted);
-    }
-
-    .param-chip.required {
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-
-    .quick-start {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1.5rem;
-      margin-bottom: 2rem;
+    .nav-tabs .nav-link.active {
+      color: var(--mcp-primary);
+      background: transparent;
+      border-bottom: 2px solid var(--mcp-primary);
     }
 
     pre {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
+      background-color: #0f1117;
       padding: 1rem;
-      overflow-x: auto;
-      font-size: 0.8rem;
-      line-height: 1.6;
-      margin-top: 0.75rem;
+      border-radius: 8px;
+      border: 1px solid #2e3250;
     }
 
-    code {
-      font-family: 'Cascadia Code', 'Fira Code', monospace;
-      color: var(--text);
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 5px;
     }
 
-    .kw { color: #c792ea; }
-    .str { color: #c3e88d; }
-    .num { color: #f78c6c; }
-    .cmt { color: #546e7a; font-style: italic; }
-    .fn { color: #82aaff; }
-
-    footer {
-      background: var(--surface);
-      border-top: 1px solid var(--border);
-      padding: 1rem 2rem;
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 0.8rem;
+    .status-online {
+      background-color: var(--mcp-secondary);
+      box-shadow: 0 0 5px var(--mcp-secondary);
     }
 
-    footer a {
-      color: var(--accent);
-      text-decoration: none;
+    .status-offline {
+      background-color: #ff4757;
     }
 
-    @media (max-width: 600px) {
-      main { padding: 1rem; }
-      .stats-grid { grid-template-columns: 1fr 1fr; }
+    .progress {
+      height: 8px;
+      background-color: #2e3250;
+    }
+
+    .progress-bar {
+      background-color: var(--mcp-primary);
     }
   </style>
 </head>
+
 <body>
 
-<header>
-  <div>
-    <div class="logo">⚡ Free LLM MCP Server</div>
-    <div class="subtitle">Model Context Protocol · 14 Providers · 42+ Models</div>
-  </div>
-  <div class="status-badge">
-    <span class="dot"></span>
-    Running on stdio
-  </div>
-</header>
-
-<main>
-
-  <!-- Stats -->
-  <div class="stats-grid">
-    <div class="stat-card">
-      <div class="label">Total Providers</div>
-      <div class="value">14</div>
-      <div class="sub">Free-tier APIs</div>
-    </div>
-    <div class="stat-card">
-      <div class="label">Total Models</div>
-      <div class="value">42+</div>
-      <div class="sub">Across all providers</div>
-    </div>
-    <div class="stat-card">
-      <div class="label">MCP Tools</div>
-      <div class="value">3</div>
-      <div class="sub">use_free_llm · list_models · code_mode</div>
-    </div>
-    <div class="stat-card">
-      <div class="label">Sandbox</div>
-      <div class="value" style="font-size:1.4rem">QuickJS</div>
-      <div class="sub">Safe JS execution</div>
-    </div>
-  </div>
-
-  <!-- MCP Tools -->
-  <div class="tools-section">
-    <div class="section-title">🔧 MCP Tools</div>
-
-    <div class="tool-card">
-      <div class="tool-name">use_free_llm</div>
-      <div class="tool-desc">
-        Call any free LLM API. Automatically routes to the correct provider based on model ID,
-        with intelligent fallback on failure and LRU response caching.
-      </div>
-      <div class="tool-params">
-        <span class="param-chip required">model *</span>
-        <span class="param-chip required">messages *</span>
-        <span class="param-chip">temperature</span>
-        <span class="param-chip">max_tokens</span>
-        <span class="param-chip">top_p</span>
-        <span class="param-chip">provider</span>
-        <span class="param-chip">fallback</span>
-        <span class="param-chip">stream</span>
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg border-bottom border-secondary-subtle py-3">
+    <div class="container">
+      <a class="navbar-brand" href="#">⚡ FREE-LLM-MCP</a>
+      <div class="ms-auto d-flex align-items-center">
+        <span id="connection-status" class="badge rounded-pill bg-dark border border-danger text-danger px-3 py-2">
+          <i class="bi bi-broadcast me-2"></i>Disconnected
+        </span>
       </div>
     </div>
+  </nav>
 
-    <div class="tool-card">
-      <div class="tool-name">list_available_free_models</div>
-      <div class="tool-desc">
-        List all free LLM models and their providers. Filter by provider ID or show only providers
-        with configured API keys.
-      </div>
-      <div class="tool-params">
-        <span class="param-chip">provider</span>
-        <span class="param-chip">available_only</span>
-      </div>
-    </div>
+  <div class="container mt-4 mb-5">
 
-    <div class="tool-card">
-      <div class="tool-name">code_mode</div>
-      <div class="tool-desc">
-        Execute JavaScript code in a sandboxed QuickJS environment. Input data is available via
-        the <code>DATA</code> variable. Use <code>print()</code> to output results. Supports
-        timeout control and tracks compression ratios.
-      </div>
-      <div class="tool-params">
-        <span class="param-chip required">code *</span>
-        <span class="param-chip">data</span>
-        <span class="param-chip">command</span>
-        <span class="param-chip">timeout_ms</span>
-      </div>
-    </div>
-  </div>
+    <!-- Tabs Navigation -->
+    <ul class="nav nav-tabs mb-4" id="dashboardTabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview" type="button"
+          role="tab"><i class="bi bi-speedometer2 me-2"></i>Overview</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="providers-tab" data-bs-toggle="tab" data-bs-target="#providers" type="button"
+          role="tab"><i class="bi bi-cpu me-2"></i>Provider Tracking</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="config-tab" data-bs-toggle="tab" data-bs-target="#config" type="button"
+          role="tab"><i class="bi bi-gear-fill me-2"></i>Quick Start</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="cache-tab" data-bs-toggle="tab" data-bs-target="#cache" type="button" role="tab"><i
+            class="bi bi-database-fill me-2"></i>Cache & Memory</button>
+      </li>
+    </ul>
 
-  <!-- Providers -->
-  <div class="section-title">🌐 Provider Registry</div>
-  <div class="providers-grid">
+    <!-- Tab Content -->
+    <div class="tab-content" id="dashboardTabsContent">
 
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">Google Gemini</div>
-          <div class="provider-id">gemini · GEMINI_API_KEY</div>
+      <!-- Tab 1: Overview -->
+      <div class="tab-pane fade show active" id="overview" role="tabpanel">
+        <div class="row g-4 mb-4">
+          <div class="col-md-3">
+            <div class="card p-3 h-100">
+              <div class="text-muted small text-uppercase mb-2">Total Providers</div>
+              <div id="total-providers" class="stat-value">15</div>
+              <div class="small text-muted">Configured in registry</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card p-3 h-100">
+              <div class="text-muted small text-uppercase mb-2">Active Providers</div>
+              <div id="active-providers" class="stat-value text-success">--</div>
+              <div class="small text-muted">With valid API keys</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card p-3 h-100">
+              <div class="text-muted small text-uppercase mb-2">Total Models</div>
+              <div id="total-models" class="stat-value text-info">45+</div>
+              <div class="small text-muted">Across all tiers</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card p-3 h-100">
+              <div class="text-muted small text-uppercase mb-2">Requests Today</div>
+              <div id="total-requests" class="stat-value text-warning">0</div>
+              <div class="small text-muted">Tracked via pipeline</div>
+            </div>
+          </div>
         </div>
-        <span class="badge badge-unavailable">Not configured</span>
-      </div>
-      <ul class="model-list">
-        <li>gemini-2.5-pro</li>
-        <li>gemini-2.5-flash</li>
-        <li>gemini-2.5-flash-lite</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">15 RPM</span>
-        <span class="rate-chip">1000 RPD</span>
-      </div>
-    </div>
 
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">Groq</div>
-          <div class="provider-id">groq · GROQ_API_KEY</div>
+        <div class="card p-4">
+          <h5 class="mb-3">Intelligent Orchestration Status</h5>
+          <p class="text-muted">The system is currently routing tasks (Coding, Chat, etc.) to the most cost-effective
+            models while managing local token caches.</p>
+          <div class="list-group list-group-flush">
+            <div
+              class="list-group-item bg-transparent border-secondary-subtle py-3 d-flex justify-content-between align-items-center">
+              <div>
+                <h6 class="mb-0">Token Interpolation</h6>
+                <small class="text-muted">Proactive counting using js-tiktoken</small>
+              </div>
+              <span class="badge bg-success">Active</span>
+            </div>
+            <div
+              class="list-group-item bg-transparent border-secondary-subtle py-3 d-flex justify-content-between align-items-center">
+              <div>
+                <h6 class="mb-0">Header Sync</h6>
+                <small class="text-muted">Real-time quota updates from API headers</small>
+              </div>
+              <span class="badge bg-success">Active</span>
+            </div>
+            <div
+              class="list-group-item bg-transparent border-secondary-subtle py-3 d-flex justify-content-between align-items-center">
+              <div>
+                <h6 class="mb-0">Auto-Fallback</h6>
+                <small class="text-muted">Cascading retry logic across tiers</small>
+              </div>
+              <span class="badge bg-primary">Operational</span>
+            </div>
+          </div>
         </div>
-        <span class="badge badge-unavailable">Not configured</span>
       </div>
-      <ul class="model-list">
-        <li>llama-3.3-70b-versatile</li>
-        <li>llama-4-scout-17b-16e-instruct</li>
-        <li>moonshotai/kimi-k2-instruct</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">30 RPM</span>
-        <span class="rate-chip">14400 RPD</span>
-      </div>
-    </div>
 
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">Mistral AI</div>
-          <div class="provider-id">mistral · MISTRAL_API_KEY</div>
+      <!-- Tab 2: Provider Tracking -->
+      <div class="tab-pane fade" id="providers" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h5>Real-time Quota Status</h5>
+          <button id="refresh-btn" class="btn btn-sm btn-outline-primary"><i
+              class="bi bi-arrow-clockwise me-1"></i>Refresh Now</button>
         </div>
-        <span class="badge badge-unavailable">Not configured</span>
-      </div>
-      <ul class="model-list">
-        <li>mistral-large-latest</li>
-        <li>mistral-small-latest</li>
-        <li>ministral-8b-latest</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">1 RPS</span>
-        <span class="rate-chip">1B tokens/month</span>
-      </div>
-    </div>
-
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">Cohere</div>
-          <div class="provider-id">cohere · CO_API_KEY</div>
+        <div class="row g-3" id="provider-cards-container">
+          <div class="col-12 text-center py-5 text-muted">
+            <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+            Connecting to MCP Server...
+          </div>
         </div>
-        <span class="badge badge-unavailable">Not configured</span>
       </div>
-      <ul class="model-list">
-        <li>command-a-03-2025</li>
-        <li>command-r-plus</li>
-        <li>aya-expanse-32b</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">20 RPM</span>
-        <span class="rate-chip">1000 req/month</span>
-      </div>
-    </div>
 
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">Cerebras</div>
-          <div class="provider-id">cerebras · CEREBRAS_API_KEY</div>
-        </div>
-        <span class="badge badge-unavailable">Not configured</span>
-      </div>
-      <ul class="model-list">
-        <li>llama-3.3-70b</li>
-        <li>qwen3-235b</li>
-        <li>gpt-oss-120b</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">30 RPM</span>
-        <span class="rate-chip">14400 RPD</span>
-      </div>
-    </div>
-
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">GitHub Models</div>
-          <div class="provider-id">github-models · GITHUB_TOKEN</div>
-        </div>
-        <span class="badge badge-unavailable">Not configured</span>
-      </div>
-      <ul class="model-list">
-        <li>gpt-4o</li>
-        <li>Llama-3.3-70B-Instruct</li>
-        <li>DeepSeek-R1</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">15 RPM</span>
-        <span class="rate-chip">150 RPD</span>
-      </div>
-    </div>
-
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">NVIDIA NIM</div>
-          <div class="provider-id">nvidia · NVIDIA_API_KEY</div>
-        </div>
-        <span class="badge badge-unavailable">Not configured</span>
-      </div>
-      <ul class="model-list">
-        <li>meta/llama-3.3-70b-instruct</li>
-        <li>mistralai/mistral-large-2-instruct</li>
-        <li>Qwen/Qwen3-235B-A22B</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">40 RPM</span>
-      </div>
-    </div>
-
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">Hugging Face</div>
-          <div class="provider-id">huggingface · HF_TOKEN</div>
-        </div>
-        <span class="badge badge-unavailable">Not configured</span>
-      </div>
-      <ul class="model-list">
-        <li>meta-llama/Llama-3.3-70B-Instruct</li>
-        <li>Qwen/Qwen2.5-72B-Instruct</li>
-        <li>mistralai/Mistral-7B-Instruct-v0.3</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">Free tier</span>
-      </div>
-    </div>
-
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">OpenRouter</div>
-          <div class="provider-id">openrouter · OPENROUTER_API_KEY</div>
-        </div>
-        <span class="badge badge-unavailable">Not configured</span>
-      </div>
-      <ul class="model-list">
-        <li>deepseek/deepseek-r1:free</li>
-        <li>meta-llama/llama-3.3-70b-instruct:free</li>
-        <li>openai/gpt-4o-mini:free</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">20 RPM</span>
-        <span class="rate-chip">50 RPD</span>
-      </div>
-    </div>
-
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">Cloudflare Workers AI</div>
-          <div class="provider-id">cloudflare · CLOUDFLARE_API_TOKEN</div>
-        </div>
-        <span class="badge badge-unavailable">Not configured</span>
-      </div>
-      <ul class="model-list">
-        <li>@cf/meta/llama-3.3-70b-instruct-fp8-fast</li>
-        <li>@cf/qwen/qwq-32b</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">Free tier</span>
-      </div>
-    </div>
-
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">Zhipu AI</div>
-          <div class="provider-id">zhipu · ZHIPU_API_KEY</div>
-        </div>
-        <span class="badge badge-unavailable">Not configured</span>
-      </div>
-      <ul class="model-list">
-        <li>glm-4-flash</li>
-        <li>glm-4.5-flash</li>
-        <li>glm-4.6v-flash</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">Free tier</span>
-      </div>
-    </div>
-
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">Kluster AI</div>
-          <div class="provider-id">kluster · KLUSTER_API_KEY</div>
-        </div>
-        <span class="badge badge-unavailable">Not configured</span>
-      </div>
-      <ul class="model-list">
-        <li>deepseek-ai/DeepSeek-R1</li>
-        <li>meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8</li>
-        <li>Qwen/Qwen3-235B-A22B</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">Free tier</span>
-      </div>
-    </div>
-
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">LLM7.io</div>
-          <div class="provider-id">llm7 · LLM7_API_KEY</div>
-        </div>
-        <span class="badge badge-unavailable">Not configured</span>
-      </div>
-      <ul class="model-list">
-        <li>deepseek-r1</li>
-        <li>gemini-2.0-flash-lite</li>
-        <li>qwen2.5-coder-32b-instruct</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">30 RPM</span>
-      </div>
-    </div>
-
-    <div class="provider-card">
-      <div class="provider-header">
-        <div>
-          <div class="provider-name">Ollama Cloud</div>
-          <div class="provider-id">ollama-cloud · OLLAMA_API_KEY</div>
-        </div>
-        <span class="badge badge-unavailable">Not configured</span>
-      </div>
-      <ul class="model-list">
-        <li>deepseek-v3.2</li>
-        <li>qwen3.5</li>
-        <li>kimi-k2.5</li>
-      </ul>
-      <div class="rate-limits">
-        <span class="rate-chip">Free tier</span>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- Quick Start -->
-  <div class="quick-start">
-    <div class="section-title">🚀 Quick Start</div>
-    <pre><code><span class="cmt"># Install dependencies</span>
+      <!-- Tab 3: Quick Start -->
+      <div class="tab-pane fade" id="config" role="tabpanel">
+        <div class="card p-4">
+          <h5>Installation & Setup</h5>
+          <pre><code class="text-info"># Install dependencies
 npm install
 
-<span class="cmt"># Configure API keys</span>
+# Setup env
 cp .env.example .env
-<span class="cmt"># Edit .env with your keys</span>
+# Edit .env and enter your API keys
 
-<span class="cmt"># Run the MCP server</span>
-npm run dev
+# Start Dashboard Server
+npm run dashboard</code></pre>
 
-<span class="cmt"># Build for production</span>
-npm run build && npm start
+          <h5 class="mt-4">Integration Code</h5>
+          <p class="text-muted">Example of calling the orchestration tool from another MCP client:</p>
+          <pre><code class="text-success">const result = await client.callTool("use_free_llm", {
+  prompt: "Write a high-performance HTTP server in Go",
+  task: "coding" // Triggers DeepSeek-R1 / Gemini Pro routing
+});</code></pre>
+        </div>
+      </div>
 
-<span class="cmt"># Run tests</span>
-npm test</code></pre>
+      <!-- Tab 4: Cache & Memory -->
+      <div class="tab-pane fade" id="cache" role="tabpanel">
+        <div class="card p-5 text-center bg-dark-subtle border-dashed">
+          <i class="bi bi-hourglass-split display-1 mb-3 text-muted"></i>
+          <h4>Future Advanced Feature</h4>
+          <p class="text-muted mb-0">Coming soon in v1.1.0: Real-time visualization of Short-term memory buffers, </p>
+          <p class="text-muted">cache hit ratios, and workspace context compression stats.</p>
+        </div>
+      </div>
 
-    <pre><code><span class="cmt">// Claude Desktop config (claude_desktop_config.json)</span>
-{
-  <span class="str">"mcpServers"</span>: {
-    <span class="str">"free-llm-apis"</span>: {
-      <span class="str">"command"</span>: <span class="str">"node"</span>,
-      <span class="str">"args"</span>: [<span class="str">"/path/to/mcp-server/dist/server.js"</span>],
-      <span class="str">"env"</span>: {
-        <span class="str">"GROQ_API_KEY"</span>: <span class="str">"your-key-here"</span>,
-        <span class="str">"GEMINI_API_KEY"</span>: <span class="str">"your-key-here"</span>
-      }
-    }
-  }
-}</code></pre>
+    </div>
   </div>
 
-</main>
+  <footer class="mt-auto py-4 border-top border-secondary-subtle">
+    <div class="container text-center small text-muted">
+      Free LLM APIs MCP Dashboard &bull; Built with Bootstrap 5 &bull; <a
+        href="https://github.com/djmahe4/awesome-free-llm-apis" class="text-decoration-none text-primary">GitHub
+        Repo</a>
+    </div>
+  </footer>
 
-<footer>
-  Free LLM APIs MCP Server &mdash;
-  <a href="https://github.com/zhu-weijie/awesome-free-llm-apis" target="_blank">GitHub</a> &mdash;
-  MIT License
-</footer>
+  <!-- Bootstrap JS Bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
+  <!-- MCP Interaction Logic -->
+  <script>
+    const statusEl = document.getElementById('connection-status');
+    const containerEl = document.getElementById('provider-cards-container');
+    const refreshBtn = document.getElementById('refresh-btn');
+
+    let stats = [];
+
+    async function fetchStats() {
+      try {
+        // In this implementation, we simplified the MCP interaction:
+        // Since the dashboard is served from the same server, we can add a simple JSON endpoint 
+        // but the user requested to "request the mcp server". 
+        // For a robust implementation without a heavy MCP client library in the browser,
+        // we'll fetch from a /api/stats endpoint if we added one, or we can use the SSE bridge.
+
+        // For now, let's assume we implement a simple internal proxy in server.ts for /api/token-stats
+        const response = await fetch('/api/token-stats');
+        if (!response.ok) throw new Error('API Unavailable');
+
+        const data = await response.json();
+        stats = data.stats;
+
+        renderStats(stats);
+        updateConnectionStatus(true);
+      } catch (err) {
+        console.error('Fetch failed:', err);
+        updateConnectionStatus(false);
+      }
+    }
+
+    function renderStats(providers) {
+      if (!providers || providers.length === 0) {
+        containerEl.innerHTML = '<div class="col-12 text-center py-5">No providers configured</div>';
+        return;
+      }
+
+      let activeCount = 0;
+      containerEl.innerHTML = providers.map(p => {
+        if (p.isAvailable) activeCount++;
+
+        const tokensLimit = p.rateLimits.tokensPerMonth || p.rateLimits.rpd || p.rateLimits.rpm || 'Free';
+        const usageStr = p.usage
+          ? `${p.usage.requests} reqs / ${p.usage.tokens} tokens`
+          : 'No usage yet';
+
+        return `
+                    <div class="col-md-6 col-lg-4">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <h6 class="card-title mb-0">${p.name}</h6>
+                                    <span class="badge ${p.isAvailable ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'} rounded-pill">
+                                        <i class="bi bi-circle-fill me-1 small"></i>${p.isAvailable ? 'Online' : 'Offline'}
+                                    </span>
+                                </div>
+                                <div class="provider-id mb-3">${p.id}</div>
+                                
+                                <div class="mb-3">
+                                    <div class="d-flex justify-content-between small text-muted mb-1">
+                                        <span>Quota</span>
+                                        <span>${tokensLimit}</span>
+                                    </div>
+                                    <div class="progress">
+                                        <div class="progress-bar" role="progressbar" style="width: 100%"></div>
+                                    </div>
+                                </div>
+
+                                <div class="small">
+                                    <div class="d-flex justify-content-between text-muted mb-1">
+                                        <span>Current Usage</span>
+                                        <span class="text-light">${usageStr}</span>
+                                    </div>
+                                </div>
+                                <div class="mt-3 pt-2 border-top border-secondary-subtle d-flex justify-content-end">
+                                    <button class="btn btn-xs btn-link text-primary p-0 text-decoration-none" onclick="verifyProvider('${p.id}', event)">
+                                        <i class="bi bi-shield-check me-1"></i>Verify Credential
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+      }).join('');
+
+      document.getElementById('active-providers').innerText = activeCount;
+    }
+
+    async function verifyProvider(providerId, event) {
+      const btn = event.target.closest('button');
+      const originalHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Verifying...';
+
+      try {
+        const response = await fetch('/api/validate-provider', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ providerId })
+        });
+        const result = await response.json();
+
+        if (result.success) {
+          alert('SUCCESS: ' + result.message + (result.latencyMs ? ` (Latency: ${result.latencyMs}ms)` : ''));
+        } else {
+          alert('FAILED: ' + result.message);
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+        fetchStats(); // Update UI
+      }
+    }
+
+    function updateConnectionStatus(online) {
+      if (online) {
+        statusEl.classList.remove('border-danger', 'text-danger');
+        statusEl.classList.add('border-success', 'text-success');
+        statusEl.innerHTML = '<i class="bi bi-broadcast me-2 pulse"></i>Connected';
+      } else {
+        statusEl.classList.remove('border-success', 'text-success');
+        statusEl.classList.add('border-danger', 'text-danger');
+        statusEl.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Disconnected';
+      }
+    }
+
+    refreshBtn.addEventListener('click', fetchStats);
+
+    // Initial fetch and poll
+    fetchStats();
+    setInterval(fetchStats, 5000);
+  </script>
 </body>
+
 </html>

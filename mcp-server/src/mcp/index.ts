@@ -8,6 +8,7 @@ import { listAvailableFreeModels } from '../tools/list-models.js';
 import { runCodeMode } from '../tools/code-mode.js';
 import { manageMemory } from '../tools/manage-memory.js';
 import { getTokenStats } from '../tools/get-token-stats.js';
+import { validateProvider } from '../tools/validate-provider.js';
 
 export async function createMCPServer(): Promise<Server> {
   const server = new Server(
@@ -64,6 +65,17 @@ export async function createMCPServer(): Promise<Server> {
         inputSchema: {
           type: 'object' as const,
           properties: {},
+        },
+      },
+      {
+        name: 'validate_provider',
+        description: 'Run a professional health check and credential validation for a specific LLM provider.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            providerId: { type: 'string', description: 'Provider ID to validate (e.g., groq, gemini)' },
+          },
+          required: ['providerId'],
         },
       },
       {
@@ -136,6 +148,14 @@ export async function createMCPServer(): Promise<Server> {
 
       if (name === 'get_token_stats') {
         const result = await getTokenStats();
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      if (name === 'validate_provider') {
+        const { providerId } = args as { providerId: string };
+        const result = await validateProvider(providerId);
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         };
