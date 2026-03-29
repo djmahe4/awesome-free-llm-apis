@@ -28,7 +28,7 @@ This MCP server features a Starlette-inspired **Intelligent Orchestration Pipeli
 - **Task-Based Routing**: Coding tasks use DeepSeek R1/Gemini Pro, while lightweight chat uses Flash models.
 - **Proactive Token Management**: Local interpolation using `js-tiktoken` prevents rate limits before they happen.
 - **Auto-Fallback Cascading**: If a provider is down or lacks a key, the system automatically tries the next best model in the tier.
-- **Semantic Caching**: Zero-cost, zero-latency responses for repeated identical or semantically similar queries.
+- **Request Caching**: Zero-cost, zero-latency responses for repeated identical queries.
 - **Visual Dashboard**: Real-time monitoring of token balance, provider health, and model availability.
 
 ## Provider APIs
