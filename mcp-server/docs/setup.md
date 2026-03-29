@@ -145,7 +145,6 @@ To install the skill so your AI agent can use it:
 # From the root of the cloned repository
 mkdir -p ~/.gemini/antigravity/skills/free-llm-apis
 cp -r mcp-server/docs/skill/* ~/.gemini/antigravity/skills/free-llm-apis/
-cp mcp-server/docs/usages.md ~/.gemini/antigravity/skills/free-llm-apis/usages.md
 ```
 
 Once copied, your agent will automatically detect the `@mcp:free-llm-apis` skill and its associated reference documents.
