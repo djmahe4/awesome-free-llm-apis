@@ -19,7 +19,9 @@
 - [Inference providers](#inference-providers)
 - [Setup & Installation](mcp-server/docs/setup.md)
 - [Architecture & Workflow Guide](mcp-server/docs/guide.md)
-- [Verified Usage & Test Matrix](free-llm-apis/references/usages.md)
+- [Original Skill](free-llm-apis/SKILL.md)
+- [MCP Agent Skill](mcp-server/docs/skill/SKILL.md)
+- [MCP Server Usage Examples](mcp-server/docs/skill/references/usages.md)
 - [Visual Dashboard](mcp-server/dashboard/index.html)
 
 ## MCP Server Features
