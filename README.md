@@ -19,17 +19,18 @@
 - [Inference providers](#inference-providers)
 - [Setup & Installation](mcp-server/docs/setup.md)
 - [Architecture & Workflow Guide](mcp-server/docs/guide.md)
+- [Verified Usage & Test Matrix](free-llm-apis/references/usages.md)
 - [Visual Dashboard](mcp-server/dashboard/index.html)
 
-## Intelligent Model Orchestration
+## MCP Server Features
 
-This MCP server features a Starlette-inspired **Intelligent Orchestration Pipeline** that automatically selects the best model for your task while managing tokens and costs.
+This server includes an orchestration pipeline for routing, token management, and failover:
 
-- **Task-Based Routing**: Coding tasks use DeepSeek R1/Gemini Pro, while lightweight chat uses Flash models.
-- **Proactive Token Management**: Local interpolation using `js-tiktoken` prevents rate limits before they happen.
-- **Auto-Fallback Cascading**: If a provider is down or lacks a key, the system automatically tries the next best model in the tier.
-- **Request Caching**: Zero-cost, zero-latency responses for repeated identical queries.
-- **Visual Dashboard**: Real-time monitoring of token balance, provider health, and model availability.
+- **Task-Based Routing**: Maps coding tasks to DeepSeek/Gemini Pro and chat to Flash models.
+- **Token Management**: Uses `js-tiktoken` for proactive usage estimation and rate limit prevention.
+- **Failover**: Automatically cascades to alternative models if a provider is unavailable.
+- **Request Caching**: Persistent caching for repeated identical queries.
+- **Dashboard**: Real-time monitoring of usage, provider health, and model availability.
 
 ## Provider APIs
 

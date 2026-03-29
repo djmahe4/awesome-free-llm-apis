@@ -177,7 +177,7 @@ The system uses a flexible, Starlette-inspired middleware pipeline to handle LLM
 ### Default Pipeline Stack
 1.  **ResponseCacheMiddleware**: Checks if a result exists in the persistent workspace-aware cache.
 2.  **IntelligentRouterMiddleware**: Maps the task type to a prioritized list of models and handles failover.
-3.  **TokenManagerMiddleware**: Performs local token interpolation and synchronizes quotas from API headers.
+3.  **TokenManagerMiddleware**: Performs local token estimation and synchronizes quotas from API headers.
 4.  **LLMExecutionMiddleware**: Performs the final HTTPS request to the provider.
 
 ---
