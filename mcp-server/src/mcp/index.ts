@@ -2,6 +2,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  type CallToolRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import { useFreeLLM } from '../tools/use-free-llm.js';
 import { listAvailableFreeModels } from '../tools/list-models.js';
@@ -110,7 +111,7 @@ export async function createMCPServer(): Promise<Server> {
     ],
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest) => {
     const { name, arguments: args } = request.params;
 
     try {

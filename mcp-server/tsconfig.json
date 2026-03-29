@@ -4,14 +4,25 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "types": [
+      "vitest/globals",
+      "node"
+    ]
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "tests", "benchmarks"]
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "benchmarks/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }

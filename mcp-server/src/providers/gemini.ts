@@ -23,7 +23,7 @@ export class GeminiProvider extends BaseProvider {
   ];
 
   private async runPythonClient(request: any): Promise<any> {
-    const pythonPath = path.join(__dirname, '../../venv/bin/python3');
+    const pythonPath = process.env.PYTHON_EXECUTABLE ?? 'python3';
     const scriptPath = path.join(__dirname, 'gemini_client.py');
 
     return new Promise((resolve, reject) => {
@@ -103,7 +103,7 @@ export class GeminiProvider extends BaseProvider {
     this.checkRateLimit();
     this.recordRequest();
 
-    const pythonPath = path.join(__dirname, '../../venv/bin/python3');
+    const pythonPath = process.env.PYTHON_EXECUTABLE ?? 'python3';
     const scriptPath = path.join(__dirname, 'gemini_client.py');
 
     const py = spawn(pythonPath, [scriptPath]);

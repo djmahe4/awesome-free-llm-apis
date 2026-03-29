@@ -209,7 +209,7 @@ Update the tool implementation (e.g., `src/tools/use-free-llm.ts`) to include yo
 
 ## Internal Workflow
 
-1.  **Request Arrival**: A tool call (e.g., `use_free_llm`) is received via SSE or Stdio.
+1.  **Request Arrival**: A tool call (e.g., `use_free_llm`) is received via Unified HTTP/SSE (using `StreamableHTTPServerTransport`) or Stdio.
 2.  **Pipeline Initialization**: The tool creates a `PipelineExecutor` with the standard stack.
 3.  **Middleware Chain**:
     - **Cache**: Immediate return if a match is found.

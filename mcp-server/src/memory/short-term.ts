@@ -12,6 +12,7 @@ export class ShortTermMemory {
   }
 
   set(key: string, value: unknown, ttlMs?: number): void {
+    this.prune();
     const expiresAt = Date.now() + (ttlMs ?? this.defaultTtlMs);
     this.cache.set(key, { value, expiresAt });
   }
@@ -34,10 +35,14 @@ export class ShortTermMemory {
     this.cache.clear();
   }
 
-  size(): number {
+  prune(): void {
+    const now = Date.now();
     for (const [key, entry] of this.cache.entries()) {
-      if (Date.now() > entry.expiresAt) this.cache.delete(key);
+      if (now > entry.expiresAt) this.cache.delete(key);
     }
+  }
+
+  size(): number {
     return this.cache.size;
   }
 }

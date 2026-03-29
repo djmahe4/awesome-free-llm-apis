@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { ResponseCache } from '../../cache/index.js';
 import { MemoryManager } from '../../memory/index.js';
+import { config } from '../../config/index.js';
 import type { Middleware, PipelineContext, NextFunction } from '../middleware.js';
 
 export class ResponseCacheMiddleware implements Middleware {
@@ -10,7 +11,7 @@ export class ResponseCacheMiddleware implements Middleware {
     private memoryManager = new MemoryManager();
 
     constructor() {
-        this.cache = new ResponseCache(500, join(process.cwd(), 'data/cache.json'));
+        this.cache = new ResponseCache(500, config.cacheStorePath);
     }
 
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
@@ -39,5 +40,10 @@ export class ResponseCacheMiddleware implements Middleware {
                 _ws: wsHash
             }, context.response);
         }
+    }
+
+    flush(): void {
+        this.cache.flush();
+        this.memoryManager.flush();
     }
 }

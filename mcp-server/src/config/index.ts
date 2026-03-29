@@ -2,6 +2,7 @@ export const config = {
   port: parseInt(process.env.PORT ?? '3000', 10),
   logLevel: process.env.LOG_LEVEL ?? 'info',
   memoryStorePath: process.env.MEMORY_STORE_PATH ?? './data/memory.json',
+  cacheStorePath: process.env.CACHE_STORE_PATH ?? './data/cache.json',
   providers: {
     cohere: process.env.CO_API_KEY,
     gemini: process.env.GEMINI_API_KEY,

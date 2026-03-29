@@ -26,7 +26,13 @@ The Google Gemini provider uses the official `google-genai` Python SDK via a bri
 ```bash
 cd mcp-server
 python3 -m venv venv
-venv/bin/pip install -U google-genai python-dotenv
+
+# For Linux/macOS:
+source venv/bin/activate
+# For Windows:
+# venv\Scripts\activate
+
+pip install -U google-genai python-dotenv
 ```
 
 ## Configuration
@@ -57,7 +63,7 @@ cd mcp-server
 npm run dev
 ```
 
-Then visit `http://localhost:3000` to view provider health and token tracking.
+Then visit `http://localhost:3000` to view the visual dashboard for provider health and token tracking.
 
 ## MCP Client Configuration
 
@@ -96,6 +102,14 @@ To use this server with an MCP-compatible LLM client (like Claude Desktop), add 
   }
 }
 ```
+
+### Option C: Remote Connection (Streamable HTTP)
+
+If the server is running with the `--sse` flag, any MCP client can connect via the unified HTTP endpoint:
+
+**URL**: `http://localhost:3000/mcp`
+
+This is the preferred method for connecting browser-based clients or remote instances.
 
 ## Running Smoke Tests
 

@@ -44,4 +44,8 @@ export class MemoryManager {
     const stats = (await this.longTerm.load('compression:stats') ?? []) as CompressionStat[];
     return stats.map(({ tool, original, compressed, ratio }) => ({ tool, original, compressed, ratio }));
   }
+
+  flush(): void {
+    this.longTerm.flush();
+  }
 }

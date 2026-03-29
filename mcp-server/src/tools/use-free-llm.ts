@@ -26,6 +26,8 @@ export interface UseFreeLLMInput {
 // Singleton instances for shared state across pipeline requests
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 export const sharedTokenManager = new TokenManagerMiddleware();
+const sharedResponseCache = new ResponseCacheMiddleware();
+const sharedRouter = new IntelligentRouterMiddleware();
 
 export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> {
   const {
@@ -51,8 +53,8 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
 
   const pipeline = new PipelineExecutor();
 
-  pipeline.use(new ResponseCacheMiddleware());
-  pipeline.use(new IntelligentRouterMiddleware());
+  pipeline.use(sharedResponseCache);
+  pipeline.use(sharedRouter);
   pipeline.use(sharedTokenManager);
   pipeline.use(new LLMExecutionMiddleware());
 
@@ -71,4 +73,9 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
   }
 
   return finalContext.response;
+}
+
+export function flushSystem(): void {
+  sharedResponseCache.flush();
+  sharedTokenManager.flush();
 }

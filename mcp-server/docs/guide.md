@@ -88,49 +88,71 @@ graph LR
 
 The server exposes a suite of tools for LLM interaction, discovery, and system management.
 
-### LLM Tools
-- **`use_free_llm`**: The primary gateway to the orchestration pipeline. 
-  - *Input*: `model`, `messages`, `task?` (coding, chat, etc.).
-  - *Logic*: Automatically routes through the `PipelineExecutor`.
-- **`list_available_free_models`**: Discover all supported models across all providers.
-  - *Option*: `available_only: true` filters for providers with active API keys.
+### Tool Discovery Handshake
+The system follows the standard MCP lifecycle:
+1.  **Initialize**: Client connects and receives capabilities. Note that `capabilities.tools` returns an empty object `{}` per spec to signal support.
+2.  **List Tools**: Client calls `tools/list` to receive the full JSON schema for all available tools.
 
-- **`run_code`**: Executes arbitrary JavaScript code in a sandboxed environment against data. The DATA variable contains the input data as a string. Use print() to output results.
-  - *Input*: `code: string`, `data?: string`
-  - *Logic*: Executes the code in a sandboxed environment and returns the output.
+### 1. `use_free_llm`
+The primary gateway to the orchestration pipeline. 
 
-- **`manage_memory`**: Interface for the persistent, workspace-aware semantic memory system.
-  - *Actions*: `search`, `list`, `stats`, `clear`.
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `model` | string | Yes | The model ID (e.g., `gpt-4o`, `gemini-1.5-pro`). |
+| `messages` | array | Yes | Array of role/content message objects. |
+| `task` | string | No | Abstract task hint (`coding`, `chat`, `moderation`). |
+| `temperature`| number | No | Sampling temperature (0.0 - 1.0). |
+| `max_tokens` | number | No | Maximum tokens to generate. |
+| `workspace_root`| string | No | Path to scan for local context. |
 
-### Monitoring & Validation
-- **`get_token_stats`**: View real-time token tracking statistics and remaining limits for all loaded API providers. Used by the visual dashboard.
-- **`validate_provider`**: Runs a live, professional health check for a specific provider to confirm credential validity and latency.
+### 2. `list_available_free_models`
+Discover all supported models across all providers.
+- **Param**: `available_only: true` filters for providers with active API keys.
 
-### System Tools
-- **`code_mode`**: Executes arbitrary JavaScript code in a secure, sandboxed QuickJS environment. 
-  - *Use Case*: Processing large data sets locally without sending everything to an LLM.
-- **`manage_memory`**: Interface for the persistent, workspace-aware semantic memory system.
-  - *Actions*: `search`, `list`, `stats`, `clear`.
+### 3. `manage_memory`
+Interface for the persistent, workspace-aware semantic memory system.
+- **Actions**: `search`, `list`, `stats`, `clear`.
+- **Note**: This memory persists across server restarts and is tied to the `workspace_root`.
+
+### 4. `code_mode`
+Executes arbitrary JavaScript code in a secure, sandboxed QuickJS environment. 
+- **Use Case**: Processing large data sets locally without sending sensitive raw data to an LLM.
+
+### 5. `get_token_stats` & `validate_provider`
+Utility tools for monitoring system health and verifying credentials.
 
 ## 5. Visual Dashboard & SSE Bridge
 
-The server includes a Bootstrap 5 dashboard for real-time monitoring. 
+The server includes a Bootstrap 5 dashboard for real-time monitoring. By default, it runs on port 3000 when starting via `npm run dashboard`.
 
+### 5.1 Dashboard Overview
+The main landing page provides high-level statistics about the orchestration health, including total providers configured, active credentials, and the currently operational automation status (Token Interpolation, Header Sync, and Auto-Fallback).
+
+![Dashboard Overview](./assets/dashboard_overview.png)
+
+### 5.2 Provider Tracking
+The Provider Tracking tab offers a granular look at every configured LLM backend. It shows real-time quota status, current token/request usage, and provides a **Verify Credential** diagnostic tool to check connectivity and API key validity instantly.
+
+![Provider Tracking](./assets/dashboard_provider.png)
+
+### 5.3 Communication Architecture
 ```mermaid
 graph LR
     subgraph Browser
         D[Dashboard UI] -->|Update UI| E[fetch /api/token-stats]
         D -->|Manual Check| V[fetch /api/validate-provider]
+        D -->|Real-time| S[SSE /mcp]
     end
     subgraph Server
         E -->|Call| F[getTokenStats Logic]
         V -->|Execute| H[validateProvider Logic]
         H -->|Minimal Call| P[LLM Provider]
         F -->|Read| G[TokenManager State]
+        S -->|Status| J[Streaming Provider State]
     end
 ```
 
-To enable the dashboard, start the server using the `--sse` flag or `npm run dashboard`. This switches the transport from `stdio` to `SSEServerTransport` and exposes the API bridge on port 3000.
+To enable the dashboard and remote MCP access, start the server using the `--sse` flag or `npm run dashboard`. This switches the transport from `stdio` to `StreamableHTTPServerTransport` and exposes the unified `/mcp` endpoint and API bridge on port 3000.
 
 ## 6. Professional Credential Validation
 
@@ -139,3 +161,15 @@ The system implements a multi-tier validation strategy to ensure high reliabilit
 1.  **Pattern Hardening**: `BaseProvider.isAvailable()` automatically filters out common placeholders (e.g., `your_github_token_here`) and extremely short keys.
 2.  **Live Health Checks**: The `validate_provider` tool/API executes a real, minimal chat completion call with `max_tokens: 1`. This confirms that the key is not only present but also valid and authorized by the provider.
 3.  **UI Feedback**: In the dashboard, each provider card features a **Verify Credential** button, allowing developers to immediately troubleshoot configuration issues without looking at server logs.
+
+## 7. Security & Networking Architecture
+
+When the server runs in HTTP/SSE mode (e.g., via `--sse` or `npm run dashboard`), it leverages robust web security practices to protect the MCP integration and dashboard:
+
+1.  **Strict CORS Policy**: `cors()` middleware ensures that cross-origin requests are appropriately managed, preventing unauthorized domains from interacting with the `/mcp` or API endpoints.
+2.  **Helmet Integration**: The extensive `helmet()` middleware provides multiple layers of defense:
+    *   **Content Security Policy (CSP)**: Restricts scripts and styles to `'self'` and explicitly trusted CDNs (like `https://cdn.jsdelivr.net`), mitigating XSS risks.
+    *   **HTTP Strict Transport Security (HSTS)**: Forces clients to interact over secure channels, with `includeSubDomains: true` and `preload: true`.
+    *   It also automatically strips vulnerable headers (like `X-Powered-By`) and configures `X-Frame-Options` and strict MIME sniffing.
+
+By hardening the HTTP envelope, the server guarantees that token states, memory operations, and sensitive provider credentials remain secure even when exposed to web clients or network boundaries.

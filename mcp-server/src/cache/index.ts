@@ -1,21 +1,28 @@
 import { LRUCache } from 'lru-cache';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { debounce } from '../utils/debounce.js';
 import type { ChatRequest, ChatResponse } from '../providers/types.js';
 
 export class ResponseCache {
   private cache: LRUCache<string, ChatResponse>;
   private persistPath: string | null = null;
+  private debouncedPersist: (() => void) & { flush: () => void };
 
   constructor(maxSize = 500, persistPath: string | null = null) {
     this.cache = new LRUCache<string, ChatResponse>({ max: maxSize });
     this.persistPath = persistPath;
+    this.debouncedPersist = debounce(() => this.persist(), 2000);
     this.loadFromDisk();
+  }
+
+  flush(): void {
+    this.debouncedPersist.flush();
   }
 
   set(key: string, value: ChatResponse): void {
     this.cache.set(key, value);
-    this.persist();
+    this.debouncedPersist();
   }
 
   get(key: string): ChatResponse | undefined {
@@ -60,7 +67,7 @@ export class ResponseCache {
 
   clear(): void {
     this.cache.clear();
-    this.persist();
+    this.debouncedPersist();
   }
 
   size(): number {

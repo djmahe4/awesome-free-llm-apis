@@ -1,13 +1,19 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { debounce } from '../utils/debounce.js';
 
 export class LongTermMemory {
   private storePath: string;
   private data: Record<string, unknown> = {};
   private loaded = false;
 
+  private debouncedPersist: (() => void) & { flush: () => void };
+
   constructor(storePath = './data/memory.json') {
     this.storePath = storePath;
+    this.debouncedPersist = debounce(() => {
+      this.persist().catch(err => console.error('Failed to persist memory:', err));
+    }, 1000);
   }
 
   private async ensureLoaded(): Promise<void> {
@@ -29,7 +35,7 @@ export class LongTermMemory {
   async save(key: string, value: unknown): Promise<void> {
     await this.ensureLoaded();
     this.data[key] = value;
-    await this.persist();
+    this.debouncedPersist();
   }
 
   async load(key: string): Promise<unknown | undefined> {
@@ -40,7 +46,11 @@ export class LongTermMemory {
   async delete(key: string): Promise<void> {
     await this.ensureLoaded();
     delete this.data[key];
-    await this.persist();
+    this.debouncedPersist();
+  }
+
+  flush(): void {
+    this.debouncedPersist.flush();
   }
 
   async list(): Promise<string[]> {

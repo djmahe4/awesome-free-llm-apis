@@ -91,6 +91,6 @@ describe('use_free_llm input validation', () => {
 
     await useFreeLLM(input);
     await useFreeLLM(input);
-    expect(chatSpy).toHaveBeenCalled();
+    expect(chatSpy).toHaveBeenCalledTimes(1);
   });
 });
