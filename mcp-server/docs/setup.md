@@ -111,6 +111,30 @@ If the server is running with the `--sse` flag, any MCP client can connect via t
 
 This is the preferred method for connecting browser-based clients or remote instances.
 
+### Option D: Running with `npx` (Streamlined)
+
+If you have the repository cloned locally, you can run the server directly using `npx`:
+
+```json
+{
+  "mcpServers": {
+    "free-llm-apis": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "/path/to/awesome-free-llm-apis/mcp-server"
+      ],
+      "env": {
+        "GEMINI_API_KEY": "your_key",
+        "CO_API_KEY": "your_key"
+      }
+    }
+  }
+}
+```
+
+*Note: This method is ideal for quick testing as it uses the `bin` configuration defined in `package.json`.*
+
 ## Running Smoke Tests
 
 ```bash

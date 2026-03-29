@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "description": "MCP server for free LLM APIs",
+  "bin": {
+    "free-llm-mcp": "./dist/server.js"
+  },
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
