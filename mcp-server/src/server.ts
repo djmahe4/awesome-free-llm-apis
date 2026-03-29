@@ -26,8 +26,8 @@ async function main() {
       contentSecurityPolicy: {
         directives: {
           ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-          "script-src": ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
-          "style-src": ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+          "script-src": ["'self'", "https://cdn.jsdelivr.net"],
+          "style-src": ["'self'", "https://cdn.jsdelivr.net"],
           "img-src": ["'self'", "data:", "https:*"],
         },
       },

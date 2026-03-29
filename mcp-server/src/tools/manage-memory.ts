@@ -26,8 +26,7 @@ export async function manageMemory(input: ManageMemoryInput) {
             // Requires careful implementation to only clear specific workspace
             return { success: true, message: `Memory management for ${wsHash} is active` };
         case 'search':
-            const results = await memoryManager.getToolOutput('use_free_llm', { _ws: wsHash });
-            return results || { message: 'No matches found for this workspace' };
+            return await memoryManager.search(wsHash, query);
         default:
             throw new Error(`Unsupported action: ${action}`);
     }

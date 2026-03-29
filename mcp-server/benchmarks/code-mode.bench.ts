@@ -24,7 +24,6 @@ const largeApiResponse = JSON.stringify({
 describe('Code Mode Compression', () => {
   bench('direct response (no compression)', () => {
     const size = largeApiResponse.length;
-    return size;
   });
 
   bench('code mode (extract key fields)', async () => {
@@ -33,6 +32,6 @@ describe('Code Mode Compression', () => {
       var first = resp.choices[0].message.content.slice(0, 100);
       print(JSON.stringify({ model: resp.model, preview: first, total: resp.usage.total_tokens }));
     `;
-    return executeInSandbox(code, largeApiResponse, 5000);
+    await executeInSandbox(code, largeApiResponse, 5000);
   });
 });

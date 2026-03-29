@@ -34,6 +34,21 @@ export class MemoryManager {
     return this.longTerm.load(key);
   }
 
+  async search(workspaceHash: string, query?: string): Promise<unknown[]> {
+    const allKeys = await this.longTerm.list();
+    const results: unknown[] = [];
+
+    for (const key of allKeys) {
+      if (key.includes(`_ws:${workspaceHash}`) || key.includes(`"ws":"${workspaceHash}"`)) {
+        const val = await this.longTerm.load(key);
+        if (!query || JSON.stringify(val).toLowerCase().includes(query.toLowerCase())) {
+          results.push(val);
+        }
+      }
+    }
+    return results;
+  }
+
   async storeCompressionStats(original: number, compressed: number, tool: string): Promise<void> {
     const stats = (await this.longTerm.load('compression:stats') ?? []) as CompressionStat[];
     stats.push({ tool, original, compressed, ratio: compressed / original, timestamp: Date.now() });

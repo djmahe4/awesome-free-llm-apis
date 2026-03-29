@@ -178,4 +178,4 @@ Each iteration builds on the last. Use `code_mode` to compress and deduplicate f
 
 ## 🧪 Verified Test Results
 
-See [usages.md](../usages.md) for the full test matrix with actual responses, token counts, and latency measurements for all 6 tools across real providers.
+See [usages.md](references/usages.md) for the full test matrix with actual responses, token counts, and latency measurements for all 6 tools across real providers.

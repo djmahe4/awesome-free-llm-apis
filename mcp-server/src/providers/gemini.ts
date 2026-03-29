@@ -36,7 +36,9 @@ export class GeminiProvider extends BaseProvider {
   private async runPythonClient(request: any): Promise<any> {
     const pythonPath = this.resolvePythonPath();
     const scriptPath = path.join(__dirname, 'gemini_client.py');
-    console.error(`[Gemini] Spawning Python: ${pythonPath} with script: ${scriptPath}`);
+    if (process.env.DEBUG) {
+      console.error(`[Gemini] Spawning Python: ${pythonPath} with script: ${scriptPath}`);
+    }
 
     return new Promise((resolve, reject) => {
       const py = spawn(pythonPath, [scriptPath], {
