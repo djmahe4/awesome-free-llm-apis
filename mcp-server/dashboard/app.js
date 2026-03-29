@@ -34,10 +34,8 @@ async function fetchStats() {
         stats = data.stats;
 
         renderStats(stats);
-        updateConnectionStatus(true);
     } catch (err) {
         console.error('Fetch failed:', err);
-        updateConnectionStatus(false);
     }
 }
 
@@ -153,7 +151,7 @@ function connectSSE() {
         eventSource.close();
     }
 
-    eventSource = new EventSource('/mcp');
+    eventSource = new EventSource('/mcp?heartbeat=true');
 
     eventSource.onopen = () => {
         updateConnectionStatus(true);
@@ -163,6 +161,7 @@ function connectSSE() {
         console.error('SSE Connection Error:', err);
         updateConnectionStatus(false);
         eventSource.close();
+        eventSource = null;
         // Attempt to reconnect after 3 seconds
         setTimeout(connectSSE, 3000);
     };

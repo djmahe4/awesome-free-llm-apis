@@ -70,6 +70,22 @@ async function main() {
     const sessionMap = new Map<string, { server: any, transport: StreamableHTTPServerTransport }>();
 
     const handleMcpRequest = async (req: express.Request, res: express.Response) => {
+      // Support for dashboard status heartbeat
+      if (req.method === 'GET' && req.query.heartbeat === 'true') {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.write('event: heartbeat\ndata: {"status":"online"}\n\n');
+        const interval = setInterval(() => {
+          res.write(': heartbeat\n\n'); // SSE comment to keep alive
+        }, 15000);
+        req.on('close', () => clearInterval(interval));
+        return;
+      }
+
       const sessionId = (req.headers['mcp-session-id'] as string) || (req.query.sessionId as string);
 
       if (sessionId && sessionMap.has(sessionId)) {

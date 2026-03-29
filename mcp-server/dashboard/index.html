@@ -278,31 +278,6 @@ npm run dashboard</code></pre>
 
   <!-- MCP Interaction Logic -->
   <script src="/app.js"></script>
-    // Setup SSE connection to the new unified endpoint for real-time status
-    let eventSource;
-    function connectSSE() {
-      if (eventSource) {
-        eventSource.close();
-      }
-
-      eventSource = new EventSource('/mcp');
-
-      eventSource.onopen = () => {
-        updateConnectionStatus(true);
-      };
-
-      eventSource.onerror = (err) => {
-        console.error('SSE Connection Error:', err);
-        updateConnectionStatus(false);
-        // Attempt to reconnect after 3 seconds
-        eventSource.close();
-        setTimeout(connectSSE, 3000);
-      };
-    }
-
-    // Initialize SSE connection
-    connectSSE();
-  </script>
 </body>
 
 </html>
