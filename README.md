@@ -8,7 +8,7 @@
 	</a>
 	<br>
 	<br>
-	<p>LLM APIs with permanent free tiers for text inference.</p>
+	<p>LLM APIs integrated with MCP server and permanent free tiers for text inference.</p>
 	<br>
 	<br>
 </div>
@@ -17,6 +17,20 @@
 
 - [Provider APIs](#provider-apis)
 - [Inference providers](#inference-providers)
+- [Setup & Installation](mcp-server/docs/setup.md)
+- [Architecture & Workflow Guide](mcp-server/docs/guide.md)
+- [Verified Usage & Test Matrix](free-llm-apis/references/usages.md)
+- [Visual Dashboard](mcp-server/dashboard/index.html)
+
+## MCP Server Features
+
+This server includes an orchestration pipeline for routing, token management, and failover:
+
+- **Task-Based Routing**: Maps coding tasks to DeepSeek/Gemini Pro and chat to Flash models.
+- **Token Management**: Uses `js-tiktoken` for proactive usage estimation and rate limit prevention.
+- **Failover**: Automatically cascades to alternative models if a provider is unavailable.
+- **Request Caching**: Persistent caching for repeated identical queries.
+- **Dashboard**: Real-time monitoring of usage, provider health, and model availability.
 
 ## Provider APIs
 
