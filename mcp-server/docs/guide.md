@@ -1,10 +1,10 @@
 # Workflow & Architecture Guide
 
-This guide explains the inner workings of the Intelligent LLM Orchestration Pipeline, including routing logic, token management, and middleware execution.
+This guide explains the inner workings of the LLM Orchestration Pipeline, including routing logic, token management, and middleware execution.
 
 ## 1. Orchestration Pipeline Flow
 
-The system uses a Starlette-inspired middleware pipeline. Every request passes through a series of "layers" before reaching the LLM provider.
+The system uses a middleware-based pipeline. Every request passes through a series of "layers" before reaching the LLM provider.
 
 ```mermaid
 sequenceDiagram
@@ -112,7 +112,7 @@ Discover all supported models across all providers.
 ### 3. `manage_memory`
 Interface for the persistent, workspace-aware semantic memory system.
 - **Actions**: `search`, `list`, `stats`, `clear`.
-- **Note**: This memory persists across server restarts and is tied to the `workspace_root`.
+- **Note on Architecture**: All memory is physically stored centrally in the MCP server's local `data/memory.json` file. The `workspace_root` parameter is used to generate a unique cryptographic hash, which acts as a **logical namespace** to safely isolate context between different projects.
 
 ### 4. `code_mode`
 Executes arbitrary JavaScript code in a secure, sandboxed QuickJS environment. 

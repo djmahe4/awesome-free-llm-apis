@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { BaseProvider } from './base.js';
@@ -16,18 +17,31 @@ export class GeminiProvider extends BaseProvider {
   models: ProviderModel[] = [
     { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
     { id: 'gemini-3.1-flash-preview', name: 'Gemini 3.1 Flash Preview' },
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
     { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite Preview' },
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
     { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
   ];
 
+  /** Attempt to locate the venv Python interpreter relative to the project root */
+  private resolvePythonPath(): string {
+    if (process.env.PYTHON_EXECUTABLE) return process.env.PYTHON_EXECUTABLE;
+    // Walk up from dist/providers → dist → project root, then look for venv
+    const projectRoot = path.resolve(__dirname, '../../');
+    const venvPython = path.join(projectRoot, 'venv', 'bin', 'python3');
+    return existsSync(venvPython) ? venvPython : 'python3';
+  }
+
   private async runPythonClient(request: any): Promise<any> {
-    const pythonPath = process.env.PYTHON_EXECUTABLE ?? 'python3';
+    const pythonPath = this.resolvePythonPath();
     const scriptPath = path.join(__dirname, 'gemini_client.py');
+    console.error(`[Gemini] Spawning Python: ${pythonPath} with script: ${scriptPath}`);
 
     return new Promise((resolve, reject) => {
-      const py = spawn(pythonPath, [scriptPath]);
+      const py = spawn(pythonPath, [scriptPath], {
+        env: { ...process.env }
+      });
       const input = JSON.stringify({
         ...request,
       });
@@ -106,7 +120,9 @@ export class GeminiProvider extends BaseProvider {
     const pythonPath = process.env.PYTHON_EXECUTABLE ?? 'python3';
     const scriptPath = path.join(__dirname, 'gemini_client.py');
 
-    const py = spawn(pythonPath, [scriptPath]);
+    const py = spawn(pythonPath, [scriptPath], {
+      env: { ...process.env }
+    });
     const input = JSON.stringify({
       model: request.model,
       messages: request.messages,

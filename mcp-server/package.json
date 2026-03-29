@@ -9,6 +9,7 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "postbuild": "mkdir -p dist/providers && cp src/providers/gemini_client.py dist/providers/gemini_client.py",
     "start": "node dist/src/server.js",
     "dev": "tsx src/server.ts",
     "test": "vitest run",

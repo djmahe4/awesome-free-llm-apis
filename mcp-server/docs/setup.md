@@ -135,6 +135,21 @@ If you have the repository cloned locally, you can run the server directly using
 
 *Note: This method is ideal for quick testing as it uses the `bin` configuration defined in `package.json`.*
 
+## Installing the AI Agent Skill
+
+This repository includes a specialized skill for AI coding agents (like Claude Code / Antigravity) to properly use the `free-llm-apis` tools, handle fallback routing, and manage persistent memory.
+
+To install the skill so your AI agent can use it:
+
+```bash
+# From the root of the cloned repository
+mkdir -p ~/.gemini/antigravity/skills/free-llm-apis
+cp -r mcp-server/docs/skill/* ~/.gemini/antigravity/skills/free-llm-apis/
+cp mcp-server/docs/usages.md ~/.gemini/antigravity/skills/free-llm-apis/usages.md
+```
+
+Once copied, your agent will automatically detect the `@mcp:free-llm-apis` skill and its associated reference documents.
+
 ## Running Smoke Tests
 
 ```bash
@@ -144,7 +159,7 @@ npm run smoke-test
 
 ## Orchestration Pipeline
 
-The server uses an intelligent pipeline for model selection and token management. For a deep dive into how routing, caching, and failover work, see the [Architecture & Workflow Guide](guide.md).
+The server uses a pipeline for model selection and token management. For a deep dive into how routing, caching, and failover work, see the [Architecture & Workflow Guide](guide.md).
 
 ### Performance Features
 - **Token Interpolation**: Uses `js-tiktoken` for local token counting.
