@@ -35,6 +35,19 @@ source venv/bin/activate
 pip install -U google-genai python-dotenv
 ```
 
+### Windows Init
+
+#### Edit your PowerShell profile:
+
+```bash
+notepad $PROFILE
+```
+#### Add:
+
+```bash
+Set-Alias python python3
+```
+
 ## Configuration
 
 ### Environment Variables
