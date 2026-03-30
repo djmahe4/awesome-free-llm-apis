@@ -25,28 +25,19 @@ The Google Gemini provider uses the official `google-genai` Python SDK via a bri
 
 ```bash
 cd mcp-server
-python3 -m venv venv
 
-# For Linux/macOS:
-source venv/bin/activate
-# For Windows:
-# venv\Scripts\activate
+# Create the virtual environment
+python -m venv venv
+
+# Activate it:
+#   Linux / macOS ......  source venv/bin/activate
+#   Windows (PowerShell)  .\venv\Scripts\Activate.ps1
+#   Windows (cmd) .......  venv\Scripts\activate.bat
 
 pip install -U google-genai python-dotenv
 ```
 
-### Windows Init
-
-#### Edit your PowerShell profile:
-
-```bash
-notepad $PROFILE
-```
-#### Add:
-
-```bash
-Set-Alias python python3
-```
+> **Note:** On some Linux distros the command is `python3`. If `python` is not found, use `python3` instead.
 
 ## Configuration
 
@@ -55,7 +46,11 @@ Set-Alias python python3
 Create a `.env` file in the `mcp-server` directory (you can use `.env.example` as a template):
 
 ```bash
+# Linux / macOS
 cp .env.example .env
+
+# Windows (PowerShell)
+Copy-Item .env.example .env
 ```
 
 Fill in your API keys for the providers you wish to use.
@@ -155,9 +150,13 @@ This repository includes a specialized skill for AI coding agents (like Claude C
 To install the skill so your AI agent can use it:
 
 ```bash
-# From the root of the cloned repository
+# Linux / macOS
 mkdir -p ~/.gemini/antigravity/skills/free-llm-apis
 cp -r mcp-server/docs/skill/* ~/.gemini/antigravity/skills/free-llm-apis/
+
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini\antigravity\skills\free-llm-apis"
+Copy-Item -Recurse mcp-server\docs\skill\* "$env:USERPROFILE\.gemini\antigravity\skills\free-llm-apis\"
 ```
 
 Once copied, your agent will automatically detect the `@mcp:free-llm-apis` skill and its associated reference documents.
