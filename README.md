@@ -33,6 +33,7 @@ This server includes an orchestration pipeline for routing, token management, an
 - **Failover**: Automatically cascades to alternative models if a provider is unavailable.
 - **Request Caching**: Persistent caching for repeated identical queries.
 - **Dashboard**: Real-time monitoring of usage, provider health, and model availability.
+- **Platform Independent**: Uses a `QuickJS` engine compiled to `WebAssembly` for a secure, host-agnostic JavaScript sandbox.
 
 ## Provider APIs
 

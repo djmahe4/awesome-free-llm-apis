@@ -19,7 +19,7 @@ cd mcp-server
 npm install
 ```
 
-> **Note:** This project uses `quickjs-emscripten`, which requires platform-specific optional dependencies (like `@emnapi/core` and `@emnapi/runtime`) to be present in the `package-lock.json` for CI/CD runners (like Linux). If you are contributing from Windows, these should be automatically handled, but any `npm ci` failures in CI likely mean the lock file is out of sync for Linux.
+> **Note:** This project uses `quickjs-emscripten`, which requires platform-specific dependencies (like `@emnapi/core` and `@emnapi/runtime`) to be present in the `package-lock.json` for CI/CD runners (like Linux). To ensure these are always included in the lock file regardless of your development OS (Windows/macOS), they are tracked in `devDependencies`. If you see `npm ci` failures in CI, please run `npm install` locally to refresh the lock file.
 32: 
 33: ### 3. Python Environment (for Gemini)
 
