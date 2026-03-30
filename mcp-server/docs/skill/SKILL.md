@@ -1,5 +1,5 @@
 ---
-name: free-llm-apis
+name: free-llms
 description: "Use when performing tasks that require free LLM inference, model fallback routing, persistent workspace memory, evolving research pipelines, or subagent script generation."
 metadata:
   category: utility

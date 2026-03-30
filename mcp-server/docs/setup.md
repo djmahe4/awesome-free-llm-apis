@@ -10,7 +10,7 @@ This guide covers the necessary steps to set up the MCP server and its provider 
 
 ## Installation
 
-### 1. Node.js Dependencies
+### 1. Node.js Dependencies & Cross-Platform Sync
 
 Install the core server dependencies:
 
@@ -19,7 +19,9 @@ cd mcp-server
 npm install
 ```
 
-### 2. Python Environment (for Gemini)
+> **Note:** This project uses `quickjs-emscripten`, which requires platform-specific optional dependencies (like `@emnapi/core` and `@emnapi/runtime`) to be present in the `package-lock.json` for CI/CD runners (like Linux). If you are contributing from Windows, these should be automatically handled, but any `npm ci` failures in CI likely mean the lock file is out of sync for Linux.
+32: 
+33: ### 3. Python Environment (for Gemini)
 
 The Google Gemini provider uses the official `google-genai` Python SDK via a bridge. You need to set up a virtual environment:
 
@@ -151,12 +153,12 @@ To install the skill so your AI agent can use it:
 
 ```bash
 # Linux / macOS
-mkdir -p ~/.gemini/antigravity/skills/free-llm-apis
-cp -r mcp-server/docs/skill/* ~/.gemini/antigravity/skills/free-llm-apis/
+mkdir -p ~/.gemini/antigravity/skills/free-llms
+cp -r mcp-server/docs/skill/* ~/.gemini/antigravity/skills/free-llms/
 
 # Windows (PowerShell)
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini\antigravity\skills\free-llm-apis"
-Copy-Item -Recurse mcp-server\docs\skill\* "$env:USERPROFILE\.gemini\antigravity\skills\free-llm-apis\"
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini\antigravity\skills\free-llms\"
+Copy-Item -Recurse mcp-server\docs\skill\* "$env:USERPROFILE\.gemini\antigravity\skills\free-llms\"
 ```
 
 Once copied, your agent will automatically detect the `@mcp:free-llm-apis` skill and its associated reference documents.
