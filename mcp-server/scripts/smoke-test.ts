@@ -18,7 +18,13 @@ async function runSmokeTest() {
     }
 
     for (const provider of availableProviders) {
-        const model = provider.models[0];
+        // Preference for gemini-2.5-flash if it exists, otherwise first model
+        let model = provider.models[0];
+        if (provider.id === 'gemini') {
+            const preferred = provider.models.find(m => m.id === 'gemini-2.5-flash');
+            if (preferred) model = preferred;
+        }
+
         if (!model) {
             console.log(`\n[-] Provider: ${provider.name} - No models defined.`);
             continue;
@@ -28,17 +34,22 @@ async function runSmokeTest() {
         console.log(`    Model: ${model.id}`);
 
         try {
-            // Simulate/Execute chat call with minimal tokens
+            // Set a 30s timeout for the chat call
             const start = Date.now();
-            const response = await provider.chat({
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Request timed out after 30s')), 30000)
+            );
+            
+            const chatPromise = provider.chat({
                 model: model.id,
                 messages: [{ role: 'user', content: 'Say "OK"' }],
                 max_tokens: 1
             });
+
+            await Promise.race([chatPromise, timeoutPromise]);
             const duration = Date.now() - start;
 
             console.log(`    Status: SUCCESS (${duration}ms)`);
-            // console.log(`    Sample: ${JSON.stringify(response.choices?.[0]?.message?.content || 'no content')}`);
         } catch (error: any) {
             console.error(`    Status: FAILED`);
             console.error(`    Error: ${error.message}`);

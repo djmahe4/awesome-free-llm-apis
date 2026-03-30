@@ -27,10 +27,20 @@ export class GeminiProvider extends BaseProvider {
   /** Attempt to locate the venv Python interpreter relative to the project root */
   private resolvePythonPath(): string {
     if (process.env.PYTHON_EXECUTABLE) return process.env.PYTHON_EXECUTABLE;
-    // Walk up from dist/providers → dist → project root, then look for venv
+    
     const projectRoot = path.resolve(__dirname, '../../');
-    const venvPython = path.join(projectRoot, 'venv', 'bin', 'python3');
-    return existsSync(venvPython) ? venvPython : 'python3';
+    const isWin = process.platform === 'win32';
+    
+    // Windows: venv\Scripts\python.exe
+    // Unix: venv/bin/python3
+    const venvPython = isWin 
+      ? path.join(projectRoot, 'venv', 'Scripts', 'python.exe')
+      : path.join(projectRoot, 'venv', 'bin', 'python3');
+
+    if (existsSync(venvPython)) return venvPython;
+    
+    // Fallback to system python
+    return isWin ? 'python' : 'python3';
   }
 
   private async runPythonClient(request: any): Promise<any> {
@@ -119,7 +129,7 @@ export class GeminiProvider extends BaseProvider {
     this.checkRateLimit();
     this.recordRequest();
 
-    const pythonPath = process.env.PYTHON_EXECUTABLE ?? 'python3';
+    const pythonPath = this.resolvePythonPath();
     const scriptPath = path.join(__dirname, 'gemini_client.py');
 
     const py = spawn(pythonPath, [scriptPath], {
