@@ -6,6 +6,7 @@ import {
   TokenManagerMiddleware,
   IntelligentRouterMiddleware,
   LLMExecutionMiddleware,
+  AgenticMiddleware,
   TaskType,
   type PipelineContext
 } from '../pipeline/index.js';
@@ -20,6 +21,8 @@ export interface UseFreeLLMInput {
   provider?: string;
   fallback?: boolean;
   workspace_root?: string;
+  agentic?: boolean;
+  sessionId?: string;
   taskType?: TaskType | string;
 }
 
@@ -28,6 +31,7 @@ const workspaceScanner = new WorkspaceScanner(process.cwd());
 export const sharedTokenManager = new TokenManagerMiddleware();
 const sharedResponseCache = new ResponseCacheMiddleware();
 const sharedRouter = new IntelligentRouterMiddleware();
+const agenticMiddleware = new AgenticMiddleware();
 
 export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> {
   const {
@@ -39,6 +43,8 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     stream = false,
     provider: providerId,
     fallback = true,
+    agentic,
+    sessionId: inputSessionId,
     workspace_root: workspaceRoot,
   } = input;
 
@@ -49,11 +55,13 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     max_tokens,
     top_p,
     stream,
+    agentic,
   };
 
   const pipeline = new PipelineExecutor();
 
   pipeline.use(sharedResponseCache);
+  pipeline.use(agenticMiddleware); // Enabled if input.agentic or env toggle is true
   pipeline.use(sharedRouter);
   pipeline.use(sharedTokenManager);
   pipeline.use(new LLMExecutionMiddleware());
@@ -63,7 +71,9 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     taskType: (input as any).taskType as TaskType || TaskType.Chat,
     workspaceRoot,
     wsHash: workspaceScanner.getWorkspaceHash(workspaceRoot),
-    providerId: providerId
+    providerId: providerId,
+    agentic,
+    sessionId: inputSessionId
   };
 
   const finalContext = await pipeline.execute(context);

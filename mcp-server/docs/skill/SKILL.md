@@ -176,21 +176,36 @@ Each iteration builds on the last. Use `code_mode` to compress and deduplicate f
 
 ---
 
-## 🤖 Agentic Middleware v2
+## 🤖 Agentic Middleware v2 (High-Performance Steering)
 
-The server optionally loads the **Most Capable Agent System Prompt** from `external/agent-prompt/` and injects it into every request via `AgenticMiddleware`.
+The server features a **Context-Aware Steering Engine** that manages high-performance, stateful task execution via the `use_free_llm` tool. It transforms static documentation into a dynamic, token-efficient prompt pipeline.
 
-Enable with:
+### ⚡ AI-First Triggering
 
-```sh
-ENABLE_AGENTIC_MIDDLEWARE=true
+You can dynamically "activate" your own agentic loop by passing the `agentic` and `sessionId` parameters when calling `use_free_llm`. This is the preferred way to manage complex, multi-turn coding tasks.
+
+```json
+{
+  "model": "gpt-4o",
+  "messages": [...],
+  "agentic": true,
+  "sessionId": "project-name-v1"
+}
 ```
 
-Key behaviours:
-- Decomposes user goals into steps and tracks them in `nowQueue / nextQueue / blockedQueue / improveQueue`.
-- Creates file-first state (`plan.md`, `tasks.md`, `knowledge.md`) under `projects/{sessionId}/`.
-- Runs a verification pass after each LLM response; failures are pushed to `improveQueue`.
+### 🧠 Intelligent Behaviours
 
-See `src/middleware/agentic/` for the implementation.
+- **Semantic Prompt Resolution**: Automatically indexes `external/agent-prompt/README.md` and scores sections based on your request context. You receive only the most relevant instructions (e.g., "MOMENTUM ENGINE" for performance tasks), maximizing focus and token efficiency.
+- **Stateful Project Memory**: Passing a `sessionId` persists your task state (`nowQueue`, `improveQueue`) and project logs (`plan.md`, `tasks.md`, `knowledge.md`) in `projects/{sessionId}/`. This enables consistent cross-turn reasoning.
+- **Automatic Task Decomposition**: The middleware automatically splits your user goal into discrete steps and monitors progress. It fits auxiliary instructions within a strict budget (default: 25,000 chars) to prevent "context rot."
+
+### 🛠️ Strategic Usage Patterns
+
+- **Activation Requirement**: Only set `agentic: true` for complex architectural changes or long-running feature developments. For simple one-off queries, leave it `false` to optimize latency.
+- **Session Consistency**: Use a unique, descriptive `sessionId` (e.g., `auth-refactor-2024`) per project to ensure your memory remains isolated from other tasks.
+- **Steering with Keywords**: If you need specific rules (e.g., "SQL Best Practices"), include those keywords in your request. The engine will resolve the matching semantic sections from the master prompt.
+
+> [!NOTE]
+> The source of truth for your behavior is controlled by the `external/agent-prompt/README.md`. The pipeline ensures you never receive irrelevant instructions.
 
 See [usages.md](references/usages.md) for the full test matrix with actual responses, token counts, and latency measurements for all 6 tools across real providers.
