@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
 import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
 import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/agentic/prompts.js';
 import type { PipelineContext } from '../src/pipeline/middleware.js';
@@ -242,8 +243,8 @@ describe('Agentic Intelligence & Middleware', () => {
             const middleware = new AgenticMiddleware();
             const workspacePath = 'c:/my/project';
             
-            // Mirror logic: ws-[sha256(path)]
-            const normalized = workspacePath.replace(/\\/g, '/');
+            // Mirror logic: ws-[sha256(path.resolve(path).replace(/\\/g, '/'))]
+            const normalized = path.resolve(workspacePath).replace(/\\/g, '/');
             const expectedHash = crypto.createHash('sha256').update(normalized).digest('hex').substring(0, 16);
             const expectedSessionId = `ws-${expectedHash}`;
 
