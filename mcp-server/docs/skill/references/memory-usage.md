@@ -84,4 +84,4 @@ If a subagent repeatedly fails, the master agent should re-write its `memory.jso
 ## ⚠️ Constraints
 - Memory is localized to `workspace_root`.
 - `clear` is destructive and non-reversible — use only when explicitly requested.
-- **Deduplication Required:** Avoid storing raw LLM outputs longer than 2000 tokens directly; pipe through `code_mode` to summarize/summarize first.
+- **Deduplication Required:** Avoid storing raw LLM outputs longer than 2000 tokens directly; pipe through `code_mode` to summarize first.
