@@ -192,10 +192,16 @@ The `AgenticMiddleware` (`src/middleware/agentic/agentic-middleware.ts`) provide
 The middleware operates in three modes:
 - **Global**: Enabled via `ENABLE_AGENTIC_MIDDLEWARE=true` in `.env`.
 - **Selective**: Trigged per-request by setting `agentic: true` in the context or request body.
-- **Bypass**: If no `sessionId` is provided, the middleware automatically steps out of the pipeline to protect project isolation.
+- **Bypass**: If no `sessionId` is available (either provided by the client or derived from a `workspace_root`, see below), the middleware automatically steps out of the pipeline.
+
+### Foolproof Session ID Derivation
+To provide a zero-config experience, the `useFreeLLM` tool automatically derives a deterministic `sessionId` if a `workspace_root` is provided but an explicit ID is missing.
+- **Precedence**: Client Override > Workspace Hash > None (Bypass).
+- **Format**: `ws-[sha256(path.resolve(workspaceRoot).replace(/\\/g, '/'))]`.
+- **Namespace**: The `ws-` prefix ensures these auto-generated IDs do not collide with manually provided strings.
 
 ### Strict Session Enforcement
-To prevent data leakage and disk pollution, every agentic request **must** include a `sessionId`.
+To prevent data leakage and disk pollution, every agentic request **must** have an associated `sessionId`.
 - **Security**: Ensures that logs, memory, and intermediate state are strictly partitioned by project.
 - **Integrity**: Prevents "anonymous" agentic execution that could lead to untracked directory creation.
 

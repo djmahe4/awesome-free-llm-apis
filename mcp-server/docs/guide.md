@@ -218,6 +218,14 @@ You can opt-in on a per-call basis by passing `"agentic": true` in the request b
 
 Without a `sessionId` and a trigger, the middleware is a transparent pass-through with zero overhead.
 
+#### 3. How to Create a Session ID
+
+The system is now **Foolproof and Zero-Config** by default:
+
+- **Option A (Automatic - Recommended)**: Simply provide a `workspace_root` (e.g., your project's absolute path). The server will automatically derive a deterministic `sessionId` (namespaced as `ws-[hash]`) from that path. This ensures persistent reasoning for that project without any extra effort.
+- **Option B (Explicit Override)**: For advanced use cases (e.g. multi-agent coordination), you can explicitly provide your own `sessionId` in the request.
+- **Persistence**: Both methods ensure your agent's memory and reasoning are tied to a dedicated directory on the server's disk (`mcp-server/projects/`).
+
 ### Example flow
 
 ```
