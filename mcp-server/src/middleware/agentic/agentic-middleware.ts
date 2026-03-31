@@ -128,18 +128,13 @@ export class AgenticMiddleware implements Middleware {
             return;
         }
 
-        // Hardened Session ID: Prioritize context then request then generate
-        let sessionId: string | undefined = context.sessionId || (context.request as any).sessionId;
+        // Hardened Session ID: Must be provided for agentic state to exist
+        const sessionId: string | undefined = context.sessionId || (context.request as any).sessionId;
         
         if (!sessionId) {
-            // Internal fallback: generate a temp session if enabled via environment only
-            if (process.env.ENABLE_AGENTIC_MIDDLEWARE === 'true') {
-                sessionId = `temp-${Date.now()}`;
-            } else {
-                console.warn('[AgenticMiddleware] Mandatory sessionId missing for requested agentic state.');
-                await next();
-                return;
-            }
+            console.warn('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
+            await next();
+            return;
         }
 
         const projectDir = await ensureProjectFiles(sessionId);

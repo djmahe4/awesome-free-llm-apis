@@ -198,25 +198,25 @@ The async function `getIntelligentSystemPrompt()` is used to ensure non-blocking
 
 ### Enabling the middleware
 
-The Agentic Middleware supports a **Dual-Mode Trigger** for both global automation and selective opt-in:
+The Agentic Middleware supports a **Dual-Mode Trigger** for both global automation and selective opt-in. In **all** modes, providing a valid **`sessionId` is mandatory** for agentic state to be created.
 
 #### 1. Global Mode (`.env`)
-Set the environment variable to enable the agentic layer for **all** requests. If a `sessionId` is missing, one will be auto-generated (e.g., `temp-{timestamp}`).
+Set the environment variable to enable the agentic layer for requests that provide a `sessionId`. Requests without an ID will bypass the agentic layer with a warning.
 
 ```sh
 ENABLE_AGENTIC_MIDDLEWARE=true npm run dev
 ```
 
 #### 2. Selective Mode (Per-Request)
-You can opt-in on a per-call basis by passing `"agentic": true` in the request body. In this mode, providing a **`sessionId` is mandatory**.
+You can opt-in on a per-call basis by passing `"agentic": true` in the request body along with a **`sessionId`**.
 
-| Trigger | `ENABLE_AGENTIC_MIDDLEWARE` | `request.agentic` | `sessionId` |
-|:---|:---|:---|:---|
-| **Global** | `true` | (Any) | Optional (Auto-gen) |
-| **Opt-In** | `false` / Unset | `true` | **Mandatory** |
-| **Off** | `false` / Unset | `false` | N/A |
+| Trigger | `ENABLE_AGENTIC_MIDDLEWARE` | `request.agentic` | `sessionId` | Result |
+|:---|:---|:---|:---|:---|
+| **Global** | `true` | (Any) | **Mandatory** | Agentic ON |
+| **Opt-In** | `false`/Unset | `true` | **Mandatory** | Agentic ON |
+| **Missing ID**| (Any) | (Any) | Missing | **Agentic OFF** (Bypass) |
 
-Without either trigger, the middleware is a transparent pass-through with zero overhead.
+Without a `sessionId` and a trigger, the middleware is a transparent pass-through with zero overhead.
 
 ### Example flow
 

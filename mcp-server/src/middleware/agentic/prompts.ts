@@ -41,25 +41,33 @@ interface PromptData {
 }
 
 let cachedPromptData: PromptData | null = null;
-let cachedPromptPromise: Promise<string> | null = null;
+let lastMtime: number = 0;
 
 /**
  * Resets the in-memory cache. Used primarily for testing or forced reloads.
  */
 export function resetPromptCache(): void {
     cachedPromptData = null;
-    cachedPromptPromise = null;
+    lastMtime = 0;
 }
 
 async function loadPromptData(): Promise<PromptData | null> {
-    if (cachedPromptData) return cachedPromptData;
-
     try {
-        await fsp.access(JSON_PROMPT);
+        const stats = await fsp.stat(JSON_PROMPT);
+        const mtime = stats.mtimeMs;
+
+        if (cachedPromptData && mtime === lastMtime) {
+            return cachedPromptData;
+        }
+
         const data = JSON.parse(await fsp.readFile(JSON_PROMPT, 'utf-8'));
         cachedPromptData = data as PromptData;
+        lastMtime = mtime;
         return cachedPromptData;
     } catch {
+        // Clear cache on failure to ensure a retry next time if the file reappears
+        cachedPromptData = null;
+        lastMtime = 0;
         return null; // Signals fallback should be used
     }
 }
@@ -205,14 +213,3 @@ function extractFromMarkdown(txt: string, marker: string): string | null {
     return null;
 }
 
-async function getMostCapableAgentSystemPrompt(): Promise<string> {
-    if (cachedPromptPromise) {
-        return cachedPromptPromise;
-    }
-
-    cachedPromptPromise = (async () => {
-        return await getIntelligentSystemPrompt();
-    })();
-
-    return cachedPromptPromise;
-}

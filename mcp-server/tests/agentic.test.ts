@@ -10,6 +10,7 @@ vi.mock('fs', () => {
         mkdir: vi.fn(),
         access: vi.fn(),
         readFile: vi.fn(),
+        stat: vi.fn(),
     };
     return {
         default: {
@@ -70,6 +71,7 @@ describe('Agentic Intelligence & Middleware', () => {
 
         vi.mocked(fsp.mkdir).mockResolvedValue(undefined);
         vi.mocked(fsp.writeFile).mockResolvedValue(undefined);
+        (vi.mocked(fsp.stat) as any).mockResolvedValue({ mtimeMs: 1000 });
     });
 
     describe('getIntelligentSystemPrompt (Async)', () => {
@@ -109,9 +111,9 @@ describe('Agentic Intelligence & Middleware', () => {
         });
 
         it('falls back to Tier 2 (RAW) if prompt.json is missing', async () => {
-            (vi.mocked(fsp.access) as any).mockImplementation(async (path: string) => {
+            (vi.mocked(fsp.stat) as any).mockImplementation(async (path: string) => {
                 if (path.endsWith('prompt.json')) throw new Error('Not found');
-                return undefined;
+                return { mtimeMs: 1000 };
             });
             const prompt = await getIntelligentSystemPrompt();
             expect(prompt).toContain("Tier 2 Fallback Prompt");
@@ -125,6 +127,21 @@ describe('Agentic Intelligence & Middleware', () => {
             });
             const prompt = await getIntelligentSystemPrompt();
             expect(prompt).toContain("Tier 2 Fallback Prompt");
+        });
+
+        it('invalidates cache when prompt.json mtime changes', async () => {
+            // First call matches default mtime 1000
+            await getIntelligentSystemPrompt();
+            expect(fsp.readFile).toHaveBeenCalledTimes(1);
+
+            // Second call with same mtime should use cache
+            await getIntelligentSystemPrompt();
+            expect(fsp.readFile).toHaveBeenCalledTimes(1);
+
+            // Update mtime to trigger reload
+            (vi.mocked(fsp.stat) as any).mockResolvedValue({ mtimeMs: 2000 });
+            await getIntelligentSystemPrompt();
+            expect(fsp.readFile).toHaveBeenCalledTimes(2);
         });
     });
 
@@ -200,6 +217,24 @@ describe('Agentic Intelligence & Middleware', () => {
             const systemMessage = context.request.messages[0];
             expect(systemMessage.role).toBe('system');
             expect(systemMessage.content).toContain("MOMENTUM ENGINE");
+        });
+
+        it('bypasses agentic processing if sessionId is missing (Strict Enforcement)', async () => {
+            const middleware = new AgenticMiddleware();
+            const context: PipelineContext = {
+                request: { 
+                    model: 'test', 
+                    messages: [{ role: 'user', content: 'momentum' }] 
+                }
+                // No sessionId
+            } as any;
+
+            const next = vi.fn();
+            await middleware.execute(context, next);
+
+            expect(next).toHaveBeenCalled();
+            expect(context.request.messages.length).toBe(1); // No system prompt prepended
+            expect(fsp.mkdir).not.toHaveBeenCalled(); // No directory created
         });
     });
 });
