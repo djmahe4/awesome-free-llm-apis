@@ -243,7 +243,7 @@ describe('Agentic Intelligence & Middleware', () => {
             const workspacePath = 'c:/my/project';
             
             // Mirror logic: ws-[sha256(path)]
-            const normalized = workspacePath.replace(/\\/g, '/');
+            const normalized = path.resolve(workspacePath).replace(/\\/g, '/');
             const expectedHash = crypto.createHash('sha256').update(normalized).digest('hex').substring(0, 16);
             const expectedSessionId = `ws-${expectedHash}`;
 
