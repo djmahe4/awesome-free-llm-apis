@@ -72,8 +72,8 @@ export function getIntelligentSystemPrompt(context?: string): string {
         return `${introduction}${critical}`;
     }
 
-    // Tokenize context
-    const tokens = new Set(context.toLowerCase().split(/\W+/).filter(t => t.length > 3));
+    // Tokenize context - allowing 3-letter tokens for technical terms (api, url, git)
+    const tokens = new Set(context.toLowerCase().split(/\W+/).filter(t => t.length > 2));
     
     // Score sections
     const scoredSections = data.sections.map(section => {
