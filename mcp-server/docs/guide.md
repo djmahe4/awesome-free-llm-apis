@@ -172,4 +172,55 @@ When the server runs in HTTP/SSE mode (e.g., via `--sse` or `npm run dashboard`)
     *   **HTTP Strict Transport Security (HSTS)**: Forces clients to interact over secure channels, with `includeSubDomains: true` and `preload: true`.
     *   It also automatically strips vulnerable headers (like `X-Powered-By`) and configures `X-Frame-Options` and strict MIME sniffing.
 
-By hardening the HTTP envelope, the server guarantees that token states, memory operations, and sensitive provider credentials remain secure even when exposed to web clients or network boundaries.
+## 8. Agentic Middleware v2
+
+The optional **Agentic Middleware** (`src/middleware/agentic/`) adds a structured, self-improving execution layer on top of the existing pipeline.
+
+### What it does
+
+| Feature | Description |
+|---------|-------------|
+| **System Prompt Injection** | Prepends the `MOST_CAPABLE_AGENT_SYSTEM_PROMPT` to every request, sourced from `external/agent-prompt/` at startup. |
+| **Task Decomposition** | Splits the user goal into discrete steps and seeds the `nowQueue`. |
+| **Momentum Queues** | In-memory `nowQueue`, `nextQueue`, `blockedQueue`, and `improveQueue` per session, persisted to `projects/{sessionId}/queues.json`. |
+| **File-First State** | Creates `projects/{sessionId}/plan.md`, `tasks.md`, and `knowledge.md` on first use. |
+| **Verification Loop** | After each step, performs a self-check LLM call. Failed verifications are enqueued to `improveQueue`. |
+
+### How it uses the external prompt
+
+The prompt loader (`src/middleware/agentic/prompts.ts`) resolves the system prompt at startup:
+
+1. Checks `external/agent-prompt/system-prompt-raw.md` first (raw, >500 chars).
+2. Falls back to extracting from `external/agent-prompt/README.md`.
+3. Uses a hardcoded fallback if the external repo is absent.
+
+The constant `MOST_CAPABLE_AGENT_SYSTEM_PROMPT` is exported and consumed by `AgenticMiddleware`.
+
+### Enabling the middleware
+
+Set the environment variable before starting the server:
+
+```sh
+ENABLE_AGENTIC_MIDDLEWARE=true npm run dev
+```
+
+Without the flag the middleware is a transparent pass-through with zero overhead.
+
+### Example flow
+
+```
+User: "Build a REST API with auth and tests"
+  │
+  ▼
+AgenticMiddleware.execute()
+  ├─ Prepend MOST_CAPABLE_AGENT_SYSTEM_PROMPT to messages
+  ├─ Decompose goal → steps ["Build REST API", "Add auth", "Write tests"]
+  ├─ nowQueue = ["Build REST API", "Add auth", "Write tests"]
+  ├─ Persist queues.json + ensure plan.md / tasks.md / knowledge.md
+  ├─ Call next() → existing pipeline (Cache → Router → Token → LLM)
+  ├─ Verification: self-check response via second LLM call
+  │    ├─ PASS → continue
+  │    └─ FAIL → push reason to improveQueue
+  └─ Shift nowQueue, persist state
+```
+

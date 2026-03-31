@@ -176,6 +176,21 @@ Each iteration builds on the last. Use `code_mode` to compress and deduplicate f
 
 ---
 
-## 🧪 Verified Test Results
+## 🤖 Agentic Middleware v2
+
+The server optionally loads the **Most Capable Agent System Prompt** from `external/agent-prompt/` and injects it into every request via `AgenticMiddleware`.
+
+Enable with:
+
+```sh
+ENABLE_AGENTIC_MIDDLEWARE=true
+```
+
+Key behaviours:
+- Decomposes user goals into steps and tracks them in `nowQueue / nextQueue / blockedQueue / improveQueue`.
+- Creates file-first state (`plan.md`, `tasks.md`, `knowledge.md`) under `projects/{sessionId}/`.
+- Runs a verification pass after each LLM response; failures are pushed to `improveQueue`.
+
+See `src/middleware/agentic/` for the implementation.
 
 See [usages.md](references/usages.md) for the full test matrix with actual responses, token counts, and latency measurements for all 6 tools across real providers.
