@@ -1,0 +1,54 @@
+name: Sync External Repo
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+     - main
+     - 'copilot/**' # Use quotes for patterns with wildcards
+  schedule:
+    - cron: '0 0 * * 0'
+
+
+permissions:
+  contents: write # Fixed the extra quote
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Ensures we have history to push back
+
+      - name: Sync External Repo
+        run: |
+          # Create directory if it doesn't exist
+          mkdir -p external
+          
+          # Use a temporary clone to avoid nested .git issues
+          echo "Cloning external repository..."
+          git clone --depth 1 https://github.com/fainir/most-capable-agent-system-prompt temp_ext
+          
+          # Remove the .git folder from the external repo so we can track the files
+          rm -rf temp_ext/.git
+          
+          # Sync the files into your directory
+          rm -rf external/agent-prompt
+          mv temp_ext external/agent-prompt
+          
+      - name: Commit updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add external/agent-prompt
+
+          # The '|| true' ensures the workflow doesn't fail if there's nothing to commit
+          if git diff --cached --quiet; then
+            echo "No changes detected."
+          else
+            git commit -m "chore: sync external agent prompt"
+            git push
+          fi

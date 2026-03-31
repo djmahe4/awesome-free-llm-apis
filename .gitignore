@@ -1,0 +1,9 @@
+*node_modules/
+*dist/
+*data/
+*.env
+.env
+*coverage/
+*venv
+
+external/agent-prompt/prompt.json

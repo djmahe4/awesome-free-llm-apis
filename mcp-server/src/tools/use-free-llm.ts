@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+import path from 'node:path';
 import { WorkspaceScanner } from '../cache/workspace.js';
 import type { ChatRequest, ChatResponse } from '../providers/types.js';
 import {
@@ -6,6 +8,7 @@ import {
   TokenManagerMiddleware,
   IntelligentRouterMiddleware,
   LLMExecutionMiddleware,
+  AgenticMiddleware,
   TaskType,
   type PipelineContext
 } from '../pipeline/index.js';
@@ -20,6 +23,8 @@ export interface UseFreeLLMInput {
   provider?: string;
   fallback?: boolean;
   workspace_root?: string;
+  agentic?: boolean;
+  sessionId?: string;
   taskType?: TaskType | string;
 }
 
@@ -28,6 +33,7 @@ const workspaceScanner = new WorkspaceScanner(process.cwd());
 export const sharedTokenManager = new TokenManagerMiddleware();
 const sharedResponseCache = new ResponseCacheMiddleware();
 const sharedRouter = new IntelligentRouterMiddleware();
+const agenticMiddleware = new AgenticMiddleware();
 
 export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> {
   const {
@@ -39,6 +45,8 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     stream = false,
     provider: providerId,
     fallback = true,
+    agentic,
+    sessionId: inputSessionId,
     workspace_root: workspaceRoot,
   } = input;
 
@@ -49,21 +57,37 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     max_tokens,
     top_p,
     stream,
+    agentic,
   };
 
   const pipeline = new PipelineExecutor();
 
   pipeline.use(sharedResponseCache);
+  pipeline.use(agenticMiddleware); // Enabled if input.agentic or env toggle is true
   pipeline.use(sharedRouter);
   pipeline.use(sharedTokenManager);
   pipeline.use(new LLMExecutionMiddleware());
+
+  // Derive a foolproof sessionId if not explicitly provided
+  let effectiveSessionId = inputSessionId;
+  if (!effectiveSessionId && workspaceRoot) {
+    try {
+      const normalizedPath = path.resolve(workspaceRoot).replace(/\\/g, '/');
+      const hash = crypto.createHash('sha256').update(normalizedPath).digest('hex').substring(0, 16);
+      effectiveSessionId = `ws-${hash}`;
+    } catch (err) {
+      console.error('[useFreeLLM] Failed to derive foolproof sessionId from workspaceRoot:', err);
+    }
+  }
 
   const context: PipelineContext = {
     request,
     taskType: (input as any).taskType as TaskType || TaskType.Chat,
     workspaceRoot,
     wsHash: workspaceScanner.getWorkspaceHash(workspaceRoot),
-    providerId: providerId
+    providerId: providerId,
+    agentic,
+    sessionId: effectiveSessionId
   };
 
   const finalContext = await pipeline.execute(context);

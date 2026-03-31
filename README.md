@@ -17,6 +17,7 @@
 
 - [Provider APIs](#provider-apis)
 - [Inference providers](#inference-providers)
+- [Agent System Prompts & Architectures](#agent-system-prompts--architectures)
 - [Setup & Installation](mcp-server/docs/setup.md)
 - [Architecture & Workflow Guide](mcp-server/docs/guide.md)
 - [Original Skill](free-llm-apis/SKILL.md)
@@ -34,6 +35,7 @@ This server includes an orchestration pipeline for routing, token management, an
 - **Request Caching**: Persistent caching for repeated identical queries.
 - **Dashboard**: Real-time monitoring of usage, provider health, and model availability.
 - **Platform Independent**: Uses a `QuickJS` engine compiled to `WebAssembly` for a secure, host-agnostic JavaScript sandbox.
+- **Agentic Middleware**: Optional agentic layer with task decomposition, momentum queues, file-first state, and a verification loop (see [`mcp-server/src/middleware/agentic/`](mcp-server/src/middleware/agentic/)).
 
 ## Provider APIs
 
@@ -59,6 +61,10 @@ Third-party platforms that host open-weight models from various sources.
 - [Ollama Cloud](https://ollama.com/settings/keys) 🇺🇸 - DeepSeek-V3.2, Qwen3.5, Kimi-K2.5 +17 more. 1 concurrent model, light usage. [^2]
 - [OpenRouter](https://openrouter.ai/keys) 🇺🇸 - DeepSeek R1, Llama 3.3 70B, GPT-OSS-120B +29 more. 20 RPM, 50 RPD (1K with $10+ in purchased credits). [^4]
 - [SiliconFlow](https://cloud.siliconflow.cn/account/ak) 🇨🇳 - Qwen3-8B, DeepSeek-R1-Distill-Qwen-7B, GLM-4.1V-9B-Thinking +10 more. 1K RPM, 50K TPM.
+
+## Agent System Prompts & Architectures
+
+- [Most Capable Agent System Prompt](https://github.com/fainir/most-capable-agent-system-prompt) — Comprehensive system prompt and architecture for building durable, self-improving, task-graph-based agentic systems. Includes momentum queues (now/next/blocked/improve/recurring), verification-first execution, file-first memory (plan.md, tasks.md, knowledge.md), and eval-driven self-improvement. (Synced via cron)
 
 ## Contributing
 
