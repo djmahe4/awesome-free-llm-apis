@@ -9,9 +9,21 @@ const PROMPT_CHAR_BUDGET = 25000;
 const BASE = path.resolve(
     process.env.AGENT_PROMPT_PATH ?? path.join(process.cwd(), '../../external/agent-prompt'),
 );
-const RAW = path.join(BASE, 'system-prompt-raw.md');
 const README = path.join(BASE, 'README.md');
 const JSON_PROMPT = path.join(BASE, 'prompt.json');
+const RAW = path.join(BASE, 'system-prompt-raw.md');
+
+/**
+ * Protocol injected when architectural reference sections are present.
+ */
+const REFERENCE_SUGGESTION_PROTOCOL = `
+## 🔗 REFERENCE SUGGESTION PROTOCOL
+When your output contains matches from the 'RESEARCH APPENDIX' or 'SUBSYSTEM REFERENCE MAP', you MUST:
+1. Provide the direct URL to the project/appendix item.
+2. Briefly explain why this reference is relevant to the user's current task.
+3. Use the following format for references:
+   - [Project Name](URL): Description / Useful pattern.
+`;
 
 interface PromptSection {
     id: string;
@@ -81,6 +93,15 @@ export function getIntelligentSystemPrompt(context?: string): string {
         // Level-based boost for critical architectural sections
         if (section.level === 1) score += 2;
 
+        // NEW: Reference Booster - boost research/appendix sections for architectural queries
+        const isReference = section.id === 'research_appendix' || section.id === 'subsystem_reference_map';
+        if (isReference) {
+            const architecturalKeywords = ['rest', 'api', 'url', 'github', 'appendix', 'reference', 'map', 'architecture'];
+            architecturalKeywords.forEach(ak => {
+                if (tokens.has(ak)) score += 10;
+            });
+        }
+
         return { ...section, score };
     });
 
@@ -89,16 +110,49 @@ export function getIntelligentSystemPrompt(context?: string): string {
         .filter(s => s.score > 0)
         .sort((a, b) => b.score - a.score);
 
-    // Assemble within budget
+    // Assemble within budget with Granular Filtering for Architectural References
     let assembled = introduction;
     let currentSize = assembled.length;
 
     for (const section of relevant) {
-        const block = `\n\n## ${section.title}\n\n${section.content}`;
-        if (currentSize + block.length < PROMPT_CHAR_BUDGET) {
-            assembled += block;
-            currentSize += block.length;
+        let content = section.content;
+
+        // Perform granular filtering for high-token reference maps
+        if (section.id === 'research_appendix' || section.id === 'subsystem_reference_map') {
+            const entries = content.split(/\n(?=- \[)/).map(e => e.trim()).filter(e => e.length > 0);
+            const scoredEntries = entries.map(entry => {
+                let entryScore = 0;
+                const entryTokens = entry.toLowerCase().split(/\W+/);
+                entryTokens.forEach(et => {
+                    if (tokens.has(et)) entryScore += 1;
+                });
+                return { entry, entryScore };
+            });
+
+            // Keep only entries with actual matches, limit to top 10 to save tokens
+            content = scoredEntries
+                .filter(se => se.entryScore > 0)
+                .sort((a, b) => b.entryScore - a.entryScore)
+                .slice(0, 10)
+                .map(se => se.entry)
+                .join('\n\n');
         }
+
+        if (content.length > 0) {
+            const block = `\n\n## ${section.title}\n\n${content}`;
+            if (currentSize + block.length < PROMPT_CHAR_BUDGET) {
+                assembled += block;
+                currentSize += block.length;
+            }
+        }
+    }
+
+    // Dynamic Protocol Injection: If references were included, add the suggestion protocol
+    const hasReferences = relevant.some(s => 
+        s.id === 'research_appendix' || s.id === 'subsystem_reference_map'
+    );
+    if (hasReferences) {
+        assembled += `\n\n${REFERENCE_SUGGESTION_PROTOCOL}`;
     }
 
     return assembled;
