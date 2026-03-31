@@ -12,7 +12,25 @@ on:
     sync:
       runs-on: ubuntu-latest
 
-  jobs:
+name: Sync External Repo
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Sync repository
+        run: |
+          # Add your sync logic here
     sync:
       runs-on: ubuntu-latest
       steps:
