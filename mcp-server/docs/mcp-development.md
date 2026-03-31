@@ -202,6 +202,13 @@ export class LoggingMiddleware implements Middleware {
 }
 ```
 
+### 3. Best Practices: Non-Blocking I/O
+**CRITICAL**: Never perform synchronous file I/O or heavy computations at the module level (during import) or within a middleware without `await`. 
+
+- **Avoid Sync I/O**: Use `fs.promises` instead of `fs.readFileSync`.
+- **Memoization**: Cache expensive operations (like prompt loading) after the first execution to ensure subsequent requests are fast.
+- **Async Factories**: Prefer async functions that return values over module-level constants that require immediate initialization.
+
 ### 2. Register Middleware
 Update the tool implementation (e.g., `src/tools/use-free-llm.ts`) to include your middleware in the `PipelineExecutor` constructor.
 
@@ -210,8 +217,9 @@ Update the tool implementation (e.g., `src/tools/use-free-llm.ts`) to include yo
 ## Internal Workflow
 
 1.  **Request Arrival**: A tool call (e.g., `use_free_llm`) is received via Unified HTTP/SSE (using `StreamableHTTPServerTransport`) or Stdio.
-2.  **Pipeline Initialization**: The tool creates a `PipelineExecutor` with the standard stack.
+2.  **Pipeline Initialization**: The tool creates a `PipelineExecutor` with the standard stack. If enabled via the **Dual-Mode Trigger** (global `.env` or per-request `agentic: true` flag), the **Agentic Middleware** is prepended to the chain.
 3.  **Middleware Chain**:
+    - **Agentic (Optional)**: Performs task decomposition and awaits dynamic/async prompt injection.
     - **Cache**: Immediate return if a match is found.
     - **Router**: Selects the best available model (ignoring placeholder keys).
     - **Token Manager**: Ensures the request won't exceed remaining quotas.

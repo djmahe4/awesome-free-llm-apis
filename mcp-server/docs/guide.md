@@ -180,7 +180,7 @@ The optional **Agentic Middleware** (`src/middleware/agentic/`) adds a structure
 
 | Feature | Description |
 |---------|-------------|
-| **System Prompt Injection** | Prepends the `MOST_CAPABLE_AGENT_SYSTEM_PROMPT` to every request, sourced from `external/agent-prompt/` at startup. |
+| **System Prompt Injection** | Prepends the tailored system prompt to every request, loaded dynamically via `getIntelligentSystemPrompt()`. |
 | **Task Decomposition** | Splits the user goal into discrete steps and seeds the `nowQueue`. |
 | **Momentum Queues** | In-memory `nowQueue`, `nextQueue`, `blockedQueue`, and `improveQueue` per session, persisted to `projects/{sessionId}/queues.json`. |
 | **File-First State** | Creates `projects/{sessionId}/plan.md`, `tasks.md`, and `knowledge.md` on first use. |
@@ -188,23 +188,35 @@ The optional **Agentic Middleware** (`src/middleware/agentic/`) adds a structure
 
 ### How it uses the external prompt
 
-The prompt loader (`src/middleware/agentic/prompts.ts`) resolves the system prompt at startup:
+The prompt loader (`src/middleware/agentic/prompts.ts`) resolves the system prompt asynchronously on its first use and memoizes the result:
 
-1. Checks `external/agent-prompt/system-prompt-raw.md` first (raw, >500 chars).
-2. Falls back to extracting from `external/agent-prompt/README.md`.
-3. Uses a hardcoded fallback if the external repo is absent.
+1. Checks `external/agent-prompt/prompt.json` (Tier 1: Pre-computed, optimized).
+2. Falls back to `external/agent-prompt/README.md` (Tier 2: Raw Markdown).
+3. Uses a hardcoded default (Tier 4) if all external sources are unavailable.
 
-The constant `MOST_CAPABLE_AGENT_SYSTEM_PROMPT` is exported and consumed by `AgenticMiddleware`.
+The async function `getIntelligentSystemPrompt()` is used to ensure non-blocking server initialization. Subsequent calls are served from an in-memory cache.
 
 ### Enabling the middleware
 
-Set the environment variable before starting the server:
+The Agentic Middleware supports a **Dual-Mode Trigger** for both global automation and selective opt-in:
+
+#### 1. Global Mode (`.env`)
+Set the environment variable to enable the agentic layer for **all** requests. If a `sessionId` is missing, one will be auto-generated (e.g., `temp-{timestamp}`).
 
 ```sh
 ENABLE_AGENTIC_MIDDLEWARE=true npm run dev
 ```
 
-Without the flag the middleware is a transparent pass-through with zero overhead.
+#### 2. Selective Mode (Per-Request)
+You can opt-in on a per-call basis by passing `"agentic": true` in the request body. In this mode, providing a **`sessionId` is mandatory**.
+
+| Trigger | `ENABLE_AGENTIC_MIDDLEWARE` | `request.agentic` | `sessionId` |
+|:---|:---|:---|:---|
+| **Global** | `true` | (Any) | Optional (Auto-gen) |
+| **Opt-In** | `false` / Unset | `true` | **Mandatory** |
+| **Off** | `false` / Unset | `false` | N/A |
+
+Without either trigger, the middleware is a transparent pass-through with zero overhead.
 
 ### Example flow
 
@@ -213,7 +225,7 @@ User: "Build a REST API with auth and tests"
   │
   ▼
 AgenticMiddleware.execute()
-  ├─ Prepend MOST_CAPABLE_AGENT_SYSTEM_PROMPT to messages
+  ├─ Await prependSystemPrompt(messages) (Dynamic/Async)
   ├─ Decompose goal → steps ["Build REST API", "Add auth", "Write tests"]
   ├─ nowQueue = ["Build REST API", "Add auth", "Write tests"]
   ├─ Persist queues.json + ensure plan.md / tasks.md / knowledge.md
