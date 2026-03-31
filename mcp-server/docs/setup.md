@@ -64,6 +64,12 @@ Fill in your API keys for the providers you wish to use.
 - **SILICONFLOW_API_KEY**: Required for SiliconFlow.
 - (See `.env.example` for all supported providers).
 
+### Feature Flags
+
+- **ENABLE_AGENTIC_MIDDLEWARE**: Set to `true` to enable the agentic middleware globally for all requests. 
+    > [!IMPORTANT]
+    > **Session IDs**: When this flag is enabled, every request **must** include a `sessionId` (either in the context or the request body). Requests without a `sessionId` will bypass the middleware to ensure data safety.
+
 ## Running the Server
 
 Start the MCP server in development mode:

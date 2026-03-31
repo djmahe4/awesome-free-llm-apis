@@ -9,6 +9,7 @@ This guide provides a structured overview of the MCP server architecture and exp
 - [Caching Mechanism](#caching-mechanism)
 - [Sandboxed Execution (Code Mode)](#sandboxed-execution-code-mode)
 - [Internal Workflow](#internal-workflow)
+- [Agentic Middleware](#agentic-middleware)
 
 ---
 
@@ -176,9 +177,33 @@ The system uses a flexible, Starlette-inspired middleware pipeline to handle LLM
 
 ### Default Pipeline Stack
 1.  **ResponseCacheMiddleware**: Checks if a result exists in the persistent workspace-aware cache.
-2.  **IntelligentRouterMiddleware**: Maps the task type to a prioritized list of models and handles failover.
-3.  **TokenManagerMiddleware**: Performs local token estimation and synchronizes quotas from API headers.
-4.  **LLMExecutionMiddleware**: Performs the final HTTPS request to the provider.
+2.  **AgenticMiddleware (Conditional)**: If triggered, decomposes tasks into sub-problems and prepares the context with intelligent prompts.
+3.  **IntelligentRouterMiddleware**: Maps the task type to a prioritized list of models and handles failover.
+4.  **TokenManagerMiddleware**: Performs local token estimation and synchronizes quotas from API headers.
+5.  **LLMExecutionMiddleware**: Performs the final HTTPS request to the provider.
+
+---
+
+## Agentic Middleware
+
+The `AgenticMiddleware` (`src/middleware/agentic/agentic-middleware.ts`) provides high-level reasoning and task decomposition capabilities.
+
+### Trigger Logic
+The middleware operates in three modes:
+- **Global**: Enabled via `ENABLE_AGENTIC_MIDDLEWARE=true` in `.env`.
+- **Selective**: Trigged per-request by setting `agentic: true` in the context or request body.
+- **Bypass**: If no `sessionId` is provided, the middleware automatically steps out of the pipeline to protect project isolation.
+
+### Strict Session Enforcement
+To prevent data leakage and disk pollution, every agentic request **must** include a `sessionId`.
+- **Security**: Ensures that logs, memory, and intermediate state are strictly partitioned by project.
+- **Integrity**: Prevents "anonymous" agentic execution that could lead to untracked directory creation.
+
+### Dynamic Prompt Synchronization
+The `prompt.json` engine uses a non-blocking, asynchronous loading strategy with automatic cache invalidation.
+- **Efficiency**: Uses `fs.stat()` to check `mtime` before every use.
+- **Zero Restart**: Prompt updates are picked up instantly without requiring a server restart.
+- **Asynchronous**: Built entirely on `fs.promises` to keep the event loop free.
 
 ---
 
