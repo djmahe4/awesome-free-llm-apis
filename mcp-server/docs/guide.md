@@ -172,4 +172,75 @@ When the server runs in HTTP/SSE mode (e.g., via `--sse` or `npm run dashboard`)
     *   **HTTP Strict Transport Security (HSTS)**: Forces clients to interact over secure channels, with `includeSubDomains: true` and `preload: true`.
     *   It also automatically strips vulnerable headers (like `X-Powered-By`) and configures `X-Frame-Options` and strict MIME sniffing.
 
-By hardening the HTTP envelope, the server guarantees that token states, memory operations, and sensitive provider credentials remain secure even when exposed to web clients or network boundaries.
+## 8. Agentic Middleware v2
+
+The optional **Agentic Middleware** (`src/middleware/agentic/`) adds a structured, self-improving execution layer on top of the existing pipeline.
+
+### What it does
+
+| Feature | Description |
+|---------|-------------|
+| **System Prompt Injection** | Prepends the tailored system prompt to every request, loaded dynamically via `getIntelligentSystemPrompt()`. |
+| **Task Decomposition** | Splits the user goal into discrete steps and seeds the `nowQueue`. |
+| **Momentum Queues** | In-memory `nowQueue`, `nextQueue`, `blockedQueue`, and `improveQueue` per session, persisted to `projects/{sessionId}/queues.json`. |
+| **File-First State** | Creates `projects/{sessionId}/plan.md`, `tasks.md`, and `knowledge.md` on first use. |
+| **Verification Loop** | After each step, performs a self-check LLM call. Failed verifications are enqueued to `improveQueue`. |
+
+### How it uses the external prompt
+
+The prompt loader (`src/middleware/agentic/prompts.ts`) resolves the system prompt asynchronously on its first use and memoizes the result:
+
+1. Checks `external/agent-prompt/prompt.json` (Tier 1: Pre-computed, optimized).
+2. Falls back to `external/agent-prompt/README.md` (Tier 2: Raw Markdown).
+3. Uses a hardcoded default (Tier 4) if all external sources are unavailable.
+
+The async function `getIntelligentSystemPrompt()` is used to ensure non-blocking server initialization. Subsequent calls are served from an in-memory cache.
+
+### Enabling the middleware
+
+The Agentic Middleware supports a **Dual-Mode Trigger** for both global automation and selective opt-in. In **all** modes, providing a valid **`sessionId` is mandatory** for agentic state to be created.
+
+#### 1. Global Mode (`.env`)
+Set the environment variable to enable the agentic layer for requests that provide a `sessionId`. Requests without an ID will bypass the agentic layer with a warning.
+
+```sh
+ENABLE_AGENTIC_MIDDLEWARE=true npm run dev
+```
+
+#### 2. Selective Mode (Per-Request)
+You can opt-in on a per-call basis by passing `"agentic": true` in the request body along with a **`sessionId`**.
+
+| Trigger | `ENABLE_AGENTIC_MIDDLEWARE` | `request.agentic` | `sessionId` | Result |
+|:---|:---|:---|:---|:---|
+| **Global** | `true` | (Any) | **Mandatory** | Agentic ON |
+| **Opt-In** | `false`/Unset | `true` | **Mandatory** | Agentic ON |
+| **Missing ID**| (Any) | (Any) | Missing | **Agentic OFF** (Bypass) |
+
+Without a `sessionId` and a trigger, the middleware is a transparent pass-through with zero overhead.
+
+#### 3. How to Create a Session ID
+
+The system is now **Foolproof and Zero-Config** by default:
+
+- **Option A (Automatic - Recommended)**: Simply provide a `workspace_root` (e.g., your project's absolute path). The server will automatically derive a deterministic `sessionId` (namespaced as `ws-[hash]`) from that path. This ensures persistent reasoning for that project without any extra effort.
+- **Option B (Explicit Override)**: For advanced use cases (e.g. multi-agent coordination), you can explicitly provide your own `sessionId` in the request.
+- **Persistence**: Both methods ensure your agent's memory and reasoning are tied to a dedicated directory on the server's disk (`mcp-server/projects/`).
+
+### Example flow
+
+```
+User: "Build a REST API with auth and tests"
+  │
+  ▼
+AgenticMiddleware.execute()
+  ├─ Await prependSystemPrompt(messages) (Dynamic/Async)
+  ├─ Decompose goal → steps ["Build REST API", "Add auth", "Write tests"]
+  ├─ nowQueue = ["Build REST API", "Add auth", "Write tests"]
+  ├─ Persist queues.json + ensure plan.md / tasks.md / knowledge.md
+  ├─ Call next() → existing pipeline (Cache → Router → Token → LLM)
+  ├─ Verification: self-check response via second LLM call
+  │    ├─ PASS → continue
+  │    └─ FAIL → push reason to improveQueue
+  └─ Shift nowQueue, persist state
+```
+

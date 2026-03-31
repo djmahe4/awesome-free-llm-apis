@@ -58,7 +58,30 @@ After each learning loop evaluation:
 
 ---
 
+## 🛠️ Agentic Memory-State Patterns [NEW]
+
+### Session-Based Task Queues
+Track multi-turn objectives without polluting the system prompt:
+```json
+{
+  "key": "session/tasks",
+  "value": {
+    "nowQueue": ["Implement Granular Extractor (DONE)", "Uplift References (In-Progress)"],
+    "improveQueue": ["Add performance metrics to logs", "Refactor regex to be more robust"]
+  }
+}
+```
+
+### Self-Healing Instruction Pattern
+If a subagent repeatedly fails, the master agent should re-write its `memory.json` instructions:
+1. **Detect Failure:** Log Error `ERR-REF-01`.
+2. **Search Memory:** Find `subagent/ref-extractor/v1`.
+3. **Improvise:** Use `use_free_llm` to rewrite `v1.1` with a fix for `ERR-REF-01`.
+4. **Update:** Store `subagent/ref-extractor/v1.1` and update the active pointer.
+
+---
+
 ## ⚠️ Constraints
 - Memory is localized to `workspace_root`.
 - `clear` is destructive and non-reversible — use only when explicitly requested.
-- Avoid storing raw LLM outputs longer than 2000 tokens directly; pipe through `code_mode` to summarize first.
+- **Deduplication Required:** Avoid storing raw LLM outputs longer than 2000 tokens directly; pipe through `code_mode` to summarize first.

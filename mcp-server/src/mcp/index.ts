@@ -45,6 +45,8 @@ export async function createMCPServer(): Promise<Server> {
             provider: { type: 'string', description: 'Override provider ID' },
             fallback: { type: 'boolean', description: 'Enable fallback (default true)' },
             workspace_root: { type: 'string', description: 'Root directory of the workspace to scan for context' },
+            agentic: { type: 'boolean', description: 'Enable agentic mode (reasoning and task decomposition)' },
+            sessionId: { type: 'string', description: 'Mandatory unique identifier for agentic sessions (e.g., UUID or project name)' },
           },
           required: ['model', 'messages'],
         },

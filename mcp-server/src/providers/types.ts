@@ -10,6 +10,7 @@ export interface ChatRequest {
   max_tokens?: number;
   top_p?: number;
   stream?: boolean;
+  agentic?: boolean;
 }
 
 export interface ChatResponse {

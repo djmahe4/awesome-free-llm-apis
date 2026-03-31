@@ -3,7 +3,7 @@ name: free-llms
 description: "Use when performing tasks that require free LLM inference, model fallback routing, persistent workspace memory, evolving research pipelines, or subagent script generation."
 metadata:
   category: utility
-  triggers: free models, llm cost, fallback reasoning, token usage, workspace memory, subagent, research pipeline, evolving agent, learning loop, gemini, groq, cohere, code mode, sandbox
+  triggers: free models, llm cost, fallback reasoning, token usage, workspace memory, subagent, research pipeline, evolving agent, learning loop, gemini, groq, cohere, code mode, sandbox, arch map, subsystem ref, token-safe, granular extraction, steering protocol, api map
 ---
 
 # Free LLM APIs — Agentic Skill
@@ -176,6 +176,48 @@ Each iteration builds on the last. Use `code_mode` to compress and deduplicate f
 
 ---
 
-## 🧪 Verified Test Results
+## 🤖 Agentic Middleware v2 (High-Performance Steering)
+
+The server features a **Context-Aware Steering Engine** that manages high-performance, stateful task execution via the `use_free_llm` tool. It transforms static documentation into a dynamic, token-efficient prompt pipeline.
+
+### ⚡ AI-First Triggering
+
+You can dynamically "activate" your own agentic loop by passing the `agentic` and `sessionId` parameters when calling `use_free_llm`. This is the preferred way to manage complex, multi-turn coding tasks.
+
+```json
+{
+  "model": "gpt-4o",
+  "messages": [...],
+  "agentic": true,
+  "sessionId": "project-name-v1"
+}
+```
+
+### 🧠 Intelligent Behaviours
+
+- **Semantic Prompt Resolution**: Automatically indexes `external/agent-prompt/README.md` and scores sections based on your request context. You receive only the most relevant instructions (e.g., "MOMENTUM ENGINE" for performance tasks), maximizing focus and token efficiency.
+- **Granular Reference Extraction**: The steering engine can parse massive architectural maps (e.g., "Research Appendix") and extract only the relevant project entries. It uses a regex-based splitter (`/\n(?=- \[)/`) and scores each entry individually, reducing context bloat by up to 90%.
+- **Stateful Project Memory**: Passing a `sessionId` persists your task state (`nowQueue`, `improveQueue`) and project logs (`plan.md`, `tasks.md`, `knowledge.md`) in `projects/{sessionId}/`. This enables consistent cross-turn reasoning.
+- **Automatic Task Decomposition**: The middleware automatically splits your user goal into discrete steps and monitors progress. It fits auxiliary instructions within a strict budget (default: 25,000 chars) to prevent "context rot."
+
+### ⚡ Reference Steering Protocols
+
+When the middleware detects architectural keywords, it injects a **Reference Suggestion Protocol**. You MUST follow this format when suggesting project-specific URLs:
+
+> **Protocol Format:** `[Project Name] (Reference: <URL>) - <Description>`
+
+#### 🚀 Keyword Boosters
+The scoring engine prioritizes reference sections when these keywords appear in your goal or plan:
+- `api`, `url`, `git`, `map`, `rest`, `endpoint`, `reference`
+
+### 🛠️ Strategic Usage Patterns
+
+- **Activation Requirement**: Only set `agentic: true` for complex architectural changes or long-running feature developments. For simple one-off queries, leave it `false` to optimize latency.
+- **Session Consistency**: Use a unique, descriptive `sessionId` (e.g., `auth-refactor-2024`) per project to ensure your memory remains isolated from other tasks.
+- **Steering with Keywords**: If you need specific rules (e.g., "SQL Best Practices"), include those keywords in your request. The engine will resolve the matching semantic sections from the master prompt.
+- **Architectural Discovery**: Instead of asking for the "whole map," ask for "references for [System X]". The booster will identify the relevant entries and provide deep links without exceeding the token budget.
+
+> [!NOTE]
+> The source of truth for your behavior is controlled by the `external/agent-prompt/README.md`. The pipeline ensures you never receive irrelevant instructions.
 
 See [usages.md](references/usages.md) for the full test matrix with actual responses, token counts, and latency measurements for all 6 tools across real providers.
