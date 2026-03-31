@@ -2,11 +2,16 @@ name: Sync External Repo
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+     - main
+     - 'copilot/**' # Use quotes for patterns with wildcards
   schedule:
     - cron: '0 0 * * 0'
 
+
 permissions:
-  contents: write
+  contents: write # Fixed the extra quote
 
 jobs:
   sync:
