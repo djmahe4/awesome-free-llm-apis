@@ -3,20 +3,6 @@ name: Sync External Repo
 on:
   workflow_dispatch:
   schedule:
-   - cron: '0 0 * * 0'  # weekly
-
-  permissions:
-  contents: write
-
-  jobs:
-    sync:
-      runs-on: ubuntu-latest
-
-name: Sync External Repo
-
-on:
-  workflow_dispatch:
-  schedule:
     - cron: '0 0 * * 0'
 
 permissions:
@@ -28,38 +14,29 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Sync repository
+
+      - name: Clone or update external repo
         run: |
-          # Add your sync logic here
-    sync:
-      runs-on: ubuntu-latest
-      steps:
-  - name: Checkout main repo
-    uses: actions/checkout@v4
+          if [ -d "external/agent-prompt/.git" ]; then
+           echo "Repo exists, pulling latest..."
+           cd external/agent-prompt
+           git fetch origin
+           git reset --hard origin/main || git reset --hard origin/master
+           cd -
+          else
+           echo "Cloning repo..."
+           git clone https://github.com/fainir/most-capable-agent-system-prompt external/agent-prompt
+          fi
+      - name: Commit updates (if any)
+        run: |
+         git config user.name "github-actions"
+         git config user.email "actions@github.com"
 
-  - name: Clone or update external repo
-    run: |
-      if [ -d "external/agent-prompt/.git" ]; then
-        echo "Repo exists, pulling latest..."
-        cd external/agent-prompt
-        git fetch origin
-        git reset --hard origin/main || git reset --hard origin/master
-        cd -
-      else
-        echo "Cloning repo..."
-        git clone https://github.com/fainir/most-capable-agent-system-prompt external/agent-prompt
-      fi
+         git add external/agent-prompt
 
-  - name: Commit updates (if any)
-    run: |
-      git config user.name "github-actions"
-      git config user.email "actions@github.com"
-
-      git add external/agent-prompt
-
-      if git diff --cached --quiet; then
-        echo "No changes to commit"
-      else
-        git commit -m "chore: sync external agent prompt"
-        git push
-      fi
+         if git diff --cached --quiet; then
+          echo "No changes to commit"
+         else
+          git commit -m "chore: sync external agent prompt"
+          git push
+         fi
