@@ -4,7 +4,6 @@ import { LRUCache } from 'lru-cache';
 import { getIntelligentSystemPrompt } from './prompts.js';
 import type { Middleware, PipelineContext, NextFunction } from '../../pipeline/middleware.js';
 
-const ENABLE_AGENTIC_MIDDLEWARE = process.env.ENABLE_AGENTIC_MIDDLEWARE === 'true';
 
 interface QueueState {
     nowQueue: string[];
@@ -122,8 +121,8 @@ export class AgenticMiddleware implements Middleware {
 
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
         // Dual-Mode Trigger: Global Env OR Per-Request Flag
-        const isAgenticExplicityRequested = context.agentic === true || context.request?.agentic === true;
-        if (process.env.ENABLE_AGENTIC_MIDDLEWARE !== 'true' && !isAgenticExplicityRequested) {
+        const isAgenticExplicitlyRequested = context.agentic === true || context.request?.agentic === true;
+        if (process.env.ENABLE_AGENTIC_MIDDLEWARE !== 'true' && !isAgenticExplicitlyRequested) {
             await next();
             return;
         }
