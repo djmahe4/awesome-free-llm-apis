@@ -1,4 +1,5 @@
 import fs from 'fs';
+const fsp = fs.promises;
 import path from 'path';
 
 /** Minimum character length for a raw prompt file to be considered valid. */
@@ -40,17 +41,26 @@ interface PromptData {
 }
 
 let cachedPromptData: PromptData | null = null;
+let cachedPromptPromise: Promise<string> | null = null;
 
-function loadPromptData(): PromptData | null {
+/**
+ * Resets the in-memory cache. Used primarily for testing or forced reloads.
+ */
+export function resetPromptCache(): void {
+    cachedPromptData = null;
+    cachedPromptPromise = null;
+}
+
+async function loadPromptData(): Promise<PromptData | null> {
     if (cachedPromptData) return cachedPromptData;
-    if (!fs.existsSync(JSON_PROMPT)) return null;
 
     try {
-        const data = JSON.parse(fs.readFileSync(JSON_PROMPT, 'utf-8'));
+        await fsp.access(JSON_PROMPT);
+        const data = JSON.parse(await fsp.readFile(JSON_PROMPT, 'utf-8'));
         cachedPromptData = data as PromptData;
         return cachedPromptData;
     } catch {
-        return null;
+        return null; // Signals fallback should be used
     }
 }
 
@@ -58,9 +68,9 @@ function loadPromptData(): PromptData | null {
  * Intelligent interpolation pipeline for subprompt selection.
  * Scores sections based on keyword density in context and assembles the prompt.
  */
-export function getIntelligentSystemPrompt(context?: string): string {
-    const data = loadPromptData();
-    if (!data) return getFallbackPrompt();
+export async function getIntelligentSystemPrompt(context?: string): Promise<string> {
+    const data = await loadPromptData();
+    if (!data) return await getFallbackPrompt();
 
     const introduction = data.introduction || "";
     if (!context) {
@@ -158,19 +168,21 @@ export function getIntelligentSystemPrompt(context?: string): string {
     return assembled;
 }
 
-function getFallbackPrompt(): string {
+async function getFallbackPrompt(): Promise<string> {
     // Tier 2: Raw Markdown File
-    if (fs.existsSync(RAW)) {
-        const data = fs.readFileSync(RAW, 'utf-8').trim();
+    try {
+        await fsp.access(RAW);
+        const data = (await fsp.readFile(RAW, 'utf-8')).trim();
         if (data.length > MIN_PROMPT_LENGTH) return data;
-    }
+    } catch { /* proceed to next tier */ }
 
     // Tier 3: Resilient README Extraction fallback
-    if (fs.existsSync(README)) {
-        const txt = fs.readFileSync(README, 'utf-8');
+    try {
+        await fsp.access(README);
+        const txt = await fsp.readFile(README, 'utf-8');
         const extracted = extractFromMarkdown(txt, "You are the principal architect and builder");
         if (extracted && extracted.length > MIN_PROMPT_LENGTH) return extracted;
-    }
+    } catch { /* proceed to next tier */ }
 
     // Tier 4: Static Fallback
     return `You are the principal architect of a self-improving agent system.
@@ -193,8 +205,14 @@ function extractFromMarkdown(txt: string, marker: string): string | null {
     return null;
 }
 
-export function getMostCapableAgentSystemPrompt(): string {
-    return getIntelligentSystemPrompt();
-}
+async function getMostCapableAgentSystemPrompt(): Promise<string> {
+    if (cachedPromptPromise) {
+        return cachedPromptPromise;
+    }
 
-export const MOST_CAPABLE_AGENT_SYSTEM_PROMPT = getIntelligentSystemPrompt();
+    cachedPromptPromise = (async () => {
+        return await getIntelligentSystemPrompt();
+    })();
+
+    return cachedPromptPromise;
+}

@@ -1,6 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
-import { getIntelligentSystemPrompt } from '../src/middleware/agentic/prompts.js';
+import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/agentic/prompts.js';
 import type { PipelineContext } from '../src/pipeline/middleware.js';
 import fs, { promises as fsp } from 'fs';
 
@@ -10,6 +9,7 @@ vi.mock('fs', () => {
         writeFile: vi.fn(),
         mkdir: vi.fn(),
         access: vi.fn(),
+        readFile: vi.fn(),
     };
     return {
         default: {
@@ -55,34 +55,38 @@ describe('Agentic Intelligence & Middleware', () => {
     beforeEach(() => {
         vi.resetAllMocks();
         vi.stubEnv('ENABLE_AGENTIC_MIDDLEWARE', 'true');
+        resetPromptCache();
         
-        // Setup default mock behaviors
-        (vi.mocked(fs.existsSync) as unknown as any).mockImplementation((path: string) => path.endsWith('prompt.json'));
-        (vi.mocked(fs.readFileSync) as unknown as any).mockImplementation((path: string) => {
+        // Setup default mock behaviors (Async)
+        (vi.mocked(fsp.access) as any).mockImplementation(async (path: string) => {
+            if (path.endsWith('prompt.json') || path.endsWith('system-prompt-raw.md') || path.endsWith('README.md')) return undefined;
+            throw new Error('File not found');
+        });
+        (vi.mocked(fsp.readFile) as any).mockImplementation(async (path: string) => {
             if (path.endsWith('prompt.json')) return JSON.stringify(mockPromptData);
+            if (path.endsWith('system-prompt-raw.md')) return "Tier 2 Fallback Prompt".padEnd(600, '!');
             return "";
         });
 
         vi.mocked(fsp.mkdir).mockResolvedValue(undefined);
-        vi.mocked(fsp.access).mockResolvedValue(undefined);
         vi.mocked(fsp.writeFile).mockResolvedValue(undefined);
     });
 
-    describe('getIntelligentSystemPrompt', () => {
-        it('returns only intro + critical section when no context', () => {
-            const prompt = getIntelligentSystemPrompt();
+    describe('getIntelligentSystemPrompt (Async)', () => {
+        it('returns only intro + critical section when no context', async () => {
+            const prompt = await getIntelligentSystemPrompt();
             expect(prompt).toContain("Agent Identity Core");
             expect(prompt).toContain("MOMENTUM ENGINE");
             expect(prompt).not.toContain("RELIABILITY MATH");
         });
 
-        it('includes relevant section for keyword match', () => {
-            const prompt = getIntelligentSystemPrompt("improve reliability");
+        it('includes relevant section for keyword match', async () => {
+            const prompt = await getIntelligentSystemPrompt("improve reliability");
             expect(prompt).toContain("RELIABILITY MATH");
         });
 
-        it('granularly filters reference maps to only include relevant entries (token optimization)', () => {
-            const prompt = getIntelligentSystemPrompt("tell me about temporal specifically");
+        it('granularly filters reference maps to only include relevant entries (token optimization)', async () => {
+            const prompt = await getIntelligentSystemPrompt("tell me about temporal specifically");
             expect(prompt).toContain("RESEARCH APPENDIX");
             expect(prompt).toContain("Temporal");
             expect(prompt).toContain("Durable execution engine");
@@ -92,16 +96,35 @@ describe('Agentic Intelligence & Middleware', () => {
             expect(prompt).not.toContain("Twilio");
         });
 
-        it('injects REFERENCE_SUGGESTION_PROTOCOL when a reference section matches', () => {
-            const prompt = getIntelligentSystemPrompt("search appendix for temporal");
+        it('injects REFERENCE_SUGGESTION_PROTOCOL when a reference section matches', async () => {
+            const prompt = await getIntelligentSystemPrompt("search appendix for temporal");
             expect(prompt).toContain("REFERENCE SUGGESTION PROTOCOL");
             expect(prompt).toContain("Provide the direct URL");
         });
 
-        it('boosts reference sections when architectural keywords are used', () => {
+        it('boosts reference sections when architectural keywords are used', async () => {
             // "api" keyword is in the booster list but not in the default keywords for research_appendix
-            const prompt = getIntelligentSystemPrompt("api references");
+            const prompt = await getIntelligentSystemPrompt("api references");
             expect(prompt).toContain("RESEARCH APPENDIX");
+        });
+
+        it('falls back to Tier 2 (RAW) if prompt.json is missing', async () => {
+            (vi.mocked(fsp.access) as any).mockImplementation(async (path: string) => {
+                if (path.endsWith('prompt.json')) throw new Error('Not found');
+                return undefined;
+            });
+            const prompt = await getIntelligentSystemPrompt();
+            expect(prompt).toContain("Tier 2 Fallback Prompt");
+        });
+
+        it('falls back to Tier 2 if prompt.json is invalid JSON', async () => {
+            (vi.mocked(fsp.readFile) as any).mockImplementation(async (path: string) => {
+                if (path.endsWith('prompt.json')) return "INVALID JSON";
+                if (path.endsWith('system-prompt-raw.md')) return "Tier 2 Fallback Prompt".padEnd(600, '!');
+                return "";
+            });
+            const prompt = await getIntelligentSystemPrompt();
+            expect(prompt).toContain("Tier 2 Fallback Prompt");
         });
     });
 

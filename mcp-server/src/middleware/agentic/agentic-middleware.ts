@@ -85,11 +85,11 @@ function decomposeGoal(goal: string): string[] {
     return lines.length > 1 ? lines : [goal];
 }
 
-function prependSystemPrompt(context: PipelineContext, userContent?: string): void {
+async function prependSystemPrompt(context: PipelineContext, userContent?: string): Promise<void> {
     const messages = context.request.messages;
     if (!messages || messages.length === 0) return;
 
-    const dynamicPrompt = getIntelligentSystemPrompt(userContent);
+    const dynamicPrompt = await getIntelligentSystemPrompt(userContent);
     const hasSystem = messages[0].role === 'system';
     
     if (hasSystem) {
@@ -149,7 +149,7 @@ export class AgenticMiddleware implements Middleware {
         const userMessage = context.request.messages.find(m => m.role === 'user');
         const userContent = userMessage ? String(userMessage.content) : undefined;
         
-        prependSystemPrompt(context, userContent);
+        await prependSystemPrompt(context, userContent);
 
         // Task decomposition: Only perform if nowQueue is empty to prevent multi-turn duplication
         if (userContent && q.nowQueue.length === 0) {
