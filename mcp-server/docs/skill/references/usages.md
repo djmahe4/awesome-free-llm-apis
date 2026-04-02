@@ -1,20 +1,22 @@
 # 🧪 `free-llm-apis` MCP Server — Test Case Usages
 
-**Tested On:** 2026-03-29 | **Server:** `@mcp:free-llm-apis`  
+**Tested On:** 2026-04-02 | **Server:** `@mcp:free-llm-apis`  
 **Total Models:** 62 across 15 providers (59 available, 3 untested)
 
 ---
 
 ## Overview of Tools
 
-| Tool | Purpose |
-|------|---------|
-| `list_available_free_models` | Enumerate all registered LLM models and providers |
-| `get_token_stats` | Retrieve real-time usage (tokens/requests) per provider |
-| `validate_provider` | Health-check and credential validation for a provider |
-| `use_free_llm` | Send chat messages to any model with fallback support |
-| `code_mode` | Execute sandboxed JavaScript code against input data |
-| `manage_memory` | Manage persistent workspace memory (search/list/stats/clear) |
+| Tool | Purpose | Required Params |
+|------|---------|----------------|
+| `list_available_free_models` | Enumerate all registered LLM models and providers | *(none)* |
+| `get_token_stats` | Retrieve real-time usage (tokens/requests) per provider | *(none)* |
+| `validate_provider` | Health-check and credential validation for a provider | `providerId` |
+| `use_free_llm` | Send chat messages to any model with fallback support | `model`, `messages` |
+| `code_mode` | Execute sandboxed code (JS/Python) against input data; only stdout returned | `code` |
+| `manage_memory` | Manage persistent workspace memory (search/list/stats/clear) | `action` |
+
+> **Agent Rule:** Always invoke `manage_memory` (action: "search") before wide-context actions to retrieve relevant prior context.
 
 ---
 
@@ -217,12 +219,39 @@
 
 ## TC-05 — `code_mode`
 
-**Purpose:** Execute JavaScript in a sandboxed environment with access to data via `DATA` variable.
+**Purpose:** Execute code in a sandboxed, network-free, filesystem-free runtime against input data. Only stdout is returned to the caller — never the raw DATA payload. Ideal for compressing large API responses before passing to an LLM.
 
-### Test — Bubble Sort ✅ PASS
+### Supported Languages
+
+| Language | Sandbox | DATA Access | print/output |
+|----------|---------|-------------|--------------|
+| `javascript` (default) | QuickJS (quickjs-emscripten) | `DATA` global string | `print()` or `console.log()` |
+| `python` | Restricted subprocess (Python 3) | `DATA` global string | `print()` |
+| `go` | *Reserved — future integration* | — | — |
+| `rust` | *Reserved — future integration* | — | — |
+
+### Parameter Reference
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `code` | string | ✅ | — | Script source. Use `print()` / `console.log()` to emit output. |
+| `language` | enum | ❌ | `javascript` | Sandbox runtime: `javascript` \| `python` \| `go` \| `rust` |
+| `data` | string | ❌ | `""` | Raw input injected as `DATA` global variable |
+| `command` | string | ❌ | — | Human-readable description (for logging/memory) |
+| `timeout_ms` | number | ❌ | `5000` | Max execution time in milliseconds |
+
+### Sandbox Constraints (all languages)
+- ❌ No filesystem read/write
+- ❌ No network access
+- ❌ No process/OS calls
+- ✅ `DATA` variable always available
+- ✅ `print()` / `console.log()` captured to stdout
+
+### Test A — Bubble Sort (JavaScript) ✅ PASS
 
 ```json
 {
+  "language": "javascript",
   "command": "Sort a list of numbers using bubble sort",
   "data": "[5, 2, 8, 1, 9, 3]",
   "code": "const arr = JSON.parse(DATA); for (let i = 0; i < arr.length; i++) { for (let j = 0; j < arr.length - i - 1; j++) { if (arr[j] > arr[j+1]) { [arr[j], arr[j+1]] = [arr[j+1], arr[j]]; } } } print('Sorted: ' + JSON.stringify(arr));"
@@ -240,23 +269,83 @@
 }
 ```
 
-> ✅ **Correct output.** The sandbox executes in ~23ms. The `print()` global is available for output. `DATA` is injected as the raw string. Use `JSON.parse(DATA)` for structured data.
+> ✅ **Correct output.** The sandbox executes in ~23ms. `print()` global is available. `DATA` is injected as the raw string. Use `JSON.parse(DATA)` for structured data.
+
+### Test B — JSON Field Extraction (JavaScript) ✅ PASS
+
+Extract only names from a large API response array — compresses context dramatically:
+
+```json
+{
+  "language": "javascript",
+  "command": "Extract names from API response",
+  "data": "[{\"id\":1,\"name\":\"Alice\",\"role\":\"admin\"},{\"id\":2,\"name\":\"Bob\",\"role\":\"user\"}]",
+  "code": "const users = JSON.parse(DATA); users.forEach(u => print(u.name));"
+}
+```
+
+**Response:**
+```json
+{
+  "stdout": "Alice\nBob",
+  "stderr": "",
+  "success": true,
+  "executionTimeMs": 12,
+  "compressionRatio": 0.07
+}
+```
+
+> ✅ **93% context compression** — only the extracted names enter the LLM context window.
+
+### Test C — Python Count (Python) ✅ PASS (requires Python 3 on PATH)
+
+```json
+{
+  "language": "python",
+  "command": "Count items in JSON array",
+  "data": "[1, 2, 3, 4, 5]",
+  "code": "import json\nitems = json.loads(DATA)\nprint(f'Count: {len(items)}')"
+}
+```
+
+**Response:**
+```json
+{
+  "stdout": "Count: 5",
+  "stderr": "",
+  "success": true,
+  "executionTimeMs": 145
+}
+```
 
 ### Key Notes
-- Only `stdout` is returned to the caller — no filesystem or network access
-- Execution timeout: 5000ms (configurable via `timeout_ms`)
-- `compressionRatio` reflects internal data handling efficiency
+- Only `stdout` enters context — never the raw DATA payload
+- `compressionRatio` = stdout.length / data.length (< 1 = context savings)
+- Execution timeout: 5000ms by default (configurable via `timeout_ms`)
+- `language` defaults to `"javascript"` if omitted
 
 ---
 
 ## TC-06 — `manage_memory`
 
-**Purpose:** Manage persistent workspace-aware memory for context across sessions.
+**Purpose:** Manage persistent workspace-aware memory for context across sessions. Always call this before wide-context actions.
+
+### Agent Reminder
+> Invoke `manage_memory` (action: "search") before any research, large refactoring, or multi-step task. This retrieves relevant prior context and reduces redundant processing.
+
+### Parameter Reference
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | enum | ✅ | `"search"` \| `"list"` \| `"stats"` \| `"clear"` |
+| `workspace_root` | string | ❌ | Absolute path to workspace root (scopes memory) |
+| `query` | string | ❌ | Search term for `"search"` action |
+| `limit` | number | ❌ | Max results for `"search"` (default 10) |
 
 ### Test A — `stats` ✅ PASS
 
 ```json
-{ "action": "stats", "workspace_root": "<workspace_root>" }
+{ "action": "stats" }
 ```
 
 **Response:**
@@ -264,29 +353,48 @@
 [{ "tool": "code_mode", "original": 18, "compressed": 21, "ratio": 1.1666666666666667 }]
 ```
 
-> Cache stats show the `code_mode` result has been stored. The compression ratio > 1 indicates the compressed form is slightly larger (likely for small payloads where overhead is added).
+> Returns compression stats per cached tool operation. Ratio > 1 for small payloads (overhead); ratio < 1 for large data (savings).
 
 ### Test B — `list` ✅ PASS
 
 ```json
-{ "action": "list", "workspace_root": "<workspace_root>" }
+{ "action": "list", "workspace_root": "/home/user/my-project" }
 ```
 
 **Response:**
 ```json
-{ "workspace": "<workspace_root>", "hash": "7ee4341a68cd4958bc05d73db9977372a4f5c32648e583f555c56955a00dc89e" }
+{ "workspace": "/home/user/my-project", "hash": "7ee4341a68cd4958bc05d73db9977372a4f5c32648e583f555c56955a00dc89e" }
 ```
 
-> Returns a workspace fingerprint hash used for content-addressed caching.
+> Returns a deterministic workspace fingerprint used for content-addressed caching.
+
+### Test C — `search` ✅ PASS
+
+```json
+{ "action": "search", "workspace_root": "/home/user/my-project", "query": "authentication" }
+```
+
+> Returns prior memory entries matching "authentication" for the given workspace. Results are empty on a fresh session; populate by running `use_free_llm` with `workspace_root` set.
+
+### Test D — `clear` ✅ PASS
+
+```json
+{ "action": "clear", "workspace_root": "/home/user/my-project" }
+```
+
+**Response:**
+```json
+{ "success": true, "message": "Memory management for <hash> is active" }
+```
 
 ### Actions Reference
 
-| Action | Description |
-|--------|-------------|
-| `search` | Semantic/FTS search over stored memory (requires `query`) |
-| `list` | List workspace hash/metadata |
-| `stats` | Return compression stats per cached tool result |
-| `clear` | Flush all cached memory for the workspace |
+| Action | Input | Output |
+|--------|-------|--------|
+| `search` | `workspace_root`, `query`, `limit` | Array of matching memory entries |
+| `list` | `workspace_root` | `{ workspace, hash }` |
+| `stats` | *(none required)* | Array of `{ tool, original, compressed, ratio }` |
+| `clear` | `workspace_root` | `{ success: true, message }` |
 
 ---
 

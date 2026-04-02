@@ -108,19 +108,68 @@ const cachedResponse = cache.get(cacheKey);
 
 ## Sandboxed Execution (Code Mode)
 
-The `code_mode` tool executes arbitrary JavaScript using the **QuickJS** engine via `quickjs-emscripten`.
+The `code_mode` tool executes code using isolated sandbox runtimes with no filesystem or network access.
 
-### Security Features
-- **Isolated Context**: Each execution runs in a fresh QuickJS context.
-- **Timeouts**: Execution is interrupted if it exceeds the specified `timeoutMs` (default 5000ms).
-- **Global Constraints**: Only a few globals like `DATA` (input string), `print()`, and `console.log()` are exposed.
+### Supported Languages
 
-### Executor Logic
-The `executeInSandbox` function in `src/sandbox/executor.ts` manages:
-1.  Initializing the QuickJS runtime.
-2.  Setting up stdout/stderr capturing.
-3.  Injecting the `DATA` variable.
-4.  Handling errors and timeout interrupts.
+| Language | Sandbox | Notes |
+|----------|---------|-------|
+| `javascript` (default) | QuickJS via `quickjs-emscripten` | Fully sandboxed; no external deps |
+| `python` | Restricted subprocess with safe builtins | Requires Python 3 on PATH; dangerous builtins stripped |
+| `go` | Reserved for future `goja` integration | Not yet available |
+| `rust` | Reserved for future `boa_engine` integration | Not yet available |
+
+### Security Features (all languages)
+- **No filesystem access**: Scripts cannot read or write files
+- **No network access**: Scripts cannot make HTTP requests or open sockets
+- **No process/OS calls**: Scripts cannot spawn processes or access environment beyond `DATA`
+- **Timeouts**: Execution is interrupted if it exceeds `timeoutMs` (default 5000ms)
+- **Output isolation**: Only `stdout` (from `print()` / `console.log()`) is returned to the caller
+
+### JavaScript Executor (QuickJS)
+The `executeJavaScript` function in `src/sandbox/executor.ts` manages:
+1. Initializing a fresh QuickJS context per request
+2. Setting up stdout/stderr capturing via `print()` and `console.log()`
+3. Injecting the `DATA` variable as a string global
+4. Setting a deadline-based interrupt handler for the timeout
+5. Disposing the context after execution (no state leakage between calls)
+
+```typescript
+// JavaScript sandbox globals available to user code:
+// DATA: string  — the input data passed in the `data` parameter
+// print(...args): void  — writes to stdout (same as console.log)
+// console.log(...args): void  — writes to stdout
+// console.error(...args): void  — writes to stderr
+```
+
+### Python Executor
+The `executePython` function in `src/sandbox/executor.ts` manages:
+1. Building a wrapper script that restricts builtins to a safe allowlist
+2. Injecting `DATA` via the `__SANDBOX_DATA__` environment variable
+3. Running the user code via `python3 -c <wrapper>` as a subprocess
+4. Capturing stdout/stderr with a 1MB buffer limit
+5. Handling timeouts via Node.js `execFile` timeout
+
+```python
+# Python sandbox — available built-ins (safe allowlist):
+# DATA: str  — the input data string
+# print(), len(), range(), enumerate(), zip(), map(), filter()
+# sorted(), reversed(), list(), dict(), set(), tuple()
+# str(), int(), float(), bool(), bytes()
+# max(), min(), sum(), abs(), round()
+# json module is importable via __import__('json')
+# datetime module is importable via __import__('datetime')
+```
+
+### Adding a New Language Sandbox
+
+To add support for a new language (e.g., Go via `goja`):
+
+1. Add the language to the `SandboxLanguage` type in `src/sandbox/executor.ts`
+2. Implement an `executeGo(code, data, timeoutMs)` function following the same pattern as `executeJavaScript`
+3. Add a case in the `executeInSandbox` switch statement
+4. Update the `code_mode` tool description in `src/mcp/index.ts` to include the new language in the `language` enum
+5. Update `docs/mcp-development.md` and `docs/skill/SKILL.md` tables
 
 ---
 

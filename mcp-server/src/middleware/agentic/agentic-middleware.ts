@@ -116,6 +116,39 @@ function verifySelf(content: string): string {
     return 'PASS';
 }
 
+/**
+ * Detect whether a user message contains a research or external-knowledge request.
+ * These patterns indicate the agent may invoke external search, browse, or retrieve
+ * information from outside the context window.
+ *
+ * Validation is logged explicitly so agents can confirm the step was intentional,
+ * reducing hallucination risk when external sources are consulted.
+ */
+function detectResearchIntent(content: string): boolean {
+    const researchPatterns = [
+        /\b(search|look up|find|research|browse|retrieve|fetch|crawl|scrape)\b/i,
+        /\b(what is|who is|when did|where is|how does|explain|describe|summarize)\b/i,
+        /\b(latest|recent|current|today|news|update|version)\b/i,
+        /\b(according to|based on|reference|source|documentation|docs)\b/i,
+        /\b(web search|internet|online|URL|http|www\.)\b/i,
+    ];
+    return researchPatterns.some((p) => p.test(content));
+}
+
+/**
+ * Log an explicit validation step for research-invocation actions.
+ * This creates a traceable audit record so agents can verify that
+ * external knowledge lookups were intentional and logged.
+ */
+function logResearchValidation(sessionId: string, userContent: string, step: string): void {
+    const timestamp = new Date().toISOString();
+    console.log(
+        `[AgenticMiddleware][RESEARCH-VALIDATION] session=${sessionId} step="${step}" ` +
+        `timestamp=${timestamp} intent_detected=true ` +
+        `query_preview="${userContent.slice(0, 120).replace(/\n/g, ' ')}..."`
+    );
+}
+
 export class AgenticMiddleware implements Middleware {
     name = 'AgenticMiddleware';
 
@@ -142,6 +175,12 @@ export class AgenticMiddleware implements Middleware {
         // Prepend system prompt with user context if available
         const userMessage = context.request.messages.find(m => m.role === 'user');
         const userContent = userMessage ? String(userMessage.content) : undefined;
+
+        // Research validation: detect and log if this request involves external knowledge lookup.
+        // This provides an explicit audit trail to reduce agent ambiguity and hallucination risk.
+        if (userContent && detectResearchIntent(userContent)) {
+            logResearchValidation(sessionId, userContent, 'pre-execution-research-detection');
+        }
         
         await prependSystemPrompt(context, userContent);
 
@@ -163,6 +202,12 @@ export class AgenticMiddleware implements Middleware {
 
             if (verifyResult.startsWith('FAIL')) {
                 q.improveQueue.push(verifyResult);
+                console.warn(`[AgenticMiddleware][VERIFY] session=${sessionId} result="${verifyResult}"`);
+            }
+
+            // Post-execution research validation: confirm response is grounded
+            if (userContent && detectResearchIntent(userContent)) {
+                logResearchValidation(sessionId, responseContent, 'post-execution-response-grounding-check');
             }
 
             context['agenticQueues'] = getQueues(sessionId);

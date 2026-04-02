@@ -106,19 +106,39 @@ Enumerate all registered models with availability, rate limits, and provider met
 
 ### `code_mode`
 
-Execute sandboxed JavaScript against arbitrary data. `DATA` is injected as a string.
+Execute sandboxed code against arbitrary data. Only stdout is returned — never the raw DATA payload. Use this to compress large API responses before passing to an LLM.
 
 ```json
 {
+  "language": "javascript",
   "command": "Sort input numbers",
   "data": "[5, 2, 8, 1]",
   "code": "const arr = JSON.parse(DATA); arr.sort((a,b)=>a-b); print(JSON.stringify(arr));"
 }
 ```
 
-- Execution timeout: **5000ms** (configurable via `timeout_ms`)
-- Use `print()` to output results
-- No filesystem or network access from within the sandbox
+**Supported Languages:**
+
+| `language` | Sandbox | Notes |
+|------------|---------|-------|
+| `javascript` (default) | QuickJS (quickjs-emscripten) | Fastest; no external deps |
+| `python` | Restricted subprocess | Requires Python 3 on PATH |
+| `go` | *Reserved* | Future integration |
+| `rust` | *Reserved* | Future integration |
+
+**Key parameters:**
+
+| Parameter | Required | Default | Notes |
+|-----------|----------|---------|-------|
+| `code` | ✅ | — | Script source; use `print()` / `console.log()` for output |
+| `language` | ❌ | `javascript` | Sandbox runtime: `javascript` \| `python` |
+| `data` | ❌ | `""` | Injected as `DATA` global variable |
+| `command` | ❌ | — | Human-readable description (logged to memory) |
+| `timeout_ms` | ❌ | `5000` | Max execution time in milliseconds |
+
+**Sandbox Constraints (all languages):** No filesystem, no network, no process/OS calls.
+
+> **Context Compression:** `compressionRatio` = stdout.length / data.length — a ratio < 1 means context savings were achieved. See TC-05 in [usages.md](references/usages.md) for benchmarks.
 
 ---
 
