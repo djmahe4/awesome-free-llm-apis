@@ -29,7 +29,7 @@
 
 This server includes an orchestration pipeline for routing, token management, and failover:
 
-- **🆕 v1.0.1: FREE-First Routing**: Prioritizes Cloudflare, GitHub Models, and OpenRouter `:free` models before paid options (see [ROUTER-V2.1.md](ROUTER-V2.1.md))
+- **🆕 v1.0.1: FREE-First Routing**: Prioritizes Cloudflare, GitHub Models, and OpenRouter `:free` models before paid options
 - **🆕 v1.0.1: 100% Provider Coverage**: Now routes across **79 models** from **15 providers** (up from 39 models, 10 providers)
 - **🆕 v1.0.1: Fixed Critical Fallback Bug**: Router no longer crashes on multiple provider attempts
 - **Task-Based Routing**: Maps coding tasks to QwQ-32B/Qwen Coder and chat to Llama 3.3-70B/GPT-4o
