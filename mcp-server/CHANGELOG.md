@@ -31,7 +31,7 @@
   - Maintains token tracking and drift correction with proper refresh handling
 - **Simplified pipeline**: Removed TokenManager and LLMExecution from pipeline (now handled by Router internally)
 - **Pipeline order**: `ResponseCache → Agentic → Router` (previously had 5 middlewares)
-- **Removed dead code**: Cleaned up unused `sharedTokenManager` and related imports
+- **Removed dead code**: Cleaned up unused `sharedTokenManager`, `LLMExecutionMiddleware` file, imports, and tests
 - **Fixed token stats**: `get-token-stats.ts` now reads from router's actual token state
 
 ### 🧪 Testing Improvements

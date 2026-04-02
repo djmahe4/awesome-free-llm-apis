@@ -4,8 +4,7 @@ import {
     TaskType,
     type PipelineContext,
     IntelligentRouterMiddleware,
-    TokenManagerMiddleware,
-    LLMExecutionMiddleware
+    TokenManagerMiddleware
 } from '../src/pipeline/index.js';
 import { LLMExecutor } from '../src/utils/LLMExecutor.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
@@ -143,31 +142,5 @@ describe('Pipeline Orchestration', () => {
         expect(context.estimatedTokens).toBeGreaterThan(0);
         const stats = manager.getTrackingState();
         expect(stats['test-p'].remainingTokens).toBe(5000);
-    });
-
-    it('LLMExecutionMiddleware calls the provider', async () => {
-        const registry = ProviderRegistry.getInstance();
-        const groq = registry.getProvider('groq');
-        if (!groq) throw new Error('Groq not found');
-
-        const mockResponse: ChatResponse = {
-            id: 'resp-1',
-            object: 'chat.completion',
-            created: Date.now(),
-            model: 'test-model',
-            choices: [],
-        };
-
-        vi.spyOn(groq, 'chat').mockResolvedValue(mockResponse);
-
-        const exec = new LLMExecutionMiddleware();
-        const context: PipelineContext = {
-            request: { model: 'test-model', messages: [] },
-            providerId: 'groq'
-        };
-
-        await exec.execute(context, async () => { });
-
-        expect(context.response).toEqual(mockResponse);
     });
 });

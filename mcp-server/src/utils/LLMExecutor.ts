@@ -12,7 +12,7 @@ export interface TokenTrackingInfo {
  * LLMExecutor - Utility class for executing LLM API calls with token management.
  * 
  * This class extracts the core execution logic from TokenManagerMiddleware and
- * LLMExecutionMiddleware so it can be called multiple times in fallback scenarios
+ * the removed LLMExecutionMiddleware so it can be called multiple times in fallback scenarios
  * without violating the middleware single-call contract.
  */
 export class LLMExecutor {
