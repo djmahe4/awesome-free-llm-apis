@@ -1,8 +1,8 @@
-import { sharedTokenManager } from './use-free-llm.js';
+import { sharedRouter } from './use-free-llm.js';
 import { ProviderRegistry } from '../providers/registry.js';
 
 export async function getTokenStats() {
-    const tracking = sharedTokenManager.getTrackingState();
+    const tracking = sharedRouter.getTokenState();
     const registry = ProviderRegistry.getInstance();
     const allProviders = registry.getAllProviders();
 
@@ -11,7 +11,7 @@ export async function getTokenStats() {
         name: p.name,
         isAvailable: p.isAvailable(),
         rateLimits: p.rateLimits,
-        usage: tracking[p.id] || { tokens: 0, requests: 0 }
+        usage: tracking[p.id] || { remainingTokens: undefined, refreshTime: undefined }
     }));
 
     return {

@@ -4,9 +4,9 @@ import {
     TaskType,
     type PipelineContext,
     IntelligentRouterMiddleware,
-    TokenManagerMiddleware,
-    LLMExecutionMiddleware
+    TokenManagerMiddleware
 } from '../src/pipeline/index.js';
+import { LLMExecutor } from '../src/utils/LLMExecutor.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import type { ChatResponse } from '../src/providers/types.js';
 
@@ -48,53 +48,70 @@ describe('Pipeline Orchestration', () => {
     });
 
     it('IntelligentRouterMiddleware selects correct model for task', async () => {
-        vi.stubEnv('KLUSTER_API_KEY', 'test-key-long-enough');
+        // With free-first routing, OpenRouter is prioritized for Coding tasks
+        vi.stubEnv('OPENROUTER_API_KEY', 'test-openrouter-key');
         const registry = ProviderRegistry.getInstance();
 
-        const router = new IntelligentRouterMiddleware();
+        // Create a mocked executor to avoid real API calls
+        const executor = new LLMExecutor();
+        vi.spyOn(executor, 'tryProvider').mockImplementation(async (context, providerId, modelId) => {
+            return {
+                id: 'test',
+                object: 'chat.completion',
+                created: Date.now(),
+                model: modelId,
+                choices: [{ index: 0, message: { role: 'assistant', content: 'Test response' }, finish_reason: 'stop' }],
+            } as ChatResponse;
+        });
+
+        const router = new IntelligentRouterMiddleware(executor);
         const context: PipelineContext = {
-            request: { model: 'any', messages: [] },
+            request: { model: 'any', messages: [{ role: 'user', content: 'test' }] },
             taskType: TaskType.Coding
         };
 
         // Mock next to just record the chosen model
-        const next = vi.fn().mockImplementation(async () => {
-            context.response = { id: 'test', model: context.request.model, choices: [] } as any;
-        });
+        const next = vi.fn();
 
         await router.execute(context, next);
 
-        // Coding task should pick DeepSeek from Kluster (as it's stubbed and available)
-        expect(context.request.model).toBe('deepseek-ai/DeepSeek-R1');
-        expect(context.providerId).toBe('kluster');
+        // Coding task should pick the best FREE coding model first (Qwen 480B via OpenRouter)
+        expect(context.request.model).toBe('qwen/qwen3-coder-480b-a35b-instruct:free');
+        expect(context.providerId).toBe('openrouter');
+        expect(next).toHaveBeenCalledTimes(1);
     });
 
     it('IntelligentRouterMiddleware explicit model-to-provider routing checks', async () => {
-        const registry = ProviderRegistry.getInstance();
-        const router = new IntelligentRouterMiddleware();
+        // Create a mocked executor to avoid real API calls
+        const executor = new LLMExecutor();
+        vi.spyOn(executor, 'tryProvider').mockImplementation(async (context, providerId, modelId) => {
+            return {
+                id: 'test',
+                object: 'chat.completion',
+                created: Date.now(),
+                model: modelId,
+                choices: [{ index: 0, message: { role: 'assistant', content: 'Test response' }, finish_reason: 'stop' }],
+            } as ChatResponse;
+        });
+
+        const router = new IntelligentRouterMiddleware(executor);
 
         // Test 1: Gemini 3.1 Pro Preview routing
         vi.stubEnv('GEMINI_API_KEY', 'test-gemini-key');
-        let ctx1: PipelineContext = { request: { model: 'gemini-3.1-pro-preview', messages: [] } };
-        await router.execute(ctx1, vi.fn().mockImplementation(async () => {
-            ctx1.response = { id: 'test', choices: [] } as any;
-        }));
+        let ctx1: PipelineContext = { request: { model: 'gemini-3.1-pro-preview', messages: [{ role: 'user', content: 'test' }] } };
+        await router.execute(ctx1, vi.fn());
         expect(ctx1.providerId).toBe('gemini');
 
         // Test 2: Mistral routing
         vi.stubEnv('MISTRAL_API_KEY', 'test-mistral-key');
-        let ctx2: PipelineContext = { request: { model: 'mistral-large-latest', messages: [] } };
-        await router.execute(ctx2, vi.fn().mockImplementation(async () => {
-            ctx2.response = { id: 'test', choices: [] } as any;
-        }));
+        let ctx2: PipelineContext = { request: { model: 'mistral-large-latest', messages: [{ role: 'user', content: 'test' }] } };
+        await router.execute(ctx2, vi.fn());
         expect(ctx2.providerId).toBe('mistral');
 
         // Test 3: Kluster fallback routing for Qwen
         vi.stubEnv('KLUSTER_API_KEY', 'test-kluster-key');
-        let ctx3: PipelineContext = { request: { model: 'Qwen/Qwen3-235B-A22B', messages: [] } };
-        await router.execute(ctx3, vi.fn().mockImplementation(async () => {
-            ctx3.response = { id: 'test', choices: [] } as any;
-        }));
+        let ctx3: PipelineContext = { request: { model: 'Qwen/Qwen3-235B-A22B', messages: [{ role: 'user', content: 'test' }] } };
+        await router.execute(ctx3, vi.fn());
         // Qwen is primarily on Nvidia and Kluster; whichever returns true first
         expect(['kluster', 'nvidia']).toContain(ctx3.providerId);
     });
@@ -125,31 +142,5 @@ describe('Pipeline Orchestration', () => {
         expect(context.estimatedTokens).toBeGreaterThan(0);
         const stats = manager.getTrackingState();
         expect(stats['test-p'].remainingTokens).toBe(5000);
-    });
-
-    it('LLMExecutionMiddleware calls the provider', async () => {
-        const registry = ProviderRegistry.getInstance();
-        const groq = registry.getProvider('groq');
-        if (!groq) throw new Error('Groq not found');
-
-        const mockResponse: ChatResponse = {
-            id: 'resp-1',
-            object: 'chat.completion',
-            created: Date.now(),
-            model: 'test-model',
-            choices: [],
-        };
-
-        vi.spyOn(groq, 'chat').mockResolvedValue(mockResponse);
-
-        const exec = new LLMExecutionMiddleware();
-        const context: PipelineContext = {
-            request: { model: 'test-model', messages: [] },
-            providerId: 'groq'
-        };
-
-        await exec.execute(context, async () => { });
-
-        expect(context.response).toEqual(mockResponse);
     });
 });

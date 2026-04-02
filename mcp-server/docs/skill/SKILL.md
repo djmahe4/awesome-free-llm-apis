@@ -10,7 +10,7 @@ metadata:
 
 Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-apis` MCP server.
 
-> **62 models** across **15 providers** — 59 verified active.
+> **79 models** across **15 providers** — optimized for FREE-first routing.
 
 ---
 
@@ -18,13 +18,16 @@ Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-
 
 | Use Case | Model | Provider | Notes |
 |----------|-------|----------|-------|
-| Fast Q&A | `llama-3.3-70b-versatile` | `groq` | ~34ms, verified |
+| Fast Chat (FREE) | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | `cloudflare` | 100% success, 1307ms avg ⚡ |
+| Fast Coding (FREE) | `@cf/qwen/qwq-32b` | `cloudflare` | Reasoning-focused, FREE ⚡ |
 | Complex Reasoning | `command-a-03-2025` | `cohere` | Long-form, accurate |
 | Code Generation | `qwen2.5-coder-32b-instruct` | `llm7` | Verified LRU/async patterns |
 | Deep Reasoning / CoT | `deepseek-r1` | `llm7` / `kluster` | Chain-of-thought |
 | Creative / Persona | `gemini-2.5-flash` | `gemini` | Large context, verified E2E |
 | Budget / High-Volume | `Qwen/Qwen2.5-7B-Instruct` | `siliconflow` | 1,000 rpm |
 | Latest Frontier | `gemini-3.1-pro-preview` | `gemini` | Highest capability |
+
+> **FREE-First Strategy**: Cloudflare models are now prioritized for fastest, most reliable responses. Router automatically cascades through 79 models across all 15 providers.
 
 ---
 
@@ -75,15 +78,17 @@ Run a live health check + credential validation for a specific provider.
 
 ### `get_token_stats`
 
-Retrieve live token consumption and request counts per provider.
+Retrieve live token consumption and rate limit status per provider.
 
 ```json
 {}
 ```
 
-Returns an array of 15 provider stat objects including `rateLimits`, `usage.tokens`, and `usage.requests`.
+Returns an array of 15 provider stat objects including `rateLimits`, `remainingTokens`, and `refreshTime` for each provider tracked by the router.
 
-> Run after each session to check quota consumption.
+> **Note:** Token tracking is now handled by the router's internal LLMExecutor. Stats reflect actual rate limit state from recent API calls.
+
+> Run after each session to check quota consumption and rate limit status.
 
 ---
 
