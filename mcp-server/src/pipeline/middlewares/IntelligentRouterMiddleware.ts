@@ -13,6 +13,20 @@ export class IntelligentRouterMiddleware implements Middleware {
     }
 
     /**
+     * Clear token tracking state
+     */
+    flush(): void {
+        this.executor.flush();
+    }
+
+    /**
+     * Get token tracking state for reporting
+     */
+    getTokenState() {
+        return this.executor.getTokenState();
+    }
+
+    /**
      * Optimized task-to-model routing map.
      * 
      * Design principles:

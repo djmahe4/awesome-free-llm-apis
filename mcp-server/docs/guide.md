@@ -184,6 +184,20 @@ Router → LLMExecutor.tryProvider() → [Token Check + API Call + Tracking]
 Single next() call after success = WORKS!
 ```
 
+### Recent Fixes (v1.0.1)
+
+The architecture was refined based on PR review feedback:
+
+1. **Token Replenishment**: `LLMExecutor.hasEnoughTokens()` now checks refresh times and clears tracking when tokens should have replenished, preventing indefinite blocking.
+
+2. **Type Safety**: Header handling improved from `any` to `Record<string, string | string[] | undefined>` with proper array handling for multi-value headers.
+
+3. **State Management**: Router now exposes `flush()` method to clear token tracking. Dead code (`sharedTokenManager`) removed from pipeline.
+
+4. **Token Stats Integration**: `get-token-stats` tool now reads from router's actual token state instead of unused middleware.
+
+All tests pass and the system handles token refresh correctly.
+
 ## 4. MCP Tools Interaction
 
 The server exposes a suite of tools for LLM interaction, discovery, and system management.

@@ -5,9 +5,7 @@ import type { ChatRequest, ChatResponse } from '../providers/types.js';
 import {
   PipelineExecutor,
   ResponseCacheMiddleware,
-  TokenManagerMiddleware,
   IntelligentRouterMiddleware,
-  LLMExecutionMiddleware,
   AgenticMiddleware,
   TaskType,
   type PipelineContext
@@ -30,9 +28,8 @@ export interface UseFreeLLMInput {
 
 // Singleton instances for shared state across pipeline requests
 const workspaceScanner = new WorkspaceScanner(process.cwd());
-export const sharedTokenManager = new TokenManagerMiddleware();
 const sharedResponseCache = new ResponseCacheMiddleware();
-const sharedRouter = new IntelligentRouterMiddleware();
+export const sharedRouter = new IntelligentRouterMiddleware();
 const agenticMiddleware = new AgenticMiddleware();
 
 export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> {
@@ -107,5 +104,5 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
 
 export function flushSystem(): void {
   sharedResponseCache.flush();
-  sharedTokenManager.flush();
+  sharedRouter.flush();
 }

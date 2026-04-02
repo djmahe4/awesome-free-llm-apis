@@ -37,6 +37,11 @@ export class LLMExecutor {
     hasEnoughTokens(providerId: string, requiredTokens: number): boolean {
         const tracker = this.tokenTracking[providerId];
         if (tracker && tracker.remainingTokens !== undefined) {
+            // Check if tokens should have refreshed based on reset time
+            if (tracker.refreshTime && Date.now() >= tracker.refreshTime) {
+                delete this.tokenTracking[providerId];
+                return true;
+            }
             return tracker.remainingTokens >= requiredTokens;
         }
         // If no tracking info, assume provider is available
@@ -56,18 +61,25 @@ export class LLMExecutor {
     /**
      * Update token tracking from response headers (drift correction)
      */
-    private updateTokenTracking(providerId: string, headers: any): void {
+    private updateTokenTracking(providerId: string, headers: Record<string, string | string[] | undefined>): void {
         if (!headers) return;
+
+        // Helper to get first string value from header (handles arrays)
+        const getHeader = (key: string): string | undefined => {
+            const val = headers[key];
+            if (Array.isArray(val)) return val[0];
+            return val;
+        };
 
         // Look for standard rate limit headers across various providers
         const remainingTokensStr =
-            headers['x-ratelimit-remaining-tokens'] ||
-            headers['x-ratelimit-remaining-tokens-minute'] ||
-            headers['x-ratelimit-tokens-remaining'];
+            getHeader('x-ratelimit-remaining-tokens') ||
+            getHeader('x-ratelimit-remaining-tokens-minute') ||
+            getHeader('x-ratelimit-tokens-remaining');
 
         const resetTimeStr =
-            headers['x-ratelimit-reset-tokens'] ||
-            headers['x-ratelimit-reset-requests'];
+            getHeader('x-ratelimit-reset-tokens') ||
+            getHeader('x-ratelimit-reset-requests');
 
         if (remainingTokensStr) {
             const remaining = parseInt(remainingTokensStr, 10);
