@@ -13,7 +13,7 @@ import { validateProvider } from '../tools/validate-provider.js';
 
 export async function createMCPServer(): Promise<Server> {
   const server = new Server(
-    { name: 'free-llm-apis', version: '1.0.1' },
+    { name: 'free-llm-apis', version: '1.1.0' },
     { capabilities: { tools: {} } }
   );
 
@@ -200,8 +200,13 @@ export async function createMCPServer(): Promise<Server> {
           'INPUTS:',
           '  code (required)   — Script source. Use print() or console.log() to emit output.',
           '                      DATA global contains the input string (from `data` param).',
-          '  language          — Sandbox runtime: "javascript" (default), "python", "go", "rust".',
-          '                      Each language runs in an isolated, network-free, filesystem-free sandbox.',
+          '  language          — Sandbox runtime (default: "javascript"):',
+          '                      "javascript" — QuickJS (quickjs-emscripten), in-process',
+          '                      "python"     — RestrictedPython subprocess; requires python3 + pip install RestrictedPython',
+          '                      "go"         — goja (pure-Go ECMAScript); requires pre-built binary',
+          '                                     Build: cd scripts/go-sandbox-runner && go build -o sandbox-runner .',
+          '                      "rust"       — boa_engine (pure-Rust ECMAScript); requires pre-built binary',
+          '                                     Build: cd scripts/rust-sandbox-runner && cargo build --release',
           '  data              — Raw input string injected as DATA global variable.',
           '  command           — Human-readable description of what the script does (for logging).',
           '  timeout_ms        — Max execution time in milliseconds (default 5000).',
@@ -219,6 +224,7 @@ export async function createMCPServer(): Promise<Server> {
           '  - success:false + error:"Execution timed out": increase timeout_ms or simplify script.',
           '  - success:false + error message: syntax or runtime error in script; check stderr.',
           '  - Empty stdout: script ran but called no print()/console.log().',
+          '  - Binary not found (go/rust): build the runner first per instructions above.',
           '',
           'JAVASCRIPT EXAMPLE:',
           '  code: "const items = JSON.parse(DATA); print(items.map(i=>i.name).join(\\"\\\\n\\"))"',

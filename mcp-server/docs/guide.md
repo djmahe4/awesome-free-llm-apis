@@ -200,40 +200,67 @@ All tests pass and the system handles token refresh correctly.
 
 ## 4. MCP Tools Interaction
 
-The server exposes a suite of tools for LLM interaction, discovery, and system management.
+The server exposes exactly **six public tools** for LLM interaction, discovery, and system management. Agents must use only these six tools — never request additional tools.
 
 ### Tool Discovery Handshake
 The system follows the standard MCP lifecycle:
 1.  **Initialize**: Client connects and receives capabilities. Note that `capabilities.tools` returns an empty object `{}` per spec to signal support.
-2.  **List Tools**: Client calls `tools/list` to receive the full JSON schema for all available tools.
+2.  **List Tools**: Client calls `tools/list` to receive the full JSON schema for all available tools with rich descriptions.
+
+> **Agent Rule**: Always call `manage_memory` (action: "search") before wide-context actions.
 
 ### 1. `use_free_llm`
-The primary gateway to the orchestration pipeline. 
+Universal chat interface with automatic fallback cascade through 60+ free models.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `model` | string | Yes | The model ID (e.g., `gpt-4o`, `gemini-1.5-pro`). |
-| `messages` | array | Yes | Array of role/content message objects. |
-| `task` | string | No | Abstract task hint (`coding`, `chat`, `moderation`). |
-| `temperature`| number | No | Sampling temperature (0.0 - 1.0). |
-| `max_tokens` | number | No | Maximum tokens to generate. |
-| `workspace_root`| string | No | Path to scan for local context. |
+| `model` | string | ✅ | Model ID (e.g. `llama-3.3-70b-versatile`, `gemini-2.0-flash`) |
+| `messages` | array | ✅ | Array of `{role, content}`. Roles: `system` \| `user` \| `assistant` |
+| `provider` | string | ❌ | Pin to a specific provider, bypassing routing |
+| `temperature` | number | ❌ | Sampling temperature 0.0–2.0 (default 0.7) |
+| `max_tokens` | number | ❌ | Maximum tokens to generate (default 1024) |
+| `workspace_root` | string | ❌ | Path to workspace for cache-keying and sessionId derivation |
+| `fallback` | boolean | ❌ | Enable provider fallback cascade (default true) |
+| `agentic` | boolean | ❌ | Enable agentic mode (task decomposition + system prompt injection) |
+| `sessionId` | string | ❌ | Required for agentic mode — partitions state/logs per project |
 
 ### 2. `list_available_free_models`
-Discover all supported models across all providers.
-- **Param**: `available_only: true` filters for providers with active API keys.
+Discover all supported models across all providers with rate-limit metadata.
+- **`available_only: true`** — filters to providers with active API keys configured.
+- **`provider: "groq"`** — filter to a specific provider.
 
 ### 3. `manage_memory`
-Interface for the persistent, workspace-aware semantic memory system.
+Interface for the persistent, workspace-aware memory system.
+
 - **Actions**: `search`, `list`, `stats`, `clear`.
-- **Note on Architecture**: All memory is physically stored centrally in the MCP server's local `data/memory.json` file. The `workspace_root` parameter is used to generate a unique cryptographic hash, which acts as a **logical namespace** to safely isolate context between different projects.
+- **Architecture**: All memory is physically stored centrally in the MCP server's local `data/memory.json`. The `workspace_root` parameter generates a unique cryptographic hash as a **logical namespace** to safely isolate context between projects.
+- **Agent Rule**: Call `manage_memory` with `action: "search"` before wide-context steps to recall relevant prior work.
 
 ### 4. `code_mode`
-Executes arbitrary JavaScript code in a secure, sandboxed QuickJS environment. 
-- **Use Case**: Processing large data sets locally without sending sensitive raw data to an LLM.
+Executes code in a sandboxed runtime — only `stdout` enters context, never the raw DATA payload.
+
+| Language | Sandbox Engine | Notes |
+|----------|---------------|-------|
+| `javascript` (default) | QuickJS via `quickjs-emscripten` | In-process, no external deps |
+| `python` | RestrictedPython subprocess runner | Requires `python3` on PATH; `pip install RestrictedPython` |
+| `go` | goja (pure-Go ECMAScript engine) | Pre-built binary required; see `scripts/go-sandbox-runner/` |
+| `rust` | boa_engine (pure-Rust ECMAScript) | Pre-built binary required; see `scripts/rust-sandbox-runner/` |
+
+- **DATA global**: raw input string injected into the sandbox before execution.
+- **Use Case**: Process large API responses locally. Pass `compressionRatio < 1` output to LLM instead of raw data — saves up to 95% of context window.
+- **Security**: No filesystem, no network, no process/OS access in any language sandbox.
+- **Build sandbox runners**:
+  ```bash
+  # Go (goja)
+  cd scripts/go-sandbox-runner && go build -o sandbox-runner .
+  # Rust (boa_engine)
+  cd scripts/rust-sandbox-runner && cargo build --release
+  ```
 
 ### 5. `get_token_stats` & `validate_provider`
-Utility tools for monitoring system health and verifying credentials.
+Utility tools for monitoring system health and verifying provider credentials.
+- `get_token_stats`: returns per-provider `{id, name, isAvailable, rateLimits, usage}`.
+- `validate_provider`: runs a live health check on a specific provider ID.
 
 ## 5. Visual Dashboard & SSE Bridge
 

@@ -48,6 +48,15 @@ graph TD
 | `code_mode` | Sandboxed script execution; only stdout returned | `code` | `language`, `data`, `timeout_ms` |
 | `manage_memory` | Workspace-scoped memory: search/list/stats/clear | `action` | `workspace_root`, `query`, `limit` |
 
+#### `code_mode` Sandbox Runtimes
+
+| `language` | Engine | Script Language | External Requirement |
+|------------|--------|----------------|---------------------|
+| `javascript` (default) | QuickJS (`quickjs-emscripten`) | JavaScript | None — in-process |
+| `python` | RestrictedPython | Python | `python3` on PATH; `pip install RestrictedPython` |
+| `go` | goja (pure-Go ECMAScript) | JavaScript | Pre-built binary: `cd scripts/go-sandbox-runner && go build -o sandbox-runner .` |
+| `rust` | boa_engine (pure-Rust ECMAScript) | JavaScript | Pre-built binary: `cd scripts/rust-sandbox-runner && cargo build --release` |
+
 ### Sample Agent Invocations
 
 **Before any wide-context action — always check memory first:**
@@ -73,9 +82,8 @@ await client.callTool('use_free_llm', {
 });
 ```
 
-**Process large API response without flooding context:**
+**Process large API response — JavaScript (default, no external deps):**
 ```ts
-// Extract only names from a large JSON array
 await client.callTool('code_mode', {
   language: 'javascript',
   code: 'const items = JSON.parse(DATA); print(items.map(i => i.name).join("\\n"))',
@@ -84,11 +92,31 @@ await client.callTool('code_mode', {
 });
 ```
 
-**Python data processing (requires Python 3 on PATH):**
+**Process data with Python (requires `python3` + `pip install RestrictedPython`):**
 ```ts
 await client.callTool('code_mode', {
   language: 'python',
   code: 'import json; items = json.loads(DATA); print(len(items))',
+  data: jsonString
+});
+```
+
+**Process with Go sandbox (requires pre-built binary):**
+```ts
+// Build first: cd scripts/go-sandbox-runner && go build -o sandbox-runner .
+await client.callTool('code_mode', {
+  language: 'go',
+  code: 'var resp = JSON.parse(DATA); print(resp.total)',
+  data: jsonString
+});
+```
+
+**Process with Rust sandbox (requires pre-built binary):**
+```ts
+// Build first: cd scripts/rust-sandbox-runner && cargo build --release
+await client.callTool('code_mode', {
+  language: 'rust',
+  code: 'var resp = JSON.parse(DATA); print(resp.total)',
   data: jsonString
 });
 ```
@@ -279,6 +307,15 @@ npm run build
 
 # Configure providers (copy and fill .env.example)
 cp .env.example .env
+
+# (Optional) Build Go sandbox runner — for language:"go" in code_mode
+cd scripts/go-sandbox-runner && go build -o sandbox-runner . && cd ../..
+
+# (Optional) Build Rust sandbox runner — for language:"rust" in code_mode
+cd scripts/rust-sandbox-runner && cargo build --release && cd ../..
+
+# (Optional) Install Python RestrictedPython — for language:"python" in code_mode
+pip install RestrictedPython
 
 # Run in stdio mode (for Claude Desktop / Cursor)
 npm start

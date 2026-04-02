@@ -7,3 +7,9 @@
 *venv
 
 external/agent-prompt/prompt.json
+# Rust build artifacts (sandbox runner)
+mcp-server/scripts/rust-sandbox-runner/target/
+mcp-server/scripts/rust-sandbox-runner/Cargo.lock
+
+# Go build artifact (sandbox runner binary)
+mcp-server/scripts/go-sandbox-runner/sandbox-runner
