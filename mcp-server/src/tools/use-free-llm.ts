@@ -62,11 +62,17 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
 
   const pipeline = new PipelineExecutor();
 
+  // Pipeline order:
+  // 1. ResponseCache - Check for cached responses
+  // 2. AgenticMiddleware - Handle agentic/reasoning mode if enabled
+  // 3. IntelligentRouter - Select provider/model and execute (includes token management and LLM execution)
+  // 
+  // Note: TokenManager and LLMExecution are now handled internally by the Router
+  // via LLMExecutor to support fallback retries without violating the middleware
+  // single-call contract. The Router calls next() only once after provider selection.
   pipeline.use(sharedResponseCache);
-  pipeline.use(agenticMiddleware); // Enabled if input.agentic or env toggle is true
+  pipeline.use(agenticMiddleware);
   pipeline.use(sharedRouter);
-  pipeline.use(sharedTokenManager);
-  pipeline.use(new LLMExecutionMiddleware());
 
   // Derive a foolproof sessionId if not explicitly provided
   let effectiveSessionId = inputSessionId;

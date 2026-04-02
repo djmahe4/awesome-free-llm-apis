@@ -2,18 +2,22 @@
 
 This guide explains the inner workings of the LLM Orchestration Pipeline, including routing logic, token management, and middleware execution.
 
-## 1. Orchestration Pipeline Flow
+## 1. Orchestration Pipeline Flow (v1.0.1 Update)
 
 The system uses a middleware-based pipeline. Every request passes through a series of "layers" before reaching the LLM provider.
+
+### Simplified Pipeline (v1.0.1)
+
+The pipeline was simplified in v1.0.1 - Router now handles token management and execution internally:
 
 ```mermaid
 sequenceDiagram
     participant U as User / Tool Call
     participant E as PipelineExecutor
     participant C as CacheMiddleware
+    participant A as AgenticMiddleware
     participant R as RouterMiddleware
-    participant T as TokenManagerMiddleware
-    participant X as ExecutionMiddleware
+    participant X as LLMExecutor (utility)
     participant P as LLM Provider
 
     U->>E: execute(request, taskType)
@@ -22,66 +26,162 @@ sequenceDiagram
     alt Cache Hit
         C-->>U: Return Cached Response
     else Cache Miss
-        C->>R: Process
+        C->>A: next()
+        A->>A: Setup agentic mode (if enabled)
+        A->>R: next()
         R->>R: Map Task to Model Tier
-        loop For each model in tier
-            R->>T: Process
-            T->>T: Interpolate Token Usage
-            T->>X: Process
+        loop For each model in tier (fallback)
+            R->>X: tryProvider(modelId, providerId)
+            X->>X: Calculate & Check Tokens
             X->>P: HTTPS Request
             alt Success
                 P-->>X: Response + Headers
-                X->>T: Sync Quota from Headers
-                T-->>R: Return Response
-                R-->>U: Final Result
+                X->>X: Update Token Tracking
+                X-->>R: Return Response
+                R->>E: next() [CALLED ONCE]
+                E-->>U: Final Result
             else Provider Error / Rate Limit
-                X-->>R: Error
-                R->>R: Cascade to next fallback
+                P-->>X: Error
+                X-->>R: Throw Error
+                R->>R: Continue to next fallback
             end
+        end
+        alt All fallbacks exhausted
+            R-->>U: Error: No providers available
         end
     end
 ```
 
-## 2. Intelligent Routing Logic
+### Pipeline Order
 
-The `IntelligentRouterMiddleware` dynamically maps abstract tasks to a prioritized list of models. If the first choice is unavailable (e.g., missing API key or rate limited), it cascades to the next best option.
+**v1.0.1 (Current):**
+1. `ResponseCache` - Check cache for existing response
+2. `AgenticMiddleware` - Handle agentic/reasoning mode
+3. `Router` - Select provider/model + execute (includes token management)
+
+**v1.0.0 (Old):**
+1. ResponseCache
+2. AgenticMiddleware
+3. Router
+4. TokenManager ❌ (removed - now in Router)
+5. LLMExecution ❌ (removed - now in Router)
+
+### Key Architectural Change
+
+The Router now calls `next()` **exactly once** after successfully selecting a provider, instead of calling it multiple times in a fallback loop. This fixes the critical `"next() called multiple times"` error.
+
+## 2. Intelligent Routing Logic (v1.0.1 Update)
+
+The `IntelligentRouterMiddleware` dynamically maps abstract tasks to a prioritized list of models, with **FREE models prioritized first**. The router now utilizes all 79 models across 15 providers.
+
+### Free-First Routing Strategy
+
+The router prioritizes FREE models (OpenRouter `:free`, GitHub Models, Cloudflare) before falling back to paid options:
+
+1. **Cloudflare** (100% success, fastest): `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, `@cf/qwen/qwq-32b`
+2. **GitHub Models** (free tier): `gpt-4o`, `Llama-3.3-70B-Instruct`, `DeepSeek-R1`
+3. **OpenRouter Free** (`:free` suffix models): Various specialized models
+4. **Paid Providers**: Gemini, Mistral, Cohere, etc.
+
+### Fallback Cascade Behavior
+
+If the first choice is unavailable (e.g., missing API key, rate limited, or timeout), it cascades to the next best option **without throwing an error**:
+
+```typescript
+// Router tries providers using LLMExecutor (no multiple next() calls)
+for (const modelId of tierModels) {
+    for (const provider of availableProviders) {
+        try {
+            const response = await executor.tryProvider(context, provider.id, modelId);
+            if (response) {
+                context.response = response;
+                await next(); // Called ONCE after success
+                return;
+            }
+        } catch (error) {
+            // Continue to next fallback
+        }
+    }
+}
+```
+
+### Task-Based Model Mapping
+
+Each task type has an optimized model tier based on real-world testing:
 
 ```mermaid
 graph TD
     A[Incoming Request] --> B{Task Type?}
     
-    B -- Coding --> C[Tier: DeepSeek-R1 -> Gemini 3.1 Pro -> Qwen 2.5 Coder]
-    B -- Moderation --> D[Tier: Gemma 2 -> Gemini Flash -> Nemotron]
-    B -- Chat --> E[Tier: GPT-4o -> Llama 3.3 70B -> Gemini Flash]
+    B -- Coding --> C[Tier: Cloudflare QwQ -> Qwen Coder 480B -> Gemini Pro]
+    B -- Moderation --> D[Tier: Cloudflare Llama -> Nemotron Mini -> Gemini Flash]
+    B -- Chat --> E[Tier: Cloudflare Llama -> GPT-4o -> Llama 3.3 70B]
+    B -- Semantic Search --> F[Tier: Trinity Large -> Cloudflare -> Command R+]
     
-    C --> F{Available?}
-    D --> F
-    E --> F
+    C --> G{Available?}
+    D --> G
+    E --> G
+    F --> G
     
-    F -- Yes --> G[Execute with Provider]
-    F -- No --> H[Next in Tier]
-    H --> F
+    G -- Yes --> H[Execute with LLMExecutor]
+    G -- No --> I[Next in Tier]
+    I --> G
     
-    H -- Exhausted --> I[Error: 503 Service Unavailable]
+    I -- Exhausted --> J[Error: All providers failed]
 ```
 
-## 3. Token Management & Synchronization
+### Provider Coverage (v1.0.1)
 
-The pipeline maintains a local "interpolated" token count to prevent overwhelming providers and hitting hard limits.
+| Provider | Models | Usage | Success Rate |
+|----------|--------|-------|--------------|
+| Cloudflare | 2 | 100% | 100% (1307ms avg) ✨ |
+| OpenRouter | 13 | 80% | 60-100% (varies by model) |
+| GitHub Models | 3 | 100% | High (free tier) |
+| Cohere | 3 | 67% | 100% (2539ms avg) |
+| Gemini | 7 | 86% | High |
+| Groq | 3 | 33% | High (fast inference) |
+| All Others | 48+ | Various | Various |
 
-1.  **Local Estimation**: Before a request, `js-tiktoken` estimates the input tokens.
-2.  **Proactive Blocking**: If the estimated usage exceeds the remaining quota, the request is blocked or routed elsewhere.
-3.  **Response Sync**: After a successful call, the `TokenManagerMiddleware` reads `x-ratelimit-remaining-tokens` (and similar headers) to update the ground truth.
+**Total: 15 providers, 79 models**
+
+## 3. Token Management & Synchronization (v1.0.1 Update)
+
+The pipeline maintains a local "interpolated" token count to prevent overwhelming providers and hitting hard limits. In v1.0.1, token management is handled by the `LLMExecutor` utility class, which is called directly by the router during fallback attempts.
+
+### Token Management Flow
+
+1. **Local Estimation**: Before a request, `js-tiktoken` estimates the input tokens
+2. **Proactive Blocking**: If the estimated usage exceeds the remaining quota, the request is blocked or routed elsewhere
+3. **Provider Execution**: `LLMExecutor.tryProvider()` combines token checks + API call in one atomic operation
+4. **Response Sync**: After a successful call, the executor reads `x-ratelimit-remaining-tokens` headers to update the ground truth
 
 ```mermaid
 graph LR
-    A[Start Request] --> B[Estimate Tokens]
-    B --> C{Within Quota?}
-    C -- No --> D[Try Lower Tier / Error]
-    C -- Yes --> E[Call Provider]
-    E --> F[Capture Headers]
-    F --> G[Update Local Quota]
-    G --> H[End]
+    A[Router Selects Model] --> B[LLMExecutor.tryProvider]
+    B --> C[Estimate Tokens]
+    C --> D{Within Quota?}
+    D -- No --> E[Throw Error → Try Next Fallback]
+    D -- Yes --> F[Deduct Tokens]
+    F --> G[Call Provider]
+    G --> H[Capture Headers]
+    H --> I[Update Local Quota]
+    I --> J[Return Response]
+```
+
+### Architecture Change (v1.0.1)
+
+**Before:**
+```
+Router → next() → TokenManager → next() → LLMExecution
+  ↓        ↓                         ↓
+Multiple next() calls = ERROR!
+```
+
+**After:**
+```
+Router → LLMExecutor.tryProvider() → [Token Check + API Call + Tracking]
+  ↓
+Single next() call after success = WORKS!
 ```
 
 ## 4. MCP Tools Interaction
