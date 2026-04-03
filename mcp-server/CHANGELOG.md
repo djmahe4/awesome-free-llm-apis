@@ -177,6 +177,11 @@ mcp-server/
 - Cloudflare: 100% success, 1307ms avg
 - OpenRouter: 60% success, 13304ms avg (due to timeouts on removed models)
 
+## TODOs
+
+- refer https://github.com/copilot/share/08311092-4b20-8c00-a053-e402444e6817
+- reversion to 1.0.3
+
 ## v1.0.0
 
 - Added Agentic Middleware using external system prompt (`src/middleware/agentic/agentic-middleware.ts`)
