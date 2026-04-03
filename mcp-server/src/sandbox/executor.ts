@@ -1,6 +1,7 @@
 import { getQuickJS, shouldInterruptAfterDeadline } from 'quickjs-emscripten';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 
 export type SandboxLanguage = 'javascript' | 'python' | 'go' | 'rust';
 
