@@ -145,9 +145,7 @@ def run_sandboxed(code: str, data: str) -> tuple[str, str, bool]:
             end = kwargs.get('end', '\n')
             line = sep.join(str(a) for a in args)
             stdout_lines.append(line)
-            # Also write to collector for compatibility
-            real_stdout.write(line + end)
-            real_stdout.flush()
+            # Output is collected and returned by run_sandboxed
 
         # Compile using RestrictedPython
         try:
