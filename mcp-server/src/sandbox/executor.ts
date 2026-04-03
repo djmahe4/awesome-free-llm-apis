@@ -27,7 +27,7 @@ function resolveRunnerPath(...segments: string[]): string {
     path.resolve(__dirname, '..', '..', 'scripts', ...segments),       // src layout
     path.resolve(__dirname, '..', '..', '..', 'scripts', ...segments), // dist layout
   ];
-  return candidates[0]; // The executor checks existence at runtime
+  return candidates.find(c => fs.existsSync(c)) || candidates[0];
 }
 
 /**
