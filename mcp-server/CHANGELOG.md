@@ -181,6 +181,10 @@ mcp-server/
 
 - refer https://github.com/copilot/share/08311092-4b20-8c00-a053-e402444e6817
 - reversion to 1.0.3
+- Validate dependencies during server start for code mode
+  - python	RestrictedPython	Python	python3 on PATH; pip install RestrictedPython
+  - go	goja (pure-Go ECMAScript)	JavaScript	Pre-built binary: cd scripts/go-sandbox-runner && go build -o sandbox-runner .
+  - rust	boa_engine (pure-Rust ECMAScript)	JavaScript	Pre-built binary: cd scripts/rust-sandbox-runner && cargo build --release
 
 ## v1.0.0
 
