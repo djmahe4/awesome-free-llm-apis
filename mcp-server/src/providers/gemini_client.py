@@ -22,11 +22,17 @@ async def main():
         stream = input_data.get("stream", False)
         temperature = input_data.get("temperature", 0.7)
         response_format = input_data.get("response_format")
+        google_search = input_data.get("google_search", False)
 
         client = genai.Client(api_key=api_key)
 
         # Build GenerateContentConfig
         config_kwargs = {"temperature": temperature}
+
+        # Add Google Search Tool if requested
+        if google_search:
+            config_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+
         if response_format and isinstance(response_format, dict):
             rf_type = response_format.get("type")
             if rf_type == "json_object":

@@ -14,6 +14,10 @@
 - **7 Live Intelligence Scenarios**: Structured traces in `SAMPLES.md` covering Memory Synthesis, Task Decomposition, and sandboxed logic extraction.
 - **Stricter Prompt Precision**: Selection threshold increased to `>= 3` to eliminate hallucinated prompt injections.
 - **Granular Reference Mapping**: Metadata-aware link extraction capped at 5 high-relevance entries per section.
+- **Adaptive Routing (Self-Healing)**: Implemented provider cooldown penalties (429/500 errors). The router now deprioritizes failing providers for 60s, ensuring faster fallbacks.
+- **Gemini Structured Output**: Added native JSON Schema support for Gemini via the `google-genai` Python SDK.
+- **Google Search Grounding**: New `google_search` flag in `ChatRequest` enables real-time web grounding for Gemini models.
+- **Intelligent Model Validation**: The router now strictly validates requested models against available providers before prioritization.
 - **Multi-Language Sandbox Support**: Support for JavaScript (QuickJS), Python (RestrictedPython), Go (goja), Rust (boa_engine).
 - **Subsystem Map Integration**: High-precision reference extraction for architectural momentum.
 
@@ -26,6 +30,7 @@
 - **Anti-Poisoning Validation**: All workspace-aware tools now strictly validate the existence of `workspace_root` via `fs.existsSync`, preventing agents from hallucinating or poisoning phantom workspaces.
 - **New `store_memory` Tool**: Implemented a dedicated tool for manual fact injection, enabling agents to explicitly persist architectural context and high-density summaries for subsequent runs.
 - **Shared Memory Singleton**: Unified state management by migrating `MemoryManager` to a singleton pattern, resolving race conditions between tool calls and debounced disk persistence.
+- **Gemini Search Tool**: Added explicit `google_search` tool call support in `gemini_client.py` for fact-grounded responses.
 
 ---
 
@@ -143,5 +148,5 @@ mcp-server/
 ## Next Updates
 
 - Infrastructure: Real-time visualization of Short-term memory buffers in dashboard.
-- Features: Add support for custom sandbox runtime containers.
 - Documentation: Expand high-density synthesis examples for multi-agent workflows.
+- **URL Context**: Planned support for direct URL consumption in the LLM pipeline by google or other llms if supported.

@@ -105,6 +105,7 @@ export class GeminiProvider extends BaseProvider {
         stream: false,
         temperature: request.temperature,
         response_format: request.response_format,
+        google_search: request.google_search,
       });
     } catch (err: any) {
       const error = new Error(`Gemini Error: ${err.message}`);
@@ -167,6 +168,7 @@ export class GeminiProvider extends BaseProvider {
       stream: true,
       temperature: request.temperature,
       response_format: request.response_format,
+      google_search: request.google_search,
     });
 
     py.stdin.write(input);
