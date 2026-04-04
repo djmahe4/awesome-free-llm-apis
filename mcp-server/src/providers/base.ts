@@ -14,6 +14,28 @@ export abstract class BaseProvider implements Provider {
   private minuteWindowStart = Date.now();
   private dayWindowStart = Date.now();
 
+  private consecutiveFailures = 0;
+  private cooldownUntil = 0;
+
+  getPenaltyScore(): number {
+    if (Date.now() < this.cooldownUntil) {
+      return 0.5; // Temporarily reduce score by 50%
+    }
+    return 0;
+  }
+
+  recordFailure(status: number): void {
+    this.consecutiveFailures++;
+    // If rate limited, cooldown for 60 seconds
+    if (status === 429) {
+      this.cooldownUntil = Date.now() + 60_000;
+    } else if (status >= 500) {
+      // Exponential backoff for server errors, capped at 60s
+      const penaltyMs = Math.min(10_000 * Math.pow(2, this.consecutiveFailures - 1), 60_000);
+      this.cooldownUntil = Date.now() + penaltyMs;
+    }
+  }
+
   isAvailable(): boolean {
     const key = process.env[this.envVar];
     if (!key || key.trim() === '') return false;
@@ -100,8 +122,12 @@ export abstract class BaseProvider implements Provider {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`HTTP ${response.status}: ${text}`);
+      const error: any = new Error(`HTTP ${response.status}: ${text}`);
+      error.status = response.status;
+      throw error;
     }
+    this.consecutiveFailures = 0;
+    this.cooldownUntil = 0;
     this.recordRequest();
     const json = await response.json() as ChatResponse;
     const headers: Record<string, string> = {};
@@ -131,8 +157,12 @@ export abstract class BaseProvider implements Provider {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`HTTP ${response.status}: ${text}`);
+      const error: any = new Error(`HTTP ${response.status}: ${text}`);
+      error.status = response.status;
+      throw error;
     }
+    this.consecutiveFailures = 0;
+    this.cooldownUntil = 0;
     this.recordRequest();
     if (!response.body) throw new Error('No response body');
     const decoder = new TextDecoder();

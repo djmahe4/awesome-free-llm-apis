@@ -195,7 +195,13 @@ export class IntelligentRouterMiddleware implements Middleware {
 
         // 1. Initial Models
         const fallbackModels = this.taskRouteMap[taskType as string] || this.taskRouteMap[TaskType.Chat];
-        const tierModels = [...new Set([context.request.model, ...fallbackModels])].filter(Boolean) as string[];
+
+        const requestedModelExists = context.request.model && availableProviders.some(p => p.models.some(m => m.id === context.request.model));
+
+        const tierModels = [...new Set([
+            ...(requestedModelExists ? [context.request.model] : []),
+            ...fallbackModels
+        ])].filter(Boolean) as string[];
 
         // 2. Context Overflow Guard: Check if we need to compress before attempting any providers
         const maxAvailableContext = availableProviders
@@ -262,10 +268,11 @@ export class IntelligentRouterMiddleware implements Middleware {
 
                     const usage = (provider as any).getUsageStats?.() || { requestCountMinute: 0 };
                     const rpmLimit = provider.rateLimits.rpm || 60;
-                    const rateLimitScore = 1 - (usage.requestCountMinute / rpmLimit);
+                    const rateLimitScore = Math.max(0, 1 - (usage.requestCountMinute / rpmLimit));
                     const tokenScore = this.executor.getTokenScore(provider.id);
+                    const penaltyScore = (provider as any).getPenaltyScore?.() || 0;
 
-                    let score = Math.max(0, rateLimitScore * tokenScore);
+                    let score = Math.max(0, rateLimitScore * tokenScore) - penaltyScore;
 
                     // Boost requested provider to ensure it's tried first
                     if (context.providerId && provider.id === context.providerId) {
@@ -293,6 +300,9 @@ export class IntelligentRouterMiddleware implements Middleware {
                     }
                 } catch (err: any) {
                     lastError = err;
+                    if (err.status && (provider as any).recordFailure) {
+                        (provider as any).recordFailure(err.status);
+                    }
                     // console.warn(`[Router] Provider ${provider.id} failed for model ${modelId}: ${err.message}. Cascading...`);
                     continue;
                 }
@@ -312,7 +322,11 @@ export class IntelligentRouterMiddleware implements Middleware {
         for (const modelId of emergencyModels) {
             const scoredProviders = availableProviders
                 .filter(p => p.models.some(m => m.id === modelId))
-                .map(provider => ({ provider, score: this.executor.getTokenScore(provider.id) }))
+                .map(provider => {
+                    const tokenScore = this.executor.getTokenScore(provider.id);
+                    const penaltyScore = (provider as any).getPenaltyScore?.() || 0;
+                    return { provider, score: Math.max(0, tokenScore) - penaltyScore };
+                })
                 .filter(p => p.score >= 0)
                 .sort((a, b) => b.score - a.score);
 
@@ -330,6 +344,9 @@ export class IntelligentRouterMiddleware implements Middleware {
                     }
                 } catch (err: any) {
                     lastError = err;
+                    if (err.status && (provider as any).recordFailure) {
+                        (provider as any).recordFailure(err.status);
+                    }
                     continue;
                 }
             }

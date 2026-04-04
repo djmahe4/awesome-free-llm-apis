@@ -205,4 +205,66 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
         // Should HAVE tried small-model (bypassing the 80% upscaling check because it was explicitly requested)
         expect(trySpy).toHaveBeenCalledWith(expect.anything(), 'smallProv', 'small-model');
     });
+
+    it('should apply penalty score to recently rate-limited providers', async () => {
+        const registry = ProviderRegistry.getInstance();
+        const executor = new LLMExecutor();
+        const router = new IntelligentRouterMiddleware(executor);
+
+        const prov1 = new MockProvider('prov1', [{ id: 'm1', name: 'M1' }], 100);
+        const prov2 = new MockProvider('prov2', [{ id: 'm1', name: 'M1' }], 100);
+
+        registry.registerProvider(prov1);
+        registry.registerProvider(prov2);
+
+        // Simulate that prov1 recently had a 429 failure
+        (prov1 as any).recordFailure(429);
+
+        const context: PipelineContext = {
+            request: { model: 'm1', messages: [{ role: 'user', content: 'test' }] },
+            taskType: TaskType.Chat
+        };
+
+        const attempts: string[] = [];
+        vi.spyOn(executor, 'tryProvider').mockImplementation(async (ctx, pid) => {
+            attempts.push(pid);
+            return null; // Force cascade to test ranking order
+        });
+
+        try {
+            await router.execute(context, async () => { });
+        } catch { }
+
+        // Prov2 should be tried before Prov1 because Prov1 has a 429 penalty
+        expect(attempts[0]).toBe('prov2');
+        expect(attempts[1]).toBe('prov1');
+    });
+
+    it('should ignore requested models that do not exist in any available provider', async () => {
+        const registry = ProviderRegistry.getInstance();
+        const executor = new LLMExecutor();
+        const router = new IntelligentRouterMiddleware(executor);
+
+        const prov = new MockProvider('prov', [{ id: 'real-model', name: 'Real' }], 100);
+        registry.registerProvider(prov);
+        // By default, fallback tier models include "gemini-2.5-flash" (we overwrite taskRouteMap for test predictable behaviour if needed)
+
+        const context: PipelineContext = {
+            request: { model: 'made-up-model', messages: [{ role: 'user', content: 'test' }] },
+            taskType: TaskType.Chat
+        };
+
+        const attempts: string[] = [];
+        vi.spyOn(executor, 'tryProvider').mockImplementation(async (ctx, pid, mid) => {
+            attempts.push(mid);
+            return null; // Force cascade
+        });
+
+        try {
+            await router.execute(context, async () => { });
+        } catch { }
+
+        // It should NOT attempt 'made-up-model' at all.
+        expect(attempts).not.toContain('made-up-model');
+    });
 });
