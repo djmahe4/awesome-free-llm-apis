@@ -186,6 +186,8 @@ export class IntelligentRouterMiddleware implements Middleware {
         let currentMessages = [...context.request.messages];
         let contextCompressed = false;
         let lastError: Error | null = null;
+        let primaryError: Error | null = null;
+        const allErrors: string[] = [];
 
         const registry = ProviderRegistry.getInstance();
         const availableProviders = registry.getAllProviders().filter(p => p.isAvailable());
@@ -196,12 +198,10 @@ export class IntelligentRouterMiddleware implements Middleware {
         // 1. Initial Models
         const fallbackModels = this.taskRouteMap[taskType as string] || this.taskRouteMap[TaskType.Chat];
 
-        const requestedModelExists = context.request.model && availableProviders.some(p => p.models.some(m => m.id === context.request.model));
-
-        const tierModels = [...new Set([
-            ...(requestedModelExists ? [context.request.model] : []),
-            ...fallbackModels
-        ])].filter(Boolean) as string[];
+        // If a specific provider is pinned, DON'T use fallbacks - stay on the requested model
+        const tierModels = context.providerId
+            ? [context.request.model]
+            : [...new Set([context.request.model, ...fallbackModels])].filter(Boolean) as string[];
 
         // 2. Context Overflow Guard: Check if we need to compress before attempting any providers
         const maxAvailableContext = availableProviders
@@ -214,32 +214,39 @@ export class IntelligentRouterMiddleware implements Middleware {
 
             const summarizer = async (text: string): Promise<string> => {
                 const summaryCtx: PipelineContext = {
-                    request: { model: 'any', messages: [{ role: 'user', content: text }], max_tokens: 512 },
+                    request: {
+                        model: 'any',
+                        messages: [{ role: 'user', content: `Summarize the following system prompt to keep only the core constraints: ${text}` }],
+                        max_tokens: 512
+                    },
                     taskType: TaskType.Summarization,
                 };
 
-                for (const model of this.taskRouteMap[TaskType.Summarization] || []) {
-                    const providers = availableProviders.filter(p => p.models.some(m => m.id === model));
+                for (const modelId of this.taskRouteMap[TaskType.Summarization] || []) {
+                    const providers = availableProviders.filter(p => p.models.some(m => m.id === modelId));
                     for (const provider of providers) {
                         try {
-                            summaryCtx.request.model = model;
-                            const res = await this.executor.tryProvider(summaryCtx, provider.id, model);
-                            return res?.choices[0]?.message?.content ?? '';
-                        } catch { /* Try next */ }
+                            summaryCtx.request.model = modelId;
+                            const res = await this.executor.tryProvider(summaryCtx, provider.id, modelId);
+                            if (res?.choices?.[0]?.message?.content) {
+                                return res.choices[0].message.content;
+                            }
+                        } catch (err: any) {
+                            console.error(`[Router][Summary] Internal fallback: provider=${provider.id} model=${modelId} error=${err.message}`);
+                        }
                     }
                 }
-                throw new Error('No summarization provider');
+                throw new Error('All summarization providers failed.');
             };
 
             try {
                 const compressionResult = await this.contextManager.compress(context, targetTokens, summarizer);
                 context.request.messages = compressionResult.messages;
-                // Important: Reset token cache so it's re-calculated for the new messages
                 delete context.estimatedTokens;
                 estimatedTokens = this.executor.calculateTokens(context.request.messages);
                 contextCompressed = true;
             } catch (err: any) {
-                // console.warn(`[Router] Compression failed: ${err.message}`);
+                console.error(`[Router][Summary] Compression ultimately failed: ${err.message}. Proceeding without compression.`);
             }
         }
 
@@ -279,7 +286,7 @@ export class IntelligentRouterMiddleware implements Middleware {
                         score += 1000;
                     }
 
-                    console.error(`[Router][Score] provider=${provider.id} model=${modelId} score=${score} requestedProvider=${context.providerId} requestedModel=${context.request.model}`);
+                    // console.debug(`[Router][Score] provider=${provider.id} model=${modelId} score=${score} requestedProvider=${context.providerId} requestedModel=${context.request.model}`);
 
                     return { provider, score };
                 })
@@ -300,10 +307,14 @@ export class IntelligentRouterMiddleware implements Middleware {
                     }
                 } catch (err: any) {
                     lastError = err;
+                    if (context.providerId && provider.id === context.providerId && !primaryError) {
+                        primaryError = err;
+                    }
+                    allErrors.push(`${provider.id}: ${err.message}`);
+
                     if (err.status && (provider as any).recordFailure) {
                         (provider as any).recordFailure(err.status);
                     }
-                    // console.warn(`[Router] Provider ${provider.id} failed for model ${modelId}: ${err.message}. Cascading...`);
                     continue;
                 }
             }
@@ -313,9 +324,8 @@ export class IntelligentRouterMiddleware implements Middleware {
         const emergencyModels = ['gemini-2.5-flash', 'command-r-plus-08-2024', 'llama-3.3-70b-versatile', 'gpt-4o', 'mistral-large-latest'];
         const emergencyTarget = 1500;
 
-        const compressionResult = this.contextManager.truncateOldest(currentMessages, emergencyTarget);
-        context.request.messages = compressionResult.messages;
-        // Important: Reset token cache!
+        const emergencyCompression = this.contextManager.truncateOldest(currentMessages, emergencyTarget);
+        context.request.messages = emergencyCompression.messages;
         delete context.estimatedTokens;
         contextCompressed = true;
 
@@ -344,6 +354,7 @@ export class IntelligentRouterMiddleware implements Middleware {
                     }
                 } catch (err: any) {
                     lastError = err;
+                    allErrors.push(`EMERGENCY:${provider.id}: ${err.message}`);
                     if (err.status && (provider as any).recordFailure) {
                         (provider as any).recordFailure(err.status);
                     }
@@ -352,10 +363,14 @@ export class IntelligentRouterMiddleware implements Middleware {
             }
         }
 
+        const mainError = primaryError || lastError;
+        const errorSummary = allErrors.slice(-3).join('; ');
+
         throw new Error(
             `[Router] Exhausted all fallback models and compression for task ${taskType}. ` +
-            `Paths attempted: ${(context as any).providersAttempted.join(', ')}. ` +
-            `Last error: ${lastError?.message || 'No available providers'}`
+            `Primary provider ${context.providerId || 'auto'} failed: ${mainError?.message || 'No available providers'}. ` +
+            `Attempts: ${(context as any).providersAttempted.join(', ')}. ` +
+            `Recent errors: ${errorSummary}`
         );
     }
 }
