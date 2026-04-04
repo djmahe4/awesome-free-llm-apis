@@ -93,4 +93,31 @@ describe('Memory System Integration', () => {
         const expectedWsPart = '"_ws":';
         expect(storeKey).toContain(expectedWsPart);
     });
+
+    it('should support synchronous retrieval immediately after storage', async () => {
+        const root = '/tmp/test_ws_sync';
+        if (!existsSync(root)) mkdirSync(root, { recursive: true });
+
+        const key = 'sync_test';
+        const content = 'This must be found immediately!';
+
+        await storeMemory({
+            key,
+            content,
+            workspace_root: root
+        });
+
+        // Search immediately (no wait/debounce)
+        const res = (await manageMemory({
+            action: 'search',
+            workspace_root: root,
+            query: 'immediately'
+        })) as { results: string[] };
+
+        expect(res.results).toHaveLength(1);
+        expect(res.results[0]).toBe(content);
+
+        // Cleanup
+        rmSync(root, { recursive: true, force: true });
+    });
 });

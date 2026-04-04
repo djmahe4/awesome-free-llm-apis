@@ -18,6 +18,8 @@ export async function storeMemory(input: StoreMemoryInput) {
         _ws: wsHash
     }, content);
 
+    memoryManager.flush();
+
     return {
         success: true,
         message: `Successfully stored memory for key '${key}' in workspace hash ${wsHash}`,

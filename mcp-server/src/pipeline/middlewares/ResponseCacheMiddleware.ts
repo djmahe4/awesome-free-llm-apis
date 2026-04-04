@@ -22,7 +22,7 @@ export class ResponseCacheMiddleware implements Middleware {
         // 1. Check Short-Term/In-Memory Cache (0 tokens)
         const cached = this.cache.get(cacheKey);
         if (cached) {
-            //console.log(`[CacheMiddleware] Found exact match in memory cache`);
+            console.error(`[CacheMiddleware] Found exact match in memory cache`);
             context.response = cached;
             return;
         }
