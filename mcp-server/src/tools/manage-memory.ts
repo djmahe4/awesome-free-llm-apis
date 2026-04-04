@@ -1,5 +1,6 @@
-import { MemoryManager } from '../memory/index.js';
+import { memoryManager } from '../memory/index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
+import { ContextManager } from '../utils/ContextManager.js';
 
 export interface ManageMemoryInput {
     action: 'search' | 'list' | 'stats' | 'clear';
@@ -8,10 +9,7 @@ export interface ManageMemoryInput {
     limit?: number;
 }
 
-const memoryManager = new MemoryManager();
 const workspaceScanner = new WorkspaceScanner(process.cwd());
-
-import { ContextManager } from '../utils/ContextManager.js';
 
 export async function manageMemory(input: ManageMemoryInput) {
     const { action, workspace_root: workspaceRoot, query, limit = 10 } = input;
@@ -24,7 +22,8 @@ export async function manageMemory(input: ManageMemoryInput) {
         case 'list':
             return { workspace: workspaceRoot || 'default', hash: wsHash };
         case 'clear':
-            return { success: true, message: `Memory management for ${wsHash} is active` };
+            await memoryManager.clear(wsHash);
+            return { success: true, message: `Cleared memory for workspace ${wsHash}` };
         case 'search': {
             const allResults = await memoryManager.search(wsHash, query);
             // Apply hard count limit

@@ -39,7 +39,7 @@ export class MemoryManager {
     const results: unknown[] = [];
 
     for (const key of allKeys) {
-      if (key.includes(`_ws:${workspaceHash}`) || key.includes(`"ws":"${workspaceHash}"`)) {
+      if (key.includes(`"_ws":"${workspaceHash}"`) || key.includes(`"ws":"${workspaceHash}"`) || key.includes(`_ws:${workspaceHash}`)) {
         const val = await this.longTerm.load(key);
         if (!query || JSON.stringify(val).toLowerCase().includes(query.toLowerCase())) {
           results.push(val);
@@ -60,7 +60,19 @@ export class MemoryManager {
     return stats.map(({ tool, original, compressed, ratio }) => ({ tool, original, compressed, ratio }));
   }
 
+  async clear(workspaceHash: string): Promise<void> {
+    const allKeys = await this.longTerm.list();
+    for (const key of allKeys) {
+      if (key.includes(`"_ws":"${workspaceHash}"`) || key.includes(`"ws":"${workspaceHash}"`) || key.includes(`_ws:${workspaceHash}`)) {
+        await this.longTerm.delete(key);
+      }
+    }
+    this.longTerm.flush();
+  }
+
   flush(): void {
     this.longTerm.flush();
   }
 }
+
+export const memoryManager = new MemoryManager();

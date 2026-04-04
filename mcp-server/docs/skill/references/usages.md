@@ -398,7 +398,35 @@ Extract only names from a large API response array — compresses context dramat
 
 ---
 
-## TC-07 — Agentic Middleware Steering
+## TC-07 — `store_memory`
+
+**Purpose:** Manually inject context or persistent findings into long-term workspace memory to avoid context loss across sessions.
+
+### Invocation
+**User Goal:** "Save the recent architectural decision that we will use Redis for queue management."
+```json
+{
+  "key": "arch_decision_queues",
+  "content": "Decision: Use Redis for in-memory queues due to required low latency.",
+  "workspace_root": "/home/user/my-project"
+}
+```
+
+### Result ✅ PASS
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Successfully stored memory for key 'arch_decision_queues' in workspace hash <hash>",
+  "stored_bytes": 63
+}
+```
+
+> **Evaluation:** When `manage_memory` (action: `search`) is called later with query "Redis", this manually saved finding is retrieved along with any LLM outputs matching the query.
+
+---
+
+## TC-08 — Agentic Middleware Steering
 
 **Purpose:** Verify that architectural keywords trigger reference map inclusion and protocol enforcement.
 

@@ -342,7 +342,12 @@ See [`.env.example`](.env.example) for all supported API key variables.
 
 The MCP server includes a comprehensive benchmarking suite to measure the efficiency of its intelligent subsystems, showing typical **token savings of 90-95%** across real-world scenarios.
 
-See [**`benchmarks/README.md`**](benchmarks/README.md) for detailed evaluation criteria, input/output previews, and performance metrics.
+
+### 🧪 System Evidence (Zero-Mock Proofs)
+
+Verification of the system's intelligence is grounded in **live, execution-based traces**:
+- See [SAMPLES.md](benchmarks/SAMPLES.md) for 7 verified scenarios including **Project State Synthesis**, **Multi-Step Decomposition**, and **Deep Memorization Retrieval**.
+- See [INTAKE.md](benchmarks/INTAKE.md) for a breakdown of the agent-server intake protocol.
 
 ---
 

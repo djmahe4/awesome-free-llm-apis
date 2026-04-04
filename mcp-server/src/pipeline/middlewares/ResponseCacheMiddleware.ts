@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { ResponseCache } from '../../cache/index.js';
-import { MemoryManager } from '../../memory/index.js';
+import { memoryManager } from '../../memory/index.js';
 import { config } from '../../config/index.js';
 import type { Middleware, PipelineContext, NextFunction } from '../middleware.js';
 
@@ -8,7 +8,6 @@ export class ResponseCacheMiddleware implements Middleware {
     name = 'ResponseCacheMiddleware';
 
     private cache: ResponseCache;
-    private memoryManager = new MemoryManager();
 
     constructor() {
         this.cache = new ResponseCache(500, config.cacheStorePath);
@@ -34,7 +33,7 @@ export class ResponseCacheMiddleware implements Middleware {
         // 3. Post-execution: Save to cache
         if (context.response) {
             this.cache.set(cacheKey, context.response);
-            await this.memoryManager.storeToolOutput('use_free_llm', {
+            await memoryManager.storeToolOutput('use_free_llm', {
                 model: context.request.model,
                 messages: context.request.messages,
                 _ws: wsHash
@@ -44,6 +43,6 @@ export class ResponseCacheMiddleware implements Middleware {
 
     flush(): void {
         this.cache.flush();
-        this.memoryManager.flush();
+        memoryManager.flush();
     }
 }

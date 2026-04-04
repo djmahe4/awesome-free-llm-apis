@@ -161,6 +161,22 @@ Manage persistent, workspace-aware memory across sessions.
 
 ---
 
+### `store_memory`
+
+Store manual context or persistent thoughts into the long-term workspace memory.
+
+```json
+{
+  "key": "auth_strategy",
+  "content": "We decided to use Redis for caching sessions to improve latency.",
+  "workspace_root": "/your/project"
+}
+```
+
+> **Use Case:** After concluding research or a large task, use this tool to explicitly save findings, decisions, or summaries. This ensures your future self can instantly recall this context via `manage_memory (search)`, preventing knowledge loss across sessions.
+
+---
+
 ## 🧠 Agentic Patterns
 
 ### Pattern 1: Subagent Bootstrap with Memory
@@ -240,12 +256,6 @@ The scoring engine prioritizes reference sections when these keywords appear in 
 The middleware implements **Research Validation Logging** to ensure all agentic actions are grounded in verified data:
 - **[RESEARCH-VALIDATION]** logs fire during pre-execution (detection) and post-execution (grounding check).
 - Provides an explicit audit trail for external knowledge lookups and architectural steering.
-
-### 🧪 System Evidence (Zero-Mock Proofs)
-
-Verification of the system's intelligence is grounded in **live, execution-based traces**:
-- See [SAMPLES.md](../../benchmarks/SAMPLES.md) for 7 verified scenarios including **Project State Synthesis**, **Multi-Step Decomposition**, and **Deep Memorization Retrieval**.
-- See [INTAKE.md](../../benchmarks/INTAKE.md) for a breakdown of the agent-server intake protocol.
 
 ---
 

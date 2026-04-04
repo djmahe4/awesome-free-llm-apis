@@ -18,6 +18,7 @@ export class WorkspaceScanner {
         }
 
         const hash = createHash('sha256');
+        hash.update(root);
         // Scan src/tools and src/providers in the provided root
         // Also scan the root itself for config files
         this.scanDirectory(join(root, 'src/tools'), hash);

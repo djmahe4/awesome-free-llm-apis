@@ -8,6 +8,7 @@ import { useFreeLLM } from '../tools/use-free-llm.js';
 import { listAvailableFreeModels } from '../tools/list-models.js';
 import { runCodeMode } from '../tools/code-mode.js';
 import { manageMemory } from '../tools/manage-memory.js';
+import { storeMemory } from '../tools/store-memory.js';
 import { getTokenStats } from '../tools/get-token-stats.js';
 import { validateProvider } from '../tools/validate-provider.js';
 
@@ -310,6 +311,33 @@ export async function createMCPServer(): Promise<Server> {
           required: ['action'],
         },
       },
+      {
+        name: 'store_memory',
+        description: [
+          'Store manual context or persistent thoughts in long-term memory.',
+          '',
+          'USER STORY: Save findings, summaries, or context details explicitly to the workspace',
+          'memory so it can be recalled later via `manage_memory` search. This avoids context',
+          'loss between agent sessions.',
+          '',
+          'WHEN TO USE: After concluding research, finding an architectural decision, or completing',
+          'a subset of a large task when the data must persist for the next agent run.',
+          '',
+          'INPUTS:',
+          '  key            — A short, descriptive identifier for this context.',
+          '  content        — The details or summary to store.',
+          '  workspace_root — Absolute path to workspace root for isolation.',
+        ].join('\n'),
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            key: { type: 'string', description: 'Short identifier for this context, e.g. "auth_strategy"' },
+            content: { type: 'string', description: 'The text or JSON context to store' },
+            workspace_root: { type: 'string', description: 'Absolute path to workspace root (e.g. "/home/user/my-project")' },
+          },
+          required: ['key', 'content'],
+        },
+      },
     ],
   }));
 
@@ -344,6 +372,14 @@ export async function createMCPServer(): Promise<Server> {
       if (name === 'manage_memory') {
         const input = args as unknown as Parameters<typeof manageMemory>[0];
         const result = await manageMemory(input);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      if (name === 'store_memory') {
+        const input = args as unknown as Parameters<typeof storeMemory>[0];
+        const result = await storeMemory(input);
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         };
