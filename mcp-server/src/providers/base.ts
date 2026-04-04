@@ -25,13 +25,20 @@ export abstract class BaseProvider implements Provider {
   }
 
   recordFailure(status: number): void {
-    this.consecutiveFailures++;
+    // Cap consecutive failures to prevent unbounded growth
+    if (this.consecutiveFailures < 100) {
+      this.consecutiveFailures++;
+    }
     // If rate limited, cooldown for 60 seconds
     if (status === 429) {
       this.cooldownUntil = Date.now() + 60_000;
     } else if (status >= 500) {
-      // Exponential backoff for server errors, capped at 60s
-      const penaltyMs = Math.min(10_000 * Math.pow(2, this.consecutiveFailures - 1), 60_000);
+      // Exponential backoff for server errors: 10s, 20s, 40s, capped at 60s
+      const baseDelay = 10_000;
+      const maxDelay = 60_000;
+      // Cap failure count to prevent Infinity in Math.pow
+      const exponent = Math.min(this.consecutiveFailures - 1, 10);
+      const penaltyMs = Math.min(baseDelay * Math.pow(2, exponent), maxDelay);
       this.cooldownUntil = Date.now() + penaltyMs;
     }
   }
