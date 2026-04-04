@@ -44,7 +44,11 @@ Send a chat completion with optional fallback and workspace memory.
   "provider": "groq",
   "fallback": true,
   "max_tokens": 1024,
-  "workspace_root": "/your/project"
+  "workspace_root": "/your/project",
+  "google_search": true,
+  "agentic": true,
+  "sessionId": "project-name-v1",
+  "top_p": 1.0
 }
 ```
 
@@ -58,6 +62,10 @@ Send a chat completion with optional fallback and workspace memory.
 | `fallback` | ❌ | `false` | Enable cross-provider failover |
 | `max_tokens` | ❌ | 1024 | Cap response size |
 | `workspace_root` | ❌ | — | Path for context-aware cache keying |
+| `google_search` | ❌ | `false` | Enable Google search for Gemini models (default false) |
+| `agentic` | ❌ | `false` | Enable agentic mode: task decomposition and intelligent system prompt injection. |
+| `sessionId` | ❌ | — | Required for agentic mode. Partitions memory/logs per project. |
+| `top_p` | ❌ | 1.0 | Nucleus sampling probability (default 1.0) |
 
 > **Rule:** Always set `fallback: true` when building resilient pipelines.
 
