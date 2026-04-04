@@ -9,19 +9,30 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 ```mermaid
 graph TD
     A[Agent / Client<br/>Claude · Cursor · Windsurf] -->|MCP Tool Call| B[MCP Server<br/>src/mcp/index.ts]
-    B --> C[PipelineExecutor<br/>src/tools/use-free-llm.ts]
-    C --> D[ResponseCacheMiddleware<br/>src/cache/index.ts]
-    D -->|Cache Miss| E[AgenticMiddleware<br/>src/middleware/agentic/]
-    E -->|Research detected: LOGGED| E
-    E --> F[IntelligentRouterMiddleware<br/>src/middleware/router/]
-    F -->|Tier selection + fallback| G[LLMExecutor<br/>src/middleware/executor/]
-    G --> H[(Free LLM Provider<br/>Groq · Gemini · OpenRouter · …)]
+    B --> C[PipelineExecutor]
+    
+    subgraph "Core Tools & Subsystems"
+        I[MemoryManager<br/>src/memory/]
+        J[SandboxExecutor<br/>src/sandbox/]
+    end
+
+    C --> D[ResponseCacheMiddleware]
+    D -->|Cache Miss| E[AgenticMiddleware]
+    E --> F[IntelligentRouterMiddleware]
+    F -->|Tier selection + fallback| G[LLMExecutor]
+    G --> H[(Free LLM Provider)]
+
+    C --> I
+    C --> J
+    
     D -->|Cache Hit| A
     H --> G --> F --> E --> D --> A
 
     style E fill:#ffe082,stroke:#f9a825
     style D fill:#b3e5fc,stroke:#0288d1
     style F fill:#c8e6c9,stroke:#388e3c
+    style I fill:#f8bbd0,stroke:#c2185b
+    style J fill:#f3e5f5,stroke:#7b1fa2
 ```
 
 ### Pipeline Order (v1.0.1)

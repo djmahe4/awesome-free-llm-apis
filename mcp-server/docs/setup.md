@@ -38,13 +38,33 @@ python -m venv venv
 
 pip install -U google-genai python-dotenv
 ```
-#### More dependencies
+### 3. Sandbox Requirements (for `code_mode`)
+
+The `code_mode` tool provides isolated script execution. Some runtimes require manual setup:
+
+#### Python Sandbox
+Mandatory for `language: "python"`. It is highly recommended to use a virtual environment.
 ```bash
-# (Optional) Install Python RestrictedPython — for language:"python" in code_mode
+# Within your active venv:
 pip install RestrictedPython
 ```
 
-> **Note:** On some Linux distros the command is `python3`. If `python` is not found, use `python3` instead.
+#### Go Sandbox
+Requires a pre-built binary for JS execution via `goja`.
+```bash
+cd scripts/go-sandbox-runner
+go build -o sandbox-runner .
+```
+
+#### Rust Sandbox
+Requires a pre-built binary for JS execution via `boa_engine`.
+```bash
+cd scripts/rust-sandbox-runner
+cargo build --release
+```
+
+> [!NOTE] 
+> The Node.js executor automatically detects these binaries if they are built in their respective directories. Python execution requires `python3` to be available on your system path with `RestrictedPython` installed in the environment used to run the server.
 
 ## Configuration
 
