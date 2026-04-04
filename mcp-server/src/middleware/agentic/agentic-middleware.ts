@@ -142,11 +142,13 @@ function detectResearchIntent(content: string): boolean {
  */
 function logResearchValidation(sessionId: string, userContent: string, step: string): void {
     const timestamp = new Date().toISOString();
-    console.log(
+    /*
+    console.error(
         `[AgenticMiddleware][RESEARCH-VALIDATION] session=${sessionId} step="${step}" ` +
         `timestamp=${timestamp} intent_detected=true ` +
         `query_preview="${userContent.slice(0, 120).replace(/\n/g, ' ')}..."`
     );
+    */
 }
 
 export class AgenticMiddleware implements Middleware {
@@ -164,7 +166,7 @@ export class AgenticMiddleware implements Middleware {
         const sessionId: string | undefined = context.sessionId || (context.request as any).sessionId;
 
         if (!sessionId) {
-            console.warn('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
+            // console.error('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
             await next();
             return;
         }
@@ -202,7 +204,7 @@ export class AgenticMiddleware implements Middleware {
 
             if (verifyResult.startsWith('FAIL')) {
                 q.improveQueue.push(verifyResult);
-                console.warn(`[AgenticMiddleware][VERIFY] session=${sessionId} result="${verifyResult}"`);
+                // console.error(`[AgenticMiddleware][VERIFY] session=${sessionId} result="${verifyResult}"`);
             }
 
             // Post-execution research validation: confirm response is grounded

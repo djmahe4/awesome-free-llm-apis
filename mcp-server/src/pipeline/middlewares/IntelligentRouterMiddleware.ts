@@ -242,7 +242,7 @@ export class IntelligentRouterMiddleware implements Middleware {
                 estimatedTokens = this.executor.calculateTokens(context);
                 contextCompressed = true;
             } catch (err: any) {
-                console.warn(`[Router] Compression failed: ${err.message}`);
+                // console.warn(`[Router] Compression failed: ${err.message}`);
             }
         }
 
@@ -284,7 +284,7 @@ export class IntelligentRouterMiddleware implements Middleware {
                     }
                 } catch (err: any) {
                     lastError = err;
-                    console.warn(`[Router] Provider ${provider.id} failed for model ${modelId}: ${err.message}. Cascading...`);
+                    // console.warn(`[Router] Provider ${provider.id} failed for model ${modelId}: ${err.message}. Cascading...`);
                     continue;
                 }
             }
