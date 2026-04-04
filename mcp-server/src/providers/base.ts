@@ -62,11 +62,15 @@ export abstract class BaseProvider implements Provider {
       this.requestCountDay = 0;
       this.dayWindowStart = now;
     }
+
+    // Log warnings if local limits are exceeded, but don't hard-block.
+    // This allows the Intelligent Router to still factor this into scoring
+    // while permitting fallback attempts to reach the actual API.
     if (this.rateLimits.rpm && this.requestCountMinute >= this.rateLimits.rpm) {
-      throw new Error(`Rate limit exceeded: ${this.rateLimits.rpm} RPM`);
+      console.warn(`[${this.name}] Local RPM limit reached (${this.requestCountMinute}/${this.rateLimits.rpm}). Proceeding with best-effort attempt.`);
     }
     if (this.rateLimits.rpd && this.requestCountDay >= this.rateLimits.rpd) {
-      throw new Error(`Rate limit exceeded: ${this.rateLimits.rpd} RPD`);
+      console.warn(`[${this.name}] Local RPD limit reached (${this.requestCountDay}/${this.rateLimits.rpd}). Proceeding with best-effort attempt.`);
     }
   }
 
@@ -77,7 +81,6 @@ export abstract class BaseProvider implements Provider {
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
     this.checkRateLimit();
-    this.recordRequest();
     const apiKey = this.getApiKey();
     const url = `${this.baseURL}chat/completions`;
 
@@ -99,6 +102,7 @@ export abstract class BaseProvider implements Provider {
       const text = await response.text();
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
+    this.recordRequest();
     const json = await response.json() as ChatResponse;
     const headers: Record<string, string> = {};
     response.headers.forEach((val, key) => { headers[key] = val; });
@@ -108,7 +112,6 @@ export abstract class BaseProvider implements Provider {
 
   async *chatStream(request: ChatRequest): AsyncIterable<string> {
     this.checkRateLimit();
-    this.recordRequest();
     const apiKey = this.getApiKey();
     const url = `${this.baseURL}chat/completions`;
 
@@ -130,6 +133,7 @@ export abstract class BaseProvider implements Provider {
       const text = await response.text();
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
+    this.recordRequest();
     if (!response.body) throw new Error('No response body');
     const decoder = new TextDecoder();
     for await (const chunk of response.body) {

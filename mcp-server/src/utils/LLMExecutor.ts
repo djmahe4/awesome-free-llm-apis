@@ -208,12 +208,13 @@ export class LLMExecutor {
 
         const totalWithCompletion = context.estimatedTokens + (context.request.max_tokens || 1024);
 
-        // 2. Check token limits
+        // 2. Check token limits (Permissive: Log warning but proceed)
         if (!this.hasEnoughTokens(providerId, totalWithCompletion)) {
             const tracker = this.tokenTracking[providerId];
-            throw new Error(
-                `[LLMExecutor] Exceeded tracked tokens for ${providerId}. ` +
-                `Requires ${totalWithCompletion}, remaining ${tracker?.remainingTokens || 0}`
+            console.warn(
+                `[LLMExecutor] Local token tracking suggests exhaustion for ${providerId}. ` +
+                `Requires ${totalWithCompletion}, remaining ${tracker?.remainingTokens || 0}. ` +
+                `Proceeding with best-effort attempt.`
             );
         }
 

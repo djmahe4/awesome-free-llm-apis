@@ -172,4 +172,37 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
         // Should try model-b first, and pick provB_High over provB_Low
         expect(attempts[0]).toBe('provB_High');
     });
+
+    it('should bypass upscaling check if model is explicitly requested', async () => {
+        const registry = ProviderRegistry.getInstance();
+        const executor = new LLMExecutor();
+        const router = new IntelligentRouterMiddleware(executor);
+
+        // Requested model: 'small-model' (1k window)
+        const smallProv = new MockProvider('smallProv', [{ id: 'small-model', name: 'Small', contextWindow: 1000 }], 60);
+        // Fallback model: 'large-model' (8k window)
+        const largeProv = new MockProvider('largeProv', [{ id: 'large-model', name: 'Large', contextWindow: 8000 }], 60);
+
+        registry.registerProvider(smallProv);
+        registry.registerProvider(largeProv);
+
+        // Mock token calculation to be 900 (90% of small-model window)
+        // Normally this would trigger upscaling (>80%) and SKIP small-model
+        vi.spyOn(executor, 'calculateTokens').mockReturnValue(900);
+
+        const context: PipelineContext = {
+            request: {
+                model: 'small-model', // EXPLICIT REQUEST
+                messages: [{ role: 'user', content: 'large content' }]
+            },
+            taskType: TaskType.Chat
+        };
+
+        const trySpy = vi.spyOn(executor, 'tryProvider').mockResolvedValue({ id: 'ok' } as any);
+
+        await router.execute(context, async () => { });
+
+        // Should HAVE tried small-model (bypassing the 80% upscaling check because it was explicitly requested)
+        expect(trySpy).toHaveBeenCalledWith(expect.anything(), 'smallProv', 'small-model');
+    });
 });

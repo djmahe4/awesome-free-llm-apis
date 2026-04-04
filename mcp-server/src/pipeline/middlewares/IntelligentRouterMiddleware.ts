@@ -249,7 +249,8 @@ export class IntelligentRouterMiddleware implements Middleware {
                         }
 
                         // Upscaling check: >80% window
-                        if (estimatedTokens > (modelMetadata.contextWindow * 0.8)) {
+                        // Skip this check if the user EXPLICITLY requested this model
+                        if (modelId !== context.request.model && estimatedTokens > (modelMetadata.contextWindow * 0.8)) {
                             return { provider, score: -1 };
                         }
                     }
@@ -264,7 +265,16 @@ export class IntelligentRouterMiddleware implements Middleware {
                     const rateLimitScore = 1 - (usage.requestCountMinute / rpmLimit);
                     const tokenScore = this.executor.getTokenScore(provider.id);
 
-                    return { provider, score: Math.max(0, rateLimitScore * tokenScore) };
+                    let score = Math.max(0, rateLimitScore * tokenScore);
+
+                    // Boost requested provider to ensure it's tried first
+                    if (context.providerId && provider.id === context.providerId) {
+                        score += 1000;
+                    }
+
+                    console.error(`[Router][Score] provider=${provider.id} model=${modelId} score=${score} requestedProvider=${context.providerId} requestedModel=${context.request.model}`);
+
+                    return { provider, score };
                 })
                 .filter(p => p.score >= 0)
                 .sort((a, b) => b.score - a.score);
