@@ -90,10 +90,15 @@ async function generate() {
     };
 
     const compressed = await cm.slidingWindow(longHistory, 300, mockSummarizer);
+    const originalTokens = countTokens(longHistory.map(m => m.content).join('\n'));
+    const compressedTokens = countTokens(compressed.messages.map(m => m.content).join('\n'));
 
     samplesMd += `## Scenario 4: Context Manager Sliding Window\n`;
     samplesMd += `> Component: \`src/utils/ContextManager.ts\`\n\n`;
-    samplesMd += `### Original History Size: ${longHistory.length} messages\n`;
+    samplesMd += `### Compression Metrics\n`;
+    samplesMd += `- Original History Size: ${longHistory.length} messages (~${originalTokens} tokens)\n`;
+    samplesMd += `- Compressed Size: ${compressed.messages.length} messages (~${compressedTokens} tokens)\n`;
+    samplesMd += `- **Token Reduction: ${((1 - compressedTokens / originalTokens) * 100).toFixed(1)}%**\n\n`;
     samplesMd += `### Real Summary Injection\n> "${compressed.messages[0].content}"\n\n---\n\n`;
 
     // --- 5. REAL DEEP MEMORIZATION RETENTION ---
@@ -111,10 +116,15 @@ async function generate() {
     };
 
     const secretResult = await cm.slidingWindow(historyWithSecret, 200, secretSummarizer);
+    const totalTokens = countTokens(historyWithSecret.map(m => m.content).join('\n'));
+    const finalTokens = countTokens(secretResult.messages.map(m => m.content).join('\n'));
 
     samplesMd += `## Scenario 5: Deep Memorization Retrieval\n`;
     samplesMd += `> Target Fact: "${secretFact}" (Deep in history)\n\n`;
-    samplesMd += `### Resulting Summary (Compressed Trace)\n> "${secretResult.messages[0].content}"\n\n---\n\n`;
+    samplesMd += `### Retention Strategy\n`;
+    samplesMd += `- Window Budget: 200 tokens\n`;
+    samplesMd += `- Input Size: ~${totalTokens} tokens\n`;
+    samplesMd += `- Resulting Summary (Compressed Trace)\n> "${secretResult.messages[0].content}"\n\n---\n\n`;
 
     // --- 6. REAL PROJECT STATE SYNTHESIS ---
     console.log("[6/7] Testing REAL State Synthesis...");
