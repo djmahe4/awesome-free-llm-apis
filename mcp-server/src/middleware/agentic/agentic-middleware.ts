@@ -55,7 +55,7 @@ async function persistQueues(sessionId: string, projectDir: string): Promise<voi
  * Async Project Setup: Ensures session boundaries and initializes state files.
  */
 async function ensureProjectFiles(sessionId: string): Promise<string> {
-    const projectDir = path.join(process.cwd(), 'projects', sessionId);
+    const projectDir = path.join(process.cwd(), 'data', 'projects', sessionId);
     await fs.mkdir(projectDir, { recursive: true });
 
     const files: Record<string, string> = {

@@ -91,15 +91,15 @@ To add a new API key, add it to the `providers` object in `src/config/index.ts` 
 The `ResponseCache` (`src/cache/index.ts`) uses an LRU (Least Recently Used) cache to store LLM responses, providing both speed and cost-efficiency.
 
 ### Key Features
-- **Workspace Awareness**: Cache keys are contextually aware of the codebase state. A `WorkspaceScanner` generates a content hash of `src/tools` and `src/providers`. If any logic changes, the cache for those contexts is automatically invalidated.
+- **Workspace Awareness**: Cache keys are contextually aware of the project identity. A `WorkspaceScanner` generates a stable **Identity Hash** based on the absolute path of the workspace root.
 - **Persistence**: Responses are persisted to `data/cache.json`. This allows the server to maintain its cache across restarts.
-- **Memory Efficiency**: Uses `lru-cache` to keep only the hottest entries in RAM while offloading the full set to disk.
+- **Stable Identity**: Unlike transient content hashes, the Identity Hash remains constant even as you edit code, ensuring your stored facts and cached responses persist throughout the development lifecycle.
 
 ### Implementation Details
-The `WorkspaceScanner` avoids high RAM usage by hashing file metadata (name, size, mtime) rather than full content, which is sufficient for detecting changes in most development workflows.
+The `WorkspaceScanner` uses `fs.existsSync` to validate that the provided `workspace_root` physically exists on disk, preventing "workspace poisoning" from hallucinated paths.
 
 ```typescript
-const wsHash = workspaceScanner.getWorkspaceHash();
+const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
 const cacheKey = cache.generateKey(request, wsHash);
 const cachedResponse = cache.get(cacheKey);
 ```
@@ -178,15 +178,15 @@ To add support for a new language (e.g., Go via `goja`):
 The MCP server is "space-aware," meaning it can scan the caller's specific workspace to generate a contextual state hash. This hash ensures that caching and memory are unique to the project you are currently working on.
 
 ### Workspace Scanning
-Use the `workspace_root` parameter in tool calls (e.g., `use_free_llm`) to specify the directory to scan. The `WorkspaceScanner` will:
-- Generate a SHA-256 hash based on file names, sizes, and modification times.
-- Detect changes in `src/tools`, `src/providers`, and root configuration files.
-- Automatically invalidate cached responses if the workspace state changes.
+Use the `workspace_root` parameter in tool calls to specify the directory to scan. The `WorkspaceScanner` will:
+- Generate a stable SHA-256 **Identity Hash** built strictly from the absolute directory path.
+- Detect and reject non-existent paths via `fs.existsSync` validation.
+- Guarantee memory stability: your architectural decisions and context persist even if you modify tool source code or configuration files.
 
 ### Key Logic
 ```typescript
 const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
-// Included in cache keys and memory metadata
+// This hash remains stable throughout the life of the project directory.
 ```
 
 ---
@@ -196,19 +196,25 @@ const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
 The `manage_memory` tool provides a way to interact with the persistent memory system programmatically.
 
 ### Actions
-- **search**: Retrieve past interactions for the current workspace.
-- **list**: List workspace identifiers.
+- **search**: Retrieve past interactions or manual context for the workspace.
+- **list**: List workspace identifiers and physical path hashes.
 - **stats**: View compression and usage statistics.
-- **clear**: Wipe memory for a specific workspace.
+- **clear**: Wipe memory for a specific workspace namespace.
+
+---
+
+## Explicit Memory Injection
+
+The `store_memory` tool allows agents to deliberately inject facts into the long-term store. This is the primary mechanism for preserving architectural decisions across sessions.
 
 ### Usage Example
 ```json
 {
-  "name": "manage_memory",
+  "name": "store_memory",
   "arguments": {
-    "action": "search",
-    "workspace_root": "/home/user/project-a",
-    "query": "authentication"
+    "key": "queue_strategy",
+    "content": "Using BullMQ on Redis for high-throughput job isolation.",
+    "workspace_root": "/home/user/project-a"
   }
 }
 ```

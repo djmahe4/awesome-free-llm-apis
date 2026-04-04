@@ -14,14 +14,18 @@
 - **7 Live Intelligence Scenarios**: Structured traces in `SAMPLES.md` covering Memory Synthesis, Task Decomposition, and sandboxed logic extraction.
 - **Stricter Prompt Precision**: Selection threshold increased to `>= 3` to eliminate hallucinated prompt injections.
 - **Granular Reference Mapping**: Metadata-aware link extraction capped at 5 high-relevance entries per section.
-- **Multi-Language Sandbox Support**: Support for JavaScript (QuickJS), Python, Go, and Rust runtimes.
+- **Multi-Language Sandbox Support**: Support for JavaScript (QuickJS), Python (RestrictedPython), Go (goja), Rust (boa_engine).
 - **Subsystem Map Integration**: High-precision reference extraction for architectural momentum.
 
 ### ✨ New Features
-- **Intake Protocol Documentation**: Detailed breakdown of how agentic systems consume tool outputs in `benchmarks/INTAKE.md`.
+- **Intake Protocol Documentation**: Detailed simulation of how agentic systems consume tool outputs in `benchmarks/SAMPLES.md`.
 - **Live Trace Harness**: `npx tsx benchmarks/generate-live-samples.ts` now captures verified system state transitions.
 - **Agentic Pipeline Observability**: Explicit `[RESEARCH-VALIDATION]` audit trails for external knowledge lookups.
 - **Build Stability**: Resolved `NonSharedBuffer` TypeScript type-safety errors in sandbox execution logic.
+- **Stable Workspace Identity**: Switched `WorkspaceScanner` from transient content-hashing to stable **Identity Hashes** built from absolute paths. This fixes "memory amnesia" caused by code edits.
+- **Anti-Poisoning Validation**: All workspace-aware tools now strictly validate the existence of `workspace_root` via `fs.existsSync`, preventing agents from hallucinating or poisoning phantom workspaces.
+- **New `store_memory` Tool**: Implemented a dedicated tool for manual fact injection, enabling agents to explicitly persist architectural context and high-density summaries for subsequent runs.
+- **Shared Memory Singleton**: Unified state management by migrating `MemoryManager` to a singleton pattern, resolving race conditions between tool calls and debounced disk persistence.
 
 ---
 

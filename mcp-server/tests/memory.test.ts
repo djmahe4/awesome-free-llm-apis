@@ -1,10 +1,22 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
 import { storeMemory } from '../src/tools/store-memory.js';
 import { manageMemory } from '../src/tools/manage-memory.js';
 import { memoryManager } from '../src/memory/index.js';
+import { mkdirSync, rmSync, existsSync } from 'node:fs';
 
 describe('Memory System Integration', () => {
     const ws = '/tmp/test_ws_vitest';
+    const ws2 = '/tmp/test_ws_vitest_2';
+
+    beforeAll(() => {
+        if (!existsSync(ws)) mkdirSync(ws, { recursive: true });
+        if (!existsSync(ws2)) mkdirSync(ws2, { recursive: true });
+    });
+
+    afterAll(() => {
+        rmSync(ws, { recursive: true, force: true });
+        rmSync(ws2, { recursive: true, force: true });
+    });
 
     beforeEach(async () => {
         // Clear before each test
@@ -51,6 +63,9 @@ describe('Memory System Integration', () => {
     it('should retrieve different results for different workspaces', async () => {
         const ws2 = '/tmp/test_ws_vitest_2';
         await manageMemory({ action: 'clear', workspace_root: ws2 });
+
+        await storeMemory({ key: 'k1', content: 'WS1 Content', workspace_root: ws });
+        await storeMemory({ key: 'k2', content: 'WS2 Content', workspace_root: ws2 });
 
         const res1 = (await manageMemory({ action: 'search', workspace_root: ws })) as { results: string[]; meta: any };
         const res2 = (await manageMemory({ action: 'search', workspace_root: ws2 })) as { results: string[]; meta: any };

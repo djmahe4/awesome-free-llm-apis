@@ -47,6 +47,7 @@ graph TD
 | `validate_provider` | Health-check and credential validation | `providerId` | — |
 | `code_mode` | Sandboxed script execution; only stdout returned | `code` | `language`, `data`, `timeout_ms` |
 | `manage_memory` | Workspace-scoped memory: search/list/stats/clear | `action` | `workspace_root`, `query`, `limit` |
+| `store_memory` | Explicitly inject persistent context/facts into memory | `key`, `content` | `workspace_root` |
 
 #### `code_mode` Sandbox Runtimes
 
@@ -348,6 +349,16 @@ The MCP server includes a comprehensive benchmarking suite to measure the effici
 Verification of the system's intelligence is grounded in **live, execution-based traces**:
 - See [SAMPLES.md](benchmarks/SAMPLES.md) for 7 verified scenarios including **Project State Synthesis**, **Multi-Step Decomposition**, and **Deep Memorization Retrieval**.
 - See [INTAKE.md](benchmarks/INTAKE.md) for a breakdown of the agent-server intake protocol.
+
+---
+
+## Reliable Persistent Memory
+
+The server features a **hardened long-term memory system** designed for long-running agentic tasks:
+
+- **Identity Hashes**: Workspaces are identified by stable, path-based hashes. Your stored facts persist even if you modify your codebase.
+- **Anti-Poisoning**: Strict `fs.existsSync` validation prevents memory pollution from hallucinated paths.
+- **Explicit Injection**: Use `store_memory` to deliberately persist architectural decisions, research findings, or task summaries across sessions.
 
 ---
 

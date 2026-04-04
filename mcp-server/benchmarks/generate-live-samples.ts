@@ -118,7 +118,7 @@ async function generate() {
 
     // --- 6. REAL PROJECT STATE SYNTHESIS ---
     console.log("[6/7] Testing REAL State Synthesis...");
-    const projectDir = path.join(process.cwd(), '..', 'projects', mockContext.sessionId);
+    const projectDir = path.join(process.cwd(), 'data', 'projects', mockContext.sessionId);
     if (!fs.existsSync(projectDir)) fs.mkdirSync(projectDir, { recursive: true });
     await fs.promises.writeFile(path.join(projectDir, 'knowledge.md'), "# Architecture\n- Event-driven orchestration.\n- Redis caching enabled.", 'utf8');
 
