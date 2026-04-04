@@ -9,7 +9,7 @@ describe('QuickJS Sandbox', () => {
   });
 
   it('DATA variable is accessible', async () => {
-    const result = await executeInSandbox('print(DATA)', 'my-test-data');
+    const result = await executeInSandbox('print(DATA)', { data: 'my-test-data' });
     expect(result.success).toBe(true);
     expect(result.stdout).toBe('my-test-data');
   });
@@ -28,12 +28,12 @@ describe('QuickJS Sandbox', () => {
   });
 
   it('timeout works for infinite loops', async () => {
-    const result = await executeInSandbox('while(true){}', '', 100);
+    const result = await executeInSandbox('while(true){}', { timeoutMs: 100 });
     expect(result.success).toBe(false);
   }, 10000);
 
   it('no process or require available (sandboxed)', async () => {
-    const result = await executeInSandbox('print(typeof process)');
+    const result = await executeInSandbox('print(typeof process)', { language: 'javascript' });
     expect(result.success).toBe(true);
     expect(result.stdout).toBe('undefined');
   });
@@ -41,7 +41,7 @@ describe('QuickJS Sandbox', () => {
   it('JSON operations work', async () => {
     const data = JSON.stringify({ name: 'test', value: 42 });
     const code = 'var obj = JSON.parse(DATA); print(obj.name + ":" + obj.value)';
-    const result = await executeInSandbox(code, data);
+    const result = await executeInSandbox(code, { data });
     expect(result.success).toBe(true);
     expect(result.stdout).toBe('test:42');
   });

@@ -366,11 +366,20 @@ export class IntelligentRouterMiddleware implements Middleware {
         const mainError = primaryError || lastError;
         const errorSummary = allErrors.slice(-3).join('; ');
 
-        throw new Error(
-            `[Router] Exhausted all fallback models and compression for task ${taskType}. ` +
-            `Primary provider ${context.providerId || 'auto'} failed: ${mainError?.message || 'No available providers'}. ` +
-            `Attempts: ${(context as any).providersAttempted.join(', ')}. ` +
-            `Recent errors: ${errorSummary}`
-        );
+        throw new Error(this.renderRouterError(taskType, context, mainError, errorSummary));
+    }
+
+    /**
+     * Helper to render a consistent and readable router error message.
+     */
+    private renderRouterError(taskType: string, context: PipelineContext, mainError: Error | null, errorSummary: string): string {
+        const primary = context.providerId || 'auto';
+        const failMessage = mainError?.message || 'No available providers';
+        const attempts = (context as any).providersAttempted?.join(', ') || 'none';
+
+        return `[Router] Exhausted all fallback models and compression for task ${taskType}. ` +
+            `Primary provider ${primary} failed: ${failMessage}. ` +
+            `Attempts: ${attempts}. ` +
+            `Recent errors: ${errorSummary}`;
     }
 }

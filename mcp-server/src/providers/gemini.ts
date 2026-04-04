@@ -131,8 +131,8 @@ export class GeminiProvider extends BaseProvider {
 
     // Success
     this.recordRequest();
-    this['consecutiveFailures'] = 0;
-    this['cooldownUntil'] = 0;
+    this.consecutiveFailures = 0;
+    this.cooldownUntil = 0;
 
     return {
       id: `gemini-${Date.now()}`,
@@ -224,8 +224,8 @@ export class GeminiProvider extends BaseProvider {
 
       if (!hasError) {
         this.recordRequest();
-        this['consecutiveFailures'] = 0;
-        this['cooldownUntil'] = 0;
+        this.consecutiveFailures = 0;
+        this.cooldownUntil = 0;
       }
     }
   }

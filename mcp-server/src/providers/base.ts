@@ -14,8 +14,8 @@ export abstract class BaseProvider implements Provider {
   private minuteWindowStart = Date.now();
   private dayWindowStart = Date.now();
 
-  private consecutiveFailures = 0;
-  private cooldownUntil = 0;
+  protected consecutiveFailures = 0;
+  protected cooldownUntil = 0;
 
   getPenaltyScore(): number {
     if (Date.now() < this.cooldownUntil) {

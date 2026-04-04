@@ -25,7 +25,11 @@ const memoryManager = new MemoryManager();
 export async function runCodeMode(input: CodeModeInput): Promise<CodeModeResult> {
   const { code, language = 'javascript', data = '', timeout_ms = 5000 } = input;
 
-  const result = await executeInSandbox(code, data, timeout_ms, language);
+  const result = await executeInSandbox(code, {
+    data,
+    timeoutMs: timeout_ms,
+    language
+  });
 
   const compressionRatio = data.length > 0 ? result.stdout.length / data.length : undefined;
 

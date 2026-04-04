@@ -30,15 +30,20 @@ function resolveRunnerPath(...segments: string[]): string {
   return candidates.find(c => fs.existsSync(c)) || candidates[0];
 }
 
+export interface SandboxOptions {
+  data?: string;
+  timeoutMs?: number;
+  language?: SandboxLanguage;
+}
+
 /**
  * Execute code in an isolated, network-free, filesystem-free sandbox.
  */
 export async function executeInSandbox(
   code: string,
-  data: string = '',
-  timeoutMs: number = 5000,
-  language: SandboxLanguage = 'javascript'
+  options: SandboxOptions = {}
 ): Promise<ExecutionResult> {
+  const { data = '', timeoutMs = 5000, language = 'javascript' } = options;
   switch (language) {
     case 'javascript':
       return executeJavaScript(code, data, timeoutMs);
