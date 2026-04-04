@@ -32,19 +32,33 @@ export class LLMExecutor {
     }
 
     /**
+     * Get a token-based health score for a provider (0-1)
+     */
+    getTokenScore(providerId: string): number {
+        const tracker = this.tokenTracking[providerId];
+        if (tracker && tracker.remainingTokens !== undefined) {
+            // Check if tokens should have refreshed
+            if (tracker.refreshTime && Date.now() >= tracker.refreshTime) {
+                return 1.0;
+            }
+            // Normalize score: 100k tokens = 1.0 score
+            return Math.min(1.0, tracker.remainingTokens / 100000);
+        }
+        return 1.0; // Assume healthy if no info
+    }
+
+    /**
      * Check if provider has enough tokens available
      */
     hasEnoughTokens(providerId: string, requiredTokens: number): boolean {
         const tracker = this.tokenTracking[providerId];
         if (tracker && tracker.remainingTokens !== undefined) {
-            // Check if tokens should have refreshed based on reset time
             if (tracker.refreshTime && Date.now() >= tracker.refreshTime) {
                 delete this.tokenTracking[providerId];
                 return true;
             }
             return tracker.remainingTokens >= requiredTokens;
         }
-        // If no tracking info, assume provider is available
         return true;
     }
 

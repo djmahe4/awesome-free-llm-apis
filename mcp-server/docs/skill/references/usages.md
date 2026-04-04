@@ -13,7 +13,7 @@
 | `get_token_stats` | Retrieve real-time usage (tokens/requests) per provider | *(none)* |
 | `validate_provider` | Health-check and credential validation for a provider | `providerId` |
 | `use_free_llm` | Send chat messages to any model with fallback support | `model`, `messages` |
-| `code_mode` | Execute sandboxed code (JS/Python) against input data; only stdout returned | `code` |
+| `code_mode` | Execute sandboxed code (JS/Python/Go/Rust) against input data | `code` |
 | `manage_memory` | Manage persistent workspace memory (search/list/stats/clear) | `action` |
 
 > **Agent Rule:** Always invoke `manage_memory` (action: "search") before wide-context actions to retrieve relevant prior context.

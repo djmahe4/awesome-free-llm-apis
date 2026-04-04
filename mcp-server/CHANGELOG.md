@@ -1,8 +1,8 @@
 # Changelog
 
-## v1.1.0 — Multi-Language Code Mode & Agent-First Refactor
+## v1.0.3 — High-Fidelity Benchmarking & Intelligence Refinement
 
-**Released:** 2026-04-02
+**Released:** 2026-04-04
 
 ### 🚀 Highlights
 - `code_mode` now supports **four sandbox runtimes**: JavaScript (QuickJS), Python (RestrictedPython), Go (goja), Rust (boa_engine)
@@ -10,6 +10,18 @@
 - **Research validation logging** added to `AgenticMiddleware` — explicit audit trail for every detected external-knowledge request
 - **New `mcp-server/README.md`** — Mermaid architecture diagram, full tool table, client configs, extension points
 - All documentation synced: `guide.md`, `SKILL.md`, `usages.md`, `mcp-development.md`
+- **New Benchmarking Suite**: Complete rewrite of `generate-live-samples.ts` to use real production middleware (Router, Context, Sandbox) instead of mocks.
+- **7 Live Intelligence Scenarios**: Structured traces in `SAMPLES.md` covering Memory Synthesis, Task Decomposition, and sandboxed logic extraction.
+- **Stricter Prompt Precision**: Selection threshold increased to `>= 3` to eliminate hallucinated prompt injections.
+- **Granular Reference Mapping**: Metadata-aware link extraction capped at 5 high-relevance entries per section.
+- **Multi-Language Sandbox Support**: Support for JavaScript (QuickJS), Python, Go, and Rust runtimes.
+- **Subsystem Map Integration**: High-precision reference extraction for architectural momentum.
+
+### ✨ New Features
+- **Intake Protocol Documentation**: Detailed breakdown of how agentic systems consume tool outputs in `benchmarks/INTAKE.md`.
+- **Live Trace Harness**: `npx tsx benchmarks/generate-live-samples.ts` now captures verified system state transitions.
+- **Agentic Pipeline Observability**: Explicit `[RESEARCH-VALIDATION]` audit trails for external knowledge lookups.
+- **Build Stability**: Resolved `NonSharedBuffer` TypeScript type-safety errors in sandbox execution logic.
 
 ---
 
@@ -124,11 +136,8 @@ mcp-server/
 ---
 
 
-## TODOs
+## Next Updates
 
-- refer https://github.com/copilot/share/08311092-4b20-8c00-a053-e402444e6817
-- reversion to 1.0.3
-- Validate dependencies during server start for code mode
-  - python	RestrictedPython	Python	python3 on PATH; pip install RestrictedPython
-  - go	goja (pure-Go ECMAScript)	JavaScript	Pre-built binary: cd scripts/go-sandbox-runner && go build -o sandbox-runner .
-  - rust	boa_engine (pure-Rust ECMAScript)	JavaScript	Pre-built binary: cd scripts/rust-sandbox-runner && cargo build --release
+- Infrastructure: Real-time visualization of Short-term memory buffers in dashboard.
+- Features: Add support for custom sandbox runtime containers.
+- Documentation: Expand high-density synthesis examples for multi-agent workflows.

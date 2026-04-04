@@ -1,249 +1,148 @@
 /**
- * code_mode Compression Benchmark
- * =================================
- * Compares the context size (bytes) of raw API responses versus the compressed
- * output produced by code_mode scripts across realistic scenarios.
+ * Agentic Pipeline & Code Mode Benchmarks (with Persistence)
+ * ==========================================================
+ * Measures the compression efficiency and qualitative "intelligence" of the entire agentic pipeline.
+ * Results are printed to console AND persisted to `mcp-server/benchmarks/logs/latest_run.md`.
  *
- * The core insight: only print() / console.log() output enters the LLM context —
- * never the full raw DATA payload. This benchmark quantifies the savings.
+ * Scenarios:
+ * 1. Prompt Injection (getIntelligentSystemPrompt via agent-prompt/README.md)
+ * 2. Token Compression & Summarization (ContextManager sliding-window)
+ * 3. Short/Long Term Memory boundaries
+ * 4. Sandbox Code Extraction (code_mode JavaScript parsing)
  *
  * Run:  cd mcp-server && npx vitest bench benchmarks/code-mode.bench.ts
- *
- * Scenarios covered:
- *   1. Chat completions    — extract first message content
- *   2. Model list          — extract names + availability flags
- *   3. Token stats         — extract provider name + usage only
- *   4. Embeddings array    — compute summary stats instead of raw floats
- *   5. Search results      — extract titles + snippets only
  */
 
-import { bench, describe } from 'vitest';
+import { bench, describe, beforeEach, afterAll } from 'vitest';
+import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/agentic/prompts.js';
+import { ContextManager } from '../src/utils/ContextManager.js';
 import { executeInSandbox } from '../src/sandbox/executor.js';
+import type { Message } from '../src/providers/types.js';
+import fs from 'fs';
+import path from 'path';
+import { getEncoding } from 'js-tiktoken';
 
-// ---------------------------------------------------------------------------
-// Scenario 1 — Chat Completions Response (large multi-choice response)
-// ---------------------------------------------------------------------------
-const chatCompletionResponse = JSON.stringify({
-  id: 'chatcmpl-abc123',
-  object: 'chat.completion',
-  created: 1700000000,
-  model: 'gpt-4o',
-  choices: Array.from({ length: 50 }, (_, i) => ({
-    index: i,
-    message: {
-      role: 'assistant',
-      content: `Response ${i}: ${'token '.repeat(80)}`.trim(),
-    },
-    finish_reason: 'stop',
-  })),
-  usage: { prompt_tokens: 500, completion_tokens: 4000, total_tokens: 4500 },
-});
+const enc = getEncoding("cl100k_base");
+const countTokens = (text: string) => enc.encode(text).length;
 
-const chatExtractionCode = `
-  var resp = JSON.parse(DATA);
-  var first = resp.choices[0].message.content.slice(0, 200);
-  print(JSON.stringify({ model: resp.model, preview: first, total_tokens: resp.usage.total_tokens }));
-`;
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// ---------------------------------------------------------------------------
-// Scenario 2 — Model List (62+ models with full metadata)
-// ---------------------------------------------------------------------------
-const modelListResponse = JSON.stringify({
-  models: Array.from({ length: 62 }, (_, i) => ({
-    providerId: ['groq', 'gemini', 'cohere', 'openrouter', 'mistral'][i % 5],
-    modelId: `model-${i}-instruct`,
-    modelName: `Model ${i} Instruct (7B)`,
-    available: i % 7 !== 0,
-    rateLimits: { rpm: 30, rpd: 14400, tpm: 200000 },
-    contextWindow: 131072,
-    description: `A fine-tuned instruction-following model variant number ${i} optimized for chat.`,
-    tags: ['free', 'instruction', 'chat'],
-  })),
-  summary: { total: 62, available: 55, unavailable: 7 },
-});
+const stats: any[] = [];
+let logContent = `# Agentic Benchmark Qualitative Log\n\nGenerated on: ${new Date().toISOString()}\n\n---\n\n`;
 
-const modelExtractionCode = `
-  var data = JSON.parse(DATA);
-  var available = data.models.filter(function(m) { return m.available; });
-  var lines = available.map(function(m) { return m.providerId + '/' + m.modelId; });
-  print(lines.join('\\n'));
-  print('--- Total available: ' + available.length);
-`;
+describe('Agentic Intelligence & Compression Pipelines', () => {
 
-// ---------------------------------------------------------------------------
-// Scenario 3 — Token Stats (15 providers × full provider objects)
-// ---------------------------------------------------------------------------
-const tokenStatsResponse = JSON.stringify(
-  Array.from({ length: 15 }, (_, i) => ({
-    id: `provider-${i}`,
-    name: `Provider ${i} (AI Services)`,
-    isAvailable: i % 4 !== 0,
-    rateLimits: { rpm: 30 + i * 2, rpd: 14400 + i * 100, tpm: 200000 },
-    usage: { tokens: i * 1234, requests: i * 17 },
-    config: {
-      baseURL: `https://api.provider${i}.com/v1/`,
-      apiKeyEnv: `PROVIDER_${i}_API_KEY`,
-      timeout: 30000,
-      retries: 3,
-    },
-    models: Array.from({ length: 4 }, (_, j) => ({
-      id: `provider-${i}-model-${j}`,
-      name: `Model ${j}`,
-      contextWindow: 128000,
-    })),
-  }))
-);
-
-const tokenStatsExtractionCode = `
-  var providers = JSON.parse(DATA);
-  var active = providers.filter(function(p) { return p.isAvailable; });
-  active.forEach(function(p) {
-    print(p.name + ': ' + p.usage.tokens + ' tokens, ' + p.usage.requests + ' requests');
-  });
-`;
-
-// ---------------------------------------------------------------------------
-// Scenario 4 — Embeddings Array (1536-dim float vector)
-// ---------------------------------------------------------------------------
-const embeddingsResponse = JSON.stringify({
-  object: 'list',
-  data: [{
-    object: 'embedding',
-    embedding: Array.from({ length: 1536 }, () => Math.random() * 2 - 1),
-    index: 0,
-  }],
-  model: 'text-embedding-3-small',
-  usage: { prompt_tokens: 12, total_tokens: 12 },
-});
-
-const embeddingsExtractionCode = `
-  var resp = JSON.parse(DATA);
-  var vec = resp.data[0].embedding;
-  var sum = 0; var min = Infinity; var max = -Infinity;
-  for (var i = 0; i < vec.length; i++) {
-    sum += vec[i];
-    if (vec[i] < min) min = vec[i];
-    if (vec[i] > max) max = vec[i];
-  }
-  print(JSON.stringify({
-    model: resp.model,
-    dimensions: vec.length,
-    mean: (sum / vec.length).toFixed(6),
-    min: min.toFixed(6),
-    max: max.toFixed(6)
-  }));
-`;
-
-// ---------------------------------------------------------------------------
-// Scenario 5 — Search Results (20 results with full HTML snippets)
-// ---------------------------------------------------------------------------
-const searchResultsResponse = JSON.stringify({
-  query: 'free LLM APIs 2024',
-  total: 20,
-  results: Array.from({ length: 20 }, (_, i) => ({
-    title: `Free LLM API Guide ${i + 1} — Best Practices`,
-    url: `https://example.com/guide/${i + 1}`,
-    snippet: `This comprehensive guide covers the best free LLM APIs available in 2024. ${'Learn how to use, integrate, and optimize free language models for your projects. '.repeat(5)}`.trim(),
-    publishedAt: `2024-0${(i % 9) + 1}-15`,
-    score: 0.95 - i * 0.02,
-    metadata: { author: `Author ${i}`, tags: ['llm', 'api', 'free'], readTime: '5 min' },
-  })),
-});
-
-const searchExtractionCode = `
-  var resp = JSON.parse(DATA);
-  resp.results.slice(0, 5).forEach(function(r, i) {
-    print((i+1) + '. ' + r.title + ' (' + r.url + ')');
-    print('   Score: ' + r.score.toFixed(2) + ' | ' + r.publishedAt);
-  });
-`;
-
-// ---------------------------------------------------------------------------
-// Helper: print size comparison (runs once before benchmarks)
-// ---------------------------------------------------------------------------
-async function printCompressionStats() {
-  const scenarios = [
-    { name: 'Chat Completions', data: chatCompletionResponse, code: chatExtractionCode },
-    { name: 'Model List', data: modelListResponse, code: modelExtractionCode },
-    { name: 'Token Stats', data: tokenStatsResponse, code: tokenStatsExtractionCode },
-    { name: 'Embeddings (1536-dim)', data: embeddingsResponse, code: embeddingsExtractionCode },
-    { name: 'Search Results', data: searchResultsResponse, code: searchExtractionCode },
-  ];
-
-  console.log('\n╔══════════════════════════════════════════════════════════════════════╗');
-  console.log('║          code_mode Context Compression — Before vs After            ║');
-  console.log('╠══════════════════════════╦══════════╦══════════╦════════╦═══════════╣');
-  console.log('║ Scenario                 ║ Raw (KB) ║ Out (KB) ║ Ratio  ║ Savings   ║');
-  console.log('╠══════════════════════════╬══════════╬══════════╬════════╬═══════════╣');
-
-  for (const s of scenarios) {
-    const result = await executeInSandbox(s.code, s.data, 5000);
-    const rawKb = (s.data.length / 1024).toFixed(1).padStart(8);
-    const outKb = (result.stdout.length / 1024).toFixed(1).padStart(8);
-    const ratio = result.stdout.length / s.data.length;
-    const savings = ((1 - ratio) * 100).toFixed(0) + '%';
-    const ratioStr = ratio.toFixed(3).padStart(6);
-    const name = s.name.padEnd(24);
-    console.log(`║ ${name} ║ ${rawKb} ║ ${outKb} ║ ${ratioStr} ║ ${savings.padStart(9)} ║`);
-  }
-
-  console.log('╚══════════════════════════╩══════════╩══════════╩════════╩═══════════╝\n');
-}
-
-// Run stats once at module load (vitest bench mode)
-printCompressionStats().catch(console.error);
-
-// ---------------------------------------------------------------------------
-// Benchmark suites
-// ---------------------------------------------------------------------------
-
-describe('Scenario 1 — Chat Completions', () => {
-  bench('raw response in context (no code_mode)', () => {
-    // Simulates passing full response directly — just measure size
-    const _size = chatCompletionResponse.length;
+  beforeEach(async () => {
+    // Enforce 10s delay to respect provider rate limits (RPM/TPM)
+    console.log('\n[Rate Limit Guard] Waiting 10 seconds...');
+    await delay(10000);
   });
 
-  bench('code_mode: extract first message (JavaScript/QuickJS)', async () => {
-    await executeInSandbox(chatExtractionCode, chatCompletionResponse, 5000, 'javascript');
-  });
-});
+  afterAll(() => {
+    // Prepare console report
+    console.log('\n╔══════════════════════════════════════════════════════════════════════╗');
+    console.log('║        Agentic Context Compression & Memory Pipeline Results        ║');
+    console.log('╠══════════════════════════╦══════════╦══════════╦════════╦═══════════╣');
+    console.log('║ Scenario                 ║ In (Tok) ║ Out(Tok) ║ Ratio  ║ Savings   ║');
+    console.log('╠══════════════════════════╬══════════╬══════════╬════════╬═══════════╣');
 
-describe('Scenario 2 — Model List', () => {
-  bench('raw response in context (no code_mode)', () => {
-    const _size = modelListResponse.length;
-  });
+    logContent += `## Quantitative Summary\n\n| Scenario | In (Tok) | Out (Tok) | Ratio | Savings |\n| :--- | :--- | :--- | :--- | :--- |\n`;
 
-  bench('code_mode: extract names + availability (JavaScript/QuickJS)', async () => {
-    await executeInSandbox(modelExtractionCode, modelListResponse, 5000, 'javascript');
-  });
-});
+    for (const s of stats) {
+      const raw = s.inTokens.toString().padStart(8);
+      const out = s.outTokens.toString().padStart(8);
+      const ratio = (s.outTokens / s.inTokens);
+      const savings = ((1 - ratio) * 100).toFixed(0) + '%';
+      const ratioStr = ratio.toFixed(3).padStart(6);
+      const name = s.name.padEnd(24);
+      console.log(`║ ${name} ║ ${raw} ║ ${out} ║ ${ratioStr} ║ ${savings.padStart(9)} ║`);
 
-describe('Scenario 3 — Token Stats', () => {
-  bench('raw response in context (no code_mode)', () => {
-    const _size = tokenStatsResponse.length;
-  });
+      logContent += `| ${s.name} | ${s.inTokens} | ${s.outTokens} | ${ratio.toFixed(3)} | ${savings} |\n`;
+    }
 
-  bench('code_mode: extract provider name + usage (JavaScript/QuickJS)', async () => {
-    await executeInSandbox(tokenStatsExtractionCode, tokenStatsResponse, 5000, 'javascript');
-  });
-});
+    console.log('╚══════════════════════════╩══════════╩══════════╩════════╩═══════════╝\n');
 
-describe('Scenario 4 — Embeddings Array', () => {
-  bench('raw response in context (no code_mode)', () => {
-    const _size = embeddingsResponse.length;
-  });
+    // Persist to log file
+    const logDir = path.resolve(process.cwd(), 'benchmarks/logs');
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
-  bench('code_mode: compute summary stats (JavaScript/QuickJS)', async () => {
-    await executeInSandbox(embeddingsExtractionCode, embeddingsResponse, 5000, 'javascript');
-  });
-});
-
-describe('Scenario 5 — Search Results', () => {
-  bench('raw response in context (no code_mode)', () => {
-    const _size = searchResultsResponse.length;
+    const logPath = path.join(logDir, 'latest_run.md');
+    fs.writeFileSync(logPath, logContent, 'utf-8');
+    console.log(`[Persistence] Qualitative log written to: ${logPath}`);
   });
 
-  bench('code_mode: extract top-5 titles + URLs (JavaScript/QuickJS)', async () => {
-    await executeInSandbox(searchExtractionCode, searchResultsResponse, 5000, 'javascript');
-  });
+  bench('1. Intelligent Prompt Injection (README.md routing)', async () => {
+    resetPromptCache();
+    const rawReadmePath = path.resolve(process.cwd(), '../external/agent-prompt/README.md');
+    let rawReadmeContent = 'Fallback README content';
+    if (fs.existsSync(rawReadmePath)) {
+      rawReadmeContent = fs.readFileSync(rawReadmePath, 'utf-8');
+    }
+
+    const query = "Andru.ia Consultant: I need to research reference links for architecture evolution and system core components.";
+    const optimizedPrompt = await getIntelligentSystemPrompt(query);
+
+    logContent += `\n---\n\n## Scenario 1: Prompt Injection\n\n### Input Query\n> ${query}\n\n### Full Input Source (Preview)\n\`\`\`markdown\n${rawReadmeContent.substring(0, 1000)}...\n\`\`\`\n\n### Optimized Output Output\n\`\`\`markdown\n${optimizedPrompt}\n\`\`\`\n`;
+
+    stats.push({
+      name: 'Prompt Injection',
+      inTokens: countTokens(rawReadmeContent),
+      outTokens: countTokens(optimizedPrompt)
+    });
+  }, { iterations: 1 });
+
+  bench('2. Memory Compression (ContextManager Sliding Window)', async () => {
+    const contextManager = new ContextManager();
+    const messages: Message[] = Array.from({ length: 150 }, (_, i) => ({
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `[Message ${i}] The system architecture uses a layered approach. Component ${i} handles part of the workload. We must ensure memory safety and token efficiency in all agentic nodes.`
+    }));
+
+    const inTokens = contextManager.countTokens(messages);
+
+    // Mock summarizer that simulates LLM reduction
+    const mockSummarizer = async (text: string) => {
+      return `SUMMARY OF ${countTokens(text)} TOKENS: The conversation discussed iterative system architecture, the importance of layered component design, and consistent requirements for memory safety and token-aware efficiency across all agentic nodes.`;
+    };
+
+    const result = await contextManager.slidingWindow(messages, 400, mockSummarizer);
+
+    logContent += `\n---\n\n## Scenario 2: Memory Compression\n\n### Original Content (Preview)\n${messages.slice(0, 5).map(m => `- [${m.role}] ${m.content}`).join('\n')}\n...\n\n### Compressed State Output\n${result.messages.map(m => `- [${m.role}] ${m.content}`).join('\n')}\n`;
+
+    stats.push({
+      name: 'Memory Sliding Window',
+      inTokens: inTokens,
+      outTokens: result.compressedTokens
+    });
+  }, { iterations: 1 });
+
+  bench('3. Sandbox Extraction (code_mode)', async () => {
+    const responseData = JSON.stringify({
+      output: `Here is the optimized coding logic for the pipeline:\n\n\`\`\`typescript\nexport const optimize = (data: any[]) => data.filter(d => d.active).map(d => ({ ...d, score: d.value * 1.5 }));\n\`\`\`\n\nAnd here is the deployment script:\n\n\`\`\`bash\nnpm run build && docker build -t server .\n\`\`\`\n\nPlease ignore the remaining fluff and verbose explanations.`
+    });
+
+    const inTokens = countTokens(responseData);
+
+    const script = `
+            var data = JSON.parse(DATA);
+            var blocks = [];
+            var regex = /\`\`\`[a-z]*\\n([\\s\\S]*?)\\n\`\`\`/g;
+            var match;
+            while ((match = regex.exec(data.output)) !== null) {
+                blocks.push(match[1]);
+            }
+            print("EXTRACTED CODE BLOCKS:\\n" + blocks.join('\\n--- CODE BLOCK ---\\n'));
+        `;
+
+    const result = await executeInSandbox(script, responseData, 5000, 'javascript');
+
+    logContent += `\n---\n\n## Scenario 3: Sandbox Extraction (code_mode)\n\n### Raw LLM Response (Input)\n\`\`\`json\n${responseData}\n\`\`\`\n\n### Extracted Output (Sandbox Results)\n\`\`\`text\n${result.stdout}\n\`\`\`\n`;
+
+    stats.push({
+      name: 'Sandbox code_mode',
+      inTokens: inTokens,
+      outTokens: countTokens(result.stdout)
+    });
+  }, { iterations: 1 });
+
 });

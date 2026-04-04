@@ -12,11 +12,80 @@ import { getTokenStats } from './tools/get-token-stats.js';
 import { listAvailableFreeModels } from './tools/list-models.js';
 import { validateProvider } from './tools/validate-provider.js';
 import { flushSystem } from './tools/use-free-llm.js';
+import { execSync } from 'child_process';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * Validate system dependencies for code execution sandboxes
+ */
+async function validateSandboxDependencies() {
+  console.error('[Startup] Validating sandbox dependencies...');
+
+  // 1. Python Validation
+  let pythonPath = 'python3';
+  const projectRoot = path.resolve(__dirname, '../../');
+  const venvPaths = [
+    path.join(projectRoot, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python3'),
+    path.join(projectRoot, 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python3')
+  ];
+
+  for (const vp of venvPaths) {
+    if (fs.existsSync(vp)) {
+      pythonPath = vp;
+      break;
+    }
+  }
+
+  try {
+    execSync(`${pythonPath} --version`, { stdio: 'ignore' });
+    try {
+      execSync(`${pythonPath} -c "import RestrictedPython"`, { stdio: 'ignore' });
+      console.error(`  [✓] Python: ${pythonPath} and RestrictedPython available`);
+    } catch {
+      console.error(`  [!] Python: ${pythonPath} found but RestrictedPython missing. Run: ${pythonPath} -m pip install RestrictedPython`);
+    }
+  } catch {
+    console.error('  [!] Python: python3 not found on PATH or in venv');
+  }
+
+  // 2. Go Validation
+  const goRunnerPath = path.join(__dirname, '../../scripts/go-sandbox-runner/sandbox-runner');
+  if (fs.existsSync(goRunnerPath)) {
+    console.error('  [✓] Go: Pre-built sandbox-runner available');
+  } else {
+    try {
+      execSync('go version', { stdio: 'ignore' });
+      console.error('  [i] Go: Building sandbox-runner...');
+      const goDir = path.join(__dirname, '../../scripts/go-sandbox-runner');
+      execSync('go build -o sandbox-runner .', { cwd: goDir, stdio: 'ignore' });
+      console.error('  [✓] Go: sandbox-runner built successfully');
+    } catch {
+      console.error('  [!] Go: sandbox-runner missing and go compiler not found');
+    }
+  }
+
+  // 3. Rust Validation
+  const rustRunnerPath = path.join(__dirname, '../../scripts/rust-sandbox-runner/target/release/sandbox-runner');
+  if (fs.existsSync(rustRunnerPath)) {
+    console.error('  [✓] Rust: Pre-built sandbox-runner available');
+  } else {
+    try {
+      execSync('cargo --version', { stdio: 'ignore' });
+      console.error('  [i] Rust: Building sandbox-runner...');
+      const rustDir = path.join(__dirname, '../../scripts/rust-sandbox-runner');
+      execSync('cargo build --release', { cwd: rustDir, stdio: 'ignore' });
+      console.error('  [✓] Rust: sandbox-runner built successfully');
+    } catch {
+      console.error('  [!] Rust: sandbox-runner missing and cargo not found');
+    }
+  }
+}
+
 async function main() {
+  await validateSandboxDependencies();
   const isSse = process.argv.includes('--sse');
   if (isSse) {
     const app = express();

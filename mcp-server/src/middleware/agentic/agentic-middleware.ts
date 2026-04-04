@@ -90,7 +90,7 @@ async function prependSystemPrompt(context: PipelineContext, userContent?: strin
 
     const dynamicPrompt = await getIntelligentSystemPrompt(userContent);
     const hasSystem = messages[0].role === 'system';
-    
+
     if (hasSystem) {
         messages[0] = {
             ...messages[0],
@@ -162,7 +162,7 @@ export class AgenticMiddleware implements Middleware {
 
         // Hardened Session ID: Must be provided for agentic state to exist
         const sessionId: string | undefined = context.sessionId || (context.request as any).sessionId;
-        
+
         if (!sessionId) {
             console.warn('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
             await next();
@@ -181,7 +181,7 @@ export class AgenticMiddleware implements Middleware {
         if (userContent && detectResearchIntent(userContent)) {
             logResearchValidation(sessionId, userContent, 'pre-execution-research-detection');
         }
-        
+
         await prependSystemPrompt(context, userContent);
 
         // Task decomposition: Only perform if nowQueue is empty to prevent multi-turn duplication
@@ -210,7 +210,8 @@ export class AgenticMiddleware implements Middleware {
                 logResearchValidation(sessionId, responseContent, 'post-execution-response-grounding-check');
             }
 
-            context['agenticQueues'] = getQueues(sessionId);
+            // Store a snapshot for observability (cloned to avoid post-shift mutation in traces)
+            context['agenticQueues'] = JSON.parse(JSON.stringify(getQueues(sessionId)));
         }
 
         if (q.nowQueue.length > 0) {

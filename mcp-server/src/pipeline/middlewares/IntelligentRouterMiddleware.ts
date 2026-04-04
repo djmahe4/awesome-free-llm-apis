@@ -2,14 +2,17 @@ import { ProviderRegistry } from '../../providers/registry.js';
 import { TaskType } from '../middleware.js';
 import type { Middleware, PipelineContext, NextFunction } from '../middleware.js';
 import { LLMExecutor } from '../../utils/LLMExecutor.js';
+import { ContextManager } from '../../utils/ContextManager.js';
 
 export class IntelligentRouterMiddleware implements Middleware {
     name = 'IntelligentRouterMiddleware';
-    
+
     private executor: LLMExecutor;
+    private contextManager: ContextManager;
 
     constructor(executor?: LLMExecutor) {
         this.executor = executor || new LLMExecutor();
+        this.contextManager = new ContextManager();
     }
 
     /**
@@ -189,43 +192,107 @@ export class IntelligentRouterMiddleware implements Middleware {
             context.taskType = taskType;
         }
 
+        // Calculate estimated tokens for context window filtering
+        let estimatedTokens = this.executor.calculateTokens(context);
+
         // Always start with the explicitly requested model, then fall back to tier
         const requestedModel = context.request.model;
-        const tierModels = [...new Set([requestedModel, ...this.taskRouteMap[taskType as string]])].filter(Boolean);
+        // 1. Initial models for context window check
+        const initialModels = [...new Set([requestedModel, ...this.taskRouteMap[taskType as string]])].filter(Boolean);
 
         const registry = ProviderRegistry.getInstance();
-        let lastError: Error | undefined;
+        let contextCompressed = false;
 
-        // Try all fallback models/providers using the executor (without calling next() in loop)
+        // 1. Pre-filter available providers once
+        const availableProviders = registry.getAllProviders().filter(p => p.isAvailable());
+
+        // 2. Context Overflow Guard: Check if we need to compress before attempting any providers
+        const maxAvailableContext = availableProviders
+            .flatMap(p => p.models)
+            .reduce((max, m) => m.contextWindow ? Math.max(max, m.contextWindow) : max, 0);
+
+
+        if (maxAvailableContext > 0 && estimatedTokens > maxAvailableContext) {
+
+            // Target: leave 20% headroom
+            const targetTokens = Math.floor(maxAvailableContext * 0.8) - (context.request.max_tokens || 1024);
+
+            const summarizer = async (text: string): Promise<string> => {
+                const summaryCtx: PipelineContext = {
+                    request: { model: 'any', messages: [{ role: 'user', content: text }], max_tokens: 512 },
+                    taskType: TaskType.Summarization,
+                };
+
+                for (const model of this.taskRouteMap[TaskType.Summarization] || []) {
+                    const providers = availableProviders.filter(p => p.models.some(m => m.id === model));
+                    for (const provider of providers) {
+                        try {
+                            summaryCtx.request.model = model;
+                            const res = await this.executor.tryProvider(summaryCtx, provider.id, model);
+                            return res?.choices[0]?.message?.content ?? '';
+                        } catch { /* Try next */ }
+                    }
+                }
+                throw new Error('No summarization provider');
+            };
+
+            try {
+                const compressionResult = await this.contextManager.compress(context, targetTokens, summarizer);
+                context.request.messages = compressionResult.messages;
+                estimatedTokens = this.executor.calculateTokens(context);
+                contextCompressed = true;
+            } catch (err: any) {
+                console.warn(`[Router] Compression failed: ${err.message}`);
+            }
+        }
+
+        // --- Main fallback loop ---
+        let lastError: Error | null = null;
+        const fallbackModels = this.taskRouteMap[taskType as string] || this.taskRouteMap[TaskType.Chat];
+        const tierModels = [...new Set([requestedModel, ...fallbackModels])].filter(Boolean) as string[];
+
         for (const modelId of tierModels) {
-            // Find all providers that support this model and are available
-            const availableProviders = registry.getAllProviders().filter(
-                p => p.models.some(m => m.id === modelId) && p.isAvailable()
-            );
+            const scoredProviders = availableProviders
+                .filter(p => p.models.some(m => m.id === modelId))
+                .map(provider => {
+                    const modelMetadata = provider.models.find(m => m.id === modelId);
+                    if (modelMetadata && modelMetadata.contextWindow && modelMetadata.contextWindow < estimatedTokens) {
+                        return { provider, score: -1 };
+                    }
 
-            for (const provider of availableProviders) {
+                    const usage = (provider as any).getUsageStats?.() || { requestCountMinute: 0 };
+                    const rpmLimit = provider.rateLimits.rpm || 60;
+                    const rateLimitScore = 1 - (usage.requestCountMinute / rpmLimit);
+                    const tokenScore = this.executor.getTokenScore(provider.id);
+
+                    return { provider, score: Math.max(0, rateLimitScore * tokenScore) };
+                })
+                .filter(p => p.score >= 0)
+                .sort((a, b) => b.score - a.score);
+
+
+            for (const { provider } of scoredProviders) {
                 try {
-                    context.request.model = modelId;
-                    context.providerId = provider.id;
-
-                    // Use executor to try this provider (no next() call here!)
                     const response = await this.executor.tryProvider(context, provider.id, modelId);
-
-                    // If successful, set response and exit fallback loop
                     if (response) {
+                        if (contextCompressed) (context as any).contextCompressed = true;
                         context.response = response;
-                        // Now call next() ONCE after successful provider selection
+                        context.providerId = provider.id;
+                        context.request.model = modelId;
                         await next();
                         return;
                     }
-                } catch (error: any) {
-                    lastError = error;
-                    console.warn(`[Router] Model ${modelId} via ${provider.id} failed: ${error.message}. Cascading to next fallback.`);
-                    // Continue to next fallback
+                } catch (err: any) {
+                    lastError = err;
+                    console.warn(`[Router] Provider ${provider.id} failed for model ${modelId}: ${err.message}. Cascading...`);
+                    continue;
                 }
             }
         }
 
-        throw new Error(`[Router] Exhausted all fallback models for task ${taskType}. Last error: ${lastError?.message || 'No available providers'}`);
+        throw new Error(
+            `[Router] Exhausted all fallback models for task ${taskType}. ` +
+            `Last error: ${lastError?.message || 'No available providers'}`
+        );
     }
 }

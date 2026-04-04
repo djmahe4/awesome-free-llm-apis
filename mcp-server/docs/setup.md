@@ -20,8 +20,8 @@ npm install
 ```
 
 > **Note:** This project uses `quickjs-emscripten`, which requires platform-specific dependencies (like `@emnapi/core` and `@emnapi/runtime`) to be present in the `package-lock.json` for CI/CD runners (like Linux). To ensure these are always included in the lock file regardless of your development OS (Windows/macOS), they are tracked in `devDependencies`. If you see `npm ci` failures in CI, please run `npm install` locally to refresh the lock file.
-32: 
-33: ### 3. Python Environment (for Gemini)
+
+### 2. Python Environment (for Gemini)
 
 The Google Gemini provider uses the official `google-genai` Python SDK via a bridge. You need to set up a virtual environment:
 
@@ -37,6 +37,11 @@ python -m venv venv
 #   Windows (cmd) .......  venv\Scripts\activate.bat
 
 pip install -U google-genai python-dotenv
+```
+#### More dependencies
+```bash
+# (Optional) Install Python RestrictedPython — for language:"python" in code_mode
+pip install RestrictedPython
 ```
 
 > **Note:** On some Linux distros the command is `python3`. If `python` is not found, use `python3` instead.
@@ -161,13 +166,19 @@ To install the skill so your AI agent can use it:
 # Linux / macOS
 mkdir -p ~/.gemini/antigravity/skills/free-llms
 cp -r mcp-server/docs/skill/* ~/.gemini/antigravity/skills/free-llms/
+```
 
+```powershell
 # Windows (PowerShell)
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini\antigravity\skills\free-llms\"
 Copy-Item -Recurse mcp-server\docs\skill\* "$env:USERPROFILE\.gemini\antigravity\skills\free-llms\"
 ```
 
-Once copied, your agent will automatically detect the `@mcp:free-llm-apis` skill and its associated reference documents.
+Once copied, your agent will automatically detect the `@free-llms` skill and its associated reference documents for calling the `@mcp:free-llm-apis` tools. Just call the skill in prompts like:
+
+```
+@free-llms Hey help me orchestrate a workflow to extract the top 10 most starred repositories from GitHub and save them to a CSV file.
+```
 
 ## Running Smoke Tests
 

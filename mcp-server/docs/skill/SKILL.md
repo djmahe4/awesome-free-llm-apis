@@ -122,9 +122,9 @@ Execute sandboxed code against arbitrary data. Only stdout is returned — never
 | `language` | Sandbox | Notes |
 |------------|---------|-------|
 | `javascript` (default) | QuickJS (quickjs-emscripten) | Fastest; no external deps |
-| `python` | Restricted subprocess | Requires Python 3 on PATH |
-| `go` | *Reserved* | Future integration |
-| `rust` | *Reserved* | Future integration |
+| `python` | Restricted subprocess | Requires Python 3 + pip install RestrictedPython |
+| `go` | goja | pure-Go ECMAScript; requires pre-built binary |
+| `rust` | boa_engine | pure-Rust ECMAScript; requires pre-built binary |
 
 **Key parameters:**
 
@@ -220,10 +220,10 @@ You can dynamically "activate" your own agentic loop by passing the `agentic` an
 
 ### 🧠 Intelligent Behaviours
 
-- **Semantic Prompt Resolution**: Automatically indexes `external/agent-prompt/README.md` and scores sections based on your request context. You receive only the most relevant instructions (e.g., "MOMENTUM ENGINE" for performance tasks), maximizing focus and token efficiency.
-- **Granular Reference Extraction**: The steering engine can parse massive architectural maps (e.g., "Research Appendix") and extract only the relevant project entries. It uses a regex-based splitter (`/\n(?=- \[)/`) and scores each entry individually, reducing context bloat by up to 90%.
-- **Stateful Project Memory**: Passing a `sessionId` persists your task state (`nowQueue`, `improveQueue`) and project logs (`plan.md`, `tasks.md`, `knowledge.md`) in `projects/{sessionId}/`. This enables consistent cross-turn reasoning.
-- **Automatic Task Decomposition**: The middleware automatically splits your user goal into discrete steps and monitors progress. It fits auxiliary instructions within a strict budget (default: 25,000 chars) to prevent "context rot."
+- **Semantic Prompt Resolution**: Automatically indexes `external/agent-prompt/prompt.json` and scores sections based on your request context. It uses a **stricter selection threshold (score >= 3)** to ensure instructions are mission-critical, eliminating "context noise" and potential hallucinations.
+- **Granular Reference Extraction**: The steering engine parses massive architectural maps (e.g., "Research Appendix") and extracts only relevant project entries. Extracted entries are **capped at 5 per section** to maintain a lean context window while providing high-quality depth.
+- **Stateful Project Memory**: Passing a `sessionId` persists your task state (`nowQueue`, `improveQueue`) and project logs (`plan.md`, `tasks.md`, `knowledge.md`) in `projects/{sessionId}/`.
+- **Automatic Task Decomposition**: Automatically splits complex goals into discrete, trackable steps.
 
 ### ⚡ Reference Steering Protocols
 
@@ -234,6 +234,20 @@ When the middleware detects architectural keywords, it injects a **Reference Sug
 #### 🚀 Keyword Boosters
 The scoring engine prioritizes reference sections when these keywords appear in your goal or plan:
 - `api`, `url`, `git`, `map`, `rest`, `endpoint`, `reference`
+
+### 🧐 Observability & Grounding
+
+The middleware implements **Research Validation Logging** to ensure all agentic actions are grounded in verified data:
+- **[RESEARCH-VALIDATION]** logs fire during pre-execution (detection) and post-execution (grounding check).
+- Provides an explicit audit trail for external knowledge lookups and architectural steering.
+
+### 🧪 System Evidence (Zero-Mock Proofs)
+
+Verification of the system's intelligence is grounded in **live, execution-based traces**:
+- See [SAMPLES.md](../../benchmarks/SAMPLES.md) for 7 verified scenarios including **Project State Synthesis**, **Multi-Step Decomposition**, and **Deep Memorization Retrieval**.
+- See [INTAKE.md](../../benchmarks/INTAKE.md) for a breakdown of the agent-server intake protocol.
+
+---
 
 ### 🛠️ Strategic Usage Patterns
 

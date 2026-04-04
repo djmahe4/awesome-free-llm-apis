@@ -28,7 +28,7 @@ vi.mock('fs', () => {
 
 describe('Agentic Intelligence & Middleware', () => {
     const mockPromptData = {
-        metadata: { version: '1.1.0' },
+        metadata: { version: '1.0.3' },
         introduction: "Agent Identity Core",
         sections: [
             {

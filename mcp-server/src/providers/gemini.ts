@@ -27,18 +27,21 @@ export class GeminiProvider extends BaseProvider {
   /** Attempt to locate the venv Python interpreter relative to the project root */
   private resolvePythonPath(): string {
     if (process.env.PYTHON_EXECUTABLE) return process.env.PYTHON_EXECUTABLE;
-    
+
     const projectRoot = path.resolve(__dirname, '../../');
     const isWin = process.platform === 'win32';
-    
-    // Windows: venv\Scripts\python.exe
-    // Unix: venv/bin/python3
-    const venvPython = isWin 
-      ? path.join(projectRoot, 'venv', 'Scripts', 'python.exe')
-      : path.join(projectRoot, 'venv', 'bin', 'python3');
 
-    if (existsSync(venvPython)) return venvPython;
-    
+    // Windows: .venv\Scripts\python.exe, venv\Scripts\python.exe
+    // Unix: .venv/bin/python3, venv/bin/python3
+    const possibleVenvs = [
+      isWin ? path.join(projectRoot, '.venv', 'Scripts', 'python.exe') : path.join(projectRoot, '.venv', 'bin', 'python3'),
+      isWin ? path.join(projectRoot, 'venv', 'Scripts', 'python.exe') : path.join(projectRoot, 'venv', 'bin', 'python3')
+    ];
+
+    for (const venvPython of possibleVenvs) {
+      if (existsSync(venvPython)) return venvPython;
+    }
+
     // Fallback to system python
     return isWin ? 'python' : 'python3';
   }

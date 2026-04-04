@@ -8,7 +8,7 @@ const MIN_PROMPT_LENGTH = 500;
 const PROMPT_CHAR_BUDGET = 25000;
 
 const BASE = path.resolve(
-    process.env.AGENT_PROMPT_PATH ?? path.join(process.cwd(), '../../external/agent-prompt'),
+    process.env.AGENT_PROMPT_PATH ?? path.join(process.cwd(), '../external/agent-prompt'),
 );
 const README = path.join(BASE, 'README.md');
 const JSON_PROMPT = path.join(BASE, 'prompt.json');
@@ -60,15 +60,16 @@ async function loadPromptData(): Promise<PromptData | null> {
             return cachedPromptData;
         }
 
-        const data = JSON.parse(await fsp.readFile(JSON_PROMPT, 'utf-8'));
+        const raw = await fsp.readFile(JSON_PROMPT, 'utf-8');
+        const data = JSON.parse(raw);
         cachedPromptData = data as PromptData;
         lastMtime = mtime;
         return cachedPromptData;
-    } catch {
-        // Clear cache on failure to ensure a retry next time if the file reappears
+    } catch (err) {
+        console.error(`[Prompts] Error loading prompt data: ${err}`);
         cachedPromptData = null;
         lastMtime = 0;
-        return null; // Signals fallback should be used
+        return null;
     }
 }
 
@@ -78,11 +79,12 @@ async function loadPromptData(): Promise<PromptData | null> {
  */
 export async function getIntelligentSystemPrompt(context?: string): Promise<string> {
     const data = await loadPromptData();
-    if (!data) return await getFallbackPrompt();
+    if (!data) {
+        return await getFallbackPrompt();
+    }
 
     const introduction = data.introduction || "";
     if (!context) {
-        // Return intro + level 1 (most critical) sections if no context
         const critical = data.sections
             .filter(s => s.level === 1)
             .map(s => `\n\n## ${s.title}\n\n${s.content}`)
@@ -90,68 +92,72 @@ export async function getIntelligentSystemPrompt(context?: string): Promise<stri
         return `${introduction}${critical}`;
     }
 
-    // Tokenize context - allowing 3-letter tokens for technical terms (api, url, git)
+    // Tokenize context
     const tokens = new Set(context.toLowerCase().split(/\W+/).filter(t => t.length > 2));
-    
+    const contextLower = context.toLowerCase();
+
     // Score sections
     const scoredSections = data.sections.map(section => {
         let score = 0;
-        
-        // Exact title match weight
+
+        // Title match (5 points per word)
         const titleTokens = section.title.toLowerCase().split(/\W+/);
         titleTokens.forEach(tt => {
             if (tokens.has(tt)) score += 5;
         });
 
-        // Keyword overlap weight
+        // Keyword match (Stricter matching for high-precision extraction)
         section.keywords.forEach(kw => {
-            if (tokens.has(kw)) score += 1;
+            const lowKw = kw.toLowerCase();
+            if (tokens.has(lowKw)) {
+                score += 3.0; // Higher weight for matching defined keywords
+            } else if (lowKw.length > 4 && contextLower.includes(lowKw)) {
+                score += 1.0;
+            }
         });
 
-        // Level-based boost for critical architectural sections
         if (section.level === 1) score += 2;
 
-        // NEW: Reference Booster - boost research/appendix sections for architectural queries
         const isReference = section.id === 'research_appendix' || section.id === 'subsystem_reference_map';
         if (isReference) {
-            const architecturalKeywords = ['rest', 'api', 'url', 'github', 'appendix', 'reference', 'map', 'architecture'];
+            const architecturalKeywords = ['rest', 'api', 'url', 'github', 'appendix', 'reference', 'map', 'architecture', 'research'];
             architecturalKeywords.forEach(ak => {
-                if (tokens.has(ak)) score += 10;
+                if (tokens.has(ak) || contextLower.includes(ak)) score += 5;
             });
         }
 
         return { ...section, score };
     });
 
-    // Sort by score (descending) and filter relevant
     const relevant = scoredSections
-        .filter(s => s.score > 0)
+        .filter(s => s.score >= 3)
         .sort((a, b) => b.score - a.score);
 
-    // Assemble within budget with Granular Filtering for Architectural References
     let assembled = introduction;
     let currentSize = assembled.length;
 
     for (const section of relevant) {
         let content = section.content;
 
-        // Perform granular filtering for high-token reference maps
         if (section.id === 'research_appendix' || section.id === 'subsystem_reference_map') {
-            const entries = content.split(/\n(?=- \[)/).map(e => e.trim()).filter(e => e.length > 0);
+            // Split by lines starting with "- [" or "  - [" and only keep actual link entries
+            const entries = content.split(/\n(?=\s*- \[)/).map(e => e.trim()).filter(e => e.length > 0 && e.includes('['));
             const scoredEntries = entries.map(entry => {
                 let entryScore = 0;
                 const entryTokens = entry.toLowerCase().split(/\W+/);
                 entryTokens.forEach(et => {
-                    if (tokens.has(et)) entryScore += 1;
+                    if (tokens.has(et)) entryScore += 2;
+                });
+                tokens.forEach(t => {
+                    if (t.length > 4 && entry.toLowerCase().includes(t)) entryScore += 1;
                 });
                 return { entry, entryScore };
             });
 
-            // Keep only entries with actual matches, limit to top 10 to save tokens
             content = scoredEntries
-                .filter(se => se.entryScore > 0)
+                .filter(se => se.entryScore >= 2)
                 .sort((a, b) => b.entryScore - a.entryScore)
-                .slice(0, 10)
+                .slice(0, 5) // High precision: only top 5 necessary references
                 .map(se => se.entry)
                 .join('\n\n');
         }
@@ -165,8 +171,7 @@ export async function getIntelligentSystemPrompt(context?: string): Promise<stri
         }
     }
 
-    // Dynamic Protocol Injection: If references were included, add the suggestion protocol
-    const hasReferences = relevant.some(s => 
+    const hasReferences = relevant.some(s =>
         s.id === 'research_appendix' || s.id === 'subsystem_reference_map'
     );
     if (hasReferences) {
@@ -177,27 +182,24 @@ export async function getIntelligentSystemPrompt(context?: string): Promise<stri
 }
 
 async function getFallbackPrompt(): Promise<string> {
-    // Tier 2: Raw Markdown File
     try {
         await fsp.access(RAW);
         const data = (await fsp.readFile(RAW, 'utf-8')).trim();
         if (data.length > MIN_PROMPT_LENGTH) return data;
-    } catch { /* proceed to next tier */ }
+    } catch { }
 
-    // Tier 3: Resilient README Extraction fallback
     try {
         await fsp.access(README);
         const txt = await fsp.readFile(README, 'utf-8');
-        const extracted = extractFromMarkdown(txt, "You are the principal architect and builder");
+        const marker = "You are the principal architect and builder";
+        const extracted = extractFromMarkdown(txt, marker);
         if (extracted && extracted.length > MIN_PROMPT_LENGTH) return extracted;
-    } catch { /* proceed to next tier */ }
+    } catch { }
 
-    // Tier 4: Static Fallback
     return `You are the principal architect of a self-improving agent system.
 Use queues (now, next, blocked, improve), verification-first execution, and file-based state.`;
 }
 
-/** Legacy support for single-block extraction if needed elsewhere */
 function extractFromMarkdown(txt: string, marker: string): string | null {
     const startIndex = txt.indexOf(marker);
     if (startIndex === -1) return null;
@@ -212,4 +214,3 @@ function extractFromMarkdown(txt: string, marker: string): string | null {
     }
     return null;
 }
-

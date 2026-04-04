@@ -38,6 +38,14 @@ export abstract class BaseProvider implements Provider {
     return true;
   }
 
+  getUsageStats(): { requestCountMinute: number; requestCountDay: number } {
+    this.checkRateLimit();
+    return {
+      requestCountMinute: this.requestCountMinute,
+      requestCountDay: this.requestCountDay
+    };
+  }
+
   protected getApiKey(): string {
     const key = process.env[this.envVar];
     if (!key) throw new Error(`API key ${this.envVar} not set`);

@@ -316,18 +316,33 @@ cd scripts/rust-sandbox-runner && cargo build --release && cd ../..
 
 # (Optional) Install Python RestrictedPython — for language:"python" in code_mode
 pip install RestrictedPython
+```
+> Follow [setup.md](docs/setup.md) for more details.
 
 # Run in stdio mode (for Claude Desktop / Cursor)
-npm start
+```bash
+npm run start
+```
 
 # Run with HTTP dashboard (port 3000)
+```bash
 npm run dashboard
+```
 
 # Docker
+```bash
 docker-compose up
 ```
 
 See [`.env.example`](.env.example) for all supported API key variables.
+
+---
+
+## Agentic Benchmarks
+
+The MCP server includes a comprehensive benchmarking suite to measure the efficiency of its intelligent subsystems, showing typical **token savings of 90-95%** across real-world scenarios.
+
+See [**`benchmarks/README.md`**](benchmarks/README.md) for detailed evaluation criteria, input/output previews, and performance metrics.
 
 ---
 

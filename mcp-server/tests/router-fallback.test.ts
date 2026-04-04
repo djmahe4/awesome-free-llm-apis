@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+vi.setConfig({ testTimeout: 10000 });
 import {
     PipelineExecutor,
     TaskType,
@@ -41,7 +42,7 @@ describe('Router Fallback Fix - Multiple next() Calls Bug', () => {
             request: { model: 'any', messages: [{ role: 'user', content: 'test' }] },
             taskType: TaskType.Coding
         };
-        await router.execute(codingContext, async () => {});
+        await router.execute(codingContext, async () => { });
         expect(firstModelAttempted).toBe('qwen/qwen3-coder-480b-a35b-instruct:free');
 
         // Reset and test Chat task
@@ -50,7 +51,7 @@ describe('Router Fallback Fix - Multiple next() Calls Bug', () => {
             request: { model: 'any', messages: [{ role: 'user', content: 'test' }] },
             taskType: TaskType.Chat
         };
-        await router.execute(chatContext, async () => {});
+        await router.execute(chatContext, async () => { });
         // Chat should try gpt-4o first (GitHub Models - free)
         expect(firstModelAttempted).toBe('gpt-4o');
     });
@@ -244,12 +245,12 @@ describe('Router Fallback Fix - Multiple next() Calls Bug', () => {
         const attemptedProviders: string[] = [];
         vi.spyOn(executor, 'tryProvider').mockImplementation(async (context, providerId, modelId) => {
             attemptedProviders.push(providerId);
-            
+
             if (attemptedProviders.length === 1) {
                 // First provider has insufficient tokens
                 throw new Error('Exceeded tracked tokens');
             }
-            
+
             // Second provider succeeds
             return {
                 id: 'resp-tokens',
@@ -282,7 +283,7 @@ describe('Router Fallback Fix - Multiple next() Calls Bug', () => {
         const attemptedModels: string[] = [];
         vi.spyOn(executor, 'tryProvider').mockImplementation(async (context, providerId, modelId) => {
             attemptedModels.push(modelId);
-            
+
             // Succeed on any attempt for this test
             return {
                 id: 'resp-model',

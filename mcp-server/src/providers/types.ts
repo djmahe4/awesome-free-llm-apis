@@ -42,7 +42,7 @@ export interface RateLimits {
 export interface ProviderModel {
   id: string;
   name: string;
-  contextLength?: number;
+  contextWindow?: number;
 }
 
 export interface Provider {

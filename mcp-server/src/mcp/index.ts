@@ -13,7 +13,7 @@ import { validateProvider } from '../tools/validate-provider.js';
 
 export async function createMCPServer(): Promise<Server> {
   const server = new Server(
-    { name: 'free-llm-apis', version: '1.1.0' },
+    { name: 'free-llm-apis', version: '1.0.3' },
     { capabilities: { tools: {} } }
   );
 

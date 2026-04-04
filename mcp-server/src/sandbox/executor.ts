@@ -32,44 +32,6 @@ function resolveRunnerPath(...segments: string[]): string {
 
 /**
  * Execute code in an isolated, network-free, filesystem-free sandbox.
- *
- * Sandbox runtimes by language:
- *
- *   javascript (default)
- *     Engine  : QuickJS via quickjs-emscripten (in-process, no subprocess)
- *     Scripts : User writes JavaScript. print() / console.log() → stdout.
- *     Security: Fully isolated — no fs, no net, deadline interrupt for timeout.
- *
- *   python
- *     Engine  : RestrictedPython (scripts/python-sandbox-runner.py)
- *     Scripts : User writes Python. print() → stdout.
- *     Security: Dangerous builtins stripped; blocked imports list enforced.
- *     Requires: python3 on PATH. Install RestrictedPython: pip install RestrictedPython
- *
- *   go
- *     Engine  : goja — pure-Go ECMAScript 5.1+ (scripts/go-sandbox-runner/)
- *     Scripts : User writes JavaScript. print() / console.log() → stdout.
- *     Security: No require/process/fs/net globals. Timeout via goroutine interrupt.
- *     Requires: Pre-built binary at scripts/go-sandbox-runner/sandbox-runner
- *               Build: cd scripts/go-sandbox-runner && go build -o sandbox-runner .
- *
- *   rust
- *     Engine  : boa_engine — pure-Rust ECMAScript 2021 (scripts/rust-sandbox-runner/)
- *     Scripts : User writes JavaScript. print() / console.log() → stdout.
- *     Security: No require/process/fs/net globals.
- *     Requires: Pre-built binary at scripts/rust-sandbox-runner/target/release/sandbox-runner
- *               Build: cd scripts/rust-sandbox-runner && cargo build --release
- *
- * All runtimes expose:
- *   DATA          — the input data string (injected before execution)
- *   print()       — captures a line to stdout
- *   console.log() — captures a line to stdout
- *   console.error()— captures a line to stderr
- *
- * @param code      - Script source code
- * @param data      - Input data injected as DATA global variable
- * @param timeoutMs - Maximum execution time in milliseconds (default 5000)
- * @param language  - Sandbox runtime language (default 'javascript')
  */
 export async function executeInSandbox(
   code: string,
@@ -113,11 +75,6 @@ export async function executeInSandbox(
 // JavaScript — QuickJS (quickjs-emscripten), in-process
 // ---------------------------------------------------------------------------
 
-/**
- * Execute JavaScript in a QuickJS sandbox (quickjs-emscripten).
- * Fully isolated: no filesystem, no network, no Node.js APIs.
- * Timeout enforced via deadline interrupt handler.
- */
 async function executeJavaScript(
   code: string,
   data: string,
@@ -130,19 +87,16 @@ async function executeJavaScript(
   const stderrLines: string[] = [];
 
   try {
-    // Inject DATA global
     const dataHandle = context.newString(data);
     context.setProp(context.global, 'DATA', dataHandle);
     dataHandle.dispose();
 
-    // print() → stdout
     const printFn = context.newFunction('print', (...args) => {
       stdoutLines.push(args.map((a) => context.dump(a)).join(' '));
     });
     context.setProp(context.global, 'print', printFn);
     printFn.dispose();
 
-    // console.log / console.error
     const consolObj = context.newObject();
     const logFn = context.newFunction('log', (...args) => {
       stdoutLines.push(args.map((a) => context.dump(a)).join(' '));
@@ -199,17 +153,6 @@ async function executeJavaScript(
 // Python — RestrictedPython subprocess runner
 // ---------------------------------------------------------------------------
 
-/**
- * Execute Python code via the RestrictedPython sandbox runner script.
- *
- * The runner (scripts/python-sandbox-runner.py) enforces:
- *   - Safe builtins only (no open, no __import__ of fs/net modules)
- *   - RestrictedPython compile_restricted() if available (falls back to manual restriction)
- *   - DATA injected via SANDBOX_DATA environment variable
- *
- * Requires: python3 on PATH.
- * Optional: pip install RestrictedPython for full RestrictedPython enforcement.
- */
 async function executePython(
   code: string,
   data: string,
@@ -227,12 +170,12 @@ async function executePython(
       input: code,
       timeout: timeoutMs,
       env: { ...process.env, SANDBOX_DATA: data },
-      maxBuffer: 1024 * 1024, // 1 MB output limit
+      maxBuffer: 1024 * 1024,
     } as any);
 
     return {
-      stdout: (stdout as string).trimEnd(),
-      stderr: (stderr as string).trimEnd(),
+      stdout: (stdout as unknown as string).trimEnd(),
+      stderr: (stderr as unknown as string).trimEnd(),
       success: true,
       executionTimeMs: Date.now() - startTime,
     };
@@ -246,38 +189,17 @@ async function executePython(
       error: notFound
         ? 'python3 is not available on PATH. Install Python 3 to use language:"python".'
         : timedOut
-        ? 'Execution timed out'
-        : err.message ?? String(err),
+          ? 'Execution timed out'
+          : err.message ?? String(err),
       executionTimeMs: Date.now() - startTime,
     };
   }
 }
 
 // ---------------------------------------------------------------------------
-// Go (goja) / Rust (boa_engine) — pre-compiled binary subprocess runner
+// Go / Rust — subprocess runner
 // ---------------------------------------------------------------------------
 
-/**
- * Execute JavaScript code via a pre-compiled sandbox runner binary.
- *
- * Used for:
- *   go   → scripts/go-sandbox-runner/sandbox-runner   (uses goja, pure-Go JS engine)
- *   rust → scripts/rust-sandbox-runner/target/release/sandbox-runner (uses boa_engine)
- *
- * Both runners:
- *   - Read JavaScript code from stdin
- *   - Read DATA from SANDBOX_DATA environment variable
- *   - Write stdout output to stdout
- *   - Write errors to stderr
- *   - Exit 0 on success, 1 on error
- *
- * Build instructions:
- *   go:   cd scripts/go-sandbox-runner   && go build -o sandbox-runner .
- *   rust: cd scripts/rust-sandbox-runner && cargo build --release
- *
- * @param binaryPath - Absolute path to the compiled runner binary
- * @param langLabel  - Language label for error messages ('go' | 'rust')
- */
 async function executeSubprocessRunner(
   binaryPath: string,
   langLabel: string,
@@ -287,7 +209,6 @@ async function executeSubprocessRunner(
 ): Promise<ExecutionResult> {
   const startTime = Date.now();
 
-  // Check binary exists
   try {
     const { access } = await import('fs/promises');
     await access(binaryPath);
@@ -320,12 +241,12 @@ async function executeSubprocessRunner(
         SANDBOX_DATA: data,
         SANDBOX_TIMEOUT_MS: String(timeoutMs),
       },
-      maxBuffer: 1024 * 1024, // 1 MB output limit
+      maxBuffer: 1024 * 1024,
     } as any);
 
     return {
-      stdout: (stdout as string).trimEnd(),
-      stderr: (stderr as string).trimEnd(),
+      stdout: (stdout as unknown as string).trimEnd(),
+      stderr: (stderr as unknown as string).trimEnd(),
       success: true,
       executionTimeMs: Date.now() - startTime,
     };
