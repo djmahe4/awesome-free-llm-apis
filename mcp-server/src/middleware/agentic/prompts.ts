@@ -61,12 +61,20 @@ async function loadPromptData(): Promise<PromptData | null> {
         }
 
         const raw = await fsp.readFile(JSON_PROMPT, 'utf-8');
-        const data = JSON.parse(raw);
-        cachedPromptData = data as PromptData;
-        lastMtime = mtime;
-        return cachedPromptData;
+        try {
+            const data = JSON.parse(raw);
+            cachedPromptData = data as PromptData;
+            lastMtime = mtime;
+            return cachedPromptData;
+        } catch (parseErr) {
+            console.error(`[Prompts] Invalid JSON in prompt data: ${parseErr}`);
+            return null;
+        }
     } catch (err) {
-        console.error(`[Prompts] Error loading prompt data: ${err}`);
+        // Only log if it's not a standard file-missing error during tests
+        if (!(err instanceof Error && err.message.includes('ENOENT'))) {
+            console.error(`[Prompts] Error loading prompt data: ${err}`);
+        }
         cachedPromptData = null;
         lastMtime = 0;
         return null;

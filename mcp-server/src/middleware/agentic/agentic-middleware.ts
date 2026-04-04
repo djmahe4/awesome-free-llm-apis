@@ -164,6 +164,15 @@ export class AgenticMiddleware implements Middleware {
             return;
         }
 
+        // Resolve workspace files if possible
+        if (context.workspaceRoot) {
+            try {
+                await ensureProjectFiles(context.workspaceRoot);
+            } catch (err) {
+                console.error(`[AgenticMiddleware] Failed to ensure project files: ${err}`);
+            }
+        }
+
         const projectDir = await ensureProjectFiles(sessionId);
         const q = getQueues(sessionId);
 
@@ -171,13 +180,19 @@ export class AgenticMiddleware implements Middleware {
         const userMessage = context.request.messages.find(m => m.role === 'user');
         const userContent = userMessage ? String(userMessage.content) : undefined;
 
+        try {
+            await prependSystemPrompt(context, userContent);
+        } catch (err) {
+            console.error(`[AgenticMiddleware] Error prepending system prompt: ${err}`);
+            // Continue without the prepended prompt
+        }
+
         // Research validation: detect and log if this request involves external knowledge lookup.
         // This provides an explicit audit trail to reduce agent ambiguity and hallucination risk.
         if (userContent && detectResearchIntent(userContent)) {
             logResearchValidation(sessionId, userContent, 'pre-execution-research-detection');
         }
 
-        await prependSystemPrompt(context, userContent);
 
         // Task decomposition: Only perform if nowQueue is empty to prevent multi-turn duplication
         if (userContent && q.nowQueue.length === 0) {

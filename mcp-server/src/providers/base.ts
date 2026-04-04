@@ -80,6 +80,10 @@ export abstract class BaseProvider implements Provider {
     this.recordRequest();
     const apiKey = this.getApiKey();
     const url = `${this.baseURL}chat/completions`;
+
+    // Sanitize request: Remove internal-only fields that strict APIs reject
+    const { agentic, ...sanitizedRequest } = request as any;
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -89,7 +93,7 @@ export abstract class BaseProvider implements Provider {
         Origin: new URL(this.baseURL).origin,
         Referer: new URL(this.baseURL).origin + '/',
       },
-      body: JSON.stringify(request),
+      body: JSON.stringify(sanitizedRequest),
     });
     if (!response.ok) {
       const text = await response.text();
@@ -107,6 +111,10 @@ export abstract class BaseProvider implements Provider {
     this.recordRequest();
     const apiKey = this.getApiKey();
     const url = `${this.baseURL}chat/completions`;
+
+    // Sanitize request: Remove internal-only fields that strict APIs reject
+    const { agentic, ...sanitizedRequest } = request as any;
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -116,7 +124,7 @@ export abstract class BaseProvider implements Provider {
         Origin: new URL(this.baseURL).origin,
         Referer: new URL(this.baseURL).origin + '/',
       },
-      body: JSON.stringify({ ...request, stream: true }),
+      body: JSON.stringify({ ...sanitizedRequest, stream: true }),
     });
     if (!response.ok) {
       const text = await response.text();

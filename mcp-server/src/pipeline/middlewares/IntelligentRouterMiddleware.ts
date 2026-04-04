@@ -38,6 +38,7 @@ export class IntelligentRouterMiddleware implements Middleware {
             'gemini-2.5-flash',
             'qwen/qwen3-coder-480b-a35b-instruct:free',
             'mistral-large-latest',
+            'mistral-small-latest',
             'DeepSeek-R1',
             'openai/gpt-oss-120b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
@@ -53,6 +54,7 @@ export class IntelligentRouterMiddleware implements Middleware {
             'gemini-2.5-flash',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             'ministral-8b-latest',
+            'mistral-small-latest',
             'nvidia/nemotron-3-super-120b-a12b:free',
             'nvidia/nemotron-mini-4b-instruct',
             'arcee-ai/trinity-mini:free',
@@ -69,6 +71,7 @@ export class IntelligentRouterMiddleware implements Middleware {
             'gemini-2.5-flash',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             'ministral-8b-latest',
+            'mistral-small-latest',
             'nvidia/nemotron-3-nano-30b-a3b:free',
             'nvidia/nemotron-mini-4b-instruct',
             'arcee-ai/trinity-mini:free',
@@ -85,6 +88,7 @@ export class IntelligentRouterMiddleware implements Middleware {
             'nvidia/nemotron-mini-4b-instruct',
             'nvidia/nemotron-nano-9b-v2:free',
             'mistral-small-latest',
+            'ministral-8b-latest',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             'arcee-ai/trinity-mini:free',
             'z-ai/glm-4.5-air:free',
@@ -100,6 +104,7 @@ export class IntelligentRouterMiddleware implements Middleware {
             'gemini-2.5-flash',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             'mistral-large-latest',
+            'mistral-small-latest',
             'qwen/qwen3-next-80b-a3b-instruct:free',
             'openai/gpt-oss-120b:free',
             'gemini-2.5-pro',
@@ -111,6 +116,8 @@ export class IntelligentRouterMiddleware implements Middleware {
             'gemini-2.5-flash',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             'command-a-03-2025',
+            'mistral-small-latest',
+            'ministral-8b-latest',
             'mistralai/mistral-small-3.1-24b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
             'openai/gpt-oss-20b:free',
@@ -126,6 +133,8 @@ export class IntelligentRouterMiddleware implements Middleware {
             'arcee-ai/trinity-large-preview:free',
             'command-r-plus-08-2024',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+            'mistral-small-latest',
+            'ministral-8b-latest',
             'z-ai/glm-4.5-air:free',
             'qwen/qwen3-next-80b-a3b-instruct:free',
             'gemini-3.1-flash-lite-preview',
@@ -139,10 +148,14 @@ export class IntelligentRouterMiddleware implements Middleware {
             'gemini-2.5-flash',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             'mistral-large-latest',
+            'mistral-small-latest',
+            'ministral-8b-latest',
             'Llama-3.3-70B-Instruct',
             'DeepSeek-R1',
             'openai/gpt-oss-120b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
+            'nvidia/nemotron-3-super-120b-a12b:free',
+            'nvidia/nemotron-mini-4b-instruct',
             'liquid/lfm2.5-1.2b-thinking:free',
             'stepfun/step-3.5-flash:free',
             'gemini-2.5-pro',
@@ -314,6 +327,7 @@ export class IntelligentRouterMiddleware implements Middleware {
 
         throw new Error(
             `[Router] Exhausted all fallback models and compression for task ${taskType}. ` +
+            `Paths attempted: ${(context as any).providersAttempted.join(', ')}. ` +
             `Last error: ${lastError?.message || 'No available providers'}`
         );
     }
