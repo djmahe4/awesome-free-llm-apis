@@ -33,6 +33,17 @@ export class ContextManager {
      * Count tokens for a message array.
      */
     countTokens(messages: Message[]): number {
+        let totalChars = 0;
+        for (const msg of messages) {
+            totalChars += msg.content.length;
+        }
+
+        // Optimization: If the string is massive (> 20k chars), 
+        // return a safe upper bound estimate immediately
+        if (totalChars > 20000) {
+            return Math.ceil(totalChars / 2); // Same factor as LLMExecutor
+        }
+
         let total = 0;
         for (const msg of messages) {
             total += this.encoder.encode(msg.content).length + 4; // ~4 overhead per msg
@@ -190,14 +201,51 @@ export class ContextManager {
         const systemMsgs = messages.filter(m => m.role === 'system');
         let nonSystemMsgs = messages.filter(m => m.role !== 'system');
 
-        // Keep removing oldest until we fit
+        // 1. First drop whole messages
         while (nonSystemMsgs.length > 1) {
             const candidate = [...systemMsgs, ...nonSystemMsgs];
             if (this.countTokens(candidate) <= targetTokens) break;
-            nonSystemMsgs = nonSystemMsgs.slice(1); // Drop oldest
+            nonSystemMsgs = nonSystemMsgs.slice(1);
         }
 
-        const result = [...systemMsgs, ...nonSystemMsgs];
+        // 2. If still over budget and one message remains, truncate that one message
+        let result = [...systemMsgs, ...nonSystemMsgs];
+        if (this.countTokens(result) > targetTokens && nonSystemMsgs.length > 0) {
+            const lastMsg = nonSystemMsgs[nonSystemMsgs.length - 1];
+            const systemTokens = this.countTokens(systemMsgs);
+            const remainingBudget = Math.max(0, targetTokens - systemTokens - 20); // 20 buffer
+
+            if (remainingBudget > 50) {
+                // High-performance truncation: Estimate chars from tokens (avg ~4 chars per token)
+                // Use a safe factor (3 chars per token) to avoid over-truncation
+                const approxChars = remainingBudget * 3;
+                let truncatedContent = lastMsg.content.slice(-approxChars);
+
+                // Refine with small word-by-word steps if still too big
+                // or add back words if we have room. For emergency, we just want to BE UNDER budget.
+                // We'll perform one more Tiktoken check and adjust if needed.
+                let currentTokens = this.countStringTokens(truncatedContent);
+
+                if (currentTokens > remainingBudget) {
+                    // Still too big? Hard slice by tokens/chars ratio
+                    const ratio = remainingBudget / currentTokens;
+                    truncatedContent = truncatedContent.slice(-Math.floor(truncatedContent.length * ratio * 0.9));
+                }
+
+                nonSystemMsgs[nonSystemMsgs.length - 1] = {
+                    ...lastMsg,
+                    content: `[...truncated...] ${truncatedContent.trim()}`
+                };
+            } else {
+                // Budget too small for meaningful content
+                nonSystemMsgs[nonSystemMsgs.length - 1] = {
+                    ...lastMsg,
+                    content: `[...truncated for emergencyFallback...]`
+                };
+            }
+            result = [...systemMsgs, ...nonSystemMsgs];
+        }
+
         return {
             messages: result,
             strategy: 'truncate-oldest',
