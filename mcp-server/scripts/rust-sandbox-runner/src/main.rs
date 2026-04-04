@@ -100,8 +100,14 @@ fn run_in_boa(code: &str, data: &str) -> Result<(), String> {
         .map_err(|e| format!("[rust-sandbox] Failed to set DATA: {e}"))?;
 
     // print() → stdout
-    let print_fn = NativeFunction::from_fn_ptr(|_this, args, _ctx| {
-        let parts: Vec<String> = args.iter().map(|v| v.display().to_string()).collect();
+    let print_fn = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+        let mut parts = Vec::new();
+        for arg in args {
+            let s = arg.to_string(ctx)
+                .map(|js_str| js_str.to_std_string_escaped())
+                .unwrap_or_else(|_| "Error".to_string());
+            parts.push(s);
+        }
         push_stdout(parts.join(" "));
         Ok(JsValue::undefined())
     });
@@ -110,18 +116,36 @@ fn run_in_boa(code: &str, data: &str) -> Result<(), String> {
         .map_err(|e| format!("[rust-sandbox] Failed to register print: {e}"))?;
 
     // console.log / console.error / console.warn
-    let log_fn = NativeFunction::from_fn_ptr(|_this, args, _ctx| {
-        let parts: Vec<String> = args.iter().map(|v| v.display().to_string()).collect();
+    let log_fn = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+        let mut parts = Vec::new();
+        for arg in args {
+            let s = arg.to_string(ctx)
+                .map(|js_str| js_str.to_std_string_escaped())
+                .unwrap_or_else(|_| "Error".to_string());
+            parts.push(s);
+        }
         push_stdout(parts.join(" "));
         Ok(JsValue::undefined())
     });
-    let error_fn = NativeFunction::from_fn_ptr(|_this, args, _ctx| {
-        let parts: Vec<String> = args.iter().map(|v| v.display().to_string()).collect();
+    let error_fn = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+        let mut parts = Vec::new();
+        for arg in args {
+            let s = arg.to_string(ctx)
+                .map(|js_str| js_str.to_std_string_escaped())
+                .unwrap_or_else(|_| "Error".to_string());
+            parts.push(s);
+        }
         push_stderr(parts.join(" "));
         Ok(JsValue::undefined())
     });
-    let warn_fn = NativeFunction::from_fn_ptr(|_this, args, _ctx| {
-        let parts: Vec<String> = args.iter().map(|v| v.display().to_string()).collect();
+    let warn_fn = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+        let mut parts = Vec::new();
+        for arg in args {
+            let s = arg.to_string(ctx)
+                .map(|js_str| js_str.to_std_string_escaped())
+                .unwrap_or_else(|_| "Error".to_string());
+            parts.push(s);
+        }
         push_stderr(format!("[warn] {}", parts.join(" ")));
         Ok(JsValue::undefined())
     });

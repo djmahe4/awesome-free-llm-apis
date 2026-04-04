@@ -26,12 +26,17 @@ import sys
 import os
 import io
 import traceback
+import warnings
+
+# Suppress RestrictedPython warning about 'printed' variable not being read.
+# We handle output collection manually via SharedCollector, making the variable redundant.
+warnings.filterwarnings("ignore", category=SyntaxWarning, message=".*never reads 'printed' variable.*")
 
 try:
     from RestrictedPython import compile_restricted, safe_globals, safe_builtins
     from RestrictedPython.Guards import (
-        safe_iter_unpack_sequence,
         guarded_iter_unpack_sequence,
+        guarded_unpack_sequence,
     )
     from RestrictedPython.PrintCollector import PrintCollector
     HAS_RESTRICTED_PYTHON = True
@@ -74,53 +79,6 @@ def _safe_import(name, *args, **kwargs):
     return __import__(name, *args, **kwargs)
 
 
-def _build_restricted_globals(data: str, print_collector: 'PrintCollector') -> dict:
-    """Build the restricted globals namespace for user code execution."""
-    if HAS_RESTRICTED_PYTHON:
-        glb = safe_globals.copy()
-        glb['__builtins__'] = safe_builtins.copy()
-    else:
-        # Fallback minimal safe builtins when RestrictedPython is not installed
-        glb = {'__builtins__': {}}
-        glb['__builtins__'] = {
-            'print': print,
-            'len': len, 'range': range, 'enumerate': enumerate, 'zip': zip,
-            'map': map, 'filter': filter, 'sorted': sorted, 'reversed': reversed,
-            'list': list, 'dict': dict, 'set': set, 'tuple': tuple, 'frozenset': frozenset,
-            'str': str, 'int': int, 'float': float, 'bool': bool, 'bytes': bytes,
-            'max': max, 'min': min, 'sum': sum, 'abs': abs, 'round': round,
-            'isinstance': isinstance, 'issubclass': issubclass, 'type': type,
-            'repr': repr, 'format': format, 'hasattr': hasattr, 'getattr': getattr,
-            'callable': callable, 'iter': iter, 'next': next, 'any': any, 'all': all,
-            'hash': hash, 'id': id, 'hex': hex, 'oct': oct, 'bin': bin, 'chr': chr, 'ord': ord,
-            'divmod': divmod, 'pow': pow, 'slice': slice,
-            'True': True, 'False': False, 'None': None,
-            'Exception': Exception, 'ValueError': ValueError, 'TypeError': TypeError,
-            'KeyError': KeyError, 'IndexError': IndexError, 'StopIteration': StopIteration,
-            'AttributeError': AttributeError, 'RuntimeError': RuntimeError,
-        }
-
-    # Allow controlled import of safe modules
-    glb['__builtins__']['__import__'] = _safe_import
-
-    # RestrictedPython guard hooks
-    if HAS_RESTRICTED_PYTHON:
-        glb['_iter_unpack_sequence_'] = safe_iter_unpack_sequence
-        glb['_getiter_'] = iter
-        glb['_getattr_'] = getattr
-        glb['_write_'] = lambda x: x  # Allow writes to local names
-
-    # Inject DATA global
-    glb['DATA'] = data
-
-    # Wire print() to our collector
-    if HAS_RESTRICTED_PYTHON:
-        glb['_print_'] = print_collector
-        glb['print'] = print_collector
-
-    return glb
-
-
 def run_sandboxed(code: str, data: str) -> tuple[str, str, bool]:
     """
     Execute `code` in a RestrictedPython sandbox with `data` available as DATA.
@@ -128,71 +86,85 @@ def run_sandboxed(code: str, data: str) -> tuple[str, str, bool]:
     Returns:
         (stdout: str, stderr: str, success: bool)
     """
-    # Redirect real stdout/stderr
+    if not HAS_RESTRICTED_PYTHON:
+        return '', 'CRITICAL: RestrictedPython is not installed. Python sandboxing is disabled. Please install it with: pip install RestrictedPython', False
+
+    # Redirect real stdout/stderr to prevent any unexpected leakage
     real_stdout = sys.stdout
     real_stderr = sys.stderr
     captured_stderr = io.StringIO()
     sys.stderr = captured_stderr
+    sys.stdout = io.StringIO()  # Also redirect stdout just in case
 
     stdout_lines: list[str] = []
 
-    if HAS_RESTRICTED_PYTHON:
-        # Use RestrictedPython's PrintCollector
-        collector = PrintCollector()
-
-        def captured_print(*args, **kwargs):
+    class SharedCollector:
+        """A collector that appends to the shared stdout_lines list."""
+        def __init__(self, _get_write=None):
+            pass
+        def write(self, data):
+            stdout_lines.append(data)
+        def __call__(self):
+            return ''.join(stdout_lines)
+        def _call_print(self, *args, **kwargs):
             sep = kwargs.get('sep', ' ')
             end = kwargs.get('end', '\n')
-            line = sep.join(str(a) for a in args)
-            stdout_lines.append(line)
-            # Output is collected and returned by run_sandboxed
+            stdout_lines.append(sep.join(map(str, args)) + end)
 
+    def builtin_print(*args, **kwargs):
+        """Custom builtin print that appends to our list."""
+        sep = kwargs.get('sep', ' ')
+        end = kwargs.get('end', '\n')
+        stdout_lines.append(sep.join(map(str, args)) + end)
+
+    try:
         # Compile using RestrictedPython
         try:
             byte_code = compile_restricted(code, filename='<sandbox>', mode='exec')
         except SyntaxError as e:
-            sys.stdout = real_stdout
-            sys.stderr = real_stderr
             return '', f'SyntaxError: {e}', False
 
-        restricted_globals = _build_restricted_globals(data, captured_print)
-        restricted_globals['print'] = captured_print
+        glb = safe_globals.copy()
+        glb['__builtins__'] = safe_builtins.copy()
+        glb['__builtins__']['__import__'] = _safe_import
+        glb['__builtins__']['print'] = builtin_print
+        
+        # In RestrictedPython, the 'print' statement is transformed to use _print_
+        glb['_print_'] = SharedCollector
+        glb['_iter_unpack_sequence_'] = guarded_iter_unpack_sequence
+        glb['_getiter_'] = iter
+        glb['_getattr_'] = getattr
+        glb['_write_'] = lambda x: x
+        glb['DATA'] = data
 
         try:
-            exec(byte_code, restricted_globals)  # noqa: S102
+            exec(byte_code, glb)  # noqa: S102
             success = True
-        except Exception as e:  # noqa: BLE001
-            captured_stderr.write(traceback.format_exc())
-            success = False
-    else:
-        # Fallback: manual builtins restriction (no RestrictedPython installed)
-        sys.stdout = io.StringIO()
-
-        def captured_print(*args, **kwargs):
-            sep = kwargs.get('sep', ' ')
-            end = kwargs.get('end', '')
-            line = sep.join(str(a) for a in args)
-            stdout_lines.append(line + end.rstrip('\n'))
-
-        safe_glb = _build_restricted_globals(data, captured_print)
-        safe_glb['print'] = captured_print
-
-        try:
-            exec(compile(code, '<sandbox>', 'exec'), safe_glb)  # noqa: S102
-            success = True
-        except Exception as e:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             captured_stderr.write(traceback.format_exc())
             success = False
 
+        # Return accumulated output
+        stdout = ''.join(stdout_lines)
+        return stdout, captured_stderr.getvalue(), success
+
+    finally:
         sys.stdout = real_stdout
-
-    sys.stderr = real_stderr
-    return '\n'.join(stdout_lines), captured_stderr.getvalue(), success
+        sys.stderr = real_stderr
 
 
 def main() -> None:
+    if not HAS_RESTRICTED_PYTHON:
+        print("[python-sandbox] CRITICAL: RestrictedPython is not installed. Python sandboxing is disabled.", file=sys.stderr)
+        print("Please install it with: pip install RestrictedPython", file=sys.stderr)
+        sys.exit(2)
+
     # Read user code from stdin
-    code = sys.stdin.read()
+    try:
+        code = sys.stdin.read()
+    except EOFError:
+        code = ''
+
     if not code.strip():
         print('[python-sandbox] No code provided via stdin.', file=sys.stderr)
         sys.exit(1)
@@ -202,6 +174,7 @@ def main() -> None:
 
     stdout, stderr, success = run_sandboxed(code, data)
 
+    # Note: PrintCollector usually adds a trailing newline
     if stdout:
         print(stdout, end='')
     if stderr:

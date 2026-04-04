@@ -153,6 +153,39 @@ async function executeJavaScript(
 // Python — RestrictedPython subprocess runner
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve the absolute path to the Python executable.
+ * Prefers local venv/ or .venv/ if they exist, supporting cross-platform paths.
+ */
+function resolvePythonPath(): string {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+
+  const isWindows = process.platform === 'win32';
+  const venvNames = ['venv', '.venv'];
+  const binDir = isWindows ? 'Scripts' : 'bin';
+  const pythonExe = isWindows ? 'python.exe' : 'python3';
+
+  // Try going up to find workspace root robustly
+  // src/sandbox/executor.ts → ../..
+  // dist/src/sandbox/executor.js → ../../..
+  const roots = [
+    path.resolve(__dirname, '..', '..'),
+    path.resolve(__dirname, '..', '..', '..'),
+  ];
+
+  for (const root of roots) {
+    for (const venvName of venvNames) {
+      const fullPath = path.resolve(root, venvName, binDir, pythonExe);
+      if (fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+  }
+
+  return isWindows ? 'python.exe' : 'python3';
+}
+
 async function executePython(
   code: string,
   data: string,
@@ -160,23 +193,19 @@ async function executePython(
 ): Promise<ExecutionResult> {
   const startTime = Date.now();
   const scriptPath = resolveRunnerPath('python-sandbox-runner.py');
+  const pythonPath = resolvePythonPath();
 
   try {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
-
-    const { stdout, stderr } = await execFileAsync('python3', [scriptPath], {
-      input: code,
+    const result = await runSubprocessWithStdin(pythonPath, [scriptPath], code, {
       timeout: timeoutMs,
-      env: { ...process.env, SANDBOX_DATA: data },
-      maxBuffer: 1024 * 1024,
-    } as any);
+      env: { SANDBOX_DATA: data },
+    });
 
     return {
-      stdout: (stdout as unknown as string).trimEnd(),
-      stderr: (stderr as unknown as string).trimEnd(),
-      success: true,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      success: result.success,
+      error: result.error,
       executionTimeMs: Date.now() - startTime,
     };
   } catch (err: any) {
@@ -187,7 +216,7 @@ async function executePython(
       stderr: err.stderr?.trimEnd() ?? '',
       success: false,
       error: notFound
-        ? 'python3 is not available on PATH. Install Python 3 to use language:"python".'
+        ? `${pythonPath} is not available. Install Python 3 to use language:"python".`
         : timedOut
           ? 'Execution timed out'
           : err.message ?? String(err),
@@ -229,25 +258,19 @@ async function executeSubprocessRunner(
   }
 
   try {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
-
-    const { stdout, stderr } = await execFileAsync(binaryPath, [], {
-      input: code,
+    const result = await runSubprocessWithStdin(binaryPath, [], code, {
       timeout: timeoutMs,
       env: {
-        ...process.env,
         SANDBOX_DATA: data,
         SANDBOX_TIMEOUT_MS: String(timeoutMs),
       },
-      maxBuffer: 1024 * 1024,
-    } as any);
+    });
 
     return {
-      stdout: (stdout as unknown as string).trimEnd(),
-      stderr: (stderr as unknown as string).trimEnd(),
-      success: true,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      success: result.success,
+      error: result.error,
       executionTimeMs: Date.now() - startTime,
     };
   } catch (err: any) {
@@ -260,4 +283,70 @@ async function executeSubprocessRunner(
       executionTimeMs: Date.now() - startTime,
     };
   }
+}
+
+/**
+ * Helper to run a subprocess with stdin input and captured output.
+ */
+async function runSubprocessWithStdin(
+  command: string,
+  args: string[],
+  input: string,
+  options: { timeout?: number; env?: Record<string, string> }
+): Promise<ExecutionResult & { code: number | null }> {
+  const startTime = Date.now();
+  const { spawn } = await import('child_process');
+
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      env: options.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let killedByTimeout = false;
+
+    const timeout = options.timeout
+      ? setTimeout(() => {
+        killedByTimeout = true;
+        child.kill('SIGKILL');
+      }, options.timeout)
+      : null;
+
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('error', (err: any) => {
+      if (timeout) clearTimeout(timeout);
+      resolve({
+        stdout: stdout.trimEnd(),
+        stderr: stderr.trimEnd(),
+        success: false,
+        error: err.code === 'ENOENT' ? `${command} not found` : err.message,
+        executionTimeMs: Date.now() - startTime,
+        code: null,
+      });
+    });
+
+    child.on('close', (code) => {
+      if (timeout) clearTimeout(timeout);
+      resolve({
+        stdout: stdout.trimEnd(),
+        stderr: stderr.trimEnd(),
+        success: code === 0 && !killedByTimeout,
+        error: killedByTimeout ? 'Execution timed out' : (code !== 0 ? `Subprocess failed with code ${code}` : undefined),
+        executionTimeMs: Date.now() - startTime,
+        code,
+      });
+    });
+
+    child.stdin.write(input);
+    child.stdin.end();
+  });
 }
