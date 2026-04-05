@@ -16,13 +16,9 @@ vi.mock('fs', () => {
     };
     return {
         default: {
-            existsSync: vi.fn(),
-            readFileSync: vi.fn(),
             promises: mockPromises,
         },
         promises: mockPromises,
-        existsSync: vi.fn(),
-        readFileSync: vi.fn(),
     };
 });
 
@@ -65,6 +61,7 @@ describe('Agentic Intelligence & Middleware', () => {
             if (path.endsWith('prompt.json') || path.endsWith('system-prompt-raw.md') || path.endsWith('README.md')) return undefined;
             throw new Error('File not found');
         });
+        (vi.mocked(fsp.stat) as any).mockImplementation(async () => ({ mtimeMs: Date.now() }));
         (vi.mocked(fsp.readFile) as any).mockImplementation(async (path: string) => {
             if (path.endsWith('prompt.json')) return JSON.stringify(mockPromptData);
             if (path.endsWith('README.md')) return "Tier 2 Fallback (README)".padEnd(600, '!');

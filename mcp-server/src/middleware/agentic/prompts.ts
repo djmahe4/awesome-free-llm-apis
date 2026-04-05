@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 /** Minimum character length for a raw prompt file to be considered valid. */
 const MIN_PROMPT_LENGTH = 500;
 /** Maximum character budget for the dynamically assembled system prompt. */
-const PROMPT_CHAR_BUDGET = 25000;
+const PROMPT_CHAR_BUDGET = 12000;
 
 // Resolve the base directory relative to this file, not process.cwd(),
 // so it works correctly regardless of where the process is launched from.
@@ -137,7 +137,8 @@ export async function getIntelligentSystemPrompt(context?: string, explicitKeywo
             }
         });
 
-        if (section.level === 1) score += 2;
+        if (section.level === 1) score += 2.0;
+        if (section.level === 2) score += 1.1; // Ensure single keyword match (3) + level boost (1.1) > threshold (4.0)
 
         const isReference = section.id === 'research_appendix' || section.id === 'subsystem_reference_map';
         if (isReference) {
@@ -155,8 +156,9 @@ export async function getIntelligentSystemPrompt(context?: string, explicitKeywo
     });
 
     const relevant = scoredSections
-        .filter(s => s.score >= 3)
-        .sort((a, b) => b.score - a.score);
+        .filter(s => s.score >= 4)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 7);
 
     let assembled = introduction;
     let currentSize = assembled.length;

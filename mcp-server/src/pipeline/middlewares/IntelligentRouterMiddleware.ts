@@ -418,7 +418,12 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
                 context.estimatedTokens = estimatedTokens;
                 contextCompressed = true;
             } catch (err: any) {
-                console.warn(`[Router][Tier1] Compression failed: ${err.message}`);
+                console.warn(`[Router][Tier1] Compression failed, falling back to Tier 2: ${err.message}`);
+                const truncated = this.contextManager.truncateOldest(context.request.messages, targetTokens);
+                context.request.messages = truncated.messages;
+                estimatedTokens = truncated.compressedTokens;
+                context.estimatedTokens = estimatedTokens;
+                contextCompressed = true;
             }
         }
 
@@ -426,7 +431,7 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
         if (estimatedTokens > 12000) {
             const truncated = this.contextManager.truncateOldest(context.request.messages, 8000);
             context.request.messages = truncated.messages;
-            estimatedTokens = this.executor.calculateTokens(context.request.messages);
+            estimatedTokens = truncated.compressedTokens;
             context.estimatedTokens = estimatedTokens;
             contextCompressed = true;
         }
