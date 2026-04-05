@@ -178,7 +178,7 @@ export class ContextManager {
                 }
                 if (currentChunk.length > 0) chunks.push(currentChunk.join(' '));
 
-                console.warn(`[ContextManager] historyText is massive (${historyTextTokens} tokens), chunking into ${chunks.length} parts for safe summarization...`);
+                console.error(`[ContextManager] historyText is massive (${historyTextTokens} tokens), chunking into ${chunks.length} parts for safe summarization...`);
 
                 const chunkSummaries = await Promise.allSettled(
                     chunks.map(chunk => summarizer(`Summarize this segment of conversation concisely:\n\n${chunk}`))
@@ -361,7 +361,7 @@ export class ContextManager {
             return executor(context);
         }
 
-        console.warn(`[ContextManager] MapReduce: splitting into ${chunks.length} chunks`);
+        console.error(`[ContextManager] MapReduce: splitting into ${chunks.length} chunks`);
 
         // Map: process each chunk independently
         const chunkResults = await Promise.allSettled(

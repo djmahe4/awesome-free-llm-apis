@@ -1,8 +1,22 @@
 #!/usr/bin/env node
 
+/**
+ * --- MCP Stdout Shield (Nuclear Hardening) ---
+ * Any stray stdout will corrupt the JSON-RPC stream used by MCP.
+ * We intercept all direct writes to stdout and redirect none-JSON content to stderr.
+ */
+const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+(process.stdout as any).write = (chunk: any, encoding: any, callback: any) => {
+  const str = typeof chunk === 'string' ? chunk : chunk.toString();
+  // Valid JSON-RPC packets always start with '{'
+  if (str.trim().startsWith('{')) {
+    return originalStdoutWrite(chunk, encoding, callback);
+  }
+  // Redirect everything else (logs, ReferenceErrors, etc.) to stderr
+  return process.stderr.write(chunk, encoding, callback);
+};
+
 // --- Global Safety Handlers (Immediate Preamble) ---
-// MCP uses stdio for JSON-RPC. Any stray stdout will corrupt the stream.
-// We redirect all uncaught errors to stderr to prevent pipeline breaks.
 process.on('uncaughtException', (err) => {
   console.error(`[CRITICAL] Uncaught Exception: ${err.message}`);
   console.error(err.stack);

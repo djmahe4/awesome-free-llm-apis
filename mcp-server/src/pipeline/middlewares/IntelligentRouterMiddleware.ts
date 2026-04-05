@@ -167,13 +167,13 @@ Request: ${lastMessage}`;
                 plannerResponse = res.choices[0].message.content;
                 if (plannerResponse) break;
             } catch (err) {
-                console.warn(`[Router] Planner ${modelId} failed:`, err);
+                console.error(`[Router] Planner ${modelId} failed:`, err);
                 continue;
             }
         }
 
         if (!plannerResponse) {
-            console.warn(`[Router] All planners failed. Falling back to monolithic execution.`);
+            console.error(`[Router] All planners failed. Falling back to monolithic execution.`);
             return;
         }
 
@@ -184,7 +184,7 @@ Request: ${lastMessage}`;
             const jsonMatch = plannerResponse.match(/\[.*\]/s);
             subtasks = JSON.parse(jsonMatch ? jsonMatch[0] : plannerResponse);
         } catch (err) {
-            console.warn(`[Router] Failed to parse planner response:`, err);
+            console.error(`[Router] Failed to parse planner response:`, err);
             return;
         }
 
@@ -427,7 +427,7 @@ Request: ${lastMessage}`;
                 context.estimatedTokens = estimatedTokens;
                 contextCompressed = true;
             } catch (err: any) {
-                console.warn(`[Router][Tier1] Compression failed, falling back to Tier 2: ${err.message}`);
+                console.error(`[Router][Tier1] Compression failed, falling back to Tier 2: ${err.message}`);
                 const truncated = this.contextManager.truncateOldest(context.request.messages, targetTokens);
                 context.request.messages = truncated.messages;
                 estimatedTokens = truncated.compressedTokens;
