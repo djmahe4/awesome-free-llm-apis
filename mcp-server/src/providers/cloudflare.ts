@@ -9,6 +9,7 @@ export class CloudflareProvider extends BaseProvider {
   models: ProviderModel[] = [
     { id: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', name: 'Llama 3.3 70B (Cloudflare)' },
     { id: '@cf/qwen/qwq-32b', name: 'QwQ 32B (Cloudflare)' },
+    { id: '@cf/qwen/qwen2.5-coder-32b-instruct', name: 'Qwen 2.5 Coder 32B (Cloudflare)' },
   ];
 
   get baseURL(): string {

@@ -32,26 +32,34 @@ export class IntelligentRouterMiddleware implements Middleware {
     /**
      * Optimized task-to-model routing map.
      */
-    private taskRouteMap: Record<string, string[]> = {
+    public static taskRouteMap: Record<string, string[]> = {
         [TaskType.Coding]: [
-            '@cf/qwen/qwq-32b',
-            'gemini-2.5-flash',
-            'qwen/qwen3-coder-480b-a35b-instruct:free',
-            'mistral-large-latest',
-            'mistral-small-latest',
             'DeepSeek-R1',
-            'openai/gpt-oss-120b:free',
-            'meta-llama/llama-3.3-70b-instruct:free',
+            'gpt-oss-20b',
+            'codestral-latest',
+            'qwen/qwen3-coder-480b-a35b-instruct:free',
+            '@cf/qwen/qwen2.5-coder-32b-instruct',
+            '@cf/qwen/qwq-32b',
             'gemini-3.1-pro-preview',
             'deepseek-ai/DeepSeek-R1',
+            'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B',
+            'Qwen/Qwen2.5-7B-Instruct',
+            'mistralai/mistral-large-2-instruct',
             'llama-3.3-70b-versatile',
             'qwen-3-235b-a22b-instruct-2507',
             'Qwen/Qwen3-235B-A22B',
-            'qwen2.5-coder-32b-instruct',
+            'gemini-2.5-flash',
+            'mistral-large-latest',
+            'mistral-small-latest',
+            'openai/gpt-oss-120b:free',
+            'meta-llama/llama-3.3-70b-instruct:free',
             'glm-4.5-flash',
         ],
         [TaskType.Moderation]: [
+            'llama-3.3-70b-versatile',
+            'gemini-3.1-flash-lite-preview',
             'gemini-2.5-flash',
+            'gemini-2.0-flash',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             'ministral-8b-latest',
             'mistral-small-latest',
@@ -59,16 +67,18 @@ export class IntelligentRouterMiddleware implements Middleware {
             'nvidia/nemotron-mini-4b-instruct',
             'arcee-ai/trinity-mini:free',
             'z-ai/glm-4.5-air:free',
-            'gemini-3.1-flash-lite-preview',
             'glm-4-flash',
             'glm-4.5-flash',
-            'llama-3.3-70b-versatile',
             'llama3.1-8b',
             'google/gemma-2-2b-it',
             'nvidia/nemotron-nano-12b-v2-vl:free',
         ],
         [TaskType.Classification]: [
+            'llama-3.3-70b-versatile',
+            'gemini-3.1-flash-lite-preview',
             'gemini-2.5-flash',
+            'gemini-2.0-flash',
+            'GLM-4.6V-Flash',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             'ministral-8b-latest',
             'mistral-small-latest',
@@ -79,12 +89,17 @@ export class IntelligentRouterMiddleware implements Middleware {
             'glm-4-flash',
             'glm-4.5-flash',
             'llama-4-scout-17b-16e-instruct',
-            'llama-3.3-70b-versatile',
             'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
             'llama3.1-8b',
+            'mistralai/Mistral-7B-Instruct-v0.3',
+            'nvidia/nemotron-mini-4b-instruct:free',
         ],
         [TaskType.UserIntent]: [
+            'gemini-3.1-flash-lite-preview',
+            'llama-3.3-70b-versatile',
             'gemini-2.5-flash',
+            'gemini-2.0-flash',
+            'GLM-4.6V-Flash',
             'nvidia/nemotron-mini-4b-instruct',
             'nvidia/nemotron-nano-9b-v2:free',
             'mistral-small-latest',
@@ -96,10 +111,10 @@ export class IntelligentRouterMiddleware implements Middleware {
             'glm-4-flash',
             'glm-4.5-flash',
             'llama-4-scout-17b-16e-instruct',
-            'llama-3.3-70b-versatile',
         ],
         [TaskType.SemanticSearch]: [
             'command-r-plus-08-2024',
+            'gemini-3.1-pro-preview',
             'arcee-ai/trinity-large-preview:free',
             'gemini-2.5-flash',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
@@ -113,25 +128,32 @@ export class IntelligentRouterMiddleware implements Middleware {
             'c4ai-aya-expanse-32b',
         ],
         [TaskType.Summarization]: [
-            'gemini-2.5-flash',
-            '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             'command-a-03-2025',
+            'mistralai/mistral-small-3.1-24b:free',
+            'llama-3.3-70b-versatile',
+            'gemini-2.5-flash',
+            'gemini-3-flash-preview',
+            '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             'mistral-small-latest',
             'ministral-8b-latest',
-            'mistralai/mistral-small-3.1-24b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
+            'gpt-oss-20b',
             'openai/gpt-oss-20b:free',
             'Llama-3.3-70B-Instruct',
             'gemini-3.1-flash-preview',
-            'llama-3.3-70b-versatile',
             'meta/llama-3.3-70b-instruct',
             'llama-4-scout-17b-16e-instruct',
             'qwen3.5',
+            'meta-llama/Llama-3.3-70B-Instruct',
         ],
         [TaskType.EntityExtraction]: [
-            'gemini-2.5-flash',
+            'gemini-3.1-pro-preview',
+            'llama-3.3-70b-versatile',
+            'gemini-3-flash-preview',
             'arcee-ai/trinity-large-preview:free',
             'command-r-plus-08-2024',
+            'gemini-2.5-flash',
+            'Pro/zai-org/GLM-4.7',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             'mistral-small-latest',
             'ministral-8b-latest',
@@ -140,18 +162,26 @@ export class IntelligentRouterMiddleware implements Middleware {
             'gemini-3.1-flash-lite-preview',
             'Qwen/Qwen3-235B-A22B',
             'glm-4.5-flash',
-            'llama-3.3-70b-versatile',
             'deepseek-ai/DeepSeek-V3',
         ],
         [TaskType.Chat]: [
+            'DeepSeek-R1',
+            'gpt-oss-20b',
             'gpt-4o',
+            'gemini-3.1-pro-preview',
+            'gemini-3-flash-preview',
+            'gemini-2.0-flash',
+            'GLM-4.6V-Flash',
+            'ministral-8b-2512',
+            'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
+            'mistral-large-latest',
             'gemini-2.5-flash',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-            'mistral-large-latest',
             'mistral-small-latest',
             'ministral-8b-latest',
             'Llama-3.3-70B-Instruct',
-            'DeepSeek-R1',
+            'meta-llama/Llama-3.3-70B-Instruct',
+            'Pro/zai-org/GLM-4.7',
             'openai/gpt-oss-120b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
             'nvidia/nemotron-3-super-120b-a12b:free',
@@ -170,13 +200,13 @@ export class IntelligentRouterMiddleware implements Middleware {
             'google/gemma-2-2b-it',
             'qwen-3-235b-a22b-instruct-2507',
             'Qwen/Qwen3-235B-A22B',
-            'qwen2.5-coder-32b-instruct',
+            '@cf/qwen/qwen2.5-coder-32b-instruct',
         ]
     };
 
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
         let taskType = context.taskType;
-        if (!taskType || !this.taskRouteMap[taskType as string]) {
+        if (!taskType || !IntelligentRouterMiddleware.taskRouteMap[taskType as string]) {
             taskType = TaskType.Chat;
             context.taskType = taskType;
         }
@@ -196,7 +226,7 @@ export class IntelligentRouterMiddleware implements Middleware {
         (context as any).providersAttempted = (context as any).providersAttempted || [];
 
         // 1. Initial Models
-        const fallbackModels = this.taskRouteMap[taskType as string] || this.taskRouteMap[TaskType.Chat];
+        const fallbackModels = IntelligentRouterMiddleware.taskRouteMap[taskType as string] || IntelligentRouterMiddleware.taskRouteMap[TaskType.Chat];
 
         // If a specific provider is pinned, DON'T use fallbacks - stay on the requested model
         const tierModels = context.providerId
@@ -222,7 +252,7 @@ export class IntelligentRouterMiddleware implements Middleware {
                     taskType: TaskType.Summarization,
                 };
 
-                for (const modelId of this.taskRouteMap[TaskType.Summarization] || []) {
+                for (const modelId of IntelligentRouterMiddleware.taskRouteMap[TaskType.Summarization] || []) {
                     const providers = availableProviders.filter(p => p.models.some(m => m.id === modelId));
                     for (const provider of providers) {
                         try {
