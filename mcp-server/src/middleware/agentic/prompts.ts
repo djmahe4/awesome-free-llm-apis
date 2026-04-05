@@ -1,14 +1,20 @@
 import fs from 'fs';
 const fsp = fs.promises;
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 /** Minimum character length for a raw prompt file to be considered valid. */
 const MIN_PROMPT_LENGTH = 500;
 /** Maximum character budget for the dynamically assembled system prompt. */
 const PROMPT_CHAR_BUDGET = 25000;
 
+// Resolve the base directory relative to this file, not process.cwd(),
+// so it works correctly regardless of where the process is launched from.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const BASE = path.resolve(
-    process.env.AGENT_PROMPT_PATH ?? path.join(process.cwd(), '../external/agent-prompt'),
+    process.env.AGENT_PROMPT_PATH ?? path.join(__dirname, '../../../external/agent-prompt'),
 );
 const README = path.join(BASE, 'README.md');
 const JSON_PROMPT = path.join(BASE, 'prompt.json');

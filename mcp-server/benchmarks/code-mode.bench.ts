@@ -20,7 +20,11 @@ import { executeInSandbox } from '../src/sandbox/executor.js';
 import type { Message } from '../src/providers/types.js';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { getEncoding } from 'js-tiktoken';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const enc = getEncoding("cl100k_base");
 const countTokens = (text: string) => enc.encode(text).length;
@@ -63,7 +67,7 @@ describe('Agentic Intelligence & Compression Pipelines', () => {
     console.log('╚══════════════════════════╩══════════╩══════════╩════════╩═══════════╝\n');
 
     // Persist to log file
-    const logDir = path.resolve(process.cwd(), 'benchmarks/logs');
+    const logDir = path.resolve(__dirname, '../benchmarks/logs');
     if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
     const logPath = path.join(logDir, 'latest_run.md');
@@ -73,7 +77,7 @@ describe('Agentic Intelligence & Compression Pipelines', () => {
 
   bench('1. Intelligent Prompt Injection (README.md routing)', async () => {
     resetPromptCache();
-    const rawReadmePath = path.resolve(process.cwd(), '../external/agent-prompt/README.md');
+    const rawReadmePath = path.resolve(__dirname, '../../external/agent-prompt/README.md');
     let rawReadmeContent = 'Fallback README content';
     if (fs.existsSync(rawReadmePath)) {
       rawReadmeContent = fs.readFileSync(rawReadmePath, 'utf-8');

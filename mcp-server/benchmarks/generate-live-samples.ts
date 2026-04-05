@@ -4,8 +4,12 @@ import { ContextManager } from '../src/utils/ContextManager.js';
 import { executeInSandbox } from '../src/sandbox/executor.js';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { getEncoding } from 'js-tiktoken';
 import type { Message } from '../src/providers/types.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const enc = getEncoding("cl100k_base");
 const countTokens = (text: string) => enc.encode(text).length;
@@ -128,7 +132,7 @@ async function generate() {
 
     // --- 6. REAL PROJECT STATE SYNTHESIS ---
     console.log("[6/7] Testing REAL State Synthesis...");
-    const projectDir = path.join(process.cwd(), 'data', 'projects', mockContext.sessionId);
+    const projectDir = path.join(__dirname, '../data', 'projects', mockContext.sessionId);
     if (!fs.existsSync(projectDir)) fs.mkdirSync(projectDir, { recursive: true });
     await fs.promises.writeFile(path.join(projectDir, 'knowledge.md'), "# Architecture\n- Event-driven orchestration.\n- Redis caching enabled.", 'utf8');
 
@@ -159,7 +163,7 @@ async function generate() {
     samplesMd += `**Conclusion**: The health-aware routing adds negligible latency (<0.1ms) while ensuring optimal provider selection.`;
 
     // Final Save to absolute path in benchmarks directory
-    const outputPath = path.join(process.cwd(), 'benchmarks', 'SAMPLES.md');
+    const outputPath = path.join(__dirname, '../benchmarks', 'SAMPLES.md');
     fs.writeFileSync(outputPath, samplesMd, 'utf8');
     console.log(`✅ REAL TRACES updated in ${outputPath}`);
 }
