@@ -43,7 +43,7 @@ describe('Router Fallback Fix - Multiple next() Calls Bug', () => {
             taskType: TaskType.Coding
         };
         await router.execute(codingContext, async () => { });
-        expect(firstModelAttempted).toBe('qwen/qwen3-coder-480b-a35b-instruct:free');
+        expect(firstModelAttempted).toBe('DeepSeek-R1');
 
         // Reset and test Chat task
         firstModelAttempted = null;
@@ -52,8 +52,8 @@ describe('Router Fallback Fix - Multiple next() Calls Bug', () => {
             taskType: TaskType.Chat
         };
         await router.execute(chatContext, async () => { });
-        // Chat should try gpt-4o first (GitHub Models - free)
-        expect(firstModelAttempted).toBe('gpt-4o');
+        // Chat should try DeepSeek-R1 first (High Performance Free)
+        expect(firstModelAttempted).toBe('DeepSeek-R1');
     });
 
     it('should call next() exactly once even with multiple fallback attempts', async () => {
