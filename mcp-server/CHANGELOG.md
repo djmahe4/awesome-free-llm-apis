@@ -12,6 +12,9 @@
 - All documentation synced: `guide.md`, `SKILL.md`, `usages.md`, `mcp-development.md`
 - **New Benchmarking Suite**: Complete rewrite of `generate-live-samples.ts` to use real production middleware (Router, Context, Sandbox) instead of mocks.
 - **7 Live Intelligence Scenarios**: Structured traces in `SAMPLES.md` covering Memory Synthesis, Task Decomposition, and sandboxed logic extraction.
+- **Deterministic Keyword Steering**: Transitioned from fuzzy matching to a **Majority-Voting Classification** engine, enabling deterministic mapping of tasks to model tiers.
+- **MCP Tool Interface Hardening**: Stripped 6 advanced/rarely-used parameters (`temperature`, `max_tokens`, `top_p`, `stream`, `provider`, `fallback`) from the `use_free_llm` schema to reduce agentic cognitive load.
+- **Auto-Routing**: Made `model` parameter optional; the router now automatically selects the optimal tier based on `keywords` if no model ID is provided.
 - **Stricter Prompt Precision**: Selection threshold increased to `>= 3` to eliminate hallucinated prompt injections.
 - **Granular Reference Mapping**: Metadata-aware link extraction capped at 5 high-relevance entries per section.
 - **Adaptive Routing & Reactive Drift Correction**: Implemented provider cooldown penalties and a new robust error-interception layer. The system now detects 429 errors and rate-limit payloads (e.g., `resource_exhausted`) to immediately update internal token tracking, even for providers without standard headers.
@@ -28,6 +31,9 @@
 - **Live Trace Harness**: `npx tsx benchmarks/generate-live-samples.ts` now captures verified system state transitions.
 - **Agentic Pipeline Observability**: Explicit `[RESEARCH-VALIDATION]` audit trails for external knowledge lookups.
 - **Build Stability**: Resolved `NonSharedBuffer` TypeScript type-safety errors in sandbox execution logic.
+- **Joint-Task Keyword Map**: Implemented high-precision mapping for `coding`, `research`, and `chat` task tiers in the Intelligent Router.
+- **Majority-Voting Classifier**: New logic in `IntelligentRouterMiddleware` that counts keyword occurrences to resolve task ambiguity reliably.
+- **Simplified Tool Description**: Rewrote `use_free_llm` instructions to prioritize "Intent-based Routing" through keywords over manual configuration.
 - **Stable Workspace Identity**: Switched `WorkspaceScanner` from transient content-hashing to stable **Identity Hashes** built from absolute paths. This fixes "memory amnesia" caused by code edits.
 - **Anti-Poisoning Validation**: All workspace-aware tools now strictly validate the existence of `workspace_root` via `fs.existsSync`, preventing agents from hallucinating or poisoning phantom workspaces.
 - **New `store_memory` Tool**: Implemented a dedicated tool for manual fact injection, enabling agents to explicitly persist architectural context and high-density summaries for subsequent runs.

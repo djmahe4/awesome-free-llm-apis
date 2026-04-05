@@ -12,7 +12,7 @@ import {
 } from '../pipeline/index.js';
 
 export interface UseFreeLLMInput {
-  model: string;
+  model?: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   temperature?: number;
   max_tokens?: number;

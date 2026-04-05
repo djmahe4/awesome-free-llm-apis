@@ -52,7 +52,7 @@ graph TD
 
 | Tool | Purpose | Required Params | Key Optional Params |
 |------|---------|----------------|---------------------|
-| `use_free_llm` | Universal chat with automatic failover | `model`, `messages` | `provider`, `temperature`, `agentic`, `sessionId`, `keywords` |
+| `use_free_llm` | Universal chat with deterministic steering | `messages` | `model`, `keywords`, `agentic`, `sessionId` |
 | `list_available_free_models` | Enumerate providers and models with metadata | *(none)* | `provider`, `available_only` |
 | `get_token_stats` | Real-time per-provider usage and quota stats | *(none)* | — |
 | `validate_provider` | Health-check and credential validation | `providerId` | — |
@@ -85,13 +85,20 @@ await client.callTool('manage_memory', {
 await client.callTool('list_available_free_models', { available_only: true });
 ```
 
-**Send a chat message with explicit keyword steering (bypasses fuzzy matching):**
+**Send a chat message with simplified parameters (Auto-Routing):**
+```ts
+await client.callTool('use_free_llm', {
+  messages: [{ role: 'user', content: 'What is the most efficient sorting algorithm?' }],
+  keywords: ['coding', 'algorithms'] // Router selects optimal coding model automatically
+});
+```
+
+**Explicit Keyword Steering (bypasses fuzzy matching):**
 ```ts
 await client.callTool('use_free_llm', {
   model: 'llama-3.3-70b-versatile',
   messages: [{ role: 'user', content: 'Explain JWT token expiry' }],
-  keywords: ['security', 'tokens', 'jwt'],
-  fallback: true
+  keywords: ['security', 'tokens', 'jwt']
 });
 ```
 

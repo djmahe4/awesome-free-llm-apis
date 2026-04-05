@@ -55,17 +55,12 @@ Perform a chat completion with optional fallback and workspace memory.
 
 ```json
 {
-  "model": "llama-3.3-70b-versatile",
   "messages": [{ "role": "user", "content": "Your prompt here" }],
-  "provider": "groq",
-  "fallback": true,
-  "max_tokens": 1024,
-  "workspace_root": "/your/project",
-  "google_search": true,
+  "keywords": ["security", "auth", "jwt"],
   "agentic": true,
   "sessionId": "project-name-v1",
-  "keywords": ["security", "auth", "jwt"],
-  "top_p": 1.0
+  "workspace_root": "/your/project",
+  "google_search": true
 }
 ```
 
@@ -73,17 +68,13 @@ Perform a chat completion with optional fallback and workspace memory.
 
 | Parameter | Required | Default | Notes |
 |-----------|----------|---------|-------|
-| `model` | ❌ | Based on task | Model ID from `list_available_free_models` |
 | `messages` | ✅ | — | Array of `{ role, content }` objects |
-| `provider` | ❌ | auto | Override auto-routing to a specific provider |
-| `fallback` | ❌ | `false` | Enable cross-provider failover |
-| `max_tokens` | ❌ | 1024 | Cap response size |
-| `workspace_root` | ❌ | — | Path for context-aware cache keying |
-| `google_search` | ❌ | `false` | Enable Google search for Gemini models (default false) |
-| `agentic` | ❌ | `false` | Enable agentic mode: task decomposition and intelligent system prompt injection. |
-| `sessionId` | ❌ | — | Required for agentic mode. Partitions memory/logs per project. |
+| `model` | ❌ | auto | Specific model ID. If omitted, the router auto-selects. |
 | `keywords` | ❌ | — | Explicit steering keywords. **Bypasses fuzzy matching** and injects only sections matching these tags. |
-| `top_p` | ❌ | 1.0 | Nucleus sampling probability (default 1.0) |
+| `agentic` | ❌ | `false` | Enable agentic mode: task decomposition and internal prompt injection. |
+| `sessionId` | ❌ | — | Required for agentic mode. Partitions memory/logs per project. |
+| `workspace_root` | ❌ | — | Path for context-aware cache keying and auto-session derivation. |
+| `google_search` | ❌ | `false` | Enable Google search for Gemini models. |
 
 > **Rule:** Always set `fallback: true` when building resilient pipelines.
 
