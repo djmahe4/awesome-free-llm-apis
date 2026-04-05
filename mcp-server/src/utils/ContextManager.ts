@@ -80,12 +80,12 @@ export class ContextManager {
             ? Math.min(targetTokens, context.providerRemainingTokens)
             : targetTokens;
 
-        if (effectiveTarget !== targetTokens) {
-            console.log(
-                `[ContextManager] Bridge override: using provider-reported ` +
-                `remaining=${context.providerRemainingTokens} tokens instead of static target=${targetTokens}`
-            );
-        }
+        //if (effectiveTarget !== targetTokens) {
+        // console.log(
+        //     `[ContextManager] Bridge override: using provider-reported ` +
+        //     `remaining=${context.providerRemainingTokens} tokens instead of static target=${targetTokens}`
+        // );
+        //}
 
         const messages = [...context.request.messages];
         const originalTokens = this.countTokens(messages);

@@ -153,9 +153,13 @@ export class IntelligentRouterMiddleware implements Middleware {
         const plannerModels = ['deepseek-ai/DeepSeek-V3', 'gemini-2.0-flash', 'llama3.1-8b'];
         let plannerResponse: string | null = null;
 
+        const lastMessage = context.request.messages.length > 0 
+            ? context.request.messages[context.request.messages.length - 1].content 
+            : 'No content provided';
+
         const planningPrompt = `Analyze this request and split it into a list of independent subtasks. 
 Return ONLY a JSON array of strings, where each string is a clear subtask instruction.
-Request: ${context.request.messages[context.request.messages.length - 1].content}`;
+Request: ${lastMessage}`;
 
         for (const modelId of plannerModels) {
             try {
@@ -327,6 +331,11 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
     };
 
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
+        // Step 0: Input validation
+        if (!context.request.messages || context.request.messages.length === 0) {
+            throw new Error('Message array is empty or undefined');
+        }
+
         // Step 1: Independent Thinking - Analysis & Classification
         if (!context.taskType) {
             context.taskType = this.autoClassify(context.request.messages, context.keywords);
@@ -481,10 +490,7 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
                     if (tracking && tracking.remainingTokens !== undefined && Number.isFinite(tracking.remainingTokens)) {
                         // Proportional to 50k tokens as a "healthy" baseline
                         tokenFactor = Math.min(1.2, Math.max(0.1, tracking.remainingTokens / 50000));
-                        //console.log(`[Router][Debug] Model ${modelId} | Provider ${provider.id} TokenFactor: ${tokenFactor.toFixed(2)} (Remaining: ${tracking.remainingTokens})`);
-                    }// else {
-                    //console.log(`[Router][Debug] Model ${modelId} | Provider ${provider.id} TokenFactor: 1.00 (Undefined/NaN)`);
-                    //}
+                    }
 
                     // 4. Metadata-driven refinement
                     let scoreModifier = 1.0;

@@ -233,4 +233,22 @@ async function main() {
   }
 }
 
-main().catch(console.error);
+// --- Global Safety Handlers ---
+// MCP uses stdio for JSON-RPC. Any stray stdout will corrupt the stream.
+// We redirect all uncaught errors to stderr to prevent pipeline breaks.
+process.on('uncaughtException', (err) => {
+  console.error(`[CRITICAL] Uncaught Exception: ${err.message}`);
+  console.error(err.stack);
+  // Do not exit immediately to allow potential recovery or logging,
+  // but in a production MCP server, you might want to exit after logging.
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error(`[CRITICAL] Unhandled Rejection at: ${promise}, reason: ${reason}`);
+});
+
+main().catch((err) => {
+  console.error(`[FATAL] Startup failed: ${err.message}`);
+  console.error(err.stack);
+  process.exit(1);
+});
