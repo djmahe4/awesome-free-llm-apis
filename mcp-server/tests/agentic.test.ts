@@ -67,7 +67,7 @@ describe('Agentic Intelligence & Middleware', () => {
         });
         (vi.mocked(fsp.readFile) as any).mockImplementation(async (path: string) => {
             if (path.endsWith('prompt.json')) return JSON.stringify(mockPromptData);
-            if (path.endsWith('system-prompt-raw.md')) return "Tier 2 Fallback Prompt".padEnd(600, '!');
+            if (path.endsWith('README.md')) return "Tier 2 Fallback (README)".padEnd(600, '!');
             return "";
         });
 
@@ -112,23 +112,32 @@ describe('Agentic Intelligence & Middleware', () => {
             expect(prompt).toContain("RESEARCH APPENDIX");
         });
 
-        it('falls back to Tier 2 (RAW) if prompt.json is missing', async () => {
+        it('falls back to Tier 2 (README) if prompt.json is missing', async () => {
             (vi.mocked(fsp.stat) as any).mockImplementation(async (path: string) => {
                 if (path.endsWith('prompt.json')) throw new Error('Not found');
                 return { mtimeMs: 1000 };
             });
             const prompt = await getIntelligentSystemPrompt();
-            expect(prompt).toContain("Tier 2 Fallback Prompt");
+            expect(prompt).toContain("Tier 2 Fallback (README)");
         });
 
         it('falls back to Tier 2 if prompt.json is invalid JSON', async () => {
             (vi.mocked(fsp.readFile) as any).mockImplementation(async (path: string) => {
                 if (path.endsWith('prompt.json')) return "INVALID JSON";
-                if (path.endsWith('system-prompt-raw.md')) return "Tier 2 Fallback Prompt".padEnd(600, '!');
+                if (path.endsWith('README.md')) return "Tier 2 Fallback (README)".padEnd(600, '!');
                 return "";
             });
             const prompt = await getIntelligentSystemPrompt();
-            expect(prompt).toContain("Tier 2 Fallback Prompt");
+            expect(prompt).toContain("Tier 2 Fallback (README)");
+        });
+
+        it('falls back to hardcoded default if all files are missing', async () => {
+            (vi.mocked(fsp.stat) as any).mockImplementation(async (path: string) => {
+                throw new Error('Not found');
+            });
+            (vi.mocked(fsp.access) as any).mockRejectedValue(new Error('Not found'));
+            const prompt = await getIntelligentSystemPrompt();
+            expect(prompt).toContain("You are the principal architect");
         });
 
         it('invalidates cache when prompt.json mtime changes', async () => {

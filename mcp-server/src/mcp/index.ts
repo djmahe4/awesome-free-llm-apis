@@ -362,8 +362,14 @@ export async function createMCPServer(): Promise<Server> {
             ? texts[0]  // single response — return as-is, no label overhead
             : texts.map((t, i) => `AGENT RESPONSE ${i + 1}\n\n${t}`).join('\n\n');
 
+        const simplified = {
+          response: responseText,
+          model: result.model,
+          usage: result.usage,
+        };
+
         return {
-          content: [{ type: 'text' as const, text: responseText }],
+          content: [{ type: 'text' as const, text: JSON.stringify(simplified, null, 2) }],
         };
       }
 

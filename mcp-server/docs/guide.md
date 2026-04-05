@@ -236,6 +236,16 @@ Interface for the persistent, workspace-aware memory system.
 - **Architecture**: All memory is physically stored centrally in the MCP server's local `data/memory.json`. The `workspace_root` parameter generates a unique cryptographic hash as a **logical namespace** to safely isolate context between projects.
 - **Agent Rule**: Call `manage_memory` with `action: "search"` before wide-context steps to recall relevant prior work.
 
+### Dynamic Prompt Synchronization (v1.0.3 Update)
+The `prompt.json` engine uses a non-blocking, asynchronous loading strategy with automatic cache invalidation.
+
+> [!NOTE]
+> For a detailed explanation of how sections are scored and compressed, see the [Agentic Prompt Injection Guide](agentic-prompts.md).
+
+- **Efficiency**: Uses `fs.stat()` to check `mtime` before every use.
+- **Zero Restart**: Prompt updates are picked up instantly without requiring a server restart.
+- **Asynchronous**: Built entirely on `fs.promises` to keep the event loop free.
+
 ### 4. `code_mode`
 Executes code in a sandboxed runtime — only `stdout` enters context, never the raw DATA payload.
 
@@ -327,9 +337,12 @@ The optional **Agentic Middleware** (`src/middleware/agentic/`) adds a structure
 | **File-First State** | Creates `projects/{sessionId}/plan.md`, `tasks.md`, and `knowledge.md` on first use. |
 | **Verification Loop** | After each step, performs a self-check LLM call. Failed verifications are enqueued to `improveQueue`. |
 
-### How it uses the external prompt
+### How it uses the external prompt (v1.0.3 Update)
 
-The prompt loader (`src/middleware/agentic/prompts.ts`) resolves the system prompt asynchronously on its first use and memoizes the result:
+The prompt loader (`src/middleware/agentic/prompts.ts`) resolves the system prompt asynchronously on its first use and memoizes the result. It uses a keyword-based scoring mechanism to select relevant documentation.
+
+> [!NOTE]
+> For a deep dive into the scoring algorithm, categorization, and reference compression, see the [Agentic Prompt Injection](agentic-prompts.md) documentation.
 
 1. Checks `external/agent-prompt/prompt.json` (Tier 1: Pre-computed, optimized).
 2. Falls back to `external/agent-prompt/README.md` (Tier 2: Raw Markdown).

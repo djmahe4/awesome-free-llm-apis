@@ -262,6 +262,10 @@ To prevent data leakage and disk pollution, every agentic request **must** have 
 
 ### Dynamic Prompt Synchronization
 The `prompt.json` engine uses a non-blocking, asynchronous loading strategy with automatic cache invalidation.
+
+> [!NOTE]
+> For a deep dive into the scoring algorithm, categorization, and reference compression, see the [Agentic Prompt Injection](agentic-prompts.md) documentation.
+
 - **Efficiency**: Uses `fs.stat()` to check `mtime` before every use.
 - **Zero Restart**: Prompt updates are picked up instantly without requiring a server restart.
 - **Asynchronous**: Built entirely on `fs.promises` to keep the event loop free.

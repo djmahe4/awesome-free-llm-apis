@@ -18,7 +18,6 @@ const BASE = path.resolve(
 );
 const README = path.join(BASE, 'README.md');
 const JSON_PROMPT = path.join(BASE, 'prompt.json');
-const RAW = path.join(BASE, 'system-prompt-raw.md');
 
 /**
  * Protocol injected when architectural reference sections are present.
@@ -142,9 +141,13 @@ export async function getIntelligentSystemPrompt(context?: string, explicitKeywo
 
         const isReference = section.id === 'research_appendix' || section.id === 'subsystem_reference_map';
         if (isReference) {
-            const architecturalKeywords = ['rest', 'api', 'url', 'github', 'appendix', 'reference', 'map', 'architecture', 'research'];
+            const architecturalKeywords = [
+                'rest', 'api', 'url', 'github', 'appendix', 'reference', 'map', 
+                'architecture', 'research', 'review', 'reviewer', 'implementation', 
+                'patterns', 'best practices', 'audit', 'python', 'javascript', 'golang', 'rust'
+            ];
             architecturalKeywords.forEach(ak => {
-                if (tokens.has(ak) || contextLower.includes(ak)) score += 5;
+                if (tokens.has(ak) || contextLower.includes(ak)) score += 4;
             });
         }
 
@@ -162,26 +165,44 @@ export async function getIntelligentSystemPrompt(context?: string, explicitKeywo
         let content = section.content;
 
         if (section.id === 'research_appendix' || section.id === 'subsystem_reference_map') {
-            // Split by lines starting with "- [" or "  - [" and only keep actual link entries
-            const entries = content.split(/\n(?=\s*- \[)/).map(e => e.trim()).filter(e => e.length > 0 && e.includes('['));
-            const scoredEntries = entries.map(entry => {
-                let entryScore = 0;
-                const entryTokens = entry.toLowerCase().split(/\W+/);
-                entryTokens.forEach(et => {
-                    if (tokens.has(et)) entryScore += 2;
-                });
-                tokens.forEach(t => {
-                    if (t.length > 4 && entry.toLowerCase().includes(t)) entryScore += 1;
-                });
-                return { entry, entryScore };
-            });
+            // Split by any list item to separate category headers from links
+            const parts = content.split(/\n(?=\s*- )/).map(p => p.trim()).filter(p => p.length > 0);
+            
+            const scoredEntries: { entry: string, entryScore: number }[] = [];
+            let currentCategory = "";
+
+            for (const part of parts) {
+                if (part.includes('[')) {
+                    // It's a link - score it with its category context
+                    let entryScore = 0;
+                    const entryLower = part.toLowerCase();
+                    const contextText = (currentCategory + " " + part).toLowerCase();
+                    
+                    // Score based on tokens in the link text AND category context
+                    contextText.split(/\W+/).forEach(et => {
+                        if (tokens.has(et)) entryScore += 2.0;
+                    });
+                    
+                    tokens.forEach(t => {
+                        if (t.length > 3 && contextText.includes(t)) entryScore += 0.5;
+                    });
+
+                    scoredEntries.push({ entry: part, entryScore });
+                } else {
+                    // It's a category header - update context for subsequent links
+                    currentCategory = part.replace(/^-\s*/, '');
+                }
+            }
+
+            // Relax entry requirements if the overall section relevance is high
+            const minEntryScore = section.score > 8 ? 0.2 : 1.5;
 
             content = scoredEntries
-                .filter(se => se.entryScore >= 2)
+                .filter(se => se.entryScore >= minEntryScore)
                 .sort((a, b) => b.entryScore - a.entryScore)
-                .slice(0, 5) // High precision: only top 5 necessary references
+                .slice(0, 15) // Higher diversity budget for categorized links
                 .map(se => se.entry)
-                .join('\n\n');
+                .join('\n');
         }
 
         if (content.length > 0) {
@@ -210,27 +231,7 @@ async function getFallbackPrompt(): Promise<string> {
         if (data.length > MIN_PROMPT_LENGTH) return data;
     } catch { }
 
-    try {
-        await fsp.access(RAW);
-        const data = (await fsp.readFile(RAW, 'utf-8')).trim();
-        if (data.length > MIN_PROMPT_LENGTH) return data;
-    } catch { }
-
     return `You are the principal architect of a self-improving agent system.
 Use queues (now, next, blocked, improve), verification-first execution, and file-based state.`;
 }
 
-function extractFromMarkdown(txt: string, marker: string): string | null {
-    const startIndex = txt.indexOf(marker);
-    if (startIndex === -1) return null;
-    const preContent = txt.slice(0, startIndex);
-    const postContent = txt.slice(startIndex);
-    const blockStart = preContent.lastIndexOf('```');
-    const blockEnd = postContent.indexOf('```');
-    if (blockStart !== -1 && blockEnd !== -1) {
-        const blockText = txt.slice(blockStart, startIndex + blockEnd + 3);
-        const match = blockText.match(/```(?:text|markdown|prompt)?\s*([\s\S]*?)\s*```/i);
-        if (match) return match[1].trim();
-    }
-    return null;
-}
