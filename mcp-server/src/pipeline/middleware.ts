@@ -8,6 +8,7 @@ export interface PipelineContext {
     estimatedTokens?: number;
     workspaceRoot?: string;
     wsHash?: string;
+    keywords?: string[];
     [key: string]: any;
 }
 

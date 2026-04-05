@@ -16,7 +16,7 @@
 | `code_mode` | Execute sandboxed code (JS/Python/Go/Rust) against input data | `code` |
 | `manage_memory` | Manage persistent workspace memory (search/list/stats/clear) | `action` |
 
-> **Agent Rule:** Always invoke `manage_memory` (action: "search") before wide-context actions to retrieve relevant prior context.
+> **Agent Rule**: Always invoke `manage_memory` (action: "search") before wide-context actions to retrieve relevant prior context.
 
 ---
 
@@ -269,7 +269,7 @@
 }
 ```
 
-> ✅ **Correct output.** The sandbox executes in ~23ms. `print()` global is available. `DATA` is injected as the raw string. Use `JSON.parse(DATA)` for structured data.
+> ✅ **Pass**: Sandbox executes in ~23ms. `print()` global is available. `DATA` is injected as a raw string. Use `JSON.parse(DATA)` for structured data.
 
 ### Test B — JSON Field Extraction (JavaScript) ✅ PASS
 
@@ -295,7 +295,7 @@ Extract only names from a large API response array — compresses context dramat
 }
 ```
 
-> ✅ **93% context compression** — only the extracted names enter the LLM context window.
+> ✅ **93% context compression** — only extracted names enter the LLM context window.
 
 ### Test C — Python Count (Python) ✅ PASS (requires Python 3 on PATH)
 
@@ -422,7 +422,7 @@ Extract only names from a large API response array — compresses context dramat
 }
 ```
 
-> **Evaluation:** When `manage_memory` (action: `search`) is called later with query "Redis", this manually saved finding is retrieved along with any LLM outputs matching the query.
+> **Evaluation**: When `manage_memory` (action: `search`) is called later with query "Redis", this manually saved finding is retrieved along with any LLM outputs matching the query.
 
 ---
 

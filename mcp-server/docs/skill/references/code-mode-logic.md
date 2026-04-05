@@ -42,20 +42,29 @@ sessions.forEach(session => {
 print(JSON.stringify(Object.values(uniqueFindings)));
 ```
 
+### 🎯 Keyword Steering [NEW]
+The Intelligent Router uses keyword-based task classification to optimize prompt routing. When building logic, include relevant keywords in the task description or output to signal the router:
+- **`api`**: Triggers enhanced header extraction and rate-limit tracking.
+- **`memory`**: Prioritizes `manage_memory` search and usage logs.
+- **`sql` / `json`**: Optimizes the parser for structured data extraction.
+- **`system`**: Forces high-precision model selection for architectural tasks.
+
+---
+
 ## 🛡️ Sandbox Limits
-- **Timeout:** 5000ms.
-- **Access:** No `fs`, `net`, or `os` modules.
-- **Output:** Only `print()` captured via `stdout` is returned.
+- **Timeout**: 5000ms.
+- **Access**: No `fs`, `net`, or `os` modules.
+- **Output**: Only `print()` captured via `stdout` is returned.
 
 ## 💡 Best Practices
-- **Token Optimization:** Use `code_mode` to flatten deeply nested JSON before it reaches the LLM context.
-- **Deduplication:** Always deduplicate repetitive research hits to keep the `compressionRatio` low.
-- **JSON Safety:** Wrap your `print()` output in `JSON.stringify()` to ensure the agent parses it correctly.
+- **Token Optimization**: Use `code_mode` to flatten deeply nested JSON before it reaches the LLM context.
+- **Deduplication**: Always deduplicate repetitive research hits to keep the `compressionRatio` low.
+- **JSON Safety**: Wrap `print()` output in `JSON.stringify()` to ensure correct parsing.
 
 ---
 
 ## Agentic Use Case: "The Chain of Logic"
 When a task requires multiple mathematical or logical steps (e.g., calculating cumulative ROI across 100 scenarios), do **not** let the LLM do the math. 
-1. Use `use_free_llm` to generate the raw data components.
-2. Use `code_mode` to execute the precise logic.
-3. Use `manage_memory` to store the final validated result.
+1. **Generate**: Use `use_free_llm` to produce the raw data components.
+2. **Execute**: Use `code_mode` to perform the precise logic.
+3. **Store**: Use `manage_memory` to persist the final validated result.

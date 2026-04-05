@@ -57,10 +57,55 @@ export class IntelligentRouterMiddleware implements Middleware {
         return this.executor.getTokenState();
     }
 
+    private static readonly keywordTaskMap: Record<string, TaskType> = {
+        // Coding
+        'code': TaskType.Coding, 'coding': TaskType.Coding, 'debug': TaskType.Coding, 'implement': TaskType.Coding,
+        'function': TaskType.Coding, 'class': TaskType.Coding, 'typescript': TaskType.Coding, 'javascript': TaskType.Coding,
+        'python': TaskType.Coding, 'rust': TaskType.Coding, 'go': TaskType.Coding, 'fix': TaskType.Coding, 'refactor': TaskType.Coding,
+        // Summarization
+        'summary': TaskType.Summarization, 'summarize': TaskType.Summarization, 'tldr': TaskType.Summarization,
+        'tl;dr': TaskType.Summarization, 'concise': TaskType.Summarization, 'brief': TaskType.Summarization,
+        // Entity Extraction
+        'extract': TaskType.EntityExtraction, 'extraction': TaskType.EntityExtraction, 'entities': TaskType.EntityExtraction,
+        'json': TaskType.EntityExtraction, 'fields': TaskType.EntityExtraction, 'parse': TaskType.EntityExtraction,
+        // Classification
+        'classify': TaskType.Classification, 'classification': TaskType.Classification, 'sentiment': TaskType.Classification,
+        'categorize': TaskType.Classification, 'label': TaskType.Classification,
+        // Semantic Search / Research
+        'search': TaskType.SemanticSearch, 'find': TaskType.SemanticSearch, 'lookup': TaskType.SemanticSearch,
+        'research': TaskType.SemanticSearch, 'discover': TaskType.SemanticSearch, 'knowledge': TaskType.SemanticSearch,
+        // Moderation
+        'moderate': TaskType.Moderation, 'moderation': TaskType.Moderation, 'safety': TaskType.Moderation,
+        'filter': TaskType.Moderation, 'policy': TaskType.Moderation,
+        // User Intent / Planning
+        'intent': TaskType.UserIntent, 'plan': TaskType.UserIntent, 'decompose': TaskType.UserIntent,
+    };
+
     /**
-     * Automatically classifies the task type based on the prompt content.
+     * Automatically classifies the task type based on explicit keywords or prompt content.
      */
-    private autoClassify(messages: Message[]): TaskType {
+    private autoClassify(messages: Message[], explicitKeywords?: string[]): TaskType {
+        // 1. Prioritize Explicit Keywords (Majority Voting)
+        if (explicitKeywords && explicitKeywords.length > 0) {
+            const counts: Record<string, number> = {};
+            for (const kw of explicitKeywords) {
+                const type = IntelligentRouterMiddleware.keywordTaskMap[kw.toLowerCase()];
+                if (type) {
+                    counts[type] = (counts[type] || 0) + 1;
+                }
+            }
+
+            const winners = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+            if (winners.length > 0) {
+                // If there's a clear winner or just one type, use it
+                if (winners.length === 1 || winners[0][1] > winners[1][1]) {
+                    return winners[0][0] as TaskType;
+                }
+                // If it's a tie, we'll continue to message-based fallback
+            }
+        }
+
+        // 2. Fallback to Message Content Analysis
         const lastMsg = messages[messages.length - 1]?.content.toLowerCase() || '';
 
         if (lastMsg.includes('```') || lastMsg.includes('function') || lastMsg.includes('class') || lastMsg.includes('debug') || lastMsg.includes('implement')) {
@@ -143,7 +188,7 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
         const subtaskResults: string[] = [];
 
         for (const [i, task] of subtasks.entries()) {
-            const taskType = this.autoClassify([{ role: 'user', content: task }]);
+            const taskType = this.autoClassify([{ role: 'user', content: task }], context.keywords);
             console.debug(`[Router] Subtask ${i + 1}: "${task.slice(0, 50)}..." (Type: ${taskType})`);
 
             try {
@@ -284,7 +329,7 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
         // Step 1: Independent Thinking - Analysis & Classification
         if (!context.taskType) {
-            context.taskType = this.autoClassify(context.request.messages);
+            context.taskType = this.autoClassify(context.request.messages, context.keywords);
             console.debug(`[Router] Auto-classified task as: ${context.taskType}`);
         }
 

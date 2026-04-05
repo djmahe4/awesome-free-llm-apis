@@ -9,13 +9,13 @@ The `manage_memory` tool provides content-addressed, workspace-aware persistence
 ## 🧠 Core Patterns
 
 ### 1. Workspace Fingerprinting
-Always begin by listing the current workspace hash:
+Always list the current workspace hash before reloading state:
 
 ```json
 { "action": "list", "workspace_root": "/absolute/path/to/workspace" }
 ```
 
-Use this hash to confirm context has not changed before re-loading prior state.
+Use this hash to confirm project integrity.
 
 ### 2. Knowledge Retrieval
 Search for existing context before starting any task:
@@ -28,8 +28,8 @@ Monitor `stats` to prevent memory bloat:
 ```json
 { "action": "stats", "workspace_root": "/absolute/path/to/workspace" }
 ```
-- **Ratio < 1.0:** Efficient. Normal operation.
-- **Ratio > 1.5:** Data overhead. Flatten nested structures before next write.
+- **Ratio < 1.0**: Efficient. Normal operation.
+- **Ratio > 1.5**: Data overhead. Flatten nested structures before next write.
 
 ---
 
@@ -44,17 +44,17 @@ learning/<task>/score_history         → JSON array of quality scores
 ```
 
 ### Example: Research Accumulation
-Each research call appends to the topic's record:
+Append each research call to the topic's record:
 1. `search` for `research/cybersecurity/3` (last known iteration).
 2. Merge with new LLM output.
 3. Store as `research/cybersecurity/4` for the next cycle.
 
 ### Example: Subagent Instruction Versioning
-After each learning loop evaluation:
+Refine instructions after each evaluation:
 1. `search` for `subagent/recon-agent/instructions/latest`.
 2. Generate improved instructions with a critique model.
 3. Write back with a new timestamp key.
-4. Old keys remain available for rollback.
+4. Maintain previous keys for rollback capability.
 
 ---
 
@@ -73,11 +73,11 @@ Track multi-turn objectives without polluting the system prompt:
 ```
 
 ### Self-Healing Instruction Pattern
-If a subagent repeatedly fails, the master agent should re-write its `memory.json` instructions:
-1. **Detect Failure:** Log Error `ERR-REF-01`.
-2. **Search Memory:** Find `subagent/ref-extractor/v1`.
-3. **Improvise:** Use `use_free_llm` to rewrite `v1.1` with a fix for `ERR-REF-01`.
-4. **Update:** Store `subagent/ref-extractor/v1.1` and update the active pointer.
+If a subagent repeatedly fails, rewrite the `memory.json` instructions:
+1. **Detect Failure**: Identify specific error code (e.g., `ERR-REF-01`).
+2. **Search Memory**: Retrieve `subagent/ref-extractor/v1`.
+3. **Refine**: Utilize `use_free_llm` to rewrite `v1.1` with a fix for the error.
+4. **Update**: Store `subagent/ref-extractor/v1.1` and update the active pointer.
 
 ---
 

@@ -82,10 +82,10 @@ async function loadPromptData(): Promise<PromptData | null> {
 }
 
 /**
- * Intelligent interpolation pipeline for subprompt selection.
- * Scores sections based on keyword density in context and assembles the prompt.
+ * Scoring sections based on keywords and assembles the prompt.
+ * If explicitKeywords are provided, fuzzy tokenization of the context is bypassed (Strict Steering).
  */
-export async function getIntelligentSystemPrompt(context?: string): Promise<string> {
+export async function getIntelligentSystemPrompt(context?: string, explicitKeywords?: string[]): Promise<string> {
     const data = await loadPromptData();
     if (!data) {
         return await getFallbackPrompt();
@@ -100,9 +100,17 @@ export async function getIntelligentSystemPrompt(context?: string): Promise<stri
         return `${introduction}${critical}`;
     }
 
-    // Tokenize context
-    const tokens = new Set(context.toLowerCase().split(/\W+/).filter(t => t.length > 2));
-    const contextLower = context.toLowerCase();
+    // Tokenize
+    let tokens: Set<string>;
+    const contextLower = (context || "").toLowerCase();
+
+    if (explicitKeywords && explicitKeywords.length > 0) {
+        // Strict Steering: Only use provided keywords, bypass fuzzy prompt tokenization
+        tokens = new Set(explicitKeywords.map(k => k.toLowerCase()));
+    } else {
+        // Fuzzy Fallback: Tokenize context
+        tokens = new Set(contextLower.split(/\W+/).filter(t => t.length > 2));
+    }
 
     // Score sections
     const scoredSections = data.sections.map(section => {

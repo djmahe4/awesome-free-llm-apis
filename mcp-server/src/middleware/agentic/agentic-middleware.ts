@@ -84,11 +84,11 @@ function decomposeGoal(goal: string): string[] {
     return lines.length > 1 ? lines : [goal];
 }
 
-async function prependSystemPrompt(context: PipelineContext, userContent?: string): Promise<void> {
+async function prependSystemPrompt(context: PipelineContext, userContent?: string, explicitKeywords?: string[]): Promise<void> {
     const messages = context.request.messages;
     if (!messages || messages.length === 0) return;
 
-    const dynamicPrompt = await getIntelligentSystemPrompt(userContent);
+    const dynamicPrompt = await getIntelligentSystemPrompt(userContent, explicitKeywords);
     const hasSystem = messages[0].role === 'system';
 
     if (hasSystem) {
@@ -181,7 +181,7 @@ export class AgenticMiddleware implements Middleware {
         const userContent = userMessage ? String(userMessage.content) : undefined;
 
         try {
-            await prependSystemPrompt(context, userContent);
+            await prependSystemPrompt(context, userContent, context.keywords);
         } catch (err) {
             console.error(`[AgenticMiddleware] Error prepending system prompt: ${err}`);
             // Continue without the prepended prompt

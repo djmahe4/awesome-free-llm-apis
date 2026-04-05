@@ -45,6 +45,7 @@ export async function createMCPServer(): Promise<Server> {
           '  agentic               — Enable agentic mode (task decomposition + system prompt injection).',
           '  sessionId             — Required for agentic mode. Partitions memory/logs per project.',
           '  google_search         — Enable Google search for Gemini models (default false).',
+          '  keywords              — Explicit steering tags (e.g. ["api", "sql"]) to prioritize reference map injection.',
           '  top_p                 — Nucleus sampling. Default 1.0.',
           '',
           'OUTPUTS: { id, object, model, choices[{message:{role,content}, finish_reason}], usage }',
@@ -83,6 +84,11 @@ export async function createMCPServer(): Promise<Server> {
             agentic: { type: 'boolean', description: 'Enable agentic mode: task decomposition and intelligent system prompt injection' },
             sessionId: { type: 'string', description: 'Unique session identifier required for agentic mode (e.g. UUID or project slug). Partitions state and logs per project.' },
             google_search: { type: 'boolean', description: 'Enable Google search for Gemini models (default false)' },
+            keywords: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Explicit steering tags to prioritize/filter documentation sections from reference maps.'
+            },
           },
           required: ['model', 'messages'],
         },
