@@ -8,8 +8,10 @@ export class ZhipuProvider extends BaseProvider {
   envVar = 'ZHIPU_API_KEY';
   rateLimits: RateLimits = {};
   models: ProviderModel[] = [
-    { id: 'glm-4-flash', name: 'GLM-4 Flash' },
-    { id: 'glm-4.5-flash', name: 'GLM-4.5 Flash' },
-    { id: 'glm-4.6v-flash', name: 'GLM-4.6V Flash' },
+    { id: 'glm-5.1', name: 'GLM-5.1' },
+    { id: 'glm-5-turbo', name: 'GLM-5-Turbo' },
+    { id: 'glm-4.7', name: 'GLM-4.7' },
+    { id: 'glm-4.6', name: 'GLM-4.6' },
+    { id: 'glm-4.5-air', name: 'GLM-4.5-Air' },
   ];
 }
