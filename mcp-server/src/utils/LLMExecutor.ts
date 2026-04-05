@@ -123,6 +123,17 @@ export class LLMExecutor {
     }
 
     /**
+     * Set token tracking state manually for a specific provider (primarily for testing)
+     */
+    updateProviderTokenState(providerId: string, info: Partial<TokenTrackingInfo>): void {
+        this.tokenTracking[providerId] = {
+            ...this.tokenTracking[providerId],
+            ...info,
+            lastSuccessTime: Date.now()
+        };
+    }
+
+    /**
      * Update token tracking from response headers (drift correction)
      */
     private updateTokenTracking(providerId: string, headers: Record<string, string | string[] | undefined>): void {
@@ -236,13 +247,32 @@ export class LLMExecutor {
         let response: ChatResponse | null = null;
         try {
             response = await provider.chat(context.request);
-        } finally {
-            if (!response) {
-                context.request.model = previousModel;
+        } catch (err: any) {
+            // 6. Handle rate limit errors even without headers (Robust extraction)
+            const errorMessage = err.message?.toLowerCase() || '';
+            const isRateLimit = err.status === 429 || 
+                               errorMessage.includes('rate_limit_exceeded') || 
+                               errorMessage.includes('resource_exhausted') ||
+                               errorMessage.includes('too many requests') ||
+                               errorMessage.includes('quota exceeded') ||
+                               errorMessage.includes('limit reached');
+
+            if (isRateLimit) {
+                console.log(`[LLMExecutor] Detected rate limit for ${providerId} from error: ${err.message}`);
+                this.updateProviderTokenState(providerId, {
+                    remainingTokens: 0,
+                    remainingRequests: 0,
+                    refreshTime: Date.now() + 60000, // Default 60s cooldown
+                    requestsRefreshTime: Date.now() + 60000
+                });
             }
+
+            // Still re-throw the error so the router knows to try next provider
+            context.request.model = previousModel;
+            throw err;
         }
 
-        // 6. Update token tracking from response headers (drift correction)
+        // 7. Update token tracking from response headers (drift correction)
         if (response && response._headers) {
             this.updateTokenTracking(providerId, response._headers);
         }

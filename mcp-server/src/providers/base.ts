@@ -18,11 +18,17 @@ export abstract class BaseProvider implements Provider {
 
 
   public consecutiveFailures = 0;
+  public shrink = false;
   protected cooldownUntil = 0;
 
   getPenaltyScore(): number {
     if (Date.now() < this.cooldownUntil) {
-      return 0.5; // Temporarily reduce score by 50%
+      // Standard cooldown penalty
+      return 0.5;
+    }
+    // Consecutive failures also add a dynamic penalty
+    if (this.consecutiveFailures > 0) {
+      return Math.min(0.4, this.consecutiveFailures * 0.1);
     }
     return 0;
   }

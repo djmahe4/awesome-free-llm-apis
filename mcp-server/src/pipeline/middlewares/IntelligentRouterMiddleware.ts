@@ -62,7 +62,7 @@ export class IntelligentRouterMiddleware implements Middleware {
      */
     private autoClassify(messages: Message[]): TaskType {
         const lastMsg = messages[messages.length - 1]?.content.toLowerCase() || '';
-        
+
         if (lastMsg.includes('```') || lastMsg.includes('function') || lastMsg.includes('class') || lastMsg.includes('debug') || lastMsg.includes('implement')) {
             return TaskType.Coding;
         }
@@ -72,13 +72,13 @@ export class IntelligentRouterMiddleware implements Middleware {
         if (lastMsg.includes('extract') || lastMsg.includes('entities') || lastMsg.includes('json') || lastMsg.includes('fields')) {
             return TaskType.EntityExtraction;
         }
-        if (lastMsg.includes('classify') || lastMsg.includes('sentiment') || lastMsg.includes('category')) {
+        if (lastMsg.includes('classify') || lastMsg.includes('sentiment') || lastMsg.includes('categorize')) {
             return TaskType.Classification;
         }
         if (lastMsg.includes('search') || lastMsg.includes('find') || lastMsg.includes('lookup')) {
             return TaskType.SemanticSearch;
         }
-        
+
         return TaskType.Chat;
     }
 
@@ -88,7 +88,7 @@ export class IntelligentRouterMiddleware implements Middleware {
     private isComplex(messages: Message[]): boolean {
         const lastMsg = messages[messages.length - 1]?.content || '';
         const lower = lastMsg.toLowerCase();
-        
+
         // Complex if it has numbered steps, multiple questions, or specific keywords
         const stepCount = (lastMsg.match(/\d\./g) || []).length;
         const questionCount = (lastMsg.match(/\?/g) || []).length;
@@ -103,11 +103,11 @@ export class IntelligentRouterMiddleware implements Middleware {
      */
     private async decomposeAndExecute(context: PipelineContext): Promise<void> {
         console.debug(`[Router] Decomposing complex task...`);
-        
+
         // 1. Pick a Planner model (SiliconFlow V3 or Gemini Flash)
         const plannerModels = ['deepseek-ai/DeepSeek-V3', 'gemini-2.0-flash', 'llama3.1-8b'];
         let plannerResponse: string | null = null;
-        
+
         const planningPrompt = `Analyze this request and split it into a list of independent subtasks. 
 Return ONLY a JSON array of strings, where each string is a clear subtask instruction.
 Request: ${context.request.messages[context.request.messages.length - 1].content}`;
@@ -144,8 +144,8 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
 
         for (const [i, task] of subtasks.entries()) {
             const taskType = this.autoClassify([{ role: 'user', content: task }]);
-            console.debug(`[Router] Subtask ${i+1}: "${task.slice(0, 50)}..." (Type: ${taskType})`);
-            
+            console.debug(`[Router] Subtask ${i + 1}: "${task.slice(0, 50)}..." (Type: ${taskType})`);
+
             try {
                 // Execute subtask with best model for its type
                 const subtaskRes = await this.executor.prompt(
@@ -153,16 +153,16 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
                     'any', // Let executor pick best for type if it can, otherwise defaults to chat
                     { taskType }
                 );
-                subtaskResults.push(`### Subtask ${i+1}: ${task}\n${subtaskRes.choices[0].message.content}`);
+                subtaskResults.push(`### Subtask ${i + 1}: ${task}\n${subtaskRes.choices[0].message.content}`);
             } catch (err) {
-                console.error(`[Router] Subtask ${i+1} failed:`, err);
-                subtaskResults.push(`### Subtask ${i+1}: ${task}\nFAILED: ${err}`);
+                console.error(`[Router] Subtask ${i + 1} failed:`, err);
+                subtaskResults.push(`### Subtask ${i + 1}: ${task}\nFAILED: ${err}`);
             }
         }
 
         // Final Aggregation (optional, here we just join)
         const finalContent = `I've broken your request into ${subtasks.length} subtasks:\n\n${subtaskResults.join('\n\n')}`;
-        
+
         context.response = {
             id: `decomposed-${Date.now()}`,
             object: 'chat.completion',
@@ -333,7 +333,7 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
                 // Use a stable summarization model
                 const summaryPrompt = `Summarize precisely while preserving technical context: ${text}`;
                 const preferredModels = IntelligentRouterMiddleware.taskRouteMap[TaskType.Summarization];
-                
+
                 // Try preferred models first
                 for (const modelId of preferredModels) {
                     for (const p of availableProviders) {
@@ -348,7 +348,7 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
                         }
                     }
                 }
-                
+
                 // Fallback: try ANY available provider with ANY model that has space
                 for (const p of availableProviders) {
                     if (p.models.length > 0) {
@@ -402,11 +402,11 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
         // --- Fallback Execution Loop ---
         for (const modelId of finalTierModels) {
             const capability = IntelligentRouterMiddleware.modelCapabilities[modelId] || 0.5;
-            
+
             // Adaptive Headroom: Powerhouses need more space for complex thoughts
-            let requiredHeadroom = 0.1; 
+            let requiredHeadroom = 0.1;
             if (isHeavyPrompt) {
-                if (capability >= 0.9) requiredHeadroom = 0.25; 
+                if (capability >= 0.9) requiredHeadroom = 0.25;
                 else if (capability >= 0.7) requiredHeadroom = 0.15;
             }
 
@@ -414,7 +414,7 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
                 .filter(p => p.models.some(m => m.id === modelId))
                 .map(provider => {
                     const modelMetadata = provider.models.find(m => m.id === modelId);
-                    
+
                     // 1. Base Score from capability
                     let baseScore = capability;
 
@@ -428,38 +428,50 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
                     // 3. Token-aware load factor
                     let tokenFactor = 1.0;
                     const tracking = this.executor.getTokenState()[provider.id];
-                    if (tracking && tracking.remainingTokens !== undefined) {
+                    if (tracking && tracking.remainingTokens !== undefined && Number.isFinite(tracking.remainingTokens)) {
                         // Proportional to 50k tokens as a "healthy" baseline
                         tokenFactor = Math.min(1.2, Math.max(0.1, tracking.remainingTokens / 50000));
+                        console.log(`[Router][Debug] Model ${modelId} | Provider ${provider.id} TokenFactor: ${tokenFactor.toFixed(2)} (Remaining: ${tracking.remainingTokens})`);
+                    } else {
+                        console.log(`[Router][Debug] Model ${modelId} | Provider ${provider.id} TokenFactor: 1.00 (Undefined/NaN)`);
                     }
 
                     // 4. Metadata-driven refinement
                     let scoreModifier = 1.0;
                     if (modelMetadata && modelMetadata.contextWindow) {
-                        const actualHeadroom = (modelMetadata.contextWindow - estimatedTokens) / modelMetadata.contextWindow;
-                        
+                        // Add 10% safety margin to estimated tokens to account for tokenizer drift
+                        const bufferedTokens = Math.ceil((estimatedTokens || 1024) * 1.1);
+                        const actualHeadroom = (modelMetadata.contextWindow - bufferedTokens) / modelMetadata.contextWindow;
+
                         // Hard Block: If truly overloaded, skip immediately
-                        if (actualHeadroom < 0.05) {
+                        const hardBlockThreshold = modelId === requestedModel ? 0 : 0.05;
+                        if (actualHeadroom < hardBlockThreshold) {
                             return { provider: provider as any, score: -1 };
                         }
 
                         // Penalty for low headroom if NOT the requested model
                         if (actualHeadroom < requiredHeadroom && modelId !== requestedModel) {
-                            scoreModifier = 0.1; 
+                            scoreModifier = 0.1;
                         }
 
                         // Refine base score with headroom
-                        baseScore = (capability * 0.6) + (actualHeadroom * 0.4);
+                        baseScore = (capability * 0.6) + (Math.max(0, actualHeadroom) * 0.4);
                     }
 
                     // 5. Persistence bonus
                     if (context.providerId && provider.id === context.providerId) baseScore += 1000;
 
-                    const finalScore = (baseScore * healthScore * loadFactor * tokenFactor * scoreModifier) - penalty;
+                    // Final Score calculation with robustness guards
+                    let finalScore = (baseScore * healthScore * loadFactor * tokenFactor * scoreModifier) - penalty;
+
+                    // NaN/Infinity Guard: Ensure scores are always valid numbers before filtering
+                    if (!Number.isFinite(finalScore)) {
+                        finalScore = -1; // Default to blocked for safety
+                    }
 
                     return { provider: provider as any, score: finalScore };
                 })
-                .filter(p => p.score > -0.5) // Allow small penalties but block hard overloads (-1)
+                .filter(p => p.score > -0.5) // Circuit Breaker: Block hard overloads (-1) or significant penalties
                 .sort((a, b) => b.score - a.score);
 
 
@@ -467,13 +479,13 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
                 try {
                     (context as any).providersAttempted.push(`${provider.id}/${modelId}`);
                     const response = await this.executor.tryProvider(context, provider.id, modelId);
-                    
+
                     if (response) {
                         if (contextCompressed) (context as any).contextCompressed = true;
                         context.response = response;
                         context.providerId = provider.id;
                         context.request.model = modelId;
-                        
+
                         // SUCCESS: Single path execution call to next()
                         try {
                             await next();

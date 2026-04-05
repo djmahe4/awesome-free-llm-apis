@@ -37,13 +37,31 @@ export interface SandboxOptions {
 }
 
 /**
+ * Constants for sandbox safety
+ */
+const MAX_DATA_LENGTH = 128 * 1024; // 128KB limit for environment variables
+const DEFAULT_TIMEOUT_MS = 5000;
+
+/**
  * Execute code in an isolated, network-free, filesystem-free sandbox.
  */
 export async function executeInSandbox(
   code: string,
   options: SandboxOptions = {}
 ): Promise<ExecutionResult> {
-  const { data = '', timeoutMs = 5000, language = 'javascript' } = options;
+  const { data = '', timeoutMs = DEFAULT_TIMEOUT_MS, language = 'javascript' } = options;
+
+  // Validation: Prevent process spawning failures due to extreme environment variable sizes
+  if (data.length > MAX_DATA_LENGTH) {
+    return {
+      stdout: '',
+      stderr: '',
+      success: false,
+      error: `Input data too large (${(data.length / 1024).toFixed(1)}KB). Max allowed is ${MAX_DATA_LENGTH / 1024}KB.`,
+      executionTimeMs: 0,
+    };
+  }
+
   switch (language) {
     case 'javascript':
       return executeJavaScript(code, data, timeoutMs);
@@ -203,7 +221,10 @@ async function executePython(
   try {
     const result = await runSubprocessWithStdin(pythonPath, [scriptPath], code, {
       timeout: timeoutMs,
-      env: { SANDBOX_DATA: data },
+      env: {
+        SANDBOX_DATA: data,
+        SANDBOX_TIMEOUT_MS: String(timeoutMs),
+      },
     });
 
     return {
