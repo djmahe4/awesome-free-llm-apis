@@ -1,6 +1,6 @@
 # free-llm-apis MCP Server
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that exposes **six focused tools** for interacting with 60+ free LLM providers through a unified, agent-first interface.
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that exposes **seven focused tools** for interacting with 60+ free LLM providers through a unified, agent-first interface.
 
 ---
 
@@ -35,7 +35,7 @@ graph TD
     style J fill:#f3e5f5,stroke:#7b1fa2
 ```
 
-### Pipeline Order (v1.0.1)
+### Pipeline Order (v1.0.3)
 
 | Stage | Component | Purpose |
 |-------|-----------|---------|
@@ -46,9 +46,9 @@ graph TD
 
 ---
 
-## Six Public Tools
+## Seven Public Tools
 
-> **Strict rule for agents:** Only these six tools are part of the public API. Never request additional tools. Prefer internal middleware changes to extend capability.
+> **Strict rule for agents:** Only these seven tools are part of the public API. Never request additional tools. Prefer internal middleware changes to extend capability.
 
 | Tool | Purpose | Required Params | Key Optional Params |
 |------|---------|----------------|---------------------|
@@ -401,13 +401,14 @@ npx tsx scripts/token-factor-smoke-test.ts
 mcp-server/
 ├── src/
 │   ├── mcp/index.ts          # Tool registration and MCP handler
-│   ├── tools/                # Six public tool implementations
+│   ├── tools/                # Seven public tool implementations
 │   │   ├── use-free-llm.ts
 │   │   ├── list-models.ts
 │   │   ├── get-token-stats.ts
 │   │   ├── validate-provider.ts
 │   │   ├── code-mode.ts
-│   │   └── manage-memory.ts
+│   │   ├── manage-memory.ts
+│   │   └── store-memory.ts
 │   ├── sandbox/              # Sandboxed code execution (QuickJS, Python)
 │   ├── middleware/           # Pipeline middleware stages
 │   │   └── agentic/          # Task decomposition + research validation

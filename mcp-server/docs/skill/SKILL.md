@@ -68,13 +68,13 @@ Perform a chat completion with optional fallback and workspace memory.
 
 | Parameter | Required | Default | Notes |
 |-----------|----------|---------|-------|
-| `messages` | ✅ | — | Array of `{ role, content }` objects |
-| `model` | ❌ | auto | Specific model ID. If omitted, the router auto-selects. |
-| `keywords` | ❌ | — | Explicit steering keywords. **Bypasses fuzzy matching** and injects only sections matching these tags. |
-| `agentic` | ❌ | `false` | Enable agentic mode: task decomposition and internal prompt injection. |
-| `sessionId` | ❌ | — | Required for agentic mode. Partitions memory/logs per project. |
-| `workspace_root` | ❌ | — | Path for context-aware cache keying and auto-session derivation. |
-| `google_search` | ❌ | `false` | Enable Google search for Gemini models. |
+| `messages` | yes | — | Array of `{ role, content }` objects |
+| `model` | no | auto | Specific model ID. If omitted, the router auto-selects. |
+| `keywords` | no | — | Explicit steering keywords. **Bypasses fuzzy matching** and injects only sections matching these tags. |
+| `agentic` | no | `false` | Enable agentic mode: task decomposition and internal prompt injection. |
+| `sessionId` | no | — | Required for agentic mode. Partitions memory/logs per project. |
+| `workspace_root` | no | — | Path for context-aware cache keying and auto-session derivation. |
+| `google_search` | no | `false` | Enable Google search for Gemini models. |
 
 > **Rule:** Always set `fallback: true` when building resilient pipelines.
 
@@ -147,11 +147,11 @@ Execute sandboxed code against arbitrary data. Only `stdout` is returned — nev
 
 | Parameter | Required | Default | Notes |
 |-----------|----------|---------|-------|
-| `code` | ✅ | — | Script source; use `print()` / `console.log()` for output |
-| `language` | ❌ | `javascript` | Sandbox runtime: `javascript` \| `python` |
-| `data` | ❌ | `""` | Injected as `DATA` global variable |
-| `command` | ❌ | — | Human-readable description (logged to memory) |
-| `timeout_ms` | ❌ | `5000` | Max execution time in milliseconds |
+| `code` | yes | — | Script source; use `print()` / `console.log()` for output |
+| `language` | no | `javascript` | Sandbox runtime: `javascript` \| `python` |
+| `data` | no | `""` | Injected as `DATA` global variable |
+| `command` | no | — | Human-readable description (logged to memory) |
+| `timeout_ms` | no | `5000` | Max execution time in milliseconds |
 
 **Sandbox Constraints (all languages):** No filesystem, no network, no process/OS calls.
 

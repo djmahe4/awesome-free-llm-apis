@@ -40,10 +40,6 @@
 - **Shared Memory Singleton**: Unified state management by migrating `MemoryManager` to a singleton pattern, resolving race conditions between tool calls and debounced disk persistence.
 - **Gemini Search Tool**: Added explicit `google_search` tool call support in `gemini_client.py` for fact-grounded responses.
 
----
-
-### ✨ New Features
-
 #### `code_mode` — Multi-Language Sandbox Support
 - Added `language` parameter to `code_mode` tool: `"javascript"` | `"python"` | `"go"` | `"rust"`
 - **JavaScript** (default): QuickJS via `quickjs-emscripten` — fully in-process, no subprocess overhead

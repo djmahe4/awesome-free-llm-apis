@@ -115,9 +115,9 @@ The `code_mode` tool executes code using isolated sandbox runtimes with no files
 | Language | Sandbox | Notes |
 |----------|---------|-------|
 | `javascript` (default) | QuickJS via `quickjs-emscripten` | Fully sandboxed; no external deps |
-| `python` | Restricted subprocess with safe builtins | Requires Python 3 on PATH; dangerous builtins stripped |
-| `go` | Reserved for future `goja` integration | Not yet available |
-| `rust` | Reserved for future `boa_engine` integration | Not yet available |
+| `python` | Restricted subprocess with safe builtins | Requires Python 3 on PATH and RestrictedPython installed |
+| `go` | Implemented using `goja` | Fully sandboxed; no external deps |
+| `rust` | Implemented using `boa_engine` | Fully sandboxed; no external deps |
 
 ### Security Features (all languages)
 - **No filesystem access**: Scripts cannot read or write files
