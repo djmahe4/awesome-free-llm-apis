@@ -90,19 +90,30 @@ async function loadPromptData(): Promise<PromptData | null> {
  * Scoring sections based on keywords and assembles the prompt.
  * If explicitKeywords are provided, fuzzy tokenization of the context is bypassed (Strict Steering).
  */
-export async function getIntelligentSystemPrompt(context?: string, explicitKeywords?: string[]): Promise<string> {
+export async function getIntelligentSystemPrompt(
+    context?: string,
+    explicitKeywords?: string[],
+    memoryContext?: string
+): Promise<string> {
     const data = await loadPromptData();
     if (!data) {
         return await getFallbackPrompt();
     }
 
     const introduction = data.introduction || "";
+    let assembled = introduction;
+
+    // Inject Workspace Memory at the very top of the assembled prompt for maximum attention
+    if (memoryContext) {
+        assembled += `\n\n## 🧠 WORKSPACE MEMORY\nRelevant prior knowledge for this workspace:\n${memoryContext}\n`;
+    }
+
     if (!context) {
         const critical = data.sections
             .filter(s => s.level === 1)
             .map(s => `\n\n## ${s.title}\n\n${s.content}`)
             .join("");
-        return `${introduction}${critical}`;
+        return `${assembled}${critical}`;
     }
 
     // Tokenize
@@ -160,7 +171,6 @@ export async function getIntelligentSystemPrompt(context?: string, explicitKeywo
         .sort((a, b) => b.score - a.score)
         .slice(0, 7);
 
-    let assembled = introduction;
     let currentSize = assembled.length;
 
     for (const section of relevant) {
@@ -236,4 +246,3 @@ async function getFallbackPrompt(): Promise<string> {
     return `You are the principal architect of a self-improving agent system.
 Use queues (now, next, blocked, improve), verification-first execution, and file-based state.`;
 }
-

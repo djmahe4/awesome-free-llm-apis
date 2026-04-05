@@ -3,6 +3,10 @@ import path from 'path';
 import { LRUCache } from 'lru-cache';
 import { getIntelligentSystemPrompt } from './prompts.js';
 import type { Middleware, PipelineContext, NextFunction } from '../../pipeline/middleware.js';
+import { memoryManager } from '../../memory/index.js';
+import { WorkspaceScanner } from '../../cache/workspace.js';
+
+const workspaceScanner = new WorkspaceScanner(process.cwd());
 
 
 interface QueueState {
@@ -84,11 +88,16 @@ function decomposeGoal(goal: string): string[] {
     return lines.length > 1 ? lines : [goal];
 }
 
-async function prependSystemPrompt(context: PipelineContext, userContent?: string, explicitKeywords?: string[]): Promise<void> {
+async function prependSystemPrompt(
+    context: PipelineContext,
+    userContent?: string,
+    explicitKeywords?: string[],
+    memoryContext?: string
+): Promise<void> {
     const messages = context.request.messages;
     if (!messages || messages.length === 0) return;
 
-    const dynamicPrompt = await getIntelligentSystemPrompt(userContent, explicitKeywords);
+    const dynamicPrompt = await getIntelligentSystemPrompt(userContent, explicitKeywords, memoryContext);
     const hasSystem = messages[0].role === 'system';
 
     if (hasSystem) {
@@ -164,14 +173,16 @@ export class AgenticMiddleware implements Middleware {
             return;
         }
 
-        // Resolve workspace files if possible
+        // Resolve workspace hash for context lookup and safe pathing
+        let wsHash: string | undefined;
         if (context.workspaceRoot) {
             try {
-                await ensureProjectFiles(context.workspaceRoot);
+                wsHash = workspaceScanner.getWorkspaceHash(context.workspaceRoot);
             } catch (err) {
-                console.error(`[AgenticMiddleware] Failed to ensure project files: ${err}`);
+                console.error(`[AgenticMiddleware] Failed to derive workspace hash: ${err}`);
             }
         }
+
 
         const projectDir = await ensureProjectFiles(sessionId);
         const q = getQueues(sessionId);
@@ -180,8 +191,29 @@ export class AgenticMiddleware implements Middleware {
         const userMessage = context.request.messages.find(m => m.role === 'user');
         const userContent = userMessage ? String(userMessage.content) : undefined;
 
+        // Retrieve relevant workspace memory context
+        let memoryContext: string | undefined;
+        if (wsHash) {
+            try {
+                console.error(`[AgenticMiddleware][DEBUG] Searching for wsHash=${wsHash} query="${userContent}"`);
+                const memoryResults = await memoryManager.search(wsHash, userContent);
+                console.error(`[AgenticMiddleware][DEBUG] Found ${memoryResults.length} memory results`);
+                if (Array.isArray(memoryResults) && memoryResults.length > 0) {
+                    // Limit to top 5 results and format as bullet points
+                    memoryContext = memoryResults
+                        .slice(0, 5)
+                        .map(m => `- ${typeof m === 'string' ? m : JSON.stringify(m)}`)
+                        .join('\n');
+                }
+            } catch (err) {
+                console.error(`[AgenticMiddleware] Memory lookup failed: ${err}`);
+            }
+        }
+
+
+
         try {
-            await prependSystemPrompt(context, userContent, context.keywords);
+            await prependSystemPrompt(context, userContent, context.keywords, memoryContext);
         } catch (err) {
             console.error(`[AgenticMiddleware] Error prepending system prompt: ${err}`);
             // Continue without the prepended prompt
