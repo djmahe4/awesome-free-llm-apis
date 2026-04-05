@@ -22,13 +22,29 @@ class MockProvider extends BaseProvider {
         this.id = id;
         this.name = `Mock ${id}`;
         this.envVar = `${id.toUpperCase()}_API_KEY`;
-        this.models = models;
+        // Ensure models have a default context window if not provided
+        this.models = models.map(m => ({ 
+            contextWindow: 8192, 
+            ...m 
+        }));
         this.rateLimits = { rpm };
         vi.stubEnv(this.envVar, 'mock-key-is-sufficiently-long');
     }
+    
+    // Support new token tracking metrics
+    override getUsageStats() { 
+        return { 
+            requestCountMinute: 0, 
+            requestCountDay: 0, 
+            tokenCountMinute: 0, 
+            tokenCountDay: 0 
+        }; 
+    }
+    
     override isAvailable(): boolean {
         return true;
     }
+
 }
 
 describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
@@ -78,11 +94,13 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
 
         // Prov1: 50% used
         const prov1 = new MockProvider('prov1', [{ id: 'm1', name: 'M1' }], 100);
-        vi.spyOn(prov1, 'getUsageStats').mockReturnValue({ requestCountMinute: 50, requestCountDay: 50 });
+        vi.spyOn(prov1, 'getUsageStats').mockReturnValue({ requestCountMinute: 50, requestCountDay: 50, tokenCountMinute: 0, tokenCountDay: 0 });
+
 
         // Prov2: 10% used (Better)
         const prov2 = new MockProvider('prov2', [{ id: 'm1', name: 'M1' }], 100);
-        vi.spyOn(prov2, 'getUsageStats').mockReturnValue({ requestCountMinute: 10, requestCountDay: 10 });
+        vi.spyOn(prov2, 'getUsageStats').mockReturnValue({ requestCountMinute: 10, requestCountDay: 10, tokenCountMinute: 0, tokenCountDay: 0 });
+
 
         registry.registerProvider(prov1);
         registry.registerProvider(prov2);
@@ -149,8 +167,9 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
         const provB_Low = new MockProvider('provB_Low', [{ id: 'model-b', name: 'M-B' }], 100);
         const provB_High = new MockProvider('provB_High', [{ id: 'model-b', name: 'M-B' }], 100);
 
-        vi.spyOn(provB_Low, 'getUsageStats').mockReturnValue({ requestCountMinute: 90, requestCountDay: 90 });
-        vi.spyOn(provB_High, 'getUsageStats').mockReturnValue({ requestCountMinute: 0, requestCountDay: 0 });
+        vi.spyOn(provB_Low, 'getUsageStats').mockReturnValue({ requestCountMinute: 90, requestCountDay: 90, tokenCountMinute: 0, tokenCountDay: 0 });
+        vi.spyOn(provB_High, 'getUsageStats').mockReturnValue({ requestCountMinute: 0, requestCountDay: 0, tokenCountMinute: 0, tokenCountDay: 0 });
+
 
         registry.registerProvider(provA);
         registry.registerProvider(provB_Low);

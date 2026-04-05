@@ -34,7 +34,7 @@ export class ResponseCacheMiddleware implements Middleware {
         if (context.response) {
             this.cache.set(cacheKey, context.response);
             await memoryManager.storeToolOutput('use_free_llm', {
-                model: context.request.model,
+                model: context.request.model || context.response.model,
                 messages: context.request.messages,
                 _ws: wsHash
             }, context.response);

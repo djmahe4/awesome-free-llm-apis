@@ -43,7 +43,7 @@ describe('Router Fallback Fix - Multiple next() Calls Bug', () => {
             taskType: TaskType.Coding
         };
         await router.execute(codingContext, async () => { });
-        expect(firstModelAttempted).toBe('DeepSeek-R1');
+        expect(firstModelAttempted).toBe('qwen/qwen3-coder-480b-a35b-instruct:free');
 
         // Reset and test Chat task
         firstModelAttempted = null;

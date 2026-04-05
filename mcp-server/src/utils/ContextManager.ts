@@ -79,8 +79,20 @@ export class ContextManager {
             return { messages, strategy: 'sliding-window', originalTokens, compressedTokens: originalTokens };
         }
 
+        // --- Tier 0: Offline Heuristic Compression (Free) ---
+        const heuristicMessages = this.heuristicCompress(messages, targetTokens);
+        const heuristicTokens = this.countTokens(heuristicMessages);
+        if (heuristicTokens <= targetTokens) {
+            return {
+                messages: heuristicMessages,
+                strategy: 'sliding-window',
+                originalTokens,
+                compressedTokens: heuristicTokens
+            };
+        }
+
         // --- Tier 1: Sliding Window with Summarization ---
-        const result = await this.slidingWindow(messages, targetTokens, summarizer);
+        const result = await this.slidingWindow(heuristicMessages, targetTokens, summarizer);
         if (result.compressedTokens <= targetTokens) {
             return result;
         }
@@ -189,6 +201,36 @@ export class ContextManager {
             originalTokens,
             compressedTokens,
         };
+    }
+
+    /**
+     * Tier 0: Offline Heuristic Compression
+     * Low-cost, regex-based compression that preserves key context without API calls.
+     */
+    heuristicCompress(messages: Message[], targetTokens: number): Message[] {
+        const systemMsgs = messages.filter(m => m.role === 'system');
+        const nonSystemMsgs = messages.filter(m => m.role !== 'system');
+
+        // Always keep the last 2 messages (1 exchange) entirely
+        const KEEP_RECENT = Math.min(2, nonSystemMsgs.length);
+        const recentMsgs = nonSystemMsgs.slice(-KEEP_RECENT);
+        const oldMsgs = nonSystemMsgs.slice(0, -KEEP_RECENT);
+
+        const compressedOld = oldMsgs.map(msg => {
+            // Keep code-heavy messages or short ones intact
+            if (msg.content.includes('```') || msg.content.length < 500) {
+                return msg;
+            }
+
+            // Extract first and last sentences of long prose
+            const sentences = msg.content.split(/[.!?]\s+/);
+            if (sentences.length <= 3) return msg;
+
+            const compressedContent = `${sentences[0]}. ${sentences[1]}. ... [summarized] ... ${sentences[sentences.length - 1]}.`;
+            return { ...msg, content: compressedContent };
+        });
+
+        return [...systemMsgs, ...compressedOld, ...recentMsgs];
     }
 
     /**

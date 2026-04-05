@@ -43,7 +43,7 @@ async function generate() {
             findings: errors.map(e => e.split(': ')[1])
         }, null, 2));
     `;
-    const sandboxResult = await executeInSandbox(script, rawData, 5000, 'javascript');
+    const sandboxResult = await executeInSandbox(script, { data: rawData, timeoutMs: 5000, language: 'javascript' });
 
     samplesMd += `## Scenario 2: Sandbox Logic Execution\n`;
     samplesMd += `> Component: \`src/sandbox/executor.ts\` (QuickJS)\n\n`;

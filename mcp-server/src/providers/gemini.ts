@@ -97,10 +97,11 @@ export class GeminiProvider extends BaseProvider {
   async chat(request: ChatRequest): Promise<ChatResponse> {
     this.checkRateLimit();
 
+    const actualModel = request.model || 'gemini-2.0-flash';
     let result;
     try {
       result = await this.runPythonClient({
-        model: request.model,
+        model: actualModel,
         messages: request.messages,
         stream: false,
         temperature: request.temperature,
@@ -147,7 +148,7 @@ export class GeminiProvider extends BaseProvider {
         },
       ],
       usage: result.usage,
-      model: request.model,
+      model: actualModel,
       object: 'chat.completion',
       created: Date.now(),
     };
@@ -163,7 +164,7 @@ export class GeminiProvider extends BaseProvider {
       env: { ...process.env }
     });
     const input = JSON.stringify({
-      model: request.model,
+      model: request.model || 'gemini-2.0-flash',
       messages: request.messages,
       stream: true,
       temperature: request.temperature,

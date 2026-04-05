@@ -134,7 +134,7 @@ describe('Agentic Intelligence & Compression Pipelines', () => {
             print("EXTRACTED CODE BLOCKS:\\n" + blocks.join('\\n--- CODE BLOCK ---\\n'));
         `;
 
-    const result = await executeInSandbox(script, responseData, 5000, 'javascript');
+    const result = await executeInSandbox(script, { data: responseData, timeoutMs: 5000, language: 'javascript' });
 
     logContent += `\n---\n\n## Scenario 3: Sandbox Extraction (code_mode)\n\n### Raw LLM Response (Input)\n\`\`\`json\n${responseData}\n\`\`\`\n\n### Extracted Output (Sandbox Results)\n\`\`\`text\n${result.stdout}\n\`\`\`\n`;
 

@@ -4,7 +4,7 @@ export interface Message {
 }
 
 export interface ChatRequest {
-  model: string;
+  model?: string;
   messages: Message[];
   temperature?: number;
   max_tokens?: number;
@@ -54,7 +54,11 @@ export interface Provider {
   models: ProviderModel[];
   rateLimits: RateLimits;
   envVar: string;
+  consecutiveFailures: number;
   isAvailable(): boolean;
   chat(request: ChatRequest): Promise<ChatResponse>;
   chatStream(request: ChatRequest): AsyncIterable<string>;
+  getPenaltyScore(): number;
+  recordFailure(status: number): void;
+  getUsageStats(): { requestCountMinute: number; requestCountDay: number };
 }

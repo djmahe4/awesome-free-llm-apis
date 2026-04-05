@@ -251,6 +251,45 @@ export class LLMExecutor {
     }
 
     /**
+     * Minimal standalone prompt execution (for subtasks/decomposition).
+     */
+    async prompt(
+        messages: Message[],
+        modelOverride: string = 'any',
+        options: { taskType?: string } = {}
+    ): Promise<ChatResponse> {
+        const registry = ProviderRegistry.getInstance();
+        const providers = registry.getAvailableProviders();
+        
+        if (providers.length === 0) {
+            throw new Error('No providers available');
+        }
+
+        // Pick matching models
+        const targetModels = modelOverride === 'any' 
+            ? ['gemini-2.0-flash', 'llama-3.3-70b-versatile', 'glm-4.7'] 
+            : [modelOverride];
+
+        for (const modelId of targetModels) {
+            for (const p of providers) {
+                if (modelOverride === 'any' || p.models.some(m => m.id === modelId)) {
+                    try {
+                        const res = await p.chat({
+                            model: modelId === 'any' ? p.models[0].id : modelId,
+                            messages
+                        });
+                        return res;
+                    } catch (err) {
+                        continue;
+                    }
+                }
+            }
+        }
+
+        throw new Error(`Failed to execute prompt with any provider.`);
+    }
+
+    /**
      * Get current token tracking state
      */
     getTokenState(): Record<string, TokenTrackingInfo> {

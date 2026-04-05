@@ -23,7 +23,10 @@ class MockProvider extends BaseProvider {
         this.id = id;
         this.name = `Mock ${id}`;
         this.envVar = `${id.toUpperCase()}_API_KEY`;
-        this.models = models;
+        this.models = models.map(m => ({
+            contextWindow: 8192,
+            ...m
+        }));
         this.rateLimits = { rpm };
         vi.stubEnv(this.envVar, 'mock-key-is-sufficiently-long');
     }
@@ -161,19 +164,20 @@ describe('Router Context Overflow Auto-Compression', () => {
         // but big enough for the 64-token summary text passed to the summarizer.
         const smallProvider = new MockProvider(
             'cloudflare',
-            [{ id: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', name: 'Llama 70B', contextWindow: 100 }],
+            [{ id: 'llama-3.3-70b-versatile', name: 'Llama 70B', contextWindow: 100 }],
             100
         );
         registry.registerProvider(smallProvider);
+        vi.spyOn(registry, 'getAvailableProviders').mockReturnValue([smallProvider]);
 
         // Mock token logic to trigger overflow then success
         const calcTokensSpy2 = vi.spyOn(executor, 'calculateTokens');
-        calcTokensSpy2.mockReturnValueOnce(150); // First call (overflow)
+        calcTokensSpy2.mockReturnValueOnce(5000); // Trigger > 4000 compression
         calcTokensSpy2.mockReturnValue(50);      // All subsequent (after compression)
 
         const context: PipelineContext = {
             request: {
-                model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+                model: 'llama-3.3-70b-versatile',
                 messages: [
                     { role: 'user', content: 'Long history info. '.repeat(50) },
                     { role: 'assistant', content: 'Long history response. '.repeat(50) },
@@ -205,12 +209,9 @@ describe('Router Context Overflow Auto-Compression', () => {
 
         await router.execute(context, async () => { });
 
-        const est = executor.calculateTokens(context);
-        const provs = registry.getAllProviders().filter(p => p.isAvailable());
-        const maxCont = provs.flatMap(p => p.models).reduce((max, m) => m.contextWindow ? Math.max(max, m.contextWindow) : max, 0);
-
-        // At least 2 calls: 1 for summarization + 1 for actual request
-        expect(callCount, `Expected callCount >= 2. Actual: ${callCount}. Est tokens: ${est}, Max context: ${maxCont}, Avail provs: ${provs.length}`).toBeGreaterThanOrEqual(2);
+        // exactly 1 call: heuristic compression (Tier 0) is synchronous and doesn't call an LLM.
+        // After Tier 0, tokens are 50, which fits in the 100 context window.
+        expect(callCount).toBe(1);
         expect(context.response).toBeDefined();
         expect((context as any).contextCompressed).toBe(true);
     });
@@ -225,6 +226,7 @@ describe('Router Context Overflow Auto-Compression', () => {
             [{ id: 'model-large', name: 'Large Model', contextWindow: 128000 }],
             100
         );
+        vi.spyOn(registry, 'getAvailableProviders').mockReturnValue([largeProvider]);
         vi.spyOn(registry, 'getAllProviders').mockReturnValue([largeProvider]);
 
         const context: PipelineContext = {

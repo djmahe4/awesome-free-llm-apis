@@ -11,10 +11,13 @@ export abstract class BaseProvider implements Provider {
 
   private requestCountMinute = 0;
   private requestCountDay = 0;
+  private tokenCountMinute = 0;
+  private tokenCountDay = 0;
   private minuteWindowStart = Date.now();
   private dayWindowStart = Date.now();
 
-  protected consecutiveFailures = 0;
+
+  public consecutiveFailures = 0;
   protected cooldownUntil = 0;
 
   getPenaltyScore(): number {
@@ -67,13 +70,16 @@ export abstract class BaseProvider implements Provider {
     return true;
   }
 
-  getUsageStats(): { requestCountMinute: number; requestCountDay: number } {
+  getUsageStats(): { requestCountMinute: number; requestCountDay: number; tokenCountMinute: number; tokenCountDay: number } {
     this.checkRateLimit();
     return {
       requestCountMinute: this.requestCountMinute,
-      requestCountDay: this.requestCountDay
+      requestCountDay: this.requestCountDay,
+      tokenCountMinute: this.tokenCountMinute,
+      tokenCountDay: this.tokenCountDay
     };
   }
+
 
   protected getApiKey(): string {
     const key = process.env[this.envVar];
@@ -85,12 +91,15 @@ export abstract class BaseProvider implements Provider {
     const now = Date.now();
     if (now - this.minuteWindowStart > 60_000) {
       this.requestCountMinute = 0;
+      this.tokenCountMinute = 0;
       this.minuteWindowStart = now;
     }
     if (now - this.dayWindowStart > 86_400_000) {
       this.requestCountDay = 0;
+      this.tokenCountDay = 0;
       this.dayWindowStart = now;
     }
+
 
     // Log warnings if local limits are exceeded, but don't hard-block.
     // This allows the Intelligent Router to still factor this into scoring
@@ -103,10 +112,13 @@ export abstract class BaseProvider implements Provider {
     }
   }
 
-  protected recordRequest(): void {
+  protected recordRequest(tokens: number = 0): void {
     this.requestCountMinute++;
     this.requestCountDay++;
+    this.tokenCountMinute += tokens;
+    this.tokenCountDay += tokens;
   }
+
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
     this.checkRateLimit();
@@ -115,6 +127,9 @@ export abstract class BaseProvider implements Provider {
 
     // Sanitize request: Remove internal-only fields that strict APIs reject
     const { agentic, ...sanitizedRequest } = request as any;
+
+    // Ensure model is set
+    sanitizedRequest.model = sanitizedRequest.model || (this.models.length > 0 ? this.models[0].id : '');
 
     const response = await fetch(url, {
       method: 'POST',
@@ -135,8 +150,10 @@ export abstract class BaseProvider implements Provider {
     }
     this.consecutiveFailures = 0;
     this.cooldownUntil = 0;
-    this.recordRequest();
     const json = await response.json() as ChatResponse;
+    const tokens = json.usage?.total_tokens || 0;
+    this.recordRequest(tokens);
+
     const headers: Record<string, string> = {};
     response.headers.forEach((val, key) => { headers[key] = val; });
     json._headers = headers;
@@ -150,6 +167,9 @@ export abstract class BaseProvider implements Provider {
 
     // Sanitize request: Remove internal-only fields that strict APIs reject
     const { agentic, ...sanitizedRequest } = request as any;
+
+    // Ensure model is set
+    sanitizedRequest.model = sanitizedRequest.model || (this.models.length > 0 ? this.models[0].id : '');
 
     const response = await fetch(url, {
       method: 'POST',

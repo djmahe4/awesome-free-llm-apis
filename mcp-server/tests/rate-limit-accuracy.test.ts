@@ -150,8 +150,11 @@ describe('Orchestration Accuracy (Fallback & Compression)', () => {
             content: 'A'.repeat(100) // 10 * 100 = 1000 chars, well over 200 tokens
         });
 
-        // Force executor to see overflow too
-        vi.spyOn(executor, 'calculateTokens').mockReturnValue(500);
+        // Dynamic token calculation based on content length
+        vi.spyOn(executor, 'calculateTokens').mockImplementation((messages: any) => {
+            const totalLength = messages.reduce((acc: number, m: any) => acc + (m.content?.length || 0), 0);
+            return Math.ceil(totalLength / 4);
+        });
 
         // SUCCESS for summarization AND final call
         (fetch as any).mockResolvedValue({
