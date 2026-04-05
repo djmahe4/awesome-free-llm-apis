@@ -41,7 +41,8 @@ export async function createMCPServer(): Promise<Server> {
           '  workspace_root (opt) — Workspace path for cache-keying and session derivation.',
           '  google_search (opt)  — Enable Google search for Gemini models (default false).',
           '',
-          'OUTPUTS: { id, object, model, choices[{message:{role,content}, finish_reason}], usage }',
+          'OUTPUTS: Assistant response text. Multiple choices are labeled AGENT RESPONSE 1, AGENT RESPONSE 2, etc.',
+          '         Metadata (model, usage, headers) is omitted to keep context lean.',
           '',
           'FAILURE STATES:',
           '  - "No providers available": all fallback models exhausted. Check `get_token_stats`.',
@@ -345,8 +346,24 @@ export async function createMCPServer(): Promise<Server> {
       if (name === 'use_free_llm') {
         const input = args as unknown as Parameters<typeof useFreeLLM>[0];
         const result = await useFreeLLM(input);
+
+        // Extract only the assistant content — strip headers, usage, id, etc.
+        // Handles multiple choices (e.g. n>1 or beam-search providers) by joining.
+        const choices: Array<{ message?: { content?: string }; text?: string }> =
+          Array.isArray(result?.choices) ? result.choices : [];
+
+        const texts = choices
+          .map((c) => (c?.message?.content ?? c?.text ?? '').trim())
+          .filter(Boolean);
+
+        const responseText = texts.length === 0
+          ? JSON.stringify(result, null, 2) // fallback: no choices at all
+          : texts.length === 1
+            ? texts[0]  // single response — return as-is, no label overhead
+            : texts.map((t, i) => `AGENT RESPONSE ${i + 1}\n\n${t}`).join('\n\n');
+
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          content: [{ type: 'text' as const, text: responseText }],
         };
       }
 

@@ -15,6 +15,8 @@
 - **Deterministic Keyword Steering**: Transitioned from fuzzy matching to a **Majority-Voting Classification** engine, enabling deterministic mapping of tasks to model tiers.
 - **MCP Tool Interface Hardening**: Stripped 6 advanced/rarely-used parameters (`temperature`, `max_tokens`, `top_p`, `stream`, `provider`, `fallback`) from the `use_free_llm` schema to reduce agentic cognitive load.
 - **Auto-Routing**: Made `model` parameter optional; the router now automatically selects the optimal tier based on `keywords` if no model ID is provided.
+- **Simplified Response Payload**: Stripped heavy JSON wrapping from `use_free_llm` results; now returns raw assistant text for immediate agent consumption.
+- **Multi-Choice Labeling**: Implemented `AGENT RESPONSE N` formatting for providers returning multiple completions (e.g., beam-search or `n > 1`).
 - **Executor ↔ Compressor Bridge**: `LLMExecutor` now propagates real-time remaining token quota (from provider response headers) into `PipelineContext.providerRemainingTokens`. `ContextManager.compress()` reads this live signal to override its static model-window estimate, making context compression accurately reflect actual provider capacity.
 - **Stricter Prompt Precision**: Selection threshold increased to `>= 3` to eliminate hallucinated prompt injections.
 - **Granular Reference Mapping**: Metadata-aware link extraction capped at 5 high-relevance entries per section.

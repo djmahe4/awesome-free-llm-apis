@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const BASE = path.resolve(
-    process.env.AGENT_PROMPT_PATH ?? path.join(__dirname, '../../../external/agent-prompt'),
+    process.env.AGENT_PROMPT_PATH ?? path.join(__dirname, '../../../../external/agent-prompt'),
 );
 const README = path.join(BASE, 'README.md');
 const JSON_PROMPT = path.join(BASE, 'prompt.json');
@@ -205,17 +205,15 @@ export async function getIntelligentSystemPrompt(context?: string, explicitKeywo
 
 async function getFallbackPrompt(): Promise<string> {
     try {
-        await fsp.access(RAW);
-        const data = (await fsp.readFile(RAW, 'utf-8')).trim();
+        await fsp.access(README);
+        const data = await fsp.readFile(README, 'utf-8');
         if (data.length > MIN_PROMPT_LENGTH) return data;
     } catch { }
 
     try {
-        await fsp.access(README);
-        const txt = await fsp.readFile(README, 'utf-8');
-        const marker = "You are the principal architect and builder";
-        const extracted = extractFromMarkdown(txt, marker);
-        if (extracted && extracted.length > MIN_PROMPT_LENGTH) return extracted;
+        await fsp.access(RAW);
+        const data = (await fsp.readFile(RAW, 'utf-8')).trim();
+        if (data.length > MIN_PROMPT_LENGTH) return data;
     } catch { }
 
     return `You are the principal architect of a self-improving agent system.

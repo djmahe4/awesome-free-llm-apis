@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "smoke-test": "tsx --env-file=.env scripts/smoke-test.ts",
+    "samples": "tsx --env-file=.env benchmarks/generate-live-samples.ts",
     "dashboard": "tsx --env-file=.env src/server.ts --sse"
   },
   "dependencies": {

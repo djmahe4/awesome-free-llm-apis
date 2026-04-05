@@ -52,7 +52,7 @@ graph TD
 
 | Tool | Purpose | Required Params | Key Optional Params |
 |------|---------|----------------|---------------------|
-| `use_free_llm` | Universal chat with deterministic steering | `messages` | `model`, `keywords`, `agentic`, `sessionId` |
+| `use_free_llm` | Universal chat with deterministic steering; returns ONLY text content | `messages` | `model`, `keywords`, `agentic`, `sessionId` |
 | `list_available_free_models` | Enumerate providers and models with metadata | *(none)* | `provider`, `available_only` |
 | `get_token_stats` | Real-time per-provider usage and quota stats | *(none)* | — |
 | `validate_provider` | Health-check and credential validation | `providerId` | — |
@@ -196,6 +196,8 @@ LLMExecutor
         │
         ▼ ─────────────────────────────────────
 Response returned to agent
+  • Simplified text content only (full JSON metadata stripped)
+  • If multiple choices: Labeled as 'AGENT RESPONSE 1', 'AGENT RESPONSE 2', etc.
 ```
 
 ### Best Practices for Agent/Copilot Authors
