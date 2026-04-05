@@ -250,15 +250,15 @@ export class LLMExecutor {
         } catch (err: any) {
             // 6. Handle rate limit errors even without headers (Robust extraction)
             const errorMessage = err.message?.toLowerCase() || '';
-            const isRateLimit = err.status === 429 || 
-                               errorMessage.includes('rate_limit_exceeded') || 
-                               errorMessage.includes('resource_exhausted') ||
-                               errorMessage.includes('too many requests') ||
-                               errorMessage.includes('quota exceeded') ||
-                               errorMessage.includes('limit reached');
+            const isRateLimit = err.status === 429 ||
+                errorMessage.includes('rate_limit_exceeded') ||
+                errorMessage.includes('resource_exhausted') ||
+                errorMessage.includes('too many requests') ||
+                errorMessage.includes('quota exceeded') ||
+                errorMessage.includes('limit reached');
 
             if (isRateLimit) {
-                console.log(`[LLMExecutor] Detected rate limit for ${providerId} from error: ${err.message}`);
+                //console.log(`[LLMExecutor] Detected rate limit for ${providerId} from error: ${err.message}`);
                 this.updateProviderTokenState(providerId, {
                     remainingTokens: 0,
                     remainingRequests: 0,
@@ -290,14 +290,14 @@ export class LLMExecutor {
     ): Promise<ChatResponse> {
         const registry = ProviderRegistry.getInstance();
         const providers = registry.getAvailableProviders();
-        
+
         if (providers.length === 0) {
             throw new Error('No providers available');
         }
 
         // Pick matching models
-        const targetModels = modelOverride === 'any' 
-            ? ['gemini-2.0-flash', 'llama-3.3-70b-versatile', 'glm-4.7'] 
+        const targetModels = modelOverride === 'any'
+            ? ['gemini-2.0-flash', 'llama-3.3-70b-versatile', 'glm-4.7']
             : [modelOverride];
 
         for (const modelId of targetModels) {

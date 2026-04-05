@@ -14,7 +14,9 @@
 - **7 Live Intelligence Scenarios**: Structured traces in `SAMPLES.md` covering Memory Synthesis, Task Decomposition, and sandboxed logic extraction.
 - **Stricter Prompt Precision**: Selection threshold increased to `>= 3` to eliminate hallucinated prompt injections.
 - **Granular Reference Mapping**: Metadata-aware link extraction capped at 5 high-relevance entries per section.
-- **Adaptive Routing (Self-Healing)**: Implemented provider cooldown penalties (429/500 errors). The router now deprioritizes failing providers for 60s, ensuring faster fallbacks.
+- **Adaptive Routing & Reactive Drift Correction**: Implemented provider cooldown penalties and a new robust error-interception layer. The system now detects 429 errors and rate-limit payloads (e.g., `resource_exhausted`) to immediately update internal token tracking, even for providers without standard headers.
+- **Improved Router Precision**: Relaxed context window hard-blocks for explicitly requested models, ensuring they remain viable up to 0% headroom.
+- **Verification Utilities**: Added `scripts/verify-header-extraction.ts` and `scripts/token-factor-smoke-test.ts` for live validation of provider rate-limit patterns and scoring logic.
 - **Gemini Structured Output**: Added native JSON Schema support for Gemini via the `google-genai` Python SDK.
 - **Google Search Grounding**: New `google_search` flag in `ChatRequest` enables real-time web grounding for Gemini models.
 - **Intelligent Model Validation**: The router now strictly validates requested models against available providers before prioritization.

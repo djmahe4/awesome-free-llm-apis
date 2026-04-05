@@ -19,7 +19,7 @@ graph TD
     C --> D[ResponseCacheMiddleware]
     D -->|Cache Miss| E[AgenticMiddleware]
     E --> F[IntelligentRouterMiddleware]
-    F -->|Tier selection + fallback| G[LLMExecutor]
+    F -->|Tier selection + fallback| G[LLMExecutor<br/>Headers + Error Recovery]
     G --> H[(Free LLM Provider)]
 
     C --> I
@@ -42,7 +42,7 @@ graph TD
 | 1 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed |
 | 2 | `AgenticMiddleware` *(optional)* | Task decomposition, research validation, system prompt injection |
 | 3 | `IntelligentRouterMiddleware` | Model-tier selection with FREE-first fallback cascade |
-| 4 | `LLMExecutor` | HTTPS request to provider; token tracking via response headers |
+| 4 | `LLMExecutor` | HTTPS request to provider; token tracking via response headers + **reactive drift correction (detected 429/error-payloads)** |
 
 ---
 
@@ -181,7 +181,7 @@ LLMExecutor
   • Estimates tokens (js-tiktoken)
   • Checks quota before request
   • Makes HTTPS request to provider
-  • Updates token tracking from x-ratelimit-* headers
+  • Updates token tracking from x-ratelimit-* headers + **reactive error interception**
         │
         ▼ ─────────────────────────────────────
 Response returned to agent
@@ -370,6 +370,20 @@ The server features a **hardened long-term memory system** designed for long-run
 - **Identity Hashes**: Workspaces are identified by stable, path-based hashes. Your stored facts persist even if you modify your codebase.
 - **Anti-Poisoning**: Strict `fs.existsSync` validation prevents memory pollution from hallucinated paths.
 - **Explicit Injection**: Use `store_memory` to deliberately persist architectural decisions, research findings, or task summaries across sessions.
+
+---
+
+## Reliability & Verification
+
+Maintainers can verify header extraction and router scoring logic using provided scripts:
+
+```bash
+# Verify how specific providers return rate-limit headers (live test)
+npx tsx scripts/verify-header-extraction.ts
+
+# Verify the router's TokenFactor scoring logic against mock states
+npx tsx scripts/token-factor-smoke-test.ts
+```
 
 ---
 

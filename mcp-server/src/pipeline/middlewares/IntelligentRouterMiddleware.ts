@@ -431,10 +431,10 @@ Request: ${context.request.messages[context.request.messages.length - 1].content
                     if (tracking && tracking.remainingTokens !== undefined && Number.isFinite(tracking.remainingTokens)) {
                         // Proportional to 50k tokens as a "healthy" baseline
                         tokenFactor = Math.min(1.2, Math.max(0.1, tracking.remainingTokens / 50000));
-                        console.log(`[Router][Debug] Model ${modelId} | Provider ${provider.id} TokenFactor: ${tokenFactor.toFixed(2)} (Remaining: ${tracking.remainingTokens})`);
-                    } else {
-                        console.log(`[Router][Debug] Model ${modelId} | Provider ${provider.id} TokenFactor: 1.00 (Undefined/NaN)`);
-                    }
+                        //console.log(`[Router][Debug] Model ${modelId} | Provider ${provider.id} TokenFactor: ${tokenFactor.toFixed(2)} (Remaining: ${tracking.remainingTokens})`);
+                    }// else {
+                    //console.log(`[Router][Debug] Model ${modelId} | Provider ${provider.id} TokenFactor: 1.00 (Undefined/NaN)`);
+                    //}
 
                     // 4. Metadata-driven refinement
                     let scoreModifier = 1.0;
