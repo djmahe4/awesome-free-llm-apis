@@ -41,8 +41,8 @@ graph TD
 |-------|-----------|---------|
 | 1 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed |
 | 2 | `AgenticMiddleware` *(optional)* | Task decomposition, research validation, system prompt injection |
-| 3 | `IntelligentRouterMiddleware` | Model-tier selection with FREE-first fallback cascade |
-| 4 | `LLMExecutor` | HTTPS request to provider; token tracking via response headers + **reactive drift correction (detected 429/error-payloads)** |
+| 3 | `IntelligentRouterMiddleware` | Deterministic keyword-based model-tier selection with FREE-first fallback cascade |
+| 4 | `LLMExecutor` | HTTPS request to provider; token tracking via response headers + **reactive drift correction** + **bridge: writes `providerRemainingTokens` into context for ContextManager** |
 
 ---
 
@@ -190,6 +190,9 @@ LLMExecutor
   • Checks quota before request
   • Makes HTTPS request to provider
   • Updates token tracking from x-ratelimit-* headers + **reactive error interception**
+  • **Bridge**: writes provider's remaining tokens into context.providerRemainingTokens
+  •   → ContextManager.compress() reads this to override static model-window with live quota
+  •   → Providers without headers degrade gracefully (static estimate used as fallback)
         │
         ▼ ─────────────────────────────────────
 Response returned to agent

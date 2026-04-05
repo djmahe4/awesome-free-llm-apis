@@ -9,6 +9,13 @@ export interface PipelineContext {
     workspaceRoot?: string;
     wsHash?: string;
     keywords?: string[];
+    /**
+     * Set by LLMExecutor after a successful provider call when the provider
+     * reports remaining token quota via response headers (x-ratelimit-remaining-tokens).
+     * ContextManager reads this to override its static model-window target with a
+     * real-time budget — the bridge between executor and compressor.
+     */
+    providerRemainingTokens?: number;
     [key: string]: any;
 }
 

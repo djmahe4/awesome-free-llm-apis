@@ -15,6 +15,7 @@
 - **Deterministic Keyword Steering**: Transitioned from fuzzy matching to a **Majority-Voting Classification** engine, enabling deterministic mapping of tasks to model tiers.
 - **MCP Tool Interface Hardening**: Stripped 6 advanced/rarely-used parameters (`temperature`, `max_tokens`, `top_p`, `stream`, `provider`, `fallback`) from the `use_free_llm` schema to reduce agentic cognitive load.
 - **Auto-Routing**: Made `model` parameter optional; the router now automatically selects the optimal tier based on `keywords` if no model ID is provided.
+- **Executor ↔ Compressor Bridge**: `LLMExecutor` now propagates real-time remaining token quota (from provider response headers) into `PipelineContext.providerRemainingTokens`. `ContextManager.compress()` reads this live signal to override its static model-window estimate, making context compression accurately reflect actual provider capacity.
 - **Stricter Prompt Precision**: Selection threshold increased to `>= 3` to eliminate hallucinated prompt injections.
 - **Granular Reference Mapping**: Metadata-aware link extraction capped at 5 high-relevance entries per section.
 - **Adaptive Routing & Reactive Drift Correction**: Implemented provider cooldown penalties and a new robust error-interception layer. The system now detects 429 errors and rate-limit payloads (e.g., `resource_exhausted`) to immediately update internal token tracking, even for providers without standard headers.
@@ -34,6 +35,7 @@
 - **Joint-Task Keyword Map**: Implemented high-precision mapping for `coding`, `research`, and `chat` task tiers in the Intelligent Router.
 - **Majority-Voting Classifier**: New logic in `IntelligentRouterMiddleware` that counts keyword occurrences to resolve task ambiguity reliably.
 - **Simplified Tool Description**: Rewrote `use_free_llm` instructions to prioritize "Intent-based Routing" through keywords over manual configuration.
+- **Executor ↔ Compressor Bridge**: Added `providerRemainingTokens` to `PipelineContext`. After a successful API call, `LLMExecutor` writes the provider's remaining token quota from response headers into this field. `ContextManager.compress()` then uses `min(staticTarget, providerRemainingTokens)` as its effective budget. Providers without rate-limit headers degrade gracefully to the static estimate.
 - **Stable Workspace Identity**: Switched `WorkspaceScanner` from transient content-hashing to stable **Identity Hashes** built from absolute paths. This fixes "memory amnesia" caused by code edits.
 - **Anti-Poisoning Validation**: All workspace-aware tools now strictly validate the existence of `workspace_root` via `fs.existsSync`, preventing agents from hallucinating or poisoning phantom workspaces.
 - **New `store_memory` Tool**: Implemented a dedicated tool for manual fact injection, enabling agents to explicitly persist architectural context and high-density summaries for subsequent runs.

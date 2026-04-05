@@ -275,6 +275,14 @@ export class LLMExecutor {
         // 7. Update token tracking from response headers (drift correction)
         if (response && response._headers) {
             this.updateTokenTracking(providerId, response._headers);
+
+            // Bridge: propagate real remaining token quota into the pipeline context
+            // so ContextManager can use it as a live compression target instead of
+            // relying on a static model-window estimate.
+            const tracker = this.tokenTracking[providerId];
+            if (tracker?.remainingTokens !== undefined) {
+                context.providerRemainingTokens = tracker.remainingTokens;
+            }
         }
 
         return response;

@@ -62,27 +62,43 @@ export class ContextManager {
      * Main entry: compress a context to fit within targetTokens.
      * Returns the compressed message array and metadata.
      *
-     * @param context     - The pipeline context to compress
-     * @param targetTokens - Max tokens allowed (contextWindow - max_tokens reserved)
-     * @param summarizer  - Async fn that summarizes a block of text using an LLM
+     * @param context      - The pipeline context to compress
+     * @param targetTokens - Max tokens allowed (contextWindow - max_tokens reserved).
+     *                       If the provider reported remaining token quota via response
+     *                       headers (context.providerRemainingTokens), that real-time
+     *                       figure overrides this estimate — bridging executor ↔ compressor.
+     * @param summarizer   - Async fn that summarizes a block of text using an LLM
      */
     async compress(
         context: PipelineContext,
         targetTokens: number,
         summarizer: (text: string) => Promise<string>
     ): Promise<ContextCompressionResult> {
+        // Bridge: if the provider told us exactly how many tokens remain,
+        // use that as the real compression ceiling instead of the static estimate.
+        const effectiveTarget = (context.providerRemainingTokens !== undefined && context.providerRemainingTokens > 0)
+            ? Math.min(targetTokens, context.providerRemainingTokens)
+            : targetTokens;
+
+        if (effectiveTarget !== targetTokens) {
+            console.log(
+                `[ContextManager] Bridge override: using provider-reported ` +
+                `remaining=${context.providerRemainingTokens} tokens instead of static target=${targetTokens}`
+            );
+        }
+
         const messages = [...context.request.messages];
         const originalTokens = this.countTokens(messages);
 
         // Already fits — nothing to do
-        if (originalTokens <= targetTokens) {
+        if (originalTokens <= effectiveTarget) {
             return { messages, strategy: 'sliding-window', originalTokens, compressedTokens: originalTokens };
         }
 
         // --- Tier 0: Offline Heuristic Compression (Free) ---
-        const heuristicMessages = this.heuristicCompress(messages, targetTokens);
+        const heuristicMessages = this.heuristicCompress(messages, effectiveTarget);
         const heuristicTokens = this.countTokens(heuristicMessages);
-        if (heuristicTokens <= targetTokens) {
+        if (heuristicTokens <= effectiveTarget) {
             return {
                 messages: heuristicMessages,
                 strategy: 'sliding-window',
@@ -92,13 +108,13 @@ export class ContextManager {
         }
 
         // --- Tier 1: Sliding Window with Summarization ---
-        const result = await this.slidingWindow(heuristicMessages, targetTokens, summarizer);
-        if (result.compressedTokens <= targetTokens) {
+        const result = await this.slidingWindow(heuristicMessages, effectiveTarget, summarizer);
+        if (result.compressedTokens <= effectiveTarget) {
             return result;
         }
 
         // --- Tier 2: Truncate Oldest (fast fallback) ---
-        const truncated = this.truncateOldest(messages, targetTokens);
+        const truncated = this.truncateOldest(messages, effectiveTarget);
         return truncated;
     }
 
