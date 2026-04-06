@@ -227,8 +227,8 @@
 |----------|---------|-------------|--------------|
 | `javascript` (default) | QuickJS (quickjs-emscripten) | `DATA` global string | `print()` or `console.log()` |
 | `python` | Restricted subprocess (Python 3) | `DATA` global string | `print()` |
-| `go` | *Reserved — future integration* | — | — |
-| `rust` | *Reserved — future integration* | — | — |
+| `go` | Restricted subprocess (Go 1.22) | `DATA` global string | `fmt.Println()` |
+| `rust` | Restricted subprocess (Rust 1.70) | `DATA` global string | `println!()` |
 
 ### Parameter Reference
 
