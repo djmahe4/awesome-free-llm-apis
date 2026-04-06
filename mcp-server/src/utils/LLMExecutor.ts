@@ -1,11 +1,14 @@
 import { getEncoding } from 'js-tiktoken';
 import { ProviderRegistry } from '../providers/registry.js';
 import type { PipelineContext } from '../pipeline/middleware.js';
-import type { ChatResponse } from '../providers/types.js';
+import type { ChatResponse, Message } from '../providers/types.js';
 
 export interface TokenTrackingInfo {
     remainingTokens?: number;
     refreshTime?: number;
+    remainingRequests?: number;
+    requestsRefreshTime?: number;
+    lastSuccessTime?: number;
 }
 
 /**
@@ -22,40 +25,112 @@ export class LLMExecutor {
     /**
      * Calculate estimated tokens for a request
      */
-    calculateTokens(context: PipelineContext): number {
-        let estimatedTokens = 0;
-        for (const msg of context.request.messages) {
-            estimatedTokens += this.encoder.encode(msg.content).length;
+    calculateTokens(messages: Message[]): number {
+        let totalChars = 0;
+        for (const msg of messages) {
+            totalChars += msg.content.length;
         }
-        const maxTokens = context.request.max_tokens || 1024;
-        return estimatedTokens + maxTokens;
+
+        // Optimization: If the string is massive (> 20k chars), 
+        // return a safe upper bound estimate immediately
+        // to avoid hanging on Tiktoken encoding.
+        if (totalChars > 20000) {
+            return Math.ceil(totalChars / 2); // Very conservative estimate (2 chars per token)
+        }
+
+        let total = 0;
+        for (const msg of messages) {
+            total += this.encoder.encode(msg.content).length + 4;
+        }
+        return total;
     }
 
     /**
-     * Check if provider has enough tokens available
+     * Get a token and RPM-based health score for a provider (0-1)
+     */
+    getTokenScore(providerId: string): number {
+        const tracker = this.tokenTracking[providerId];
+        if (!tracker) return 1.0; // Assume healthy if no info
+
+        let score = 1.0;
+
+        if (tracker.remainingTokens !== undefined) {
+            if (tracker.refreshTime && Date.now() >= tracker.refreshTime) {
+                // Tokens refreshed
+            } else {
+                // Normalize score: 100k tokens = 1.0 score
+                score = Math.min(score, tracker.remainingTokens / 100000);
+            }
+        }
+
+        if (tracker.remainingRequests !== undefined) {
+            if (tracker.requestsRefreshTime && Date.now() >= tracker.requestsRefreshTime) {
+                // Requests refreshed
+            } else {
+                if (tracker.remainingRequests < 2) {
+                    score = Math.min(score, 0.1); // Severely penalize if almost out of requests
+                } else if (tracker.remainingRequests < 10) {
+                    score = Math.min(score, 0.5); // Penalize if getting low
+                }
+            }
+        }
+
+        return Math.max(0, score);
+    }
+
+    /**
+     * Check if provider has enough tokens and requests available
      */
     hasEnoughTokens(providerId: string, requiredTokens: number): boolean {
         const tracker = this.tokenTracking[providerId];
-        if (tracker && tracker.remainingTokens !== undefined) {
-            // Check if tokens should have refreshed based on reset time
+        if (!tracker) return true;
+
+        let tokensOk = true;
+        let requestsOk = true;
+
+        if (tracker.remainingTokens !== undefined) {
             if (tracker.refreshTime && Date.now() >= tracker.refreshTime) {
-                delete this.tokenTracking[providerId];
-                return true;
+                tracker.remainingTokens = undefined; // Lazy clear
+            } else {
+                tokensOk = tracker.remainingTokens >= requiredTokens;
             }
-            return tracker.remainingTokens >= requiredTokens;
         }
-        // If no tracking info, assume provider is available
-        return true;
+
+        if (tracker.remainingRequests !== undefined) {
+            if (tracker.requestsRefreshTime && Date.now() >= tracker.requestsRefreshTime) {
+                tracker.remainingRequests = undefined;
+            } else {
+                requestsOk = tracker.remainingRequests > 0;
+            }
+        }
+
+        return tokensOk && requestsOk;
     }
 
     /**
-     * Deduct tokens from provider's tracked quota
+     * Deduct tokens and requests from provider's tracked quota
      */
     private deductTokens(providerId: string, tokens: number): void {
         const tracker = this.tokenTracking[providerId];
-        if (tracker && tracker.remainingTokens !== undefined) {
-            tracker.remainingTokens -= tokens;
+        if (tracker) {
+            if (tracker.remainingTokens !== undefined) {
+                tracker.remainingTokens -= tokens;
+            }
+            if (tracker.remainingRequests !== undefined) {
+                tracker.remainingRequests -= 1;
+            }
         }
+    }
+
+    /**
+     * Set token tracking state manually for a specific provider (primarily for testing)
+     */
+    updateProviderTokenState(providerId: string, info: Partial<TokenTrackingInfo>): void {
+        this.tokenTracking[providerId] = {
+            ...this.tokenTracking[providerId],
+            ...info,
+            lastSuccessTime: Date.now()
+        };
     }
 
     /**
@@ -77,20 +152,42 @@ export class LLMExecutor {
             getHeader('x-ratelimit-remaining-tokens-minute') ||
             getHeader('x-ratelimit-tokens-remaining');
 
-        const resetTimeStr =
-            getHeader('x-ratelimit-reset-tokens') ||
-            getHeader('x-ratelimit-reset-requests');
+        const remainingRequestsStr =
+            getHeader('x-ratelimit-remaining-requests') ||
+            getHeader('x-ratelimit-requests-remaining') ||
+            getHeader('x-ratelimit-remaining-requests-minute');
+
+        const resetTokensTimeStr = getHeader('x-ratelimit-reset-tokens');
+        const resetRequestsTimeStr = getHeader('x-ratelimit-reset-requests');
+
+        this.tokenTracking[providerId] = this.tokenTracking[providerId] || {};
+        this.tokenTracking[providerId].lastSuccessTime = Date.now();
 
         if (remainingTokensStr) {
             const remaining = parseInt(remainingTokensStr, 10);
             if (!isNaN(remaining)) {
-                this.tokenTracking[providerId] = this.tokenTracking[providerId] || {};
                 this.tokenTracking[providerId].remainingTokens = remaining;
 
-                if (resetTimeStr) {
-                    const resetVal = parseFloat(resetTimeStr);
+                if (resetTokensTimeStr) {
+                    const resetVal = parseFloat(resetTokensTimeStr);
                     if (!isNaN(resetVal)) {
                         this.tokenTracking[providerId].refreshTime = Date.now() + (resetVal * 1000);
+                    }
+                }
+            }
+        }
+
+        if (remainingRequestsStr) {
+            const remainingReq = parseInt(remainingRequestsStr, 10);
+            if (!isNaN(remainingReq)) {
+                this.tokenTracking[providerId].remainingRequests = remainingReq;
+
+                // Fallback to tokens reset time if request reset time is not provided separately
+                const resetStr = resetRequestsTimeStr || resetTokensTimeStr;
+                if (resetStr) {
+                    const resetVal = parseFloat(resetStr);
+                    if (!isNaN(resetVal)) {
+                        this.tokenTracking[providerId].requestsRefreshTime = Date.now() + (resetVal * 1000);
                     }
                 }
             }
@@ -114,21 +211,26 @@ export class LLMExecutor {
         providerId: string,
         modelId: string
     ): Promise<ChatResponse | null> {
-        // 1. Calculate token requirements
-        const totalEstimated = this.calculateTokens(context);
-        context.estimatedTokens = totalEstimated - (context.request.max_tokens || 1024);
+        // 1. Calculate tokens once per set of messages
+        if (context.estimatedTokens === undefined) {
+            const promptTokens = this.calculateTokens(context.request.messages);
+            context.estimatedTokens = promptTokens;
+        }
 
-        // 2. Check token limits
-        if (!this.hasEnoughTokens(providerId, totalEstimated)) {
+        const totalWithCompletion = context.estimatedTokens + (context.request.max_tokens || 1024);
+
+        // 2. Check token limits (Permissive: Log warning but proceed)
+        if (!this.hasEnoughTokens(providerId, totalWithCompletion)) {
             const tracker = this.tokenTracking[providerId];
-            throw new Error(
-                `[LLMExecutor] Exceeded tracked tokens for ${providerId}. ` +
-                `Requires ${totalEstimated}, remaining ${tracker?.remainingTokens || 0}`
+            console.warn(
+                `[LLMExecutor] Local token tracking suggests exhaustion for ${providerId}. ` +
+                `Requires ${totalWithCompletion}, remaining ${tracker?.remainingTokens || 0}. ` +
+                `Proceeding with best-effort attempt.`
             );
         }
 
-        // 3. Deduct tokens proactively
-        this.deductTokens(providerId, totalEstimated);
+        // 3. Deduct resources PROACTIVELY
+        this.deductTokens(providerId, totalWithCompletion);
 
         // 4. Get provider and execute
         const registry = ProviderRegistry.getInstance();
@@ -139,14 +241,90 @@ export class LLMExecutor {
         }
 
         // 5. Make the API call
-        const response = await provider.chat(context.request);
+        const previousModel = context.request.model;
+        context.request.model = modelId;
 
-        // 6. Update token tracking from response headers (drift correction)
+        let response: ChatResponse | null = null;
+        try {
+            response = await provider.chat(context.request);
+        } catch (err: any) {
+            // 6. Handle rate limit errors even without headers (Robust extraction)
+            const errorMessage = err.message?.toLowerCase() || '';
+            const isRateLimit = err.status === 429 ||
+                errorMessage.includes('rate_limit_exceeded') ||
+                errorMessage.includes('resource_exhausted') ||
+                errorMessage.includes('too many requests') ||
+                errorMessage.includes('quota exceeded') ||
+                errorMessage.includes('limit reached');
+
+            if (isRateLimit) {
+                //console.log(`[LLMExecutor] Detected rate limit for ${providerId} from error: ${err.message}`);
+                this.updateProviderTokenState(providerId, {
+                    remainingTokens: 0,
+                    remainingRequests: 0,
+                    refreshTime: Date.now() + 60000, // Default 60s cooldown
+                    requestsRefreshTime: Date.now() + 60000
+                });
+            }
+
+            // Still re-throw the error so the router knows to try next provider
+            context.request.model = previousModel;
+            throw err;
+        }
+
+        // 7. Update token tracking from response headers (drift correction)
         if (response && response._headers) {
             this.updateTokenTracking(providerId, response._headers);
+
+            // Bridge: propagate real remaining token quota into the pipeline context
+            // so ContextManager can use it as a live compression target instead of
+            // relying on a static model-window estimate.
+            const tracker = this.tokenTracking[providerId];
+            if (tracker?.remainingTokens !== undefined) {
+                context.providerRemainingTokens = tracker.remainingTokens;
+            }
         }
 
         return response;
+    }
+
+    /**
+     * Minimal standalone prompt execution (for subtasks/decomposition).
+     */
+    async prompt(
+        messages: Message[],
+        modelOverride: string = 'any',
+        options: { taskType?: string } = {}
+    ): Promise<ChatResponse> {
+        const registry = ProviderRegistry.getInstance();
+        const providers = registry.getAvailableProviders();
+
+        if (providers.length === 0) {
+            throw new Error('No providers available');
+        }
+
+        // Pick matching models
+        const targetModels = modelOverride === 'any'
+            ? ['gemini-2.0-flash', 'llama-3.3-70b-versatile', 'glm-4.7']
+            : [modelOverride];
+
+        for (const modelId of targetModels) {
+            for (const p of providers) {
+                if (modelOverride === 'any' || p.models.some(m => m.id === modelId)) {
+                    try {
+                        const res = await p.chat({
+                            model: modelId === 'any' ? p.models[0].id : modelId,
+                            messages
+                        });
+                        return res;
+                    } catch (err) {
+                        continue;
+                    }
+                }
+            }
+        }
+
+        throw new Error(`Failed to execute prompt with any provider.`);
     }
 
     /**

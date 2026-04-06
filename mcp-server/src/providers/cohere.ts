@@ -25,8 +25,9 @@ export class CohereProvider extends BaseProvider {
     this.recordRequest();
     const client = this.getClient();
 
+    const actualModel = request.model || 'command-r-plus-08-2024';
     const response = await client.chat({
-      model: request.model,
+      model: actualModel,
       messages: request.messages.map((m) => ({
         role: m.role,
         content: m.content,
@@ -53,7 +54,7 @@ export class CohereProvider extends BaseProvider {
         completion_tokens: response.usage?.tokens?.outputTokens ?? 0,
         total_tokens: (response.usage?.tokens?.inputTokens ?? 0) + (response.usage?.tokens?.outputTokens ?? 0),
       },
-      model: request.model,
+      model: actualModel,
       object: 'chat.completion',
       created: Date.now(),
     };
@@ -64,8 +65,9 @@ export class CohereProvider extends BaseProvider {
     this.recordRequest();
     const client = this.getClient();
 
+    const actualModel = request.model || 'command-r-plus-08-2024';
     const stream = await client.chatStream({
-      model: request.model,
+      model: actualModel,
       messages: request.messages.map((m) => ({
         role: m.role,
         content: m.content,

@@ -91,15 +91,15 @@ To add a new API key, add it to the `providers` object in `src/config/index.ts` 
 The `ResponseCache` (`src/cache/index.ts`) uses an LRU (Least Recently Used) cache to store LLM responses, providing both speed and cost-efficiency.
 
 ### Key Features
-- **Workspace Awareness**: Cache keys are contextually aware of the codebase state. A `WorkspaceScanner` generates a content hash of `src/tools` and `src/providers`. If any logic changes, the cache for those contexts is automatically invalidated.
+- **Workspace Awareness**: Cache keys are contextually aware of the project identity. A `WorkspaceScanner` generates a stable **Identity Hash** based on the absolute path of the workspace root.
 - **Persistence**: Responses are persisted to `data/cache.json`. This allows the server to maintain its cache across restarts.
-- **Memory Efficiency**: Uses `lru-cache` to keep only the hottest entries in RAM while offloading the full set to disk.
+- **Stable Identity**: Unlike transient content hashes, the Identity Hash remains constant even as you edit code, ensuring your stored facts and cached responses persist throughout the development lifecycle.
 
 ### Implementation Details
-The `WorkspaceScanner` avoids high RAM usage by hashing file metadata (name, size, mtime) rather than full content, which is sufficient for detecting changes in most development workflows.
+The `WorkspaceScanner` uses `fs.existsSync` to validate that the provided `workspace_root` physically exists on disk, preventing "workspace poisoning" from hallucinated paths.
 
 ```typescript
-const wsHash = workspaceScanner.getWorkspaceHash();
+const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
 const cacheKey = cache.generateKey(request, wsHash);
 const cachedResponse = cache.get(cacheKey);
 ```
@@ -108,19 +108,68 @@ const cachedResponse = cache.get(cacheKey);
 
 ## Sandboxed Execution (Code Mode)
 
-The `code_mode` tool executes arbitrary JavaScript using the **QuickJS** engine via `quickjs-emscripten`.
+The `code_mode` tool executes code using isolated sandbox runtimes with no filesystem or network access.
 
-### Security Features
-- **Isolated Context**: Each execution runs in a fresh QuickJS context.
-- **Timeouts**: Execution is interrupted if it exceeds the specified `timeoutMs` (default 5000ms).
-- **Global Constraints**: Only a few globals like `DATA` (input string), `print()`, and `console.log()` are exposed.
+### Supported Languages
 
-### Executor Logic
-The `executeInSandbox` function in `src/sandbox/executor.ts` manages:
-1.  Initializing the QuickJS runtime.
-2.  Setting up stdout/stderr capturing.
-3.  Injecting the `DATA` variable.
-4.  Handling errors and timeout interrupts.
+| Language | Sandbox | Notes |
+|----------|---------|-------|
+| `javascript` (default) | QuickJS via `quickjs-emscripten` | Fully sandboxed; no external deps |
+| `python` | Restricted subprocess with safe builtins | Requires Python 3 on PATH and RestrictedPython installed |
+| `go` | Implemented using `goja` | Fully sandboxed; no external deps |
+| `rust` | Implemented using `boa_engine` | Fully sandboxed; no external deps |
+
+### Security Features (all languages)
+- **No filesystem access**: Scripts cannot read or write files
+- **No network access**: Scripts cannot make HTTP requests or open sockets
+- **No process/OS calls**: Scripts cannot spawn processes or access environment beyond `DATA`
+- **Timeouts**: Execution is interrupted if it exceeds `timeoutMs` (default 5000ms)
+- **Output isolation**: Only `stdout` (from `print()` / `console.log()`) is returned to the caller
+
+### JavaScript Executor (QuickJS)
+The `executeJavaScript` function in `src/sandbox/executor.ts` manages:
+1. Initializing a fresh QuickJS context per request
+2. Setting up stdout/stderr capturing via `print()` and `console.log()`
+3. Injecting the `DATA` variable as a string global
+4. Setting a deadline-based interrupt handler for the timeout
+5. Disposing the context after execution (no state leakage between calls)
+
+```typescript
+// JavaScript sandbox globals available to user code:
+// DATA: string  — the input data passed in the `data` parameter
+// print(...args): void  — writes to stdout (same as console.log)
+// console.log(...args): void  — writes to stdout
+// console.error(...args): void  — writes to stderr
+```
+
+### Python Executor
+The `executePython` function in `src/sandbox/executor.ts` manages:
+1. Building a wrapper script that restricts builtins to a safe allowlist
+2. Injecting `DATA` via the `__SANDBOX_DATA__` environment variable
+3. Running the user code via `python3 -c <wrapper>` as a subprocess
+4. Capturing stdout/stderr with a 1MB buffer limit
+5. Handling timeouts via Node.js `execFile` timeout
+
+```python
+# Python sandbox — available built-ins (safe allowlist):
+# DATA: str  — the input data string
+# print(), len(), range(), enumerate(), zip(), map(), filter()
+# sorted(), reversed(), list(), dict(), set(), tuple()
+# str(), int(), float(), bool(), bytes()
+# max(), min(), sum(), abs(), round()
+# json module is importable via __import__('json')
+# datetime module is importable via __import__('datetime')
+```
+
+### Adding a New Language Sandbox
+
+To add support for a new language (e.g., Go via `goja`):
+
+1. Add the language to the `SandboxLanguage` type in `src/sandbox/executor.ts`
+2. Implement an `executeGo(code, data, timeoutMs)` function following the same pattern as `executeJavaScript`
+3. Add a case in the `executeInSandbox` switch statement
+4. Update the `code_mode` tool description in `src/mcp/index.ts` to include the new language in the `language` enum
+5. Update `docs/mcp-development.md` and `docs/skill/SKILL.md` tables
 
 ---
 
@@ -129,15 +178,15 @@ The `executeInSandbox` function in `src/sandbox/executor.ts` manages:
 The MCP server is "space-aware," meaning it can scan the caller's specific workspace to generate a contextual state hash. This hash ensures that caching and memory are unique to the project you are currently working on.
 
 ### Workspace Scanning
-Use the `workspace_root` parameter in tool calls (e.g., `use_free_llm`) to specify the directory to scan. The `WorkspaceScanner` will:
-- Generate a SHA-256 hash based on file names, sizes, and modification times.
-- Detect changes in `src/tools`, `src/providers`, and root configuration files.
-- Automatically invalidate cached responses if the workspace state changes.
+Use the `workspace_root` parameter in tool calls to specify the directory to scan. The `WorkspaceScanner` will:
+- Generate a stable SHA-256 **Identity Hash** built strictly from the absolute directory path.
+- Detect and reject non-existent paths via `fs.existsSync` validation.
+- Guarantee memory stability: your architectural decisions and context persist even if you modify tool source code or configuration files.
 
 ### Key Logic
 ```typescript
 const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
-// Included in cache keys and memory metadata
+// This hash remains stable throughout the life of the project directory.
 ```
 
 ---
@@ -147,19 +196,25 @@ const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
 The `manage_memory` tool provides a way to interact with the persistent memory system programmatically.
 
 ### Actions
-- **search**: Retrieve past interactions for the current workspace.
-- **list**: List workspace identifiers.
+- **search**: Retrieve past interactions or manual context for the workspace.
+- **list**: List workspace identifiers and physical path hashes.
 - **stats**: View compression and usage statistics.
-- **clear**: Wipe memory for a specific workspace.
+- **clear**: Wipe memory for a specific workspace namespace.
+
+---
+
+## Explicit Memory Injection
+
+The `store_memory` tool allows agents to deliberately inject facts into the long-term store. This is the primary mechanism for preserving architectural decisions across sessions.
 
 ### Usage Example
 ```json
 {
-  "name": "manage_memory",
+  "name": "store_memory",
   "arguments": {
-    "action": "search",
-    "workspace_root": "/home/user/project-a",
-    "query": "authentication"
+    "key": "queue_strategy",
+    "content": "Using BullMQ on Redis for high-throughput job isolation.",
+    "workspace_root": "/home/user/project-a"
   }
 }
 ```
@@ -207,6 +262,10 @@ To prevent data leakage and disk pollution, every agentic request **must** have 
 
 ### Dynamic Prompt Synchronization
 The `prompt.json` engine uses a non-blocking, asynchronous loading strategy with automatic cache invalidation.
+
+> [!NOTE]
+> For a deep dive into the scoring algorithm, categorization, and reference compression, see the [Agentic Prompt Injection](agentic-prompts.md) documentation.
+
 - **Efficiency**: Uses `fs.stat()` to check `mtime` before every use.
 - **Zero Restart**: Prompt updates are picked up instantly without requiring a server restart.
 - **Asynchronous**: Built entirely on `fs.promises` to keep the event loop free.

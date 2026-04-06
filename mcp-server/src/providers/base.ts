@@ -11,8 +11,46 @@ export abstract class BaseProvider implements Provider {
 
   private requestCountMinute = 0;
   private requestCountDay = 0;
+  private tokenCountMinute = 0;
+  private tokenCountDay = 0;
   private minuteWindowStart = Date.now();
   private dayWindowStart = Date.now();
+
+
+  public consecutiveFailures = 0;
+  public shrink = false;
+  protected cooldownUntil = 0;
+
+  getPenaltyScore(): number {
+    if (Date.now() < this.cooldownUntil) {
+      // Standard cooldown penalty
+      return 0.5;
+    }
+    // Consecutive failures also add a dynamic penalty
+    if (this.consecutiveFailures > 0) {
+      return Math.min(0.4, this.consecutiveFailures * 0.1);
+    }
+    return 0;
+  }
+
+  recordFailure(status: number): void {
+    // Cap consecutive failures to prevent unbounded growth
+    if (this.consecutiveFailures < 100) {
+      this.consecutiveFailures++;
+    }
+    // If rate limited, cooldown for 60 seconds
+    if (status === 429) {
+      this.cooldownUntil = Date.now() + 60_000;
+    } else if (status >= 500) {
+      // Exponential backoff for server errors: 10s, 20s, 40s, capped at 60s
+      const baseDelay = 10_000;
+      const maxDelay = 60_000;
+      // Cap failure count to prevent Infinity in Math.pow
+      const exponent = Math.min(this.consecutiveFailures - 1, 10);
+      const penaltyMs = Math.min(baseDelay * Math.pow(2, exponent), maxDelay);
+      this.cooldownUntil = Date.now() + penaltyMs;
+    }
+  }
 
   isAvailable(): boolean {
     const key = process.env[this.envVar];
@@ -38,6 +76,17 @@ export abstract class BaseProvider implements Provider {
     return true;
   }
 
+  getUsageStats(): { requestCountMinute: number; requestCountDay: number; tokenCountMinute: number; tokenCountDay: number } {
+    this.checkRateLimit();
+    return {
+      requestCountMinute: this.requestCountMinute,
+      requestCountDay: this.requestCountDay,
+      tokenCountMinute: this.tokenCountMinute,
+      tokenCountDay: this.tokenCountDay
+    };
+  }
+
+
   protected getApiKey(): string {
     const key = process.env[this.envVar];
     if (!key) throw new Error(`API key ${this.envVar} not set`);
@@ -48,30 +97,46 @@ export abstract class BaseProvider implements Provider {
     const now = Date.now();
     if (now - this.minuteWindowStart > 60_000) {
       this.requestCountMinute = 0;
+      this.tokenCountMinute = 0;
       this.minuteWindowStart = now;
     }
     if (now - this.dayWindowStart > 86_400_000) {
       this.requestCountDay = 0;
+      this.tokenCountDay = 0;
       this.dayWindowStart = now;
     }
+
+
+    // Log warnings if local limits are exceeded, but don't hard-block.
+    // This allows the Intelligent Router to still factor this into scoring
+    // while permitting fallback attempts to reach the actual API.
     if (this.rateLimits.rpm && this.requestCountMinute >= this.rateLimits.rpm) {
-      throw new Error(`Rate limit exceeded: ${this.rateLimits.rpm} RPM`);
+      console.warn(`[${this.name}] Local RPM limit reached (${this.requestCountMinute}/${this.rateLimits.rpm}). Proceeding with best-effort attempt.`);
     }
     if (this.rateLimits.rpd && this.requestCountDay >= this.rateLimits.rpd) {
-      throw new Error(`Rate limit exceeded: ${this.rateLimits.rpd} RPD`);
+      console.warn(`[${this.name}] Local RPD limit reached (${this.requestCountDay}/${this.rateLimits.rpd}). Proceeding with best-effort attempt.`);
     }
   }
 
-  protected recordRequest(): void {
+  protected recordRequest(tokens: number = 0): void {
     this.requestCountMinute++;
     this.requestCountDay++;
+    this.tokenCountMinute += tokens;
+    this.tokenCountDay += tokens;
   }
+
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
     this.checkRateLimit();
-    this.recordRequest();
     const apiKey = this.getApiKey();
     const url = `${this.baseURL}chat/completions`;
+
+    // Sanitize request: Remove internal-only fields that strict APIs reject
+    const { agentic, ...sanitizedRequest } = request as any;
+
+    // Ensure model is set
+    sanitizedRequest.model = sanitizedRequest.model || (this.models.length > 0 ? this.models[0].id : '');
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -81,13 +146,20 @@ export abstract class BaseProvider implements Provider {
         Origin: new URL(this.baseURL).origin,
         Referer: new URL(this.baseURL).origin + '/',
       },
-      body: JSON.stringify(request),
+      body: JSON.stringify(sanitizedRequest),
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`HTTP ${response.status}: ${text}`);
+      const error: any = new Error(`HTTP ${response.status}: ${text}`);
+      error.status = response.status;
+      throw error;
     }
+    this.consecutiveFailures = 0;
+    this.cooldownUntil = 0;
     const json = await response.json() as ChatResponse;
+    const tokens = json.usage?.total_tokens || 0;
+    this.recordRequest(tokens);
+
     const headers: Record<string, string> = {};
     response.headers.forEach((val, key) => { headers[key] = val; });
     json._headers = headers;
@@ -96,9 +168,15 @@ export abstract class BaseProvider implements Provider {
 
   async *chatStream(request: ChatRequest): AsyncIterable<string> {
     this.checkRateLimit();
-    this.recordRequest();
     const apiKey = this.getApiKey();
     const url = `${this.baseURL}chat/completions`;
+
+    // Sanitize request: Remove internal-only fields that strict APIs reject
+    const { agentic, ...sanitizedRequest } = request as any;
+
+    // Ensure model is set
+    sanitizedRequest.model = sanitizedRequest.model || (this.models.length > 0 ? this.models[0].id : '');
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -108,12 +186,17 @@ export abstract class BaseProvider implements Provider {
         Origin: new URL(this.baseURL).origin,
         Referer: new URL(this.baseURL).origin + '/',
       },
-      body: JSON.stringify({ ...request, stream: true }),
+      body: JSON.stringify({ ...sanitizedRequest, stream: true }),
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`HTTP ${response.status}: ${text}`);
+      const error: any = new Error(`HTTP ${response.status}: ${text}`);
+      error.status = response.status;
+      throw error;
     }
+    this.consecutiveFailures = 0;
+    this.cooldownUntil = 0;
+    this.recordRequest();
     if (!response.body) throw new Error('No response body');
     const decoder = new TextDecoder();
     for await (const chunk of response.body) {

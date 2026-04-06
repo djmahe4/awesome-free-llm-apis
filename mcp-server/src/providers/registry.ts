@@ -79,4 +79,8 @@ export class ProviderRegistry {
   getAllProviders(): Provider[] {
     return Array.from(this.providers.values());
   }
+
+  registerProvider(provider: Provider): void {
+    this.providers.set(provider.id, provider);
+  }
 }

@@ -20,8 +20,8 @@ npm install
 ```
 
 > **Note:** This project uses `quickjs-emscripten`, which requires platform-specific dependencies (like `@emnapi/core` and `@emnapi/runtime`) to be present in the `package-lock.json` for CI/CD runners (like Linux). To ensure these are always included in the lock file regardless of your development OS (Windows/macOS), they are tracked in `devDependencies`. If you see `npm ci` failures in CI, please run `npm install` locally to refresh the lock file.
-32: 
-33: ### 3. Python Environment (for Gemini)
+
+### 2. Python Environment (for Gemini)
 
 The Google Gemini provider uses the official `google-genai` Python SDK via a bridge. You need to set up a virtual environment:
 
@@ -38,8 +38,33 @@ python -m venv venv
 
 pip install -U google-genai python-dotenv
 ```
+### 3. Sandbox Requirements (for `code_mode`)
 
-> **Note:** On some Linux distros the command is `python3`. If `python` is not found, use `python3` instead.
+The `code_mode` tool provides isolated script execution. Some runtimes require manual setup:
+
+#### Python Sandbox
+Mandatory for `language: "python"`. It is highly recommended to use a virtual environment.
+```bash
+# Within your active venv:
+pip install RestrictedPython
+```
+
+#### Go Sandbox
+Requires a pre-built binary for JS execution via `goja`.
+```bash
+cd scripts/go-sandbox-runner
+go build -o sandbox-runner .
+```
+
+#### Rust Sandbox
+Requires a pre-built binary for JS execution via `boa_engine`.
+```bash
+cd scripts/rust-sandbox-runner
+cargo build --release
+```
+
+> [!NOTE] 
+> The Node.js executor automatically detects these binaries if they are built in their respective directories. Python execution requires `python3` to be available on your system path with `RestrictedPython` installed in the environment used to run the server.
 
 ## Configuration
 
@@ -67,6 +92,7 @@ Fill in your API keys for the providers you wish to use.
 ### Feature Flags
 
 - **ENABLE_AGENTIC_MIDDLEWARE**: Set to `true` to enable the agentic middleware globally for all requests. 
+- **AGENT_PROMPT_PATH**: Path to the directory containing `prompt.json` and `README.md` (default: `../external/agent-prompt`).
     > [!IMPORTANT]
     > **Session IDs**: When this flag is enabled, every request **must** include a `sessionId` (either in the context or the request body). Requests without a `sessionId` will bypass the middleware to ensure data safety.
 
@@ -161,13 +187,19 @@ To install the skill so your AI agent can use it:
 # Linux / macOS
 mkdir -p ~/.gemini/antigravity/skills/free-llms
 cp -r mcp-server/docs/skill/* ~/.gemini/antigravity/skills/free-llms/
+```
 
+```powershell
 # Windows (PowerShell)
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini\antigravity\skills\free-llms\"
 Copy-Item -Recurse mcp-server\docs\skill\* "$env:USERPROFILE\.gemini\antigravity\skills\free-llms\"
 ```
 
-Once copied, your agent will automatically detect the `@mcp:free-llm-apis` skill and its associated reference documents.
+Once copied, your agent will automatically detect the `@free-llms` skill and its associated reference documents for calling the `@mcp:free-llm-apis` tools. Just call the skill in prompts like:
+
+```
+@free-llms Hey help me orchestrate a workflow to extract the top 10 most starred repositories from GitHub and save them to a CSV file.
+```
 
 ## Running Smoke Tests
 

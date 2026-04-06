@@ -4,13 +4,15 @@ export interface Message {
 }
 
 export interface ChatRequest {
-  model: string;
+  model?: string;
   messages: Message[];
   temperature?: number;
   max_tokens?: number;
   top_p?: number;
   stream?: boolean;
   agentic?: boolean;
+  response_format?: { type: 'json_object' | 'text' } | { type: 'json_schema', json_schema?: { name: string, strict?: boolean, schema: any } } | any;
+  google_search?: boolean;
 }
 
 export interface ChatResponse {
@@ -42,7 +44,7 @@ export interface RateLimits {
 export interface ProviderModel {
   id: string;
   name: string;
-  contextLength?: number;
+  contextWindow?: number;
 }
 
 export interface Provider {
@@ -52,7 +54,11 @@ export interface Provider {
   models: ProviderModel[];
   rateLimits: RateLimits;
   envVar: string;
+  consecutiveFailures: number;
   isAvailable(): boolean;
   chat(request: ChatRequest): Promise<ChatResponse>;
   chatStream(request: ChatRequest): AsyncIterable<string>;
+  getPenaltyScore(): number;
+  recordFailure(status: number): void;
+  getUsageStats(): { requestCountMinute: number; requestCountDay: number };
 }

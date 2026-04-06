@@ -21,5 +21,9 @@ export class OpenRouterProvider extends BaseProvider {
     { id: 'openai/gpt-oss-20b:free', name: 'GPT-OSS 20B' },
     { id: 'mistralai/mistral-small-3.1-24b:free', name: 'Mistral Small 3.1 24B' },
     { id: 'liquid/lfm2.5-1.2b-thinking:free', name: 'LFM 2.5 1.2B Thinking' },
+    { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'Nemotron 3 Super 120B' },
+    { id: 'nvidia/nemotron-nano-12b-v2-vl:free', name: 'Nemotron Nano 12B VL' },
+    { id: 'nvidia/nemotron-3-nano-30b-a3b:free', name: 'Nemotron 3 Nano 30B' },
+    { id: 'nvidia/nemotron-nano-9b-v2:free', name: 'Nemotron Nano 9B' },
   ];
 }

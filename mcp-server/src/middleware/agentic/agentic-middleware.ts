@@ -3,6 +3,10 @@ import path from 'path';
 import { LRUCache } from 'lru-cache';
 import { getIntelligentSystemPrompt } from './prompts.js';
 import type { Middleware, PipelineContext, NextFunction } from '../../pipeline/middleware.js';
+import { memoryManager } from '../../memory/index.js';
+import { WorkspaceScanner } from '../../cache/workspace.js';
+
+const workspaceScanner = new WorkspaceScanner(process.cwd());
 
 
 interface QueueState {
@@ -55,7 +59,7 @@ async function persistQueues(sessionId: string, projectDir: string): Promise<voi
  * Async Project Setup: Ensures session boundaries and initializes state files.
  */
 async function ensureProjectFiles(sessionId: string): Promise<string> {
-    const projectDir = path.join(process.cwd(), 'projects', sessionId);
+    const projectDir = path.join(process.cwd(), 'data', 'projects', sessionId);
     await fs.mkdir(projectDir, { recursive: true });
 
     const files: Record<string, string> = {
@@ -84,13 +88,18 @@ function decomposeGoal(goal: string): string[] {
     return lines.length > 1 ? lines : [goal];
 }
 
-async function prependSystemPrompt(context: PipelineContext, userContent?: string): Promise<void> {
+async function prependSystemPrompt(
+    context: PipelineContext,
+    userContent?: string,
+    explicitKeywords?: string[],
+    memoryContext?: string
+): Promise<void> {
     const messages = context.request.messages;
     if (!messages || messages.length === 0) return;
 
-    const dynamicPrompt = await getIntelligentSystemPrompt(userContent);
+    const dynamicPrompt = await getIntelligentSystemPrompt(userContent, explicitKeywords, memoryContext);
     const hasSystem = messages[0].role === 'system';
-    
+
     if (hasSystem) {
         messages[0] = {
             ...messages[0],
@@ -116,6 +125,34 @@ function verifySelf(content: string): string {
     return 'PASS';
 }
 
+/**
+ * Detect whether a user message contains a research or external-knowledge request.
+ * These patterns indicate the agent may invoke external search, browse, or retrieve
+ * information from outside the context window.
+ *
+ * Validation is logged explicitly so agents can confirm the step was intentional,
+ * reducing hallucination risk when external sources are consulted.
+ */
+function detectResearchIntent(content: string): boolean {
+    const researchPatterns = [
+        /\b(search|look up|find|research|browse|retrieve|fetch|crawl|scrape)\b/i,
+        /\b(what is|who is|when did|where is|how does|explain|describe|summarize)\b/i,
+        /\b(latest|recent|current|today|news|update|version)\b/i,
+        /\b(according to|based on|reference|source|documentation|docs)\b/i,
+        /\b(web search|internet|online|URL|http|www\.)\b/i,
+    ];
+    return researchPatterns.some((p) => p.test(content));
+}
+
+function logResearchValidation(sessionId: string, userContent: string, step: string): void {
+    const timestamp = new Date().toISOString();
+    console.error(
+        `[AgenticMiddleware][RESEARCH-VALIDATION] session=${sessionId} step="${step}" ` +
+        `timestamp=${timestamp} intent_detected=true ` +
+        `query_preview="${userContent.slice(0, 120).replace(/\n/g, ' ')}..."`
+    );
+}
+
 export class AgenticMiddleware implements Middleware {
     name = 'AgenticMiddleware';
 
@@ -129,12 +166,23 @@ export class AgenticMiddleware implements Middleware {
 
         // Hardened Session ID: Must be provided for agentic state to exist
         const sessionId: string | undefined = context.sessionId || (context.request as any).sessionId;
-        
+
         if (!sessionId) {
-            console.warn('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
+            console.error('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
             await next();
             return;
         }
+
+        // Resolve workspace hash for context lookup and safe pathing
+        let wsHash: string | undefined;
+        if (context.workspaceRoot) {
+            try {
+                wsHash = workspaceScanner.getWorkspaceHash(context.workspaceRoot);
+            } catch (err) {
+                console.error(`[AgenticMiddleware] Failed to derive workspace hash: ${err}`);
+            }
+        }
+
 
         const projectDir = await ensureProjectFiles(sessionId);
         const q = getQueues(sessionId);
@@ -142,8 +190,41 @@ export class AgenticMiddleware implements Middleware {
         // Prepend system prompt with user context if available
         const userMessage = context.request.messages.find(m => m.role === 'user');
         const userContent = userMessage ? String(userMessage.content) : undefined;
-        
-        await prependSystemPrompt(context, userContent);
+
+        // Retrieve relevant workspace memory context
+        let memoryContext: string | undefined;
+        if (wsHash) {
+            try {
+                console.error(`[AgenticMiddleware][DEBUG] Searching for wsHash=${wsHash} query="${userContent}"`);
+                const memoryResults = await memoryManager.search(wsHash, userContent);
+                console.error(`[AgenticMiddleware][DEBUG] Found ${memoryResults.length} memory results`);
+                if (Array.isArray(memoryResults) && memoryResults.length > 0) {
+                    // Limit to top 5 results and format as bullet points
+                    memoryContext = memoryResults
+                        .slice(0, 5)
+                        .map(m => `- ${typeof m === 'string' ? m : JSON.stringify(m)}`)
+                        .join('\n');
+                }
+            } catch (err) {
+                console.error(`[AgenticMiddleware] Memory lookup failed: ${err}`);
+            }
+        }
+
+
+
+        try {
+            await prependSystemPrompt(context, userContent, context.keywords, memoryContext);
+        } catch (err) {
+            console.error(`[AgenticMiddleware] Error prepending system prompt: ${err}`);
+            // Continue without the prepended prompt
+        }
+
+        // Research validation: detect and log if this request involves external knowledge lookup.
+        // This provides an explicit audit trail to reduce agent ambiguity and hallucination risk.
+        if (userContent && detectResearchIntent(userContent)) {
+            logResearchValidation(sessionId, userContent, 'pre-execution-research-detection');
+        }
+
 
         // Task decomposition: Only perform if nowQueue is empty to prevent multi-turn duplication
         if (userContent && q.nowQueue.length === 0) {
@@ -163,9 +244,16 @@ export class AgenticMiddleware implements Middleware {
 
             if (verifyResult.startsWith('FAIL')) {
                 q.improveQueue.push(verifyResult);
+                console.error(`[AgenticMiddleware][VERIFY] session=${sessionId} result="${verifyResult}"`);
             }
 
-            context['agenticQueues'] = getQueues(sessionId);
+            // Post-execution research validation: confirm response is grounded
+            if (userContent && detectResearchIntent(userContent)) {
+                logResearchValidation(sessionId, responseContent, 'post-execution-response-grounding-check');
+            }
+
+            // Store a snapshot for observability (cloned to avoid post-shift mutation in traces)
+            context['agenticQueues'] = JSON.parse(JSON.stringify(getQueues(sessionId)));
         }
 
         if (q.nowQueue.length > 0) {

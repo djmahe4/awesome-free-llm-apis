@@ -1,9 +1,9 @@
 ---
 name: free-llms
-description: "Use when performing tasks that require free LLM inference, model fallback routing, persistent workspace memory, evolving research pipelines, or subagent script generation."
+description: "Orchestrate multiple free LLM providers, manage persistent workspace memory, execute sandboxed code for context compression, and utilize keyword-based steering for project-specific reference extraction."
 metadata:
   category: utility
-  triggers: free models, llm cost, fallback reasoning, token usage, workspace memory, subagent, research pipeline, evolving agent, learning loop, gemini, groq, cohere, code mode, sandbox, arch map, subsystem ref, token-safe, granular extraction, steering protocol, api map
+  triggers: free models, llm cost, fallback, routing, token tracking, workspace memory, context-aware steering, reference extractor, keyword classification, project discovery, gemini, groq, cohere, cloudflare, deepseek, qwen, code mode, compression, sandbox
 ---
 
 # Free LLM APIs — Agentic Skill
@@ -11,6 +11,22 @@ metadata:
 Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-apis` MCP server.
 
 > **79 models** across **15 providers** — optimized for FREE-first routing.
+
+---
+
+## 🎯 When to Use
+
+- **Cost-Effective Inference**: When a task can be solved using free frontier or mid-tier models instead of paid APIs.
+- **Resilient Workflows**: When a project requires automatic fallback cascading to ensure completion even during provider rate limits.
+- **Stateful Context**: When an agent needs to persist findings or decisions across multiple turns or separate coding sessions.
+- **Large Context Management**: When raw data (API responses, documentation) exceeds context limits and requires sandboxed pre-processing/compression via `code_mode`.
+- **Architectural Steering**: When a task needs project-specific documentation or architectural maps to guide implementation.
+
+## 🚫 When NOT to Use
+
+- **Privacy-Sensitive Data**: When data cannot be sent to third-party free providers (verify specific provider terms of service if unsure).
+- **Hard Real-Time Constraints**: When sub-second response times of paid tiers are strictly required (though Cloudflare/Groq are extremely fast).
+- **Non-Coding Mathematical Logic**: Avoid letting the LLM perform complex math directly; use the `code_mode` tool instead.
 
 ---
 
@@ -35,16 +51,16 @@ Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-
 
 ### `use_free_llm`
 
-Send a chat completion with optional fallback and workspace memory.
+Perform a chat completion with optional fallback and workspace memory.
 
 ```json
 {
-  "model": "llama-3.3-70b-versatile",
   "messages": [{ "role": "user", "content": "Your prompt here" }],
-  "provider": "groq",
-  "fallback": true,
-  "max_tokens": 1024,
-  "workspace_root": "/your/project"
+  "keywords": ["security", "auth", "jwt"],
+  "agentic": true,
+  "sessionId": "project-name-v1",
+  "workspace_root": "/your/project",
+  "google_search": true
 }
 ```
 
@@ -52,12 +68,13 @@ Send a chat completion with optional fallback and workspace memory.
 
 | Parameter | Required | Default | Notes |
 |-----------|----------|---------|-------|
-| `model` | ✅ | — | Model ID from `list_available_free_models` |
-| `messages` | ✅ | — | Array of `{ role, content }` objects |
-| `provider` | ❌ | auto | Override auto-routing to a specific provider |
-| `fallback` | ❌ | `false` | Enable cross-provider failover |
-| `max_tokens` | ❌ | 1024 | Cap response size |
-| `workspace_root` | ❌ | — | Path for context-aware cache keying |
+| `messages` | yes | — | Array of `{ role, content }` objects |
+| `model` | no | auto | Specific model ID. If omitted, the router auto-selects. |
+| `keywords` | no | — | Explicit steering keywords. **Bypasses fuzzy matching** and injects only sections matching these tags. |
+| `agentic` | no | `false` | Enable agentic mode: task decomposition and internal prompt injection. |
+| `sessionId` | no | — | Required for agentic mode. Partitions memory/logs per project. |
+| `workspace_root` | no | — | Path for context-aware cache keying and auto-session derivation. |
+| `google_search` | no | `false` | Enable Google search for Gemini models. |
 
 > **Rule:** Always set `fallback: true` when building resilient pipelines.
 
@@ -106,19 +123,39 @@ Enumerate all registered models with availability, rate limits, and provider met
 
 ### `code_mode`
 
-Execute sandboxed JavaScript against arbitrary data. `DATA` is injected as a string.
+Execute sandboxed code against arbitrary data. Only `stdout` is returned — never the raw `DATA` payload. Use this to compress large API responses before passing to an LLM.
 
 ```json
 {
+  "language": "javascript",
   "command": "Sort input numbers",
   "data": "[5, 2, 8, 1]",
   "code": "const arr = JSON.parse(DATA); arr.sort((a,b)=>a-b); print(JSON.stringify(arr));"
 }
 ```
 
-- Execution timeout: **5000ms** (configurable via `timeout_ms`)
-- Use `print()` to output results
-- No filesystem or network access from within the sandbox
+**Supported Languages:**
+
+| `language` | Sandbox | Notes |
+|------------|---------|-------|
+| `javascript` (default) | QuickJS (quickjs-emscripten) | Fastest; no external deps |
+| `python` | Restricted subprocess | Requires Python 3 + pip install RestrictedPython |
+| `go` | goja | pure-Go ECMAScript; requires pre-built binary |
+| `rust` | boa_engine | pure-Rust ECMAScript; requires pre-built binary |
+
+**Key parameters:**
+
+| Parameter | Required | Default | Notes |
+|-----------|----------|---------|-------|
+| `code` | yes | — | Script source; use `print()` / `console.log()` for output |
+| `language` | no | `javascript` | Sandbox runtime: `javascript` \| `python` |
+| `data` | no | `""` | Injected as `DATA` global variable |
+| `command` | no | — | Human-readable description (logged to memory) |
+| `timeout_ms` | no | `5000` | Max execution time in milliseconds |
+
+**Sandbox Constraints (all languages):** No filesystem, no network, no process/OS calls.
+
+> **Context Compression:** `compressionRatio` = stdout.length / data.length — a ratio < 1 means context savings were achieved. See TC-05 in [usages.md](references/usages.md) for benchmarks.
 
 ---
 
@@ -138,6 +175,38 @@ Manage persistent, workspace-aware memory across sessions.
 | `clear` | Flush all cached memory for the workspace |
 
 > **Rule:** Always `search` memory before starting any new research task.
+
+---
+
+### `store_memory`
+
+Store manual context or persistent thoughts into the long-term workspace memory.
+
+```json
+{
+  "key": "auth_strategy",
+  "content": "We decided to use Redis for caching sessions to improve latency.",
+  "workspace_root": "/your/project"
+}
+```
+
+> **Use Case**: Explicitly save findings, decisions, or summaries after concluding research or a large task. This ensures instant recall via `manage_memory (search)` in future sessions, preventing knowledge loss.
+
+---
+
+## 🦾 Keyword-Based Task Classification
+
+The Intelligent Router and Steering Engine utilize specific keywords in the goal or plan to classify tasks and select relevant reference materials.
+
+### 🎯 Core Trigger Keywords
+
+| Category | Keywords | Impact |
+|----------|----------|--------|
+| **API/REST** | `api`, `endpoint`, `url`, `rest`, `status code`, `json` | Prioritizes API documentation and schema references |
+| **Persistence** | `database`, `sql`, `memory`, `cache`, `persistence`, `redis` | Prioritizes database schemas and memory-state patterns |
+| **Security** | `auth`, `jwt`, `token`, `security`, `encryption`, `cors` | Prioritizes authentication protocols and security guidelines |
+| **DevOps** | `git`, `env`, `deploy`, `ci`, `docker`, `config` | Prioritizes environment configurations and CI/CD maps |
+| **Research** | `search`, `research`, `findings`, `knowledge`, `discover` | Activates deep-search and memory-retrieval optimization |
 
 ---
 
@@ -181,48 +250,43 @@ Each iteration builds on the last. Use `code_mode` to compress and deduplicate f
 
 ---
 
-## 🤖 Agentic Middleware v2 (High-Performance Steering)
+## 🤖 Agentic Middleware v2 (Steering Engine)
 
-The server features a **Context-Aware Steering Engine** that manages high-performance, stateful task execution via the `use_free_llm` tool. It transforms static documentation into a dynamic, token-efficient prompt pipeline.
+The server features a **Context-Aware Steering Engine** that manages stateful task execution via the `use_free_llm` tool. It transforms static documentation into a dynamic, token-efficient prompt pipeline.
 
 ### ⚡ AI-First Triggering
 
-You can dynamically "activate" your own agentic loop by passing the `agentic` and `sessionId` parameters when calling `use_free_llm`. This is the preferred way to manage complex, multi-turn coding tasks.
+Dynamically activate the agentic loop by passing the `agentic` and `sessionId` parameters when calling `use_free_llm`. This is the preferred method for managing complex, multi-turn coding tasks.
 
-```json
-{
-  "model": "gpt-4o",
-  "messages": [...],
-  "agentic": true,
-  "sessionId": "project-name-v1"
-}
-```
+### 🧠 Intelligent Behaviors
 
-### 🧠 Intelligent Behaviours
-
-- **Semantic Prompt Resolution**: Automatically indexes `external/agent-prompt/README.md` and scores sections based on your request context. You receive only the most relevant instructions (e.g., "MOMENTUM ENGINE" for performance tasks), maximizing focus and token efficiency.
-- **Granular Reference Extraction**: The steering engine can parse massive architectural maps (e.g., "Research Appendix") and extract only the relevant project entries. It uses a regex-based splitter (`/\n(?=- \[)/`) and scores each entry individually, reducing context bloat by up to 90%.
-- **Stateful Project Memory**: Passing a `sessionId` persists your task state (`nowQueue`, `improveQueue`) and project logs (`plan.md`, `tasks.md`, `knowledge.md`) in `projects/{sessionId}/`. This enables consistent cross-turn reasoning.
-- **Automatic Task Decomposition**: The middleware automatically splits your user goal into discrete steps and monitors progress. It fits auxiliary instructions within a strict budget (default: 25,000 chars) to prevent "context rot."
+- **Semantic Prompt Resolution**: Automatically indexes relevant prompt sections. A **stricter selection threshold (score >= 3)** ensures instructions are mission-critical, eliminating "context noise."
+- **Granular Reference Extraction**: The steering engine parses massive architectural maps and extracts only relevant project entries. Extracted entries are **capped at 5 per section** to maintain a lean context window.
+- **Stateful Project Memory**: Passing a `sessionId` persists task state (`nowQueue`, `improveQueue`) and project logs (`plan.md`, `tasks.md`, `knowledge.md`) in `projects/{sessionId}/`.
+- **Automatic Task Decomposition**: Automatically splits complex goals into discrete, trackable steps.
 
 ### ⚡ Reference Steering Protocols
 
-When the middleware detects architectural keywords, it injects a **Reference Suggestion Protocol**. You MUST follow this format when suggesting project-specific URLs:
+When architectural keywords are detected, the system injects a **Reference Suggestion Protocol**. Follow this format when suggesting project-specific URLs:
 
 > **Protocol Format:** `[Project Name] (Reference: <URL>) - <Description>`
 
-#### 🚀 Keyword Boosters
-The scoring engine prioritizes reference sections when these keywords appear in your goal or plan:
-- `api`, `url`, `git`, `map`, `rest`, `endpoint`, `reference`
+### 🧐 Observability & Grounding
+
+The middleware implements **Research Validation Logging** to ensure all agentic actions are grounded in verified data:
+- **[RESEARCH-VALIDATION]** logs fire during pre-execution (detection) and post-execution (grounding check).
+- Provides an explicit audit trail for external knowledge lookups and architectural steering.
+
+---
 
 ### 🛠️ Strategic Usage Patterns
 
-- **Activation Requirement**: Only set `agentic: true` for complex architectural changes or long-running feature developments. For simple one-off queries, leave it `false` to optimize latency.
-- **Session Consistency**: Use a unique, descriptive `sessionId` (e.g., `auth-refactor-2024`) per project to ensure your memory remains isolated from other tasks.
-- **Steering with Keywords**: If you need specific rules (e.g., "SQL Best Practices"), include those keywords in your request. The engine will resolve the matching semantic sections from the master prompt.
-- **Architectural Discovery**: Instead of asking for the "whole map," ask for "references for [System X]". The booster will identify the relevant entries and provide deep links without exceeding the token budget.
+- **Activation**: Only set `agentic: true` for complex architectural changes or long-running feature developments. For simple one-off queries, leave it `false` to optimize latency.
+- **Session Consistency**: Use a unique, descriptive `sessionId` (e.g., `auth-refactor-2024`) per project to ensure memory remains isolated.
+- **Explicit Steering**: Pass a `keywords` array to strictly control the injected system prompt AND the task routing tier. This documentation-first approach bypasses fuzzy logic, ensuring the agent receives ONLY relevant reference material and is routed to the optimal model tier (e.g., Coding vs. Research) via majority-voting, saving thousands of tokens.
+- **Architectural Discovery**: Instead of requesting the "whole map," request "references for [System X]". The booster will identify the relevant entries and provide deep links without exceeding the token budget.
 
 > [!NOTE]
-> The source of truth for your behavior is controlled by the `external/agent-prompt/README.md`. The pipeline ensures you never receive irrelevant instructions.
+> The source of truth for behavior is controlled by the `external/agent-prompt/README.md`. IRRELEVANT instructions are filtered out automatically.
 
-See [usages.md](references/usages.md) for the full test matrix with actual responses, token counts, and latency measurements for all 6 tools across real providers.
+See [usages.md](references/usages.md) for the full test matrix with actual responses, token counts, and latency measurements for all tools.

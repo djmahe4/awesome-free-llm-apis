@@ -1,54 +1,32 @@
 import { createHash } from 'node:crypto';
-import { readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 export class WorkspaceScanner {
-    private hashes: Map<string, { hash: string; lastScan: number }> = new Map();
-    private readonly scanThresholdMs = 10000;
+    private hashes: Map<string, string> = new Map();
 
     constructor(private defaultProjectRoot: string) { }
 
     getWorkspaceHash(projectRoot?: string): string {
-        const root = projectRoot || this.defaultProjectRoot;
-        const cached = this.hashes.get(root);
-        const now = Date.now();
+        const root = resolve(projectRoot || this.defaultProjectRoot);
 
-        if (cached && now - cached.lastScan < this.scanThresholdMs) {
-            return cached.hash;
+        if (!existsSync(root)) {
+            throw new Error(`Workspace root '${root}' does not exist on disk. Please provide a valid absolute directory path.`);
         }
 
+        const cached = this.hashes.get(root);
+        if (cached) {
+            return cached;
+        }
+
+        // Generate a stable identity hash strictly based on the normalized absolute path.
+        // We DO NOT hash file contents because adding a single comment would rotate the hash
+        // and cause the agent to lose its long-term memory for this project.
         const hash = createHash('sha256');
-        // Scan src/tools and src/providers in the provided root
-        // Also scan the root itself for config files
-        this.scanDirectory(join(root, 'src/tools'), hash);
-        this.scanDirectory(join(root, 'src/providers'), hash);
-        this.scanDirectory(join(root, '.'), hash, 1); // Depth 1 for config files
+        hash.update(root);
 
         const finalHash = hash.digest('hex');
-        this.hashes.set(root, { hash: finalHash, lastScan: now });
+        this.hashes.set(root, finalHash);
         return finalHash;
-    }
-
-    private scanDirectory(dir: string, hash: ReturnType<typeof createHash>, maxDepth = 10, currentDepth = 0) {
-        if (currentDepth > maxDepth) return;
-        try {
-            const entries = readdirSync(dir, { withFileTypes: true });
-            for (const entry of entries) {
-                const fullPath = join(dir, entry.name);
-                if (entry.isDirectory()) {
-                    this.scanDirectory(fullPath, hash, maxDepth, currentDepth + 1);
-                } else if (entry.isFile() && (
-                    entry.name.endsWith('.ts') ||
-                    entry.name.endsWith('.js') ||
-                    entry.name.endsWith('.json') ||
-                    entry.name === '.env'
-                )) {
-                    const stats = statSync(fullPath);
-                    hash.update(`${entry.name}:${stats.size}:${stats.mtimeMs}`);
-                }
-            }
-        } catch {
-            // Ignore errors for non-existent directories
-        }
     }
 }

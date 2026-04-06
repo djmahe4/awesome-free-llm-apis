@@ -16,19 +16,15 @@ vi.mock('fs', () => {
     };
     return {
         default: {
-            existsSync: vi.fn(),
-            readFileSync: vi.fn(),
             promises: mockPromises,
         },
         promises: mockPromises,
-        existsSync: vi.fn(),
-        readFileSync: vi.fn(),
     };
 });
 
 describe('Agentic Intelligence & Middleware', () => {
     const mockPromptData = {
-        metadata: { version: '1.1.0' },
+        metadata: { version: '1.0.3' },
         introduction: "Agent Identity Core",
         sections: [
             {
@@ -65,9 +61,10 @@ describe('Agentic Intelligence & Middleware', () => {
             if (path.endsWith('prompt.json') || path.endsWith('system-prompt-raw.md') || path.endsWith('README.md')) return undefined;
             throw new Error('File not found');
         });
+        (vi.mocked(fsp.stat) as any).mockImplementation(async () => ({ mtimeMs: Date.now() }));
         (vi.mocked(fsp.readFile) as any).mockImplementation(async (path: string) => {
             if (path.endsWith('prompt.json')) return JSON.stringify(mockPromptData);
-            if (path.endsWith('system-prompt-raw.md')) return "Tier 2 Fallback Prompt".padEnd(600, '!');
+            if (path.endsWith('README.md')) return "Tier 2 Fallback (README)".padEnd(600, '!');
             return "";
         });
 
@@ -112,23 +109,32 @@ describe('Agentic Intelligence & Middleware', () => {
             expect(prompt).toContain("RESEARCH APPENDIX");
         });
 
-        it('falls back to Tier 2 (RAW) if prompt.json is missing', async () => {
+        it('falls back to Tier 2 (README) if prompt.json is missing', async () => {
             (vi.mocked(fsp.stat) as any).mockImplementation(async (path: string) => {
                 if (path.endsWith('prompt.json')) throw new Error('Not found');
                 return { mtimeMs: 1000 };
             });
             const prompt = await getIntelligentSystemPrompt();
-            expect(prompt).toContain("Tier 2 Fallback Prompt");
+            expect(prompt).toContain("Tier 2 Fallback (README)");
         });
 
         it('falls back to Tier 2 if prompt.json is invalid JSON', async () => {
             (vi.mocked(fsp.readFile) as any).mockImplementation(async (path: string) => {
                 if (path.endsWith('prompt.json')) return "INVALID JSON";
-                if (path.endsWith('system-prompt-raw.md')) return "Tier 2 Fallback Prompt".padEnd(600, '!');
+                if (path.endsWith('README.md')) return "Tier 2 Fallback (README)".padEnd(600, '!');
                 return "";
             });
             const prompt = await getIntelligentSystemPrompt();
-            expect(prompt).toContain("Tier 2 Fallback Prompt");
+            expect(prompt).toContain("Tier 2 Fallback (README)");
+        });
+
+        it('falls back to hardcoded default if all files are missing', async () => {
+            (vi.mocked(fsp.stat) as any).mockImplementation(async (path: string) => {
+                throw new Error('Not found');
+            });
+            (vi.mocked(fsp.access) as any).mockRejectedValue(new Error('Not found'));
+            const prompt = await getIntelligentSystemPrompt();
+            expect(prompt).toContain("You are the principal architect");
         });
 
         it('invalidates cache when prompt.json mtime changes', async () => {

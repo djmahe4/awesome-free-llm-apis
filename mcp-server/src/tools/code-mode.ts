@@ -1,8 +1,11 @@
 import { executeInSandbox } from '../sandbox/executor.js';
 import { MemoryManager } from '../memory/index.js';
 
+export type CodeLanguage = 'javascript' | 'python' | 'go' | 'rust';
+
 export interface CodeModeInput {
   code: string;
+  language?: CodeLanguage;
   data?: string;
   command?: string;
   timeout_ms?: number;
@@ -20,9 +23,13 @@ export interface CodeModeResult {
 const memoryManager = new MemoryManager();
 
 export async function runCodeMode(input: CodeModeInput): Promise<CodeModeResult> {
-  const { code, data = '', timeout_ms = 5000 } = input;
+  const { code, language = 'javascript', data = '', timeout_ms = 5000 } = input;
 
-  const result = await executeInSandbox(code, data, timeout_ms);
+  const result = await executeInSandbox(code, {
+    data,
+    timeoutMs: timeout_ms,
+    language
+  });
 
   const compressionRatio = data.length > 0 ? result.stdout.length / data.length : undefined;
 

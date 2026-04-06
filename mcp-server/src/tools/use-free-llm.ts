@@ -12,7 +12,7 @@ import {
 } from '../pipeline/index.js';
 
 export interface UseFreeLLMInput {
-  model: string;
+  model?: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   temperature?: number;
   max_tokens?: number;
@@ -24,6 +24,7 @@ export interface UseFreeLLMInput {
   agentic?: boolean;
   sessionId?: string;
   taskType?: TaskType | string;
+  keywords?: string[];
 }
 
 // Singleton instances for shared state across pipeline requests
@@ -45,6 +46,7 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     agentic,
     sessionId: inputSessionId,
     workspace_root: workspaceRoot,
+    keywords,
   } = input;
 
   const request: ChatRequest = {
@@ -90,7 +92,8 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     wsHash: workspaceScanner.getWorkspaceHash(workspaceRoot),
     providerId: providerId,
     agentic,
-    sessionId: effectiveSessionId
+    sessionId: effectiveSessionId,
+    keywords
   };
 
   const finalContext = await pipeline.execute(context);

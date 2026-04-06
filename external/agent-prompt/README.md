@@ -3159,66 +3159,66 @@ Primary-source architecture references updated on March 28, 2026. These are here
 
 ## Subsystem Reference Map
 
-Use this map when you are building or improving one subsystem at a time. Study two to four strong repos in the target category, extract patterns, and turn them into concrete implementation choices, evals, and operating rules.
+Use this map when you are building or improving one subsystem at a time. Study two to four strong repos in the target category, extract patterns, and turn them into concrete implementation choices, evals, and operating rules. This repository indexes patterns for handling **JSON** data, **Regex** extraction, and **TFIDF** relevance scoring.
 
 - Research and web intelligence
-  - [GPT Researcher](https://github.com/assafelovic/gpt-researcher)
-  - [Crawl4AI](https://github.com/unclecode/crawl4ai)
-  - [Firecrawl](https://github.com/firecrawl/firecrawl)
-  - [Stagehand](https://github.com/browserbase/stagehand)
+  - [GPT Researcher](https://github.com/assafelovic/gpt-researcher) - Python framework for high-fidelity autonomous research.
+  - [Crawl4AI](https://github.com/unclecode/crawl4ai) - Open-source LLM-friendly web crawler and scraper in Python.
+  - [Firecrawl](https://github.com/firecrawl/firecrawl) - Turn websites into LLM-ready markdown; supports Python and JS.
+  - [Stagehand](https://github.com/browserbase/stagehand) - Playwright-based browser automation with natural language in TypeScript.
 
 - Memory and context assembly
-  - [Letta](https://github.com/letta-ai/letta)
-  - [Zep](https://github.com/getzep/zep)
-  - [Graphiti](https://github.com/getzep/graphiti)
-  - [Mem0](https://github.com/mem0ai/mem0)
+  - [Letta](https://github.com/letta-ai/letta) - Stateful agent memory and persistent identity in Python.
+  - [Zep](https://github.com/getzep/zep) - Long-term memory for AI assistants; supports Python and Go.
+  - [Graphiti](https://github.com/getzep/graphiti) - Temporally-aware knowledge graph memory in Python.
+  - [Mem0](https://github.com/mem0ai/mem0) - Personalized memory layer for AI agents in Python.
 
 - Planning, tasks, and durable workflows
-  - [LangGraph](https://github.com/langchain-ai/langgraph)
-  - [Temporal](https://github.com/temporalio/temporal)
-  - [Trigger.dev](https://github.com/triggerdotdev/trigger.dev)
-  - [Inngest](https://github.com/inngest/inngest)
-  - [TaskWeaver](https://github.com/microsoft/TaskWeaver)
+  - [LangGraph](https://github.com/langchain-ai/langgraph) - Cyclic graph-based orchestration in Python and JS.
+  - [Temporal](https://github.com/temporalio/temporal) - Durable execution and fault-tolerant workflows in Go, Java, Python, and TS.
+  - [Trigger.dev](https://github.com/triggerdotdev/trigger.dev) - Professional-grade background jobs and long-running tasks in TypeScript.
+  - [Inngest](https://github.com/inngest/inngest) - Event-driven durable step functions for reliable workflows in TypeScript/Go.
+  - [TaskWeaver](https://github.com/microsoft/TaskWeaver) - Code-first planning and data analysis in Python.
 
 - Multi-agent orchestration and agent operating systems
-  - [AutoGen](https://github.com/microsoft/autogen)
-  - [CAMEL](https://github.com/camel-ai/camel)
-  - [AgentScope](https://github.com/agentscope-ai/agentscope)
-  - [Agno](https://github.com/agno-agi/agno)
-  - [MetaGPT](https://github.com/FoundationAgents/MetaGPT)
-  - [OpenClaw](https://github.com/openclaw/openclaw)
-  - [Paperclip](https://github.com/paperclipai/paperclip)
+  - [AutoGen](https://github.com/microsoft/autogen) - Multi-agent conversation framework in Python and .NET.
+  - [CAMEL](https://github.com/camel-ai/camel) - Scalable multi-agent society simulation in Python.
+  - [AgentScope](https://github.com/agentscope-ai/agentscope) - Asynchronous multi-agent programming in Python.
+  - [Agno](https://github.com/agno-agi/agno) - Build multi-modal agents and teams in Python.
+  - [MetaGPT](https://github.com/FoundationAgents/MetaGPT) - SOP-driven multi-agent software company in Python.
+  - [OpenClaw](https://github.com/openclaw/openclaw) - Unified agent platform with browser and desktop automation in Python.
+  - [Paperclip](https://github.com/paperclipai/paperclip) - Business-scale agent orchestration and governance in Python.
 
 - Evals, tracing, and observability
-  - [Phoenix](https://github.com/Arize-ai/phoenix)
-  - [Langfuse](https://github.com/langfuse/langfuse)
-  - [Opik](https://github.com/comet-ml/opik)
-  - [Helicone](https://github.com/helicone/helicone)
-  - [Promptfoo](https://github.com/promptfoo/promptfoo)
+  - [Phoenix](https://github.com/Arize-ai/phoenix) - Open-source tracing and eval for LLMs in Python.
+  - [Langfuse](https://github.com/langfuse/langfuse) - Open-source observability and prompt management in JS/TS.
+  - [Opik](https://github.com/comet-ml/opik) - Comprehensive tracing and eval platform in Python.
+  - [Helicone](https://github.com/helicone/helicone) - Observability proxy and dashboard for LLM apps.
+  - [Promptfoo](https://github.com/promptfoo/promptfoo) - Systematic test runner for prompts and model review.
 
 - Guardrails and policy enforcement
-  - [Invariant Guardrails](https://github.com/invariantlabs-ai/invariant)
-  - [Guardrails AI](https://github.com/guardrails-ai/guardrails)
-  - [NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails)
+  - [Invariant Guardrails](https://github.com/invariantlabs-ai/invariant) - Policy enforcement over traces and tool use in Python.
+  - [Guardrails AI](https://github.com/guardrails-ai/guardrails) - Input/output validation and structured generation in Python.
+  - [NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) - Programmable dialog rails in Python.
 
 - Tool, auth, and action integration
-  - [MCP](https://modelcontextprotocol.io/)
-  - [Composio](https://github.com/ComposioHQ/composio)
+  - [MCP](https://modelcontextprotocol.io/) - Standard for connecting agents to tools and data.
+  - [Composio](https://github.com/ComposioHQ/composio) - Large-scale tool and auth integration in Python and JS.
 
 - Execution sandboxes and code runtime
-  - [E2B](https://github.com/e2b-dev/E2B)
-  - [Daytona](https://github.com/daytonaio/daytona)
-  - [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
+  - [E2B](https://github.com/e2b-dev/E2B) - Secure isolated sandboxes for generated code in Python and JS.
+  - [Daytona](https://github.com/daytonaio/daytona) - Persistent developer environments for agent execution in Go.
+  - [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) - Kubernetes-native research and execution sandboxes.
 
 - Science reproducibility and experiment lineage
-  - [MLflow](https://mlflow.org/)
-  - [DVC](https://dvc.org/)
+  - [MLflow](https://mlflow.org/) - Experiment tracking and model lineage in Python.
+  - [DVC](https://dvc.org/) - Data version control and reproducible pipelines in Python.
 
 - Coding-agent operating stacks and methodology
-  - [Superpowers](https://github.com/obra/superpowers)
-  - [gstack](https://github.com/garrytan/gstack)
-  - [Everything Claude Code](https://github.com/affaan-m/everything-claude-code)
-  - [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+  - [Superpowers](https://github.com/obra/superpowers) - Methodology-driven coding agent with TDD and review in Python.
+  - [gstack](https://github.com/garrytan/gstack) - Architecture and security review layer for coding agents.
+  - [Everything Claude Code](https://github.com/affaan-m/everything-claude-code) - Performance-tuned coding harness and research-first methodology.
+  - [Hermes Agent](https://github.com/NousResearch/hermes-agent) - Self-improving agent with autonomous skill creation.
 
 ## Notes
 

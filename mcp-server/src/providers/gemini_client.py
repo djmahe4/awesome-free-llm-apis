@@ -21,8 +21,29 @@ async def main():
         messages = input_data.get("messages", [])
         stream = input_data.get("stream", False)
         temperature = input_data.get("temperature", 0.7)
+        response_format = input_data.get("response_format")
+        google_search = input_data.get("google_search", False)
 
         client = genai.Client(api_key=api_key)
+
+        # Build GenerateContentConfig
+        config_kwargs = {"temperature": temperature}
+
+        # Add Google Search Tool if requested
+        if google_search:
+            config_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+
+        if response_format and isinstance(response_format, dict):
+            rf_type = response_format.get("type")
+            if rf_type == "json_object":
+                config_kwargs["response_mime_type"] = "application/json"
+            elif rf_type == "json_schema" and "json_schema" in response_format:
+                schema_def = response_format["json_schema"].get("schema")
+                if schema_def:
+                    config_kwargs["response_mime_type"] = "application/json"
+                    config_kwargs["response_json_schema"] = schema_def
+
+        config = types.GenerateContentConfig(**config_kwargs)
 
         # Convert simple messages to SDK format
         # [{ "role": "user", "content": "..." }] -> [{ "role": "user", "parts": [{"text": "..."}] }]
@@ -37,7 +58,7 @@ async def main():
             async for chunk in await client.aio.models.generate_content_stream(
                 model=model_id,
                 contents=sdk_messages,
-                config=types.GenerateContentConfig(temperature=temperature)
+                config=config
             ):
                 # Output chunk text immediately for streaming
                 if chunk.text:
@@ -47,7 +68,7 @@ async def main():
             response = await client.aio.models.generate_content(
                 model=model_id,
                 contents=sdk_messages,
-                config=types.GenerateContentConfig(temperature=temperature)
+                config=config
             )
             
             # Prepare standard response

@@ -39,6 +39,7 @@ This server includes an orchestration pipeline for routing, token management, an
 - **Dashboard**: Real-time monitoring of usage, provider health, and model availability
 - **Platform Independent**: Uses a `QuickJS` engine compiled to `WebAssembly` for a secure, host-agnostic JavaScript sandbox
 - **Agentic Middleware**: Optional agentic layer with task decomposition, momentum queues, file-first state, and a verification loop (see [`mcp-server/src/middleware/agentic/`](mcp-server/src/middleware/agentic/))
+- **🆕 Agentic Benchmarks**: Specialized performance suite validating **90-95% context compression** and pipeline efficiency (see [**`mcp-server/benchmarks/README.md`**](mcp-server/benchmarks/README.md))
 
 ## Provider APIs
 
