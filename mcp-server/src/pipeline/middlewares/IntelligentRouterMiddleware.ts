@@ -2,8 +2,9 @@ import { ProviderRegistry } from '../../providers/registry.js';
 import { TaskType } from '../middleware.js';
 import type { Message } from '../../providers/types.js';
 import type { Middleware, PipelineContext, NextFunction } from '../middleware.js';
-import { LLMExecutor } from '../../utils/LLMExecutor.js';
 import { ContextManager } from '../../utils/ContextManager.js';
+import { getMessageContent } from '../../utils/MessageUtils.js';
+import { LLMExecutor } from '../../utils/LLMExecutor.js';
 
 export class IntelligentRouterMiddleware implements Middleware {
     name = 'IntelligentRouterMiddleware';
@@ -78,7 +79,6 @@ export class IntelligentRouterMiddleware implements Middleware {
         'moderate': TaskType.Moderation, 'moderation': TaskType.Moderation, 'safety': TaskType.Moderation,
         'filter': TaskType.Moderation, 'policy': TaskType.Moderation,
         // User Intent / Planning
-        'intent': TaskType.UserIntent, 'plan': TaskType.UserIntent, 'decompose': TaskType.UserIntent,
     };
 
     /**
@@ -106,7 +106,7 @@ export class IntelligentRouterMiddleware implements Middleware {
         }
 
         // 2. Fallback to Message Content Analysis
-        const lastMsg = messages[messages.length - 1]?.content.toLowerCase() || '';
+        const lastMsg = getMessageContent(messages[messages.length - 1]).toLowerCase();
 
         if (lastMsg.includes('```') || lastMsg.includes('function') || lastMsg.includes('class') || lastMsg.includes('debug') || lastMsg.includes('implement')) {
             return TaskType.Coding;
@@ -131,7 +131,7 @@ export class IntelligentRouterMiddleware implements Middleware {
      * Detects if a prompt is complex enough to warrant decomposition.
      */
     private isComplex(messages: Message[]): boolean {
-        const lastMsg = messages[messages.length - 1]?.content || '';
+        const lastMsg = getMessageContent(messages[messages.length - 1]);
         const lower = lastMsg.toLowerCase();
 
         // Complex if it has numbered steps, multiple questions, or specific keywords
@@ -154,7 +154,7 @@ export class IntelligentRouterMiddleware implements Middleware {
         let plannerResponse: string | null = null;
 
         const lastMessage = context.request.messages.length > 0 
-            ? context.request.messages[context.request.messages.length - 1].content 
+            ? getMessageContent(context.request.messages[context.request.messages.length - 1])
             : 'No content provided';
 
         const planningPrompt = `Analyze this request and split it into a list of independent subtasks. 
@@ -368,11 +368,8 @@ Request: ${lastMessage}`;
         const allErrors: string[] = [];
 
         // --- Context Management Strategic Workflow ---
-        let originalTokens = context.estimatedTokens;
-        if (originalTokens === undefined) {
-            originalTokens = this.executor.calculateTokens(context.request.messages);
-            context.estimatedTokens = originalTokens;
-        }
+        const originalTokens = context.estimatedTokens ?? this.executor.calculateTokens(context.request.messages);
+        context.estimatedTokens = originalTokens;
 
         let estimatedTokens = originalTokens;
         let contextCompressed = false;

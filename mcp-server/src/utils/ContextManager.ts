@@ -1,6 +1,7 @@
-import { getEncoding } from 'js-tiktoken';
 import type { Message } from '../providers/types.js';
 import type { PipelineContext } from '../pipeline/middleware.js';
+import { getMessageContent } from './MessageUtils.js';
+import { getEncoding } from 'js-tiktoken';
 
 /**
  * Controls how context overflow is handled.
@@ -35,7 +36,7 @@ export class ContextManager {
     countTokens(messages: Message[]): number {
         let totalChars = 0;
         for (const msg of messages) {
-            totalChars += msg.content.length;
+            totalChars += getMessageContent(msg).length;
         }
 
         // Optimization: If the string is massive (> 20k chars), 
@@ -46,7 +47,7 @@ export class ContextManager {
 
         let total = 0;
         for (const msg of messages) {
-            total += this.encoder.encode(msg.content).length + 4; // ~4 overhead per msg
+            total += this.encoder.encode(getMessageContent(msg)).length + 4; // ~4 overhead per msg
         }
         return total;
     }
@@ -151,7 +152,7 @@ export class ContextManager {
         }
 
         const historyText = oldMsgs
-            .map(m => `${m.role.toUpperCase()}: ${m.content}`)
+            .map(m => `${m.role.toUpperCase()}: ${getMessageContent(m)}`)
             .join('\n---\n');
 
         const historyTextTokens = this.countStringTokens(historyText);
@@ -233,15 +234,15 @@ export class ContextManager {
         const oldMsgs = nonSystemMsgs.slice(0, -KEEP_RECENT);
 
         const compressedOld = oldMsgs.map(msg => {
+            const content = getMessageContent(msg);
             // Keep code-heavy messages or short ones intact
-            if (msg.content.includes('```') || msg.content.length < 500) {
+            if (content.includes('```') || content.length < 500) {
                 return msg;
             }
 
             // Extract first and last sentences of long prose
-            const sentences = msg.content.split(/[.!?]\s+/);
+            const sentences = content.split(/[.!?]\s+/);
             if (sentences.length <= 3) return msg;
-
             const compressedContent = `${sentences[0]}. ${sentences[1]}. ... [summarized] ... ${sentences[sentences.length - 1]}.`;
             return { ...msg, content: compressedContent };
         });
@@ -274,10 +275,11 @@ export class ContextManager {
             const remainingBudget = Math.max(0, targetTokens - systemTokens - 20); // 20 buffer
 
             if (remainingBudget > 50) {
+                const content = getMessageContent(lastMsg);
                 // High-performance truncation: Estimate chars from tokens (avg ~4 chars per token)
                 // Use a safe factor (3 chars per token) to avoid over-truncation
                 const approxChars = remainingBudget * 3;
-                let truncatedContent = lastMsg.content.slice(-approxChars);
+                let truncatedContent = content.slice(-approxChars);
 
                 // Refine with small word-by-word steps if still too big
                 // or add back words if we have room. For emergency, we just want to BE UNDER budget.
@@ -338,7 +340,8 @@ export class ContextManager {
         }
 
         // Split by words to avoid breaking tokens mid-way
-        const words = lastUserMsg.content.split(/\s+/);
+        const lastUserContent = getMessageContent(lastUserMsg);
+        const words = lastUserContent.split(/\s+/);
         const chunks: string[] = [];
         let currentChunk: string[] = [];
         let currentTokens = 0;
@@ -374,7 +377,7 @@ export class ContextManager {
                             ...messages.filter(m => m.role === 'system'),
                             {
                                 role: 'user',
-                                content: `[Part ${i + 1}/${chunks.length}] ${lastUserMsg.content.split(chunk)[0] ? 'Continuing from previous section. ' : ''}Process this section:\n\n${chunk}`,
+                                content: `[Part ${i + 1}/${chunks.length}] ${lastUserContent.split(chunk)[0] ? 'Continuing from previous section. ' : ''}Process this section:\n\n${chunk}`,
                             },
                         ],
                     },

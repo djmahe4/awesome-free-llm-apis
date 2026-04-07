@@ -2,6 +2,7 @@ import { getEncoding } from 'js-tiktoken';
 import { ProviderRegistry } from '../providers/registry.js';
 import type { PipelineContext } from '../pipeline/middleware.js';
 import type { ChatResponse, Message } from '../providers/types.js';
+import { getMessageContent } from './MessageUtils.js';
 
 export interface TokenTrackingInfo {
     remainingTokens?: number;
@@ -28,7 +29,7 @@ export class LLMExecutor {
     calculateTokens(messages: Message[]): number {
         let totalChars = 0;
         for (const msg of messages) {
-            totalChars += msg.content.length;
+            totalChars += getMessageContent(msg).length;
         }
 
         // Optimization: If the string is massive (> 20k chars), 
@@ -40,7 +41,7 @@ export class LLMExecutor {
 
         let total = 0;
         for (const msg of messages) {
-            total += this.encoder.encode(msg.content).length + 4;
+            total += this.encoder.encode(getMessageContent(msg)).length + 4;
         }
         return total;
     }
