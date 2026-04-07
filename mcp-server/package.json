@@ -19,7 +19,7 @@
     "dashboard": "tsx --env-file=.env src/server.ts --sse"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "cohere-ai": "^7.21.0",
     "cors": "^2.8.6",
     "express": "^4.21.2",
