@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "cohere-ai": "^7.21.0",
+    "cohere-ai": "^8.0.0",
     "cors": "^2.8.6",
     "express": "^4.21.2",
     "helmet": "^8.1.0",
