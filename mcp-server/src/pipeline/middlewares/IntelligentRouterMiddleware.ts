@@ -192,8 +192,9 @@ Request: ${lastMessage}`;
         const subtaskResults: string[] = [];
 
         for (const [i, task] of subtasks.entries()) {
+            const taskStr = typeof task === 'string' ? task : (getMessageContent({ role: 'user', content: task }) || String(task));
             const taskType = this.autoClassify([{ role: 'user', content: task }], context.keywords);
-            console.debug(`[Router] Subtask ${i + 1}: "${task.slice(0, 50)}..." (Type: ${taskType})`);
+            console.debug(`[Router] Subtask ${i + 1}: "${taskStr.slice(0, 50)}..." (Type: ${taskType})`);
 
             try {
                 // Execute subtask with best model for its type
@@ -202,10 +203,10 @@ Request: ${lastMessage}`;
                     'any', // Let executor pick best for type if it can, otherwise defaults to chat
                     { taskType }
                 );
-                subtaskResults.push(`### Subtask ${i + 1}: ${task}\n${subtaskRes.choices[0].message.content}`);
+                subtaskResults.push(`### Subtask ${i + 1}: ${taskStr}\n${subtaskRes.choices[0].message.content}`);
             } catch (err) {
                 console.error(`[Router] Subtask ${i + 1} failed:`, err);
-                subtaskResults.push(`### Subtask ${i + 1}: ${task}\nFAILED: ${err}`);
+                subtaskResults.push(`### Subtask ${i + 1}: ${taskStr}\nFAILED: ${err}`);
             }
         }
 

@@ -79,4 +79,40 @@ describe('Intelligent Router - Multi-modal Content Bug Repro', () => {
         // Since "solve this math problem: 2+2" doesn't have explicit coding keywords, it will default to Chat
         expect(context.taskType).toBe(TaskType.Chat);
     });
+
+    it('should NOT crash in decomposeAndExecute when subtasks are objects instead of strings', async () => {
+        const executor = new LLMExecutor();
+        const router = new IntelligentRouterMiddleware(executor);
+
+        // Simulate a complex prompt to trigger decomposition
+        const context: PipelineContext = {
+            request: {
+                messages: [{ role: 'user', content: '1. do this\n2. do that\n3. then finally this' }]
+            }
+        };
+
+        // Mock planner response returning objects in subtasks
+        const plannerResponse = JSON.stringify([
+            { task: 'Subtask 1' },
+            { task: 'Subtask 2' }
+        ]);
+
+        vi.spyOn(executor, 'prompt').mockImplementation(async (msgs: any) => {
+            // First call is for planning
+            if (msgs[0].content.includes('JSON array of strings')) {
+                return { choices: [{ message: { content: plannerResponse } }] } as any;
+            }
+            // Subsequent calls are for execution
+            return { choices: [{ message: { content: 'Subtask result' } }] } as any;
+        });
+
+        const trySpy = vi.spyOn(executor, 'tryProvider').mockResolvedValue({ id: 'ok' } as any);
+
+        // This should NOT throw "TypeError: task.slice is not a function"
+        await expect((router as any).decomposeAndExecute(context)).resolves.not.toThrow();
+        
+        // Final response should contain the results
+        expect(context.response?.choices[0].message.content).toContain('Subtask 1');
+        expect(context.response?.choices[0].message.content).toContain('Subtask 2');
+    });
 });
