@@ -178,13 +178,20 @@ Request: ${lastMessage}`;
         }
 
         // Parse subtasks
-        let subtasks: string[] = [];
+        let subtasks: any[] = [];
         try {
             // Basic JSON extraction
             const jsonMatch = plannerResponse.match(/\[.*\]/s);
-            subtasks = JSON.parse(jsonMatch ? jsonMatch[0] : plannerResponse);
+            const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : plannerResponse);
+            subtasks = Array.isArray(parsed) ? parsed : [parsed];
         } catch (err) {
             console.error(`[Router] Failed to parse planner response:`, err);
+            // Fallback: use lines if JSON fails
+            subtasks = plannerResponse.split('\n').filter(l => l.trim().length > 5);
+        }
+
+        if (subtasks.length === 0) {
+            console.error(`[Router] No subtasks parsed. Falling back to monolithic.`);
             return;
         }
 
@@ -192,8 +199,8 @@ Request: ${lastMessage}`;
         const subtaskResults: string[] = [];
 
         for (const [i, task] of subtasks.entries()) {
-            const taskStr = typeof task === 'string' ? task : (getMessageContent({ role: 'user', content: task }) || String(task));
-            const taskType = this.autoClassify([{ role: 'user', content: task }], context.keywords);
+            const taskStr = getMessageContent(task);
+            const taskType = this.autoClassify([{ role: 'user', content: taskStr }], context.keywords);
             console.debug(`[Router] Subtask ${i + 1}: "${taskStr.slice(0, 50)}..." (Type: ${taskType})`);
 
             try {

@@ -3,16 +3,26 @@ import type { Message } from '../providers/types.js';
 /**
  * Safely extracts text content from a Message, handling both string and multi-modal (array) content.
  */
-export function getMessageContent(message: Message): string {
-    if (!message || message.content === undefined || message.content === null) return '';
+/**
+ * Safely extracts text content from a Message or raw content, handling strings, multi-modal (array) content, and structured objects.
+ */
+export function getMessageContent(input: any): string {
+    if (input === undefined || input === null) return '';
+
+    // Handle full Message object
+    let content = input;
+    if (typeof input === 'object' && 'content' in input && input.content !== undefined) {
+        content = input.content;
+    }
+
+    if (content === undefined || content === null) return '';
     
     // 1. String content
-    if (typeof message.content === 'string') return message.content;
+    if (typeof content === 'string') return content;
     
     // 2. Array-based multi-modal content
-    if (Array.isArray(message.content)) {
-        const contentArray = message.content as any[];
-        return contentArray
+    if (Array.isArray(content)) {
+        return content
             .map((part: any) => {
                 if (typeof part === 'string') return part;
                 if (part && typeof part === 'object') {
@@ -25,10 +35,9 @@ export function getMessageContent(message: Message): string {
     }
     
     // 3. Single-object content (some models/parsers return this)
-    if (typeof message.content === 'object' && message.content !== null) {
-        const obj = message.content as any;
-        return obj.text || obj.task || obj.content || String(obj);
+    if (typeof content === 'object') {
+        return content.text || content.task || content.content || JSON.stringify(content);
     }
     
-    return String(message.content);
+    return String(content);
 }

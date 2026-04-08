@@ -1,5 +1,6 @@
 import { getEncoding } from 'js-tiktoken';
 import type { Middleware, PipelineContext, NextFunction } from '../middleware.js';
+import { getMessageContent } from '../../utils/MessageUtils.js';
 
 export class TokenManagerMiddleware implements Middleware {
     name = 'TokenManagerMiddleware';
@@ -20,7 +21,7 @@ export class TokenManagerMiddleware implements Middleware {
         // 1. Local Token Calculation
         let estimatedTokens = 0;
         for (const msg of context.request.messages) {
-            estimatedTokens += this.encoder.encode(msg.content).length;
+            estimatedTokens += this.encoder.encode(getMessageContent(msg)).length;
         }
         const maxTokens = context.request.max_tokens || 1024;
         const totalEstimated = estimatedTokens + maxTokens;

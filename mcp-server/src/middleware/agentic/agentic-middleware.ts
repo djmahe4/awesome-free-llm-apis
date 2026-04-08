@@ -5,6 +5,7 @@ import { getIntelligentSystemPrompt } from './prompts.js';
 import type { Middleware, PipelineContext, NextFunction } from '../../pipeline/middleware.js';
 import { memoryManager } from '../../memory/index.js';
 import { WorkspaceScanner } from '../../cache/workspace.js';
+import { getMessageContent } from '../../utils/MessageUtils.js';
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
@@ -111,7 +112,8 @@ async function prependSystemPrompt(
 }
 
 function getResponseContent(context: PipelineContext): string | undefined {
-    return context.response?.choices?.[0]?.message?.content;
+    const rawContent = context.response?.choices?.[0]?.message?.content;
+    return rawContent ? getMessageContent(rawContent) : undefined;
 }
 
 function verifySelf(content: string): string {
@@ -149,7 +151,7 @@ function logResearchValidation(sessionId: string, userContent: string, step: str
     console.error(
         `[AgenticMiddleware][RESEARCH-VALIDATION] session=${sessionId} step="${step}" ` +
         `timestamp=${timestamp} intent_detected=true ` +
-        `query_preview="${userContent.slice(0, 120).replace(/\n/g, ' ')}..."`
+        `query_preview="${getMessageContent(userContent).slice(0, 120).replace(/\n/g, ' ')}..."`
     );
 }
 
