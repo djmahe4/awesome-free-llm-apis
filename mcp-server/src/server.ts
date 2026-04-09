@@ -30,6 +30,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { LRUCache } from 'lru-cache';
 import { createMCPServer } from './mcp/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -139,9 +140,11 @@ async function main() {
 
       // API endpoints for dashboard
 
-      // Simple in-memory rate limiter for filesystem-backed routes (dashboard-only, local server)
-      const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-      const RATE_LIMIT_WINDOW_MS = 60_000; // 1-minute window
+      // Long-term session-less rate limiting using TTL cache to prevent memory leaks
+      const rateLimitCache = new LRUCache<string, { count: number; resetAt: number }>({
+        max: 1000,
+        ttl: 60_000, // 1 minute
+      });
       const RATE_LIMIT_MAX = 120;           // 2 requests/second burst over a minute
 
       function checkRateLimit(req: express.Request, res: express.Response): boolean {
@@ -149,10 +152,10 @@ async function main() {
           ?? req.socket.remoteAddress
           ?? 'unknown';
         const now = Date.now();
-        let entry = rateLimitMap.get(ip);
+        let entry = rateLimitCache.get(ip);
         if (!entry || now >= entry.resetAt) {
-          entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
-          rateLimitMap.set(ip, entry);
+          entry = { count: 0, resetAt: now + 60_000 };
+          rateLimitCache.set(ip, entry);
         }
         entry.count++;
         if (entry.count > RATE_LIMIT_MAX) {

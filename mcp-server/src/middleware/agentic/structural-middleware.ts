@@ -21,7 +21,18 @@ export class StructuralMarkdownMiddleware implements Middleware {
             const memStart = Date.now();
             const fullMemory = await this.readFullSessionMemory(sessionId);
             console.error(`[memory-read] ${Date.now() - memStart}ms session=${sessionId}`);
-            userMsg.content = `# TASK CONTEXT\n${userMsg.content}\n\n# FULL MEMORY STATE (session ${sessionId})\n${fullMemory}\n\n# RESPONSE FORMAT\nReply only in clean Markdown. For any code or file changes use exactly this block:\n\`\`\`file:relative/path/from/session/root.ts\n// FULL file content here (never partial diffs)\n\`\`\``;
+
+            const contextHeader = `# TASK CONTEXT\n# FULL MEMORY STATE (session ${sessionId})\n${fullMemory}\n\n# RESPONSE FORMAT\nReply only in clean Markdown. For any code or file changes use exactly this block:\n\`\`\`file:relative/path/from/session/root.ts\n// FULL file content here (never partial diffs)\n\`\`\``;
+
+            if (typeof userMsg.content === 'string') {
+                userMsg.content = `${contextHeader}\n\n${userMsg.content}`;
+            } else if (Array.isArray(userMsg.content)) {
+                // Prepend context as a new text block to avoid breaking multi-modal parts
+                (userMsg.content as any[]).unshift({
+                    type: 'text',
+                    text: contextHeader
+                });
+            }
         }
         await next();
         console.error(`[structural-middleware] ${Date.now() - startMs}ms`);

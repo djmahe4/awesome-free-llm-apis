@@ -50,7 +50,7 @@ async function main() {
     // We must ensure the query passed to the middleware matches the seeded content
     const mockContext: any = {
         request: {
-            messages: [{ role: 'user', content: 'Is agentic memory functioning correctly?' }]
+            messages: [{ role: 'user', content: 'functioning correctly' }]
         },
         sessionId: 'test-session-' + Date.now(),
         workspaceRoot: workspaceRoot,
