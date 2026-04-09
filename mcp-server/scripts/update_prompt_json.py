@@ -77,9 +77,18 @@ def main():
     # Use environment variable or derive relative path from script location
     base_dir = os.environ.get('AGENT_PROMPT_PATH')
     if not base_dir:
-        # Script is in repo_root/scripts/, prompt is in repo_root/external/agent-prompt
+        # Script is in mcp-server/scripts/
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        base_dir = os.path.abspath(os.path.join(script_dir, '../external/agent-prompt'))
+        
+        # Check local external/ (if mcp-server is standalone)
+        local_external = os.path.abspath(os.path.join(script_dir, '../external/agent-prompt'))
+        # Check repo-root external/ (normal monorepo case)
+        root_external = os.path.abspath(os.path.join(script_dir, '../../external/agent-prompt'))
+        
+        if os.path.exists(local_external):
+            base_dir = local_external
+        else:
+            base_dir = root_external
     
     readme_path = os.path.join(base_dir, 'README.md')
     json_path = os.path.join(base_dir, 'prompt.json')

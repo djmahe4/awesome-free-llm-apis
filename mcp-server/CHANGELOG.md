@@ -6,24 +6,27 @@
 
 ### 🚀 Highlights
 
+- **Intelligent Router Task Matrix**: Expanded `autoClassify` logic into a high-fidelity classification engine supporting 9 distinct categories (Coding, Reasoning, Moderation, Classification, UserIntent, SemanticSearch, Summarization, EntityExtraction, Chat).
+- **Dynamic Greedy Budgeting**: Implemented cross-provider timeout management that dynamically allocates time across the fallback cascade, preventing deadlocks while maximizing success probability.
+- **Tiered Context Pressure Handling**: Introduced Tier 0/1/2 logic for extreme input pressure (100k+ characters), using parallel summarization and adaptive truncation to maintain critical context windows.
 - **Fixed 'codeastral-latest' mode bug**: `code_mode` now features proper dynamic mode detection. The execution mode (`'chat'` | `'coding'` | `'research'`) is inferred automatically from code content and command description, replacing any hardcoded model references.
-- **Added Structural Markdown Middleware**: New `StructuralMarkdownMiddleware` inserted as the first pipeline stage. For agentic requests it reads the full `knowledge.md` from `data/projects/{sessionId}/` and injects it into the user message along with a response format template, giving the LLM complete visibility into session memory on every turn.
-- **Reduced middleware over-iteration**: `AgenticMiddleware` now caps decomposed plans to **4 high-level steps** via `limitSubtasks()`, adds a `## HIGH-LEVEL STEPS` section to every system prompt, and exits the verification loop early when `confidenceScore > 0.85` or `iterationCount >= 3`.
-- **Made coding mode persistent**: When `code_mode` is called with (or detects) `mode: 'coding'` and a `sessionId`, any ` ```file:<path>``` ` blocks in sandbox stdout are parsed and written to `data/projects/{sessionId}/` via `writeToSessionMemory()` with path-traversal protection.
-- **Performance logging**: `console.time/timeEnd` instrumentation added to `StructuralMarkdownMiddleware` and `AgenticMiddleware` for latency observability.
+- **Added Structural Markdown Middleware**: New `StructuralMarkdownMiddleware` inserted as the first pipeline stage. For agentic requests it reads the full session memory (`data/projects/{sessionId}/`) and injects it into the user message, giving the LLM complete visibility into context on every turn.
+- **Logic Collision Fixes**: Resolved auto-classification collisions (e.g., 'classify' matching as 'coding' due to name overlap) to ensure deterministic routing for complex intents.
 
 ### ✨ New Features
 
+- **Classification Task Validation**: Fully implemented Moderation, UserIntent, and Reasoning task routing.
+- **Context Summarization Engine**: Tier 1 fallback that compresses history when it exceeds 40% of the model's budget.
 - `StructuralMarkdownMiddleware` (`src/middleware/agentic/structural-middleware.ts`) — registered as stage 1 in the pipeline
 - `writeToSessionMemory(sessionId, filePath, content)` helper in `code-mode.ts` — safe file persistence with path-traversal guard
-- `detectMode(code, command)` in `code-mode.ts` — auto-detects `'coding'` | `'research'` | `'chat'` mode
+- `detectMode(code, command)` in `code-mode.ts` — auto-detects `'coding'` | `'research'` mode
 - `limitSubtasks(plan)` in `AgenticMiddleware` — hard cap of 4 subtasks
-- Early-exit confidence/iteration check in `AgenticMiddleware` verification step
-- `## HIGH-LEVEL STEPS` injected into every agentic system prompt (max 4 items)
-- `fs-extra` added as a production dependency for session file I/O
+- **Test Matrix Expansion**: Added `tests/task-routing-matrix.test.ts` to verify the "Prompt → Task → Model" routing pipeline across all 9 categories.
+- **Dynamic Timeout Testing**: Switched test assertions to `expect.any(Number)` to support dynamic time budgets.
 
 ### 🔧 Improvements
 
+- **Stability & Timeout Enforcement**: Implemented `AbortController` and `Promise.race` in `BaseProvider` for hard-stop guarantees.
 - `CodeModeInput` now accepts optional `sessionId` and `mode` fields
 - `CodeModeResult` now includes `mode` and optional `filesWritten` fields
 - MCP server name version string bumped to `1.0.4`
