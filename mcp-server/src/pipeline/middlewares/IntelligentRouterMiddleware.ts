@@ -149,8 +149,12 @@ export class IntelligentRouterMiddleware implements Middleware {
         // 2. Fallback to Message Content Analysis
         const lastMsg = getMessageContent(messages[messages.length - 1]).toLowerCase();
 
-        if (lastMsg.includes('```') || lastMsg.includes('function') || lastMsg.includes('class') || lastMsg.includes('debug') || lastMsg.includes('implement')) {
-            return TaskType.Coding;
+        // Specific Tasks First
+        if (lastMsg.includes('classify') || lastMsg.includes('sentiment') || lastMsg.includes('categorize')) {
+            return TaskType.Classification;
+        }
+        if (lastMsg.includes('moderate') || lastMsg.includes('safety') || lastMsg.includes('policy') || lastMsg.includes('violation')) {
+            return TaskType.Moderation;
         }
         if (lastMsg.includes('summarize') || lastMsg.includes('summarization') || lastMsg.includes('tldr') || lastMsg.includes('tl;dr') || lastMsg.includes('concise')) {
             return TaskType.Summarization;
@@ -158,11 +162,19 @@ export class IntelligentRouterMiddleware implements Middleware {
         if (lastMsg.includes('extract') || lastMsg.includes('entities') || lastMsg.includes('json') || lastMsg.includes('fields')) {
             return TaskType.EntityExtraction;
         }
-        if (lastMsg.includes('classify') || lastMsg.includes('sentiment') || lastMsg.includes('categorize')) {
-            return TaskType.Classification;
-        }
         if (lastMsg.includes('search') || lastMsg.includes('find') || lastMsg.includes('lookup')) {
             return TaskType.SemanticSearch;
+        }
+        if (lastMsg.includes('think') || lastMsg.includes('reason') || lastMsg.includes('logic') || lastMsg.includes('step by step')) {
+            return TaskType.Reasoning;
+        }
+        if (lastMsg.includes('who are you') || lastMsg.includes('what can you do') || lastMsg.includes('help') || lastMsg.includes('capabilities')) {
+            return TaskType.UserIntent;
+        }
+
+        // Coding last as it has some very common words like 'class' or 'debug'
+        if (lastMsg.includes('```') || lastMsg.includes('function ') || lastMsg.includes('class ') || lastMsg.includes('debug') || lastMsg.includes('implement')) {
+            return TaskType.Coding;
         }
 
         return TaskType.Chat;
@@ -452,6 +464,14 @@ Request: ${lastMessage}`;
         let lastError: Error | null = null;
         let primaryError: Error | null = null;
         const allErrors: string[] = [];
+        
+        const startTime = Date.now();
+        const totalBudget = context.request.timeoutMs || 30000;
+        
+        const getRemainingTimeout = () => {
+            const elapsed = Date.now() - startTime;
+            return Math.max(0, totalBudget - elapsed);
+        };
 
         // --- Context Management Strategic Workflow ---
         const originalTokens = context.estimatedTokens ?? this.executor.calculateTokens(context.request.messages);
@@ -466,7 +486,19 @@ Request: ${lastMessage}`;
 
         if (estimatedTokens > 4000 || absoluteOverflow) {
             const targetTokens = absoluteOverflow ? Math.min(estimatedTokens * 0.5, maxWindow * 0.8) : Math.max(2000, estimatedTokens * 0.4);
+            let summarizationAttempts = 0;
+            const MAX_SUMMARIZATION_ATTEMPTS = 3;
+
             const summarizer = async (text: string) => {
+                summarizationAttempts++;
+                const remaining = getRemainingTimeout();
+
+                // Strategic Bailout: If we've tried too many times or have < 60% budget left, 
+                // stop trying to summarize and fall back to Tier 2 (Truncation) which is instant.
+                if (summarizationAttempts > MAX_SUMMARIZATION_ATTEMPTS || remaining < (totalBudget * 0.6)) {
+                    throw new Error('Summarization budget or attempt limit exhausted');
+                }
+
                 // Use a stable summarization model
                 const summaryPrompt = `Summarize precisely while preserving technical context: ${text}`;
                 const preferredModels = IntelligentRouterMiddleware.taskRouteMap[TaskType.Summarization];
@@ -475,13 +507,19 @@ Request: ${lastMessage}`;
                 for (const modelId of preferredModels) {
                     for (const p of availableProviders) {
                         if (p.models.some(m => m.id === modelId)) {
-                            try {
-                                const res = await p.chat({
-                                    model: modelId,
-                                    messages: [{ role: 'user', content: summaryPrompt }]
-                                });
-                                return res.choices[0].message.content;
-                            } catch { continue; }
+                                try {
+                                    const currentRemaining = getRemainingTimeout();
+                                    if (currentRemaining < 2000) throw new Error('Timeout budget exhausted for summarization');
+
+                                    const res = await p.chat({
+                                        model: modelId,
+                                        messages: [{ role: 'user', content: summaryPrompt }],
+                                        timeoutMs: Math.min(10000, Math.floor(currentRemaining * 0.4)) 
+                                    });
+                                    return res.choices[0].message.content;
+                                } catch (err: any) { 
+                                    continue; 
+                                }
                         }
                     }
                 }
@@ -490,13 +528,19 @@ Request: ${lastMessage}`;
                 for (const p of availableProviders) {
                     if (p.models.length > 0) {
                         const m = p.models[0];
-                        try {
-                            const res = await p.chat({
-                                model: m.id,
-                                messages: [{ role: 'user', content: summaryPrompt }]
-                            });
-                            return res.choices[0].message.content;
-                        } catch { continue; }
+                                try {
+                                    const currentRemaining = getRemainingTimeout();
+                                    if (currentRemaining < 2000) throw new Error('Timeout budget exhausted for summarization fallback');
+
+                                    const res = await p.chat({
+                                        model: m.id,
+                                        messages: [{ role: 'user', content: summaryPrompt }],
+                                        timeoutMs: Math.min(8000, Math.floor(currentRemaining * 0.3)) 
+                                    });
+                                    return res.choices[0].message.content;
+                                } catch (err: any) { 
+                                    continue; 
+                                }
                     }
                 }
 
@@ -510,7 +554,6 @@ Request: ${lastMessage}`;
                 context.estimatedTokens = estimatedTokens;
                 contextCompressed = true;
             } catch (err: any) {
-                console.error(`[Router][Tier1] Compression failed, falling back to Tier 2: ${err.message}`);
                 const truncated = this.contextManager.truncateOldest(context.request.messages, targetTokens);
                 context.request.messages = truncated.messages;
                 estimatedTokens = truncated.compressedTokens;
@@ -616,9 +659,15 @@ Request: ${lastMessage}`;
 
             for (const { provider } of scoredProviders) {
                 try {
+                    const remainingTimeout = getRemainingTimeout();
+                    if (remainingTimeout < 2000) continue;
+
+                    const perAttemptTimeout = Math.floor(remainingTimeout / 2); // Greedy: use half of remaining
+
+                    console.error(`[Router][Fallback] Trying ${provider.id}/${modelId} (remaining budget: ${remainingTimeout}ms, attempt timeout: ${perAttemptTimeout}ms)`);
                     (context as any).providersAttempted.push(`${provider.id}/${modelId}`);
                     context.request.model = modelId; // Update state before attempt
-                    const response = await this.executor.tryProvider(context, provider.id, modelId);
+                    const response = await this.executor.tryProvider(context, provider.id, modelId, perAttemptTimeout);
 
                     if (response) {
                         if (contextCompressed) (context as any).contextCompressed = true;

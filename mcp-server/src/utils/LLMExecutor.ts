@@ -210,7 +210,8 @@ export class LLMExecutor {
     async tryProvider(
         context: PipelineContext,
         providerId: string,
-        modelId: string
+        modelId: string,
+        timeoutMs?: number
     ): Promise<ChatResponse | null> {
         // 1. Calculate tokens once per set of messages
         if (context.estimatedTokens === undefined) {
@@ -243,12 +244,17 @@ export class LLMExecutor {
 
         // 5. Make the API call
         const previousModel = context.request.model;
+        const previousTimeout = context.request.timeoutMs;
         context.request.model = modelId;
+        if (timeoutMs) context.request.timeoutMs = timeoutMs;
 
         let response: ChatResponse | null = null;
         try {
             response = await provider.chat(context.request);
         } catch (err: any) {
+            // Restore previous settings on error
+            context.request.model = previousModel;
+            context.request.timeoutMs = previousTimeout;
             // 6. Handle rate limit errors even without headers (Robust extraction)
             const errorMessage = err.message?.toLowerCase() || '';
             const isRateLimit = err.status === 429 ||
@@ -286,6 +292,10 @@ export class LLMExecutor {
             }
         }
 
+        // Restore previous settings on success
+        context.request.model = previousModel;
+        context.request.timeoutMs = previousTimeout;
+
         return response;
     }
 
@@ -295,7 +305,7 @@ export class LLMExecutor {
     async prompt(
         messages: Message[],
         modelOverride: string = 'any',
-        options: { taskType?: string } = {}
+        options: { taskType?: string, timeoutMs?: number } = {}
     ): Promise<ChatResponse> {
         const registry = ProviderRegistry.getInstance();
         const providers = registry.getAvailableProviders();
@@ -315,7 +325,8 @@ export class LLMExecutor {
                     try {
                         const res = await p.chat({
                             model: modelId === 'any' ? p.models[0].id : modelId,
-                            messages
+                            messages,
+                            timeoutMs: options.timeoutMs
                         });
                         return res;
                     } catch (err) {
