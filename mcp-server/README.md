@@ -26,7 +26,7 @@ graph TD
     C --> J[MemoryManager<br/>src/memory/]
     C --> K[SandboxExecutor<br/>src/sandbox/]
     
-    D -->|Pass-through (non-agentic)| E
+    D -->|"Pass-through (non-agentic)"| E
     E -->|Cache Hit| A
     I --> H --> G --> F --> E --> D --> A
 
