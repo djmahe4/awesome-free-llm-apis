@@ -256,9 +256,9 @@ export class AgenticMiddleware implements Middleware {
         await persistQueues(sessionId, projectDir);
 
         // v1.0.4 optimization: Track iteration count per session for early-exit logic
-        const iterationKey = `_iteration_${sessionId}`;
-        const iterationCount: number = (context[iterationKey] as number | undefined) ?? 0;
-        context[iterationKey] = iterationCount + 1;
+        const iterationCountKey = `_iteration_${sessionId}`;
+        const iterationCount: number = (context[iterationCountKey] as number | undefined) ?? 0;
+        context[iterationCountKey] = iterationCount + 1;
 
         // Execute the pipeline
         await next();
