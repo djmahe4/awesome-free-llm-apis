@@ -539,13 +539,13 @@ Request: ${lastMessage}`;
             for (const { provider } of scoredProviders) {
                 try {
                     (context as any).providersAttempted.push(`${provider.id}/${modelId}`);
+                    context.request.model = modelId; // Update state before attempt
                     const response = await this.executor.tryProvider(context, provider.id, modelId);
 
                     if (response) {
                         if (contextCompressed) (context as any).contextCompressed = true;
                         context.response = response;
                         context.providerId = provider.id;
-                        context.request.model = modelId;
 
                         // SUCCESS: Single path execution call to next()
                         try {
@@ -578,12 +578,12 @@ Request: ${lastMessage}`;
             for (const p of providers) {
                 try {
                     (context as any).providersAttempted.push(`EMERGENCY:${p.id}/${modelId}`);
+                    context.request.model = modelId; // Update state before attempt
                     const res = await this.executor.tryProvider(context, p.id, modelId);
                     if (res) {
                         (context as any).contextCompressed = true;
                         context.response = res;
                         context.providerId = p.id;
-                        context.request.model = modelId;
                         await next();
                         return;
                     }

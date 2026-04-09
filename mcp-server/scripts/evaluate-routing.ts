@@ -86,7 +86,7 @@ async function evaluateRouting() {
         fallbackCount++;
 
         // Loophole Test: Simulate failure for the 'failover-test' model ID
-        if (context.request.model === 'failover-test') {
+        if (modelId === 'failover-test') {
             throw new Error(`[SIMULATED FAILURE] Provider ${providerId} logic error`);
         }
 
