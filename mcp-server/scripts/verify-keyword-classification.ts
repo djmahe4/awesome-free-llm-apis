@@ -9,7 +9,7 @@ import { TaskType } from '../src/pipeline/middleware.js';
 const router = new IntelligentRouterMiddleware() as any;
 
 async function runTests() {
-    console.log('--- Verification: Keyword-Based Task Classification ---');
+    console.error('--- Verification: Keyword-Based Task Classification ---');
 
     const testCases = [
         {
@@ -48,12 +48,12 @@ async function runTests() {
     for (const tc of testCases) {
         const result = router.autoClassify(tc.messages, tc.keywords);
         const passed = result === tc.expected;
-        console.log(`${passed ? '✅' : '❌'} ${tc.name}: Result=${result}, Expected=${tc.expected}`);
+        console.error(`${passed ? '✅' : '❌'} ${tc.name}: Result=${result}, Expected=${tc.expected}`);
         if (!passed) allPassed = false;
     }
 
     if (allPassed) {
-        console.log('\nSUCCESS: Keyword classification logic verified.');
+        console.error('\nSUCCESS: Keyword classification logic verified.');
     } else {
         console.error('\nFAILURE: Some test cases failed.');
         process.exit(1);

@@ -43,36 +43,36 @@ let fallbackCount = 0;
 let currentFallbacks: string[] = [];
 
 async function evaluateRouting() {
-    console.log('\n' + '='.repeat(70));
-    console.log('🔍 ROUTER EFFICIENCY EVALUATION');
-    console.log('='.repeat(70));
+    console.error('\n' + '='.repeat(70));
+    console.error('🔍 ROUTER EFFICIENCY EVALUATION');
+    console.error('='.repeat(70));
 
     const registry = ProviderRegistry.getInstance();
     const allProviders = registry.getAllProviders();
     const availableProviders = allProviders.filter(p => p.isAvailable());
 
-    console.log(`\n📊 Provider Status:`);
-    console.log(`   Total Providers: ${allProviders.length}`);
-    console.log(`   Available (with API keys): ${availableProviders.length}`);
-    console.log(`   Missing API keys: ${allProviders.length - availableProviders.length}`);
+    console.error(`\n📊 Provider Status:`);
+    console.error(`   Total Providers: ${allProviders.length}`);
+    console.error(`   Available (with API keys): ${availableProviders.length}`);
+    console.error(`   Missing API keys: ${allProviders.length - availableProviders.length}`);
 
     if (availableProviders.length === 0) {
-        console.log('\n❌ No providers available. Set API keys in .env file.');
-        console.log('   Example keys: OPENROUTER_API_KEY, GITHUB_TOKEN, GEMINI_API_KEY');
+        console.error('\n❌ No providers available. Set API keys in .env file.');
+        console.error('   Example keys: OPENROUTER_API_KEY, GITHUB_TOKEN, GEMINI_API_KEY');
         process.exit(1);
     }
 
-    console.log(`\n✅ Available Providers:`);
+    console.error(`\n✅ Available Providers:`);
     for (const p of availableProviders) {
         const freeModels = p.models.filter(m => m.id.includes(':free')).length;
-        console.log(`   • ${p.id}: ${p.models.length} models (${freeModels} free)`);
+        console.error(`   • ${p.id}: ${p.models.length} models (${freeModels} free)`);
     }
 
     const unavailable = allProviders.filter(p => !p.isAvailable());
     if (unavailable.length > 0) {
-        console.log(`\n⚠️  Unavailable Providers (missing API keys):`);
+        console.error(`\n⚠️  Unavailable Providers (missing API keys):`);
         for (const p of unavailable) {
-            console.log(`   • ${p.id}: needs ${p.envVar}`);
+            console.error(`   • ${p.id}: needs ${p.envVar}`);
         }
     }
 
@@ -122,9 +122,9 @@ async function evaluateRouting() {
         [TaskType.UserIntent]: 'What is the intent of "Book a flight"? One word.',
     };
 
-    console.log('\n' + '─'.repeat(70));
-    console.log('🧪 RUNNING TASK-BASED ROUTING TESTS');
-    console.log('─'.repeat(70));
+    console.error('\n' + '─'.repeat(70));
+    console.error('🧪 RUNNING TASK-BASED ROUTING TESTS');
+    console.error('─'.repeat(70));
 
     for (const testCase of testCases) {
         fallbackCount = 0;
@@ -150,8 +150,8 @@ async function evaluateRouting() {
             taskType: testCase.taskType
         };
 
-        console.log(`\n📋 Test: ${testCase.description}`);
-        console.log(`   Task Type: ${testCase.taskType}`);
+        console.error(`\n📋 Test: ${testCase.description}`);
+        console.error(`   Task Type: ${testCase.taskType}`);
 
         const start = Date.now();
         let success = false;
@@ -213,96 +213,96 @@ async function evaluateRouting() {
 
         // Print result
         if (success) {
-            console.log(`   ✅ SUCCESS in ${responseTime}ms`);
-            console.log(`   📍 Provider: ${context.providerId}`);
-            console.log(`   🤖 Model: ${context.request.model}`);
-            console.log(`   💰 Free Tier: ${isFree ? 'YES ✨' : 'No (paid)'}`);
+            console.error(`   ✅ SUCCESS in ${responseTime}ms`);
+            console.error(`   📍 Provider: ${context.providerId}`);
+            console.error(`   🤖 Model: ${context.request.model}`);
+            console.error(`   💰 Free Tier: ${isFree ? 'YES ✨' : 'No (paid)'}`);
             if (result.fallbacksAttempted && result.fallbacksAttempted > 0) {
-                console.log(`   🔄 Fallbacks tried: ${result.fallbacksAttempted}`);
+                console.error(`   🔄 Fallbacks tried: ${result.fallbacksAttempted}`);
             }
             if (context.response?.choices?.[0]?.message?.content) {
                 const content = context.response.choices[0].message.content.substring(0, 50);
-                console.log(`   💬 Response: "${content}${content.length >= 50 ? '...' : ''}"`);
+                console.error(`   💬 Response: "${content}${content.length >= 50 ? '...' : ''}"`);
             }
         } else {
-            console.log(`   ❌ FAILED after ${responseTime}ms`);
-            console.log(`   🔄 Fallbacks attempted: ${fallbackCount}`);
-            console.log(`   ⚠️  Error: ${error?.substring(0, 100)}`);
+            console.error(`   ❌ FAILED after ${responseTime}ms`);
+            console.error(`   🔄 Fallbacks attempted: ${fallbackCount}`);
+            console.error(`   ⚠️  Error: ${error?.substring(0, 100)}`);
             if ((context as any).providersAttempted && (context as any).providersAttempted.length > 0) {
-                console.log(`   📍 Providers attempted: ${(context as any).providersAttempted.join(', ')}`);
+                console.error(`   📍 Providers attempted: ${(context as any).providersAttempted.join(', ')}`);
             }
         }
     }
 
     // Print Summary
-    console.log('\n' + '='.repeat(70));
-    console.log('📊 EFFICIENCY SUMMARY');
-    console.log('='.repeat(70));
+    console.error('\n' + '='.repeat(70));
+    console.error('📊 EFFICIENCY SUMMARY');
+    console.error('='.repeat(70));
 
     const successCount = results.filter(r => r.success).length;
     const freeCount = results.filter(r => r.success && r.isFreeModel).length;
     const totalFallbacks = results.reduce((sum, r) => sum + (r.fallbacksAttempted || 0), 0);
     const avgResponseTime = results.filter(r => r.success).reduce((sum, r) => sum + r.responseTime, 0) / Math.max(successCount, 1);
 
-    console.log(`\n📈 Overall Results:`);
-    console.log(`   Success Rate: ${successCount}/${results.length} (${Math.round(successCount / results.length * 100)}%)`);
-    console.log(`   Free Model Usage: ${freeCount}/${successCount} successful (${Math.round(freeCount / Math.max(successCount, 1) * 100)}%)`);
-    console.log(`   Avg Response Time: ${Math.round(avgResponseTime)}ms`);
-    console.log(`   Total Fallback Attempts: ${totalFallbacks}`);
+    console.error(`\n📈 Overall Results:`);
+    console.error(`   Success Rate: ${successCount}/${results.length} (${Math.round(successCount / results.length * 100)}%)`);
+    console.error(`   Free Model Usage: ${freeCount}/${successCount} successful (${Math.round(freeCount / Math.max(successCount, 1) * 100)}%)`);
+    console.error(`   Avg Response Time: ${Math.round(avgResponseTime)}ms`);
+    console.error(`   Total Fallback Attempts: ${totalFallbacks}`);
 
-    console.log(`\n📊 Provider Utilization:`);
+    console.error(`\n📊 Provider Utilization:`);
     const sortedStats = Array.from(providerStats.values()).sort((a, b) => b.successes - a.successes);
     for (const stats of sortedStats) {
         const successRate = Math.round(stats.successes / stats.totalAttempts * 100);
-        console.log(`   • ${stats.providerId}: ${stats.successes}/${stats.totalAttempts} success (${successRate}%), avg ${Math.round(stats.avgResponseTime)}ms`);
-        console.log(`     Models used: ${Array.from(stats.models).join(', ')}`);
+        console.error(`   • ${stats.providerId}: ${stats.successes}/${stats.totalAttempts} success (${successRate}%), avg ${Math.round(stats.avgResponseTime)}ms`);
+        console.error(`     Models used: ${Array.from(stats.models).join(', ')}`);
     }
 
     // Check unused providers
     const usedProviders = new Set(sortedStats.map(s => s.providerId));
     const unusedAvailable = availableProviders.filter(p => !usedProviders.has(p.id));
     if (unusedAvailable.length > 0) {
-        console.log(`\n⚠️  Available but unused providers:`);
+        console.error(`\n⚠️  Available but unused providers:`);
         for (const p of unusedAvailable) {
-            console.log(`   • ${p.id}: ${p.models.length} models available`);
+            console.error(`   • ${p.id}: ${p.models.length} models available`);
         }
     }
 
     // Task-specific results
-    console.log(`\n📋 Results by Task Type:`);
+    console.error(`\n📋 Results by Task Type:`);
     for (const result of results) {
         const status = result.success ? '✅' : '❌';
         const freeTag = result.isFreeModel && result.success ? ' [FREE]' : '';
-        console.log(`   ${status} ${result.taskType}: ${result.selectedProvider}/${result.selectedModel}${freeTag}`);
+        console.error(`   ${status} ${result.taskType}: ${result.selectedProvider}/${result.selectedModel}${freeTag}`);
     }
 
     // Recommendations
-    console.log('\n' + '─'.repeat(70));
-    console.log('💡 RECOMMENDATIONS');
-    console.log('─'.repeat(70));
+    console.error('\n' + '─'.repeat(70));
+    console.error('💡 RECOMMENDATIONS');
+    console.error('─'.repeat(70));
 
     if (freeCount < successCount) {
-        console.log(`\n• Free model utilization is ${Math.round(freeCount / successCount * 100)}%. Consider prioritizing more free models.`);
+        console.error(`\n• Free model utilization is ${Math.round(freeCount / successCount * 100)}%. Consider prioritizing more free models.`);
     } else {
-        console.log(`\n• Excellent! Free models are being prioritized (${Math.round(freeCount / successCount * 100)}%).`);
+        console.error(`\n• Excellent! Free models are being prioritized (${Math.round(freeCount / successCount * 100)}%).`);
     }
 
     if (totalFallbacks > results.length * 2) {
-        console.log(`• High fallback rate detected. Consider reordering models in taskRouteMap.`);
+        console.error(`• High fallback rate detected. Consider reordering models in taskRouteMap.`);
     }
 
     if (unusedAvailable.length > 0) {
-        console.log(`• ${unusedAvailable.length} available providers not being used. Add their models to taskRouteMap.`);
+        console.error(`• ${unusedAvailable.length} available providers not being used. Add their models to taskRouteMap.`);
     }
 
     const failedTasks = results.filter(r => !r.success);
     if (failedTasks.length > 0) {
-        console.log(`• ${failedTasks.length} task(s) failed. Check API keys and model availability.`);
+        console.error(`• ${failedTasks.length} task(s) failed. Check API keys and model availability.`);
     }
 
-    console.log('\n' + '='.repeat(70));
-    console.log('✨ Evaluation Complete!');
-    console.log('='.repeat(70) + '\n');
+    console.error('\n' + '='.repeat(70));
+    console.error('✨ Evaluation Complete!');
+    console.error('='.repeat(70) + '\n');
     process.exit(0);
 }
 

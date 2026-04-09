@@ -67,11 +67,11 @@ export class MemoryManager {
         await this.longTerm.delete(key);
       }
     }
-    this.longTerm.flush();
+    await this.longTerm.flush();
   }
 
-  flush(): void {
-    this.longTerm.flush();
+  async flush(): Promise<void> {
+    await this.longTerm.flush();
   }
 }
 
