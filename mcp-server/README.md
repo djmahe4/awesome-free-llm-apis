@@ -12,37 +12,41 @@ graph TD
     B --> C[PipelineExecutor]
     
     subgraph "Core Tools & Subsystems"
-        I[MemoryManager<br/>src/memory/]
-        J[SandboxExecutor<br/>src/sandbox/]
+        J[MemoryManager<br/>src/memory/]
+        K[SandboxExecutor<br/>src/sandbox/]
     end
 
-    C --> D[ResponseCacheMiddleware]
-    D -->|Cache Miss| E[AgenticMiddleware]
-    E --> F[IntelligentRouterMiddleware]
-    F -->|Tier selection + fallback| G[LLMExecutor<br/>Headers + Error Recovery]
-    G --> H[(Free LLM Provider)]
+    C --> D[StructuralMarkdownMiddleware<br/>src/middleware/agentic/structural-middleware.ts]
+    D -->|Agentic requests: inject full session memory| E[ResponseCacheMiddleware]
+    E -->|Cache Miss| F[AgenticMiddleware]
+    F --> G[IntelligentRouterMiddleware]
+    G -->|Tier selection + fallback| H[LLMExecutor<br/>Headers + Error Recovery]
+    H --> I[(Free LLM Provider)]
 
-    C --> I
-    C --> J
+    C --> J[MemoryManager<br/>src/memory/]
+    C --> K[SandboxExecutor<br/>src/sandbox/]
     
-    D -->|Cache Hit| A
-    H --> G --> F --> E --> D --> A
+    D -->|Pass-through (non-agentic)| E
+    E -->|Cache Hit| A
+    I --> H --> G --> F --> E --> D --> A
 
-    style E fill:#ffe082,stroke:#f9a825
-    style D fill:#b3e5fc,stroke:#0288d1
-    style F fill:#c8e6c9,stroke:#388e3c
-    style I fill:#f8bbd0,stroke:#c2185b
-    style J fill:#f3e5f5,stroke:#7b1fa2
+    style D fill:#ffd54f,stroke:#f57f17
+    style F fill:#ffe082,stroke:#f9a825
+    style E fill:#b3e5fc,stroke:#0288d1
+    style G fill:#c8e6c9,stroke:#388e3c
+    style J fill:#f8bbd0,stroke:#c2185b
+    style K fill:#f3e5f5,stroke:#7b1fa2
 ```
 
-### Pipeline Order (v1.0.3)
+### Pipeline Order (v1.0.4)
 
 | Stage | Component | Purpose |
 |-------|-----------|---------|
-| 1 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed |
-| 2 | `AgenticMiddleware` *(optional)* | Task decomposition, research validation, system prompt injection |
-| 3 | `IntelligentRouterMiddleware` | Deterministic keyword-based model-tier selection with FREE-first fallback cascade |
-| 4 | `LLMExecutor` | HTTPS request to provider; token tracking via response headers + **reactive drift correction** + **bridge: writes `providerRemainingTokens` into context for ContextManager** |
+| 1 | `StructuralMarkdownMiddleware` *(new v1.0.4)* | Injects full `knowledge.md` session memory into agentic requests; enforces structured response format |
+| 2 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed |
+| 3 | `AgenticMiddleware` *(optional)* | Task decomposition (max 4 steps), research validation, system prompt injection, early-exit on confidence > 0.85 or 3 iterations |
+| 4 | `IntelligentRouterMiddleware` | Deterministic keyword-based model-tier selection with FREE-first fallback cascade |
+| 5 | `LLMExecutor` | HTTPS request to provider; token tracking via response headers + **reactive drift correction** + **bridge: writes `providerRemainingTokens` into context for ContextManager** |
 
 ---
 
@@ -162,6 +166,12 @@ Tool Call (use_free_llm)
 PipelineExecutor.execute(request, taskType)
         │
         ▼ ─────────────────────────────────────
+StructuralMarkdownMiddleware  (v1.0.4 — only when request.isAgentic is set)
+  • Reads full knowledge.md for session into memory
+  • Injects full memory state + response format instructions into user message
+  • console.time('structural-middleware') / console.timeEnd for latency logging
+        │
+        ▼ ─────────────────────────────────────
 ResponseCacheMiddleware
   • generateKey(request, workspaceHash)
   • If cache hit → return immediately (no LLM call)
@@ -171,10 +181,11 @@ ResponseCacheMiddleware
 AgenticMiddleware  (only when agentic:true or ENABLE_AGENTIC_MIDDLEWARE=true)
   • Requires sessionId (auto-derived from workspace_root if not provided)
   • detectResearchIntent(userContent) → logs [RESEARCH-VALIDATION] if detected
-  • decomposeGoal(userContent) → pushes steps to nowQueue
-  • prependSystemPrompt(context) → dynamic prompt from prompts.json
+  • decomposeGoal(userContent) → limitSubtasks() caps plan to 4 steps (v1.0.4)
+  • prependSystemPrompt(context) → dynamic prompt + HIGH-LEVEL STEPS section (v1.0.4)
   • next()
   • verifySelf(response) → logs [VERIFY] on FAIL, pushes to improveQueue
+  • confidenceScore > 0.85 or iterationCount >= 3 → early exit, clears nowQueue (v1.0.4)
   • Persists queue state to projects/{sessionId}/queues.json
         │
         ▼ ─────────────────────────────────────

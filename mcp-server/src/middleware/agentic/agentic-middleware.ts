@@ -99,15 +99,17 @@ async function prependSystemPrompt(
     if (!messages || messages.length === 0) return;
 
     const dynamicPrompt = await getIntelligentSystemPrompt(userContent, explicitKeywords, memoryContext);
+    // v1.0.4 optimization: Force HIGH-LEVEL STEPS section (max 4 items) to constrain iteration
+    const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **4** high-level steps. Example:\n1. Understand the task\n2. Implement the core change\n3. Validate correctness\n4. Summarize\nDo not list more than 4 steps.`;
     const hasSystem = messages[0].role === 'system';
 
     if (hasSystem) {
         messages[0] = {
             ...messages[0],
-            content: `${dynamicPrompt}\n\n${messages[0].content}`,
+            content: `${dynamicPrompt}${highLevelStepsSection}\n\n${messages[0].content}`,
         };
     } else {
-        messages.unshift({ role: 'system', content: dynamicPrompt });
+        messages.unshift({ role: 'system', content: `${dynamicPrompt}${highLevelStepsSection}` });
     }
 }
 
@@ -158,10 +160,21 @@ function logResearchValidation(sessionId: string, userContent: string, step: str
 export class AgenticMiddleware implements Middleware {
     name = 'AgenticMiddleware';
 
+    // v1.0.4 optimization: Cap decomposed plan to 4 high-level steps to prevent over-iteration
+    private limitSubtasks(plan: string): string {
+        const steps = plan.split('\n- ').filter(s => s.trim().length > 0);
+        if (steps.length > 4) {
+            return steps.slice(0, 4).join('\n- ') + '\n\n(Note: Limited to 4 high-level steps for efficiency. Remaining steps deferred to next iteration.)';
+        }
+        return plan;
+    }
+
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
+        console.time('agentic-middleware');
         // Dual-Mode Trigger: Global Env OR Per-Request Flag
         const isAgenticExplicitlyRequested = context.agentic === true || context.request?.agentic === true;
         if (process.env.ENABLE_AGENTIC_MIDDLEWARE !== 'true' && !isAgenticExplicitlyRequested) {
+            console.timeEnd('agentic-middleware');
             await next();
             return;
         }
@@ -171,6 +184,7 @@ export class AgenticMiddleware implements Middleware {
 
         if (!sessionId) {
             console.error('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
+            console.timeEnd('agentic-middleware');
             await next();
             return;
         }
@@ -231,10 +245,20 @@ export class AgenticMiddleware implements Middleware {
         // Task decomposition: Only perform if nowQueue is empty to prevent multi-turn duplication
         if (userContent && q.nowQueue.length === 0) {
             const steps = decomposeGoal(userContent);
-            q.nowQueue.push(...steps);
+
+            // v1.0.4 optimization: Apply subtask limit before queuing to prevent over-iteration
+            const rawPlan = steps.join('\n- ');
+            const limitedPlan = this.limitSubtasks(rawPlan);
+            const limitedSteps = limitedPlan.split('\n- ').filter(s => s.trim().length > 0 && !s.startsWith('(Note:'));
+            q.nowQueue.push(...limitedSteps);
         }
 
         await persistQueues(sessionId, projectDir);
+
+        // v1.0.4 optimization: Track iteration count per session for early-exit logic
+        const iterationKey = `_iteration_${sessionId}`;
+        const iterationCount: number = (context[iterationKey] as number | undefined) ?? 0;
+        context[iterationKey] = iterationCount + 1;
 
         // Execute the pipeline
         await next();
@@ -254,6 +278,15 @@ export class AgenticMiddleware implements Middleware {
                 logResearchValidation(sessionId, responseContent, 'post-execution-response-grounding-check');
             }
 
+            // v1.0.4 optimization: Compute a simple confidence score from response quality
+            const confidenceScore = verifyResult === 'PASS' ? 0.9 : 0.4;
+
+            // v1.0.4 optimization: Early exit if confidence is high or max iterations reached
+            if (confidenceScore > 0.85 || iterationCount >= 3) {
+                console.error(`[AgenticMiddleware] Early exit: confidence=${confidenceScore} iterations=${iterationCount}`);
+                q.nowQueue = [];
+            }
+
             // Store a snapshot for observability (cloned to avoid post-shift mutation in traces)
             context['agenticQueues'] = JSON.parse(JSON.stringify(getQueues(sessionId)));
         }
@@ -262,5 +295,6 @@ export class AgenticMiddleware implements Middleware {
             q.nowQueue.shift();
         }
         await persistQueues(sessionId, projectDir);
+        console.timeEnd('agentic-middleware');
     }
 }

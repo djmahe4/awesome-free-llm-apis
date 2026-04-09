@@ -10,6 +10,7 @@ import {
   TaskType,
   type PipelineContext
 } from '../pipeline/index.js';
+import { StructuralMarkdownMiddleware } from '../middleware/agentic/structural-middleware.js';
 
 export interface UseFreeLLMInput {
   model?: string;
@@ -32,6 +33,7 @@ const workspaceScanner = new WorkspaceScanner(process.cwd());
 const sharedResponseCache = new ResponseCacheMiddleware();
 export const sharedRouter = new IntelligentRouterMiddleware();
 const agenticMiddleware = new AgenticMiddleware();
+const structuralMarkdownMiddleware = new StructuralMarkdownMiddleware();
 
 export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> {
   const {
@@ -62,13 +64,15 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
   const pipeline = new PipelineExecutor();
 
   // Pipeline order:
-  // 1. ResponseCache - Check for cached responses
-  // 2. AgenticMiddleware - Handle agentic/reasoning mode if enabled
-  // 3. IntelligentRouter - Select provider/model and execute (includes token management and LLM execution)
-  // 
+  // 1. StructuralMarkdownMiddleware - Inject full session memory into agentic requests (v1.0.4)
+  // 2. ResponseCache - Check for cached responses
+  // 3. AgenticMiddleware - Handle agentic/reasoning mode if enabled
+  // 4. IntelligentRouter - Select provider/model and execute (includes token management and LLM execution)
+  //
   // Note: TokenManager and LLMExecution are now handled internally by the Router
   // via LLMExecutor to support fallback retries without violating the middleware
   // single-call contract. The Router calls next() only once after provider selection.
+  pipeline.use(structuralMarkdownMiddleware);
   pipeline.use(sharedResponseCache);
   pipeline.use(agenticMiddleware);
   pipeline.use(sharedRouter);

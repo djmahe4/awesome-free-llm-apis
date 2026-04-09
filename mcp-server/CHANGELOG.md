@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.0.4 – Mode Fix + Structural Memory + Anti-Over-Iteration (April 2026)
+
+**Released:** 2026-04-09
+
+### 🚀 Highlights
+
+- **Fixed 'codeastral-latest' mode bug**: `code_mode` now features proper dynamic mode detection. The execution mode (`'chat'` | `'coding'` | `'research'`) is inferred automatically from code content and command description, replacing any hardcoded model references.
+- **Added Structural Markdown Middleware**: New `StructuralMarkdownMiddleware` inserted as the first pipeline stage. For agentic requests it reads the full `knowledge.md` from `data/projects/{sessionId}/` and injects it into the user message along with a response format template, giving the LLM complete visibility into session memory on every turn.
+- **Reduced middleware over-iteration**: `AgenticMiddleware` now caps decomposed plans to **4 high-level steps** via `limitSubtasks()`, adds a `## HIGH-LEVEL STEPS` section to every system prompt, and exits the verification loop early when `confidenceScore > 0.85` or `iterationCount >= 3`.
+- **Made coding mode persistent**: When `code_mode` is called with (or detects) `mode: 'coding'` and a `sessionId`, any ` ```file:<path>``` ` blocks in sandbox stdout are parsed and written to `data/projects/{sessionId}/` via `writeToSessionMemory()` with path-traversal protection.
+- **Performance logging**: `console.time/timeEnd` instrumentation added to `StructuralMarkdownMiddleware` and `AgenticMiddleware` for latency observability.
+
+### ✨ New Features
+
+- `StructuralMarkdownMiddleware` (`src/middleware/agentic/structural-middleware.ts`) — registered as stage 1 in the pipeline
+- `writeToSessionMemory(sessionId, filePath, content)` helper in `code-mode.ts` — safe file persistence with path-traversal guard
+- `detectMode(code, command)` in `code-mode.ts` — auto-detects `'coding'` | `'research'` | `'chat'` mode
+- `limitSubtasks(plan)` in `AgenticMiddleware` — hard cap of 4 subtasks
+- Early-exit confidence/iteration check in `AgenticMiddleware` verification step
+- `## HIGH-LEVEL STEPS` injected into every agentic system prompt (max 4 items)
+- `fs-extra` added as a production dependency for session file I/O
+
+### 🔧 Improvements
+
+- `CodeModeInput` now accepts optional `sessionId` and `mode` fields
+- `CodeModeResult` now includes `mode` and optional `filesWritten` fields
+- MCP server name version string bumped to `1.0.4`
+- Pipeline middleware order updated: `StructuralMarkdownMiddleware` → `ResponseCacheMiddleware` → `AgenticMiddleware` → `IntelligentRouterMiddleware`
+
+### ⚠️ Breaking Changes
+
+- None. `code_mode` calls without `sessionId` or `mode` continue to work exactly as before (sandbox-only execution).
+
+---
+
 ## v1.0.3 — High-Fidelity Benchmarking & Intelligence Refinement
 
 **Released:** 2026-04-04
