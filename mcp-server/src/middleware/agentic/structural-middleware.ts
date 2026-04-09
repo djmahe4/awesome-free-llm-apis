@@ -7,20 +7,12 @@ export class StructuralMarkdownMiddleware implements Middleware {
 
     async execute(context: PipelineContext, next: NextFunction) {
         const startMs = Date.now();
-        if (!context.request?.agentic) {
-            await next();
-            console.error(`[structural-middleware] ${Date.now() - startMs}ms (pass-through)`);
-            return;
-        }
-
-        // Hardened Session ID: Must be provided for agentic state to exist.
-        // Falls back to agentic-middleware bypass logic if sessionId is missing.
         const sessionId = context.sessionId || (context.request as any).sessionId;
 
-        if (!sessionId) {
-            console.error('[StructuralMarkdownMiddleware] Mandatory sessionId missing. Bypassing state injection.');
+        // Tightened Guard: Bypass if not agentic OR missing mandatory sessionId
+        if (!context.request?.agentic || !sessionId) {
             await next();
-            console.error(`[structural-middleware] ${Date.now() - startMs}ms (no-session bypass)`);
+            console.error(`[structural-middleware] ${Date.now() - startMs}ms (pass-through)`);
             return;
         }
 

@@ -195,7 +195,9 @@ async function main() {
         if (!checkRateLimit(req, res)) return;
         try {
           const projectsBase = path.join(process.cwd(), 'data', 'projects');
-          if (!fs.existsSync(projectsBase)) {
+          try {
+            await fsp.access(projectsBase);
+          } catch {
             res.json({ sessions: [] });
             return;
           }

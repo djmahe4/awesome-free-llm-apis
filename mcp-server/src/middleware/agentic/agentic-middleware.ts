@@ -161,10 +161,8 @@ export class AgenticMiddleware implements Middleware {
     name = 'AgenticMiddleware';
 
     // v1.0.4 optimization: Cap decomposed plan to 4 high-level steps to prevent over-iteration
-    private limitSubtasks(plan: string): string[] {
-        const steps = plan.split('\n- ').filter(s => s.trim().length > 0);
+    private limitSubtasks(steps: string[]): string[] {
         if (steps.length > 4) {
-            // Note: Limited to 4 high-level steps for efficiency. Remaining steps deferred to next iteration.
             return steps.slice(0, 4);
         }
         return steps;
@@ -248,8 +246,7 @@ export class AgenticMiddleware implements Middleware {
             const steps = decomposeGoal(userContent);
 
             // v1.0.4 optimization: Apply subtask limit before queuing to prevent over-iteration
-            const rawPlan = steps.join('\n- ');
-            const limitedSteps = this.limitSubtasks(rawPlan);
+            const limitedSteps = this.limitSubtasks(steps);
             q.nowQueue.push(...limitedSteps);
         }
 
