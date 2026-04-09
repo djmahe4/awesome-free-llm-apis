@@ -266,7 +266,7 @@ async function main() {
         }
       });
 
-      // v1.0.5 Memory Hardening: Use LRUCache for sessions to prevent memory leaks
+      // v1.0.4 Memory Hardening: Use LRUCache for sessions to prevent memory leaks
       const sessionMap = new LRUCache<string, { server: any, transport: StreamableHTTPServerTransport }>({
         max: 1000,
         ttl: 1000 * 60 * 60, // 1 hour idle TTL

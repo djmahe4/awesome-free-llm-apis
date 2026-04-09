@@ -28,6 +28,11 @@
 - `CodeModeResult` now includes `mode` and optional `filesWritten` fields
 - MCP server name version string bumped to `1.0.4`
 - Pipeline middleware order updated: `StructuralMarkdownMiddleware` → `ResponseCacheMiddleware` → `AgenticMiddleware` → `IntelligentRouterMiddleware`
+- **Security Hardening**: Implemented strict `sessionId` regex validation (`/^(?!\.\.?$)[\w\-\.]{1,128}$/`) and `path.resolve` prefix checks in `StructuralMarkdownMiddleware` to prevent unauthorized file access.
+- **Multi-modal Robustness**: `StructuralMarkdownMiddleware` updated to handle complex message content (Array/Object) for visual/multi-modal compatibility.
+- **Memory Optimization**: Migrated to `LRUCache` for session management (1000 entries, 1h TTL) with automatic `transport.close()` on eviction to prevent resource leaks.
+- **Async Cache Initialization**: Refactored `ResponseCache` to eliminate synchronous file I/O during server startup, moving to a lazy-loading async `init()` pattern.
+- **Logic Simplification**: Removed redundant `confidenceScore` mapping and added robust optional chaining (`?.`) across all middleware context lookups.
 
 ### ⚠️ Breaking Changes
 
