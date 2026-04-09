@@ -174,8 +174,8 @@ export class AgenticMiddleware implements Middleware {
         // Dual-Mode Trigger: Global Env OR Per-Request Flag
         const isAgenticExplicitlyRequested = context.agentic === true || context.request?.agentic === true;
         if (process.env.ENABLE_AGENTIC_MIDDLEWARE !== 'true' && !isAgenticExplicitlyRequested) {
-            console.timeEnd('agentic-middleware');
             await next();
+            console.timeEnd('agentic-middleware');
             return;
         }
 
@@ -184,8 +184,8 @@ export class AgenticMiddleware implements Middleware {
 
         if (!sessionId) {
             console.error('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
-            console.timeEnd('agentic-middleware');
             await next();
+            console.timeEnd('agentic-middleware');
             return;
         }
 

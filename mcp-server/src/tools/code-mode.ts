@@ -46,7 +46,10 @@ function detectMode(code: string, command?: string): CodeModeType {
 async function writeToSessionMemory(sessionId: string, filePath: string, content: string) {
   const base = path.join(process.cwd(), 'data', 'projects', sessionId);
   const safePath = path.resolve(base, filePath);
-  if (!safePath.startsWith(base)) throw new Error('Path traversal blocked');
+  // Guard: resolved path must be inside base (exact child or deeper descendant)
+  if (safePath !== base && !safePath.startsWith(base + path.sep)) {
+    throw new Error('Path traversal blocked');
+  }
   await fs.ensureDir(path.dirname(safePath));
   await fs.writeFile(safePath, content, 'utf-8');
 }

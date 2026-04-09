@@ -138,6 +138,30 @@ async function main() {
       app.use(express.json());
 
       // API endpoints for dashboard
+
+      // Simple in-memory rate limiter for filesystem-backed routes (dashboard-only, local server)
+      const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+      const RATE_LIMIT_WINDOW_MS = 60_000; // 1-minute window
+      const RATE_LIMIT_MAX = 120;           // 2 requests/second burst over a minute
+
+      function checkRateLimit(req: express.Request, res: express.Response): boolean {
+        const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+          ?? req.socket.remoteAddress
+          ?? 'unknown';
+        const now = Date.now();
+        let entry = rateLimitMap.get(ip);
+        if (!entry || now >= entry.resetAt) {
+          entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+          rateLimitMap.set(ip, entry);
+        }
+        entry.count++;
+        if (entry.count > RATE_LIMIT_MAX) {
+          res.status(429).json({ error: 'Too many requests' });
+          return false;
+        }
+        return true;
+      }
+
       app.get('/api/token-stats', async (req, res) => {
         try {
           const stats = await getTokenStats();
@@ -168,6 +192,7 @@ async function main() {
 
       // List all active agentic sessions (directories under data/projects/)
       app.get('/api/sessions', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
         try {
           const projectsBase = path.join(process.cwd(), 'data', 'projects');
           if (!fs.existsSync(projectsBase)) {
@@ -177,8 +202,8 @@ async function main() {
           const entries = fs.readdirSync(projectsBase);
           const sessions = entries.filter(d => {
             const full = path.resolve(projectsBase, d);
-            // Guard: entry must be a direct child of projectsBase
-            return full.startsWith(projectsBase + path.sep) && fs.statSync(full).isDirectory();
+            // Guard: entry must be a *direct* child of projectsBase
+            return path.dirname(full) === projectsBase && fs.statSync(full).isDirectory();
           });
           res.json({ sessions });
         } catch (err) {
@@ -188,17 +213,18 @@ async function main() {
 
       // Return knowledge.md content and momentum queues for a given session
       app.get('/api/memory/:sessionId', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
         try {
           const { sessionId } = req.params;
-          // Step 1: Reject IDs with characters that could construct path traversal
-          if (!/^[\w\-\.]{1,128}$/.test(sessionId)) {
+          // Step 1: Reject IDs with dots-only sequences or characters outside word/hyphen/dot
+          if (!/^(?!\.\.?$)[\w\-\.]{1,128}$/.test(sessionId)) {
             res.status(400).json({ error: 'Invalid sessionId' });
             return;
           }
-          // Step 2: Resolve and verify the resulting path stays inside data/projects/
+          // Step 2: Resolve and verify the resulting path is a direct child of data/projects/
           const projectsBase = path.join(process.cwd(), 'data', 'projects');
           const projectDir = path.resolve(projectsBase, sessionId);
-          if (!projectDir.startsWith(projectsBase + path.sep)) {
+          if (path.dirname(projectDir) !== projectsBase) {
             res.status(400).json({ error: 'Invalid sessionId' });
             return;
           }
