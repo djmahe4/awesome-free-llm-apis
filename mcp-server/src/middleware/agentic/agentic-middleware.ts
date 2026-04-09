@@ -170,12 +170,12 @@ export class AgenticMiddleware implements Middleware {
     }
 
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
-        console.time('agentic-middleware');
+        const startMs = Date.now();
         // Dual-Mode Trigger: Global Env OR Per-Request Flag
         const isAgenticExplicitlyRequested = context.agentic === true || context.request?.agentic === true;
         if (process.env.ENABLE_AGENTIC_MIDDLEWARE !== 'true' && !isAgenticExplicitlyRequested) {
             await next();
-            console.timeEnd('agentic-middleware');
+            console.error(`[agentic-middleware] ${Date.now() - startMs}ms (pass-through)`);
             return;
         }
 
@@ -185,7 +185,7 @@ export class AgenticMiddleware implements Middleware {
         if (!sessionId) {
             console.error('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
             await next();
-            console.timeEnd('agentic-middleware');
+            console.error(`[agentic-middleware] ${Date.now() - startMs}ms (no-session bypass)`);
             return;
         }
 
@@ -283,7 +283,7 @@ export class AgenticMiddleware implements Middleware {
 
             // v1.0.4 optimization: Early exit if confidence is high or max iterations reached
             if (confidenceScore > 0.85 || iterationCount >= 3) {
-                console.info(`[AgenticMiddleware] Early exit: confidence=${confidenceScore} iterations=${iterationCount}`);
+                console.error(`[AgenticMiddleware] Early exit: confidence=${confidenceScore} iterations=${iterationCount}`);
                 q.nowQueue = [];
             }
 
@@ -295,6 +295,6 @@ export class AgenticMiddleware implements Middleware {
             q.nowQueue.shift();
         }
         await persistQueues(sessionId, projectDir);
-        console.timeEnd('agentic-middleware');
+        console.error(`[agentic-middleware] ${Date.now() - startMs}ms session=${sessionId}`);
     }
 }

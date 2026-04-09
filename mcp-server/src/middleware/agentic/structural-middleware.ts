@@ -6,23 +6,24 @@ export class StructuralMarkdownMiddleware implements Middleware {
     name = 'StructuralMarkdownMiddleware';
 
     async execute(context: PipelineContext, next: NextFunction) {
-        console.time('structural-middleware');
+        const startMs = Date.now();
         if (!context.request?.agentic) {
-            console.timeEnd('structural-middleware');
-            return next();
+            await next();
+            console.error(`[structural-middleware] ${Date.now() - startMs}ms (pass-through)`);
+            return;
         }
 
         const userMsg = context.request.messages?.find((m: any) => m.role === 'user');
         if (userMsg) {
-            console.time('memory-read');
+            const memStart = Date.now();
             // AgenticMiddleware enforces mandatory sessionId; 'default' is only reached in
             // direct/standalone use of this middleware outside the standard agentic pipeline.
             const fullMemory = await this.readFullSessionMemory(context.sessionId || 'default');
-            console.timeEnd('memory-read');
+            console.error(`[memory-read] ${Date.now() - memStart}ms session=${context.sessionId}`);
             userMsg.content = `# TASK CONTEXT\n${userMsg.content}\n\n# FULL MEMORY STATE (session ${context.sessionId})\n${fullMemory}\n\n# RESPONSE FORMAT\nReply only in clean Markdown. For any code or file changes use exactly this block:\n\`\`\`file:relative/path/from/session/root.ts\n// FULL file content here (never partial diffs)\n\`\`\``;
         }
         await next();
-        console.timeEnd('structural-middleware');
+        console.error(`[structural-middleware] ${Date.now() - startMs}ms`);
     }
 
     private async readFullSessionMemory(sessionId: string): Promise<string> {
