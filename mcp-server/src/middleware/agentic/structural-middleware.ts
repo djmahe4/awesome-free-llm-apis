@@ -7,10 +7,19 @@ export class StructuralMarkdownMiddleware implements Middleware {
 
     async execute(context: PipelineContext, next: NextFunction) {
         const startMs = Date.now();
-        const sessionId = context.sessionId || (context.request as any).sessionId;
+        // v1.0.4 Harden: Optional chaining and strict type guard
+        const sessionIdRaw = context.sessionId || (context.request as any)?.sessionId;
+        
+        // v1.0.5 Security: Strict sessionId validation to prevent path traversal
+        const sessionId = (typeof sessionIdRaw === 'string' && /^(?!\.\.?$)[\w\-\.]{1,128}$/.test(sessionIdRaw)) 
+            ? sessionIdRaw 
+            : undefined;
 
-        // Tightened Guard: Bypass if not agentic OR missing mandatory sessionId
+        // Tightened Guard: Bypass if not agentic OR missing mandatory/valid sessionId
         if (!context.request?.agentic || !sessionId) {
+            if (context.request?.agentic && !sessionId) {
+                console.error(`[structural-middleware] Rejected invalid or missing sessionId: ${sessionIdRaw}`);
+            }
             await next();
             console.error(`[structural-middleware] ${Date.now() - startMs}ms (pass-through)`);
             return;
@@ -24,6 +33,7 @@ export class StructuralMarkdownMiddleware implements Middleware {
 
             const contextHeader = `# TASK CONTEXT\n# FULL MEMORY STATE (session ${sessionId})\n${fullMemory}\n\n# RESPONSE FORMAT\nReply only in clean Markdown. For any code or file changes use exactly this block:\n\`\`\`file:relative/path/from/session/root.ts\n// FULL file content here (never partial diffs)\n\`\`\``;
 
+            // v1.0.5 Robustness: Handle all valid message content formats (string, array, or object)
             if (typeof userMsg.content === 'string') {
                 userMsg.content = `${contextHeader}\n\n${userMsg.content}`;
             } else if (Array.isArray(userMsg.content)) {
@@ -32,6 +42,18 @@ export class StructuralMarkdownMiddleware implements Middleware {
                     type: 'text',
                     text: contextHeader
                 });
+            } else if (userMsg.content && typeof userMsg.content === 'object') {
+                // Some SDKs might use a single object for content (e.g. { type: 'text', text: '...' })
+                const contentObj = userMsg.content as any;
+                if (contentObj.type === 'text' && typeof contentObj.text === 'string') {
+                    contentObj.text = `${contextHeader}\n\n${contentObj.text}`;
+                } else {
+                    // Fallback: Convert to array if it's a non-standard object format
+                    userMsg.content = [
+                        { type: 'text', text: contextHeader },
+                        contentObj
+                    ];
+                }
             }
         }
         await next();
@@ -39,8 +61,17 @@ export class StructuralMarkdownMiddleware implements Middleware {
     }
 
     private async readFullSessionMemory(sessionId: string): Promise<string> {
-        const dir = path.join(process.cwd(), 'data', 'projects', sessionId);
-        const knowledgePath = path.join(dir, 'knowledge.md');
+        // v1.0.5 Security: Final path sanitization check
+        const projectsBase = path.join(process.cwd(), 'data', 'projects');
+        const projectDir = path.resolve(projectsBase, sessionId);
+        
+        // Ensure the resolved path is actually within the projects directory
+        if (!projectDir.startsWith(projectsBase)) {
+            console.error(`[structural-middleware] Blocked traversal attempt for sessionId: ${sessionId}`);
+            return 'Security Error: Access denied.';
+        }
+
+        const knowledgePath = path.join(projectDir, 'knowledge.md');
         if (await fs.pathExists(knowledgePath)) {
             return await fs.readFile(knowledgePath, 'utf-8');
         }

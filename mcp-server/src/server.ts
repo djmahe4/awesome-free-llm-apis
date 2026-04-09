@@ -266,7 +266,20 @@ async function main() {
         }
       });
 
-      const sessionMap = new Map<string, { server: any, transport: StreamableHTTPServerTransport }>();
+      // v1.0.5 Memory Hardening: Use LRUCache for sessions to prevent memory leaks
+      const sessionMap = new LRUCache<string, { server: any, transport: StreamableHTTPServerTransport }>({
+        max: 1000,
+        ttl: 1000 * 60 * 60, // 1 hour idle TTL
+        dispose: (value) => {
+          // Attempt to close transport if it's still alive when purged from cache
+          try {
+            console.error(`[Server] Purging stagnant session: closing transport`);
+            value.transport.close();
+          } catch (err) {
+            // Ignore closure errors for already closed transports
+          }
+        }
+      });
 
       const handleMcpRequest = async (req: express.Request, res: express.Response) => {
         // Support for dashboard status heartbeat

@@ -20,7 +20,7 @@ export class ResponseCacheMiddleware implements Middleware {
         const cacheKey = this.cache.generateKey(context.request, wsHash);
 
         // 1. Check Short-Term/In-Memory Cache (0 tokens)
-        const cached = this.cache.get(cacheKey);
+        const cached = await this.cache.get(cacheKey);
         if (cached) {
             console.error(`[CacheMiddleware] Found exact match in memory cache`);
             context.response = cached;
@@ -32,7 +32,7 @@ export class ResponseCacheMiddleware implements Middleware {
 
         // 3. Post-execution: Save to cache
         if (context.response) {
-            this.cache.set(cacheKey, context.response);
+            await this.cache.set(cacheKey, context.response);
             await memoryManager.storeToolOutput('use_free_llm', {
                 model: context.request.model || context.response.model,
                 messages: context.request.messages,

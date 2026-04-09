@@ -1,6 +1,6 @@
 export interface Message {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | any; // Supports multi-modal arrays or objects
 }
 
 export interface ChatRequest {

@@ -179,7 +179,7 @@ export class AgenticMiddleware implements Middleware {
         }
 
         // Hardened Session ID: Must be provided for agentic state to exist
-        const sessionId: string | undefined = context.sessionId || (context.request as any).sessionId;
+        const sessionId: string | undefined = context.sessionId || (context.request as any)?.sessionId;
 
         if (!sessionId) {
             console.error('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
@@ -275,12 +275,9 @@ export class AgenticMiddleware implements Middleware {
                 logResearchValidation(sessionId, responseContent, 'post-execution-response-grounding-check');
             }
 
-            // v1.0.4 optimization: Compute a simple confidence score from response quality
-            const confidenceScore = verifyResult === 'PASS' ? 0.9 : 0.4;
-
-            // v1.0.4 optimization: Early exit if confidence is high or max iterations reached
-            if (confidenceScore > 0.85 || iterationCount >= 3) {
-                console.error(`[AgenticMiddleware] Early exit: confidence=${confidenceScore} iterations=${iterationCount}`);
+            // v1.0.4 optimization: Early exit if verification passes or max iterations reached
+            if (verifyResult === 'PASS' || iterationCount >= 3) {
+                console.error(`[AgenticMiddleware] Early exit: result=${verifyResult} iterations=${iterationCount}`);
                 q.nowQueue = [];
             }
 
