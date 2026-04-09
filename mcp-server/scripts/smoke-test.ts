@@ -10,7 +10,7 @@ async function runSmokeTest() {
 
     console.error(`\n=== MCP Provider Smoke Test ===`);
     console.error(`Found ${providers.length} total providers.`);
-    console.error(`Available providers: ${availableProviders.length > 0 ? availableProviders.map(p => (p as any).id).join(', ') : 'NONE (set API keys in .env)'}`);
+    console.error(`Available providers: ${availableProviders.length > 0 ? availableProviders.map(p => p.id).join(', ') : 'NONE (set API keys in .env)'}`);
 
     if (availableProviders.length === 0) {
         console.error('\nTip: Create a .env file in the mcp-server directory with your API keys.');

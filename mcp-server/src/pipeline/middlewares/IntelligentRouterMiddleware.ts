@@ -37,6 +37,9 @@ export class IntelligentRouterMiddleware implements Middleware {
         'glm-4.7': 0.85,
         'glm-4.6': 0.8,
         'glm-4.5-air': 0.7,
+        'Qwen/Qwen2.5-72B-Instruct': 0.85,
+        'Qwen/Qwen2.5-Coder-32B-Instruct': 0.82,
+        'Qwen/Qwen3-8B': 0.7,
     };
 
     constructor(executor?: LLMExecutor) {
@@ -239,6 +242,8 @@ Request: ${lastMessage}`;
     public static taskRouteMap: Record<string, string[]> = {
         [TaskType.Coding]: [
             'qwen/qwen3-coder-480b-a35b-instruct:free',
+            'Codestral-22B-v0.1',
+            'Qwen/Qwen2.5-Coder-32B-Instruct',
             'DeepSeek-R1',
             'gpt-oss-20b',
             'codestral-latest',
@@ -335,6 +340,8 @@ Request: ${lastMessage}`;
             'openai/gpt-oss-120b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
             'openrouter/free',
+            'Qwen/Qwen2.5-72B-Instruct',
+            'Qwen/Qwen3-8B',
         ]
     };
 
