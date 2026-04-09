@@ -83,7 +83,7 @@ function renderStats(providers) {
                         </div>
                     </div>
                     <div class="mt-3 pt-2 border-top border-secondary-subtle d-flex justify-content-end">
-                        <button class="btn btn-xs btn-link text-primary p-0 text-decoration-none" onclick="verifyProvider('${p.id}', event)">
+                        <button class="btn btn-sm btn-link text-primary p-0 text-decoration-none" onclick="verifyProvider('${p.id}', event)">
                             <i class="bi bi-shield-check me-1"></i>Verify Credential
                         </button>
                     </div>
@@ -171,7 +171,9 @@ async function fetchSessions() {
             opt.textContent = s;
             memorySessionSelect.appendChild(opt);
         });
-    } catch { /* server may not be running, ignore */ }
+    } catch (err) {
+        console.error(`[Dashboard] Failed to fetch sessions:`, err);
+    }
 }
 
 async function fetchMemory(sessionId) {

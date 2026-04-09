@@ -169,7 +169,7 @@ PipelineExecutor.execute(request, taskType)
 StructuralMarkdownMiddleware  (v1.0.4 — only when request.isAgentic is set)
   • Reads full knowledge.md for session into memory
   • Injects full memory state + response format instructions into user message
-  • console.time('structural-middleware') / console.timeEnd for latency logging
+  • console.error() with Date.now() subtraction for standardized latency logging
         │
         ▼ ─────────────────────────────────────
 ResponseCacheMiddleware

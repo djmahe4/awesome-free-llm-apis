@@ -40,7 +40,7 @@ import { listAvailableFreeModels } from './tools/list-models.js';
 import { validateProvider } from './tools/validate-provider.js';
 import { flushSystem } from './tools/use-free-llm.js';
 import { execSync } from 'child_process';
-import fs from 'fs';
+import fs, { promises as fsp } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -199,12 +199,19 @@ async function main() {
             res.json({ sessions: [] });
             return;
           }
-          const entries = fs.readdirSync(projectsBase);
-          const sessions = entries.filter(d => {
+          const entries = await fsp.readdir(projectsBase);
+          const sessions: string[] = [];
+          
+          for (const d of entries) {
             const full = path.resolve(projectsBase, d);
             // Guard: entry must be a *direct* child of projectsBase
-            return path.dirname(full) === projectsBase && fs.statSync(full).isDirectory();
-          });
+            if (path.dirname(full) === projectsBase) {
+              const stat = await fsp.stat(full);
+              if (stat.isDirectory()) {
+                sessions.push(d);
+              }
+            }
+          }
           res.json({ sessions });
         } catch (err) {
           res.status(500).json({ error: String(err) });
@@ -231,19 +238,21 @@ async function main() {
           const knowledgePath = path.join(projectDir, 'knowledge.md');
           const queuesPath = path.join(projectDir, 'queues.json');
 
-          const knowledge = fs.existsSync(knowledgePath)
-            ? fs.readFileSync(knowledgePath, 'utf-8')
-            : 'No memory yet – session not started.';
+          let knowledge = 'No memory yet – session not started.';
+          try {
+            knowledge = await fsp.readFile(knowledgePath, 'utf-8');
+          } catch {
+            // file missing is expected if session hasn't written yet
+          }
 
           let queues: Record<string, string[]> = {
             nowQueue: [], nextQueue: [], blockedQueue: [], improveQueue: []
           };
-          if (fs.existsSync(queuesPath)) {
-            try {
-              queues = JSON.parse(fs.readFileSync(queuesPath, 'utf-8'));
-            } catch (parseErr) {
-              console.error(`[API] Failed to parse queues.json for session ${sessionId}: ${parseErr}`);
-            }
+          try {
+            const qData = await fsp.readFile(queuesPath, 'utf-8');
+            queues = JSON.parse(qData);
+          } catch (parseErr) {
+            // expected if file missing
           }
 
           res.json({ sessionId, knowledge, queues });

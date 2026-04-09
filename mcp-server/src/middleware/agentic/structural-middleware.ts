@@ -13,14 +13,23 @@ export class StructuralMarkdownMiddleware implements Middleware {
             return;
         }
 
-        const userMsg = context.request.messages?.find((m: any) => m.role === 'user');
+        // Hardened Session ID: Must be provided for agentic state to exist.
+        // Falls back to agentic-middleware bypass logic if sessionId is missing.
+        const sessionId = context.sessionId || (context.request as any).sessionId;
+
+        if (!sessionId) {
+            console.error('[StructuralMarkdownMiddleware] Mandatory sessionId missing. Bypassing state injection.');
+            await next();
+            console.error(`[structural-middleware] ${Date.now() - startMs}ms (no-session bypass)`);
+            return;
+        }
+
+        const userMsg = context.request.messages?.find(m => m.role === 'user');
         if (userMsg) {
             const memStart = Date.now();
-            // AgenticMiddleware enforces mandatory sessionId; 'default' is only reached in
-            // direct/standalone use of this middleware outside the standard agentic pipeline.
-            const fullMemory = await this.readFullSessionMemory(context.sessionId || 'default');
-            console.error(`[memory-read] ${Date.now() - memStart}ms session=${context.sessionId}`);
-            userMsg.content = `# TASK CONTEXT\n${userMsg.content}\n\n# FULL MEMORY STATE (session ${context.sessionId})\n${fullMemory}\n\n# RESPONSE FORMAT\nReply only in clean Markdown. For any code or file changes use exactly this block:\n\`\`\`file:relative/path/from/session/root.ts\n// FULL file content here (never partial diffs)\n\`\`\``;
+            const fullMemory = await this.readFullSessionMemory(sessionId);
+            console.error(`[memory-read] ${Date.now() - memStart}ms session=${sessionId}`);
+            userMsg.content = `# TASK CONTEXT\n${userMsg.content}\n\n# FULL MEMORY STATE (session ${sessionId})\n${fullMemory}\n\n# RESPONSE FORMAT\nReply only in clean Markdown. For any code or file changes use exactly this block:\n\`\`\`file:relative/path/from/session/root.ts\n// FULL file content here (never partial diffs)\n\`\`\``;
         }
         await next();
         console.error(`[structural-middleware] ${Date.now() - startMs}ms`);

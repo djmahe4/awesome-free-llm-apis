@@ -161,12 +161,13 @@ export class AgenticMiddleware implements Middleware {
     name = 'AgenticMiddleware';
 
     // v1.0.4 optimization: Cap decomposed plan to 4 high-level steps to prevent over-iteration
-    private limitSubtasks(plan: string): string {
+    private limitSubtasks(plan: string): string[] {
         const steps = plan.split('\n- ').filter(s => s.trim().length > 0);
         if (steps.length > 4) {
-            return steps.slice(0, 4).join('\n- ') + '\n\n(Note: Limited to 4 high-level steps for efficiency. Remaining steps deferred to next iteration.)';
+            // Note: Limited to 4 high-level steps for efficiency. Remaining steps deferred to next iteration.
+            return steps.slice(0, 4);
         }
-        return plan;
+        return steps;
     }
 
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
@@ -248,8 +249,7 @@ export class AgenticMiddleware implements Middleware {
 
             // v1.0.4 optimization: Apply subtask limit before queuing to prevent over-iteration
             const rawPlan = steps.join('\n- ');
-            const limitedPlan = this.limitSubtasks(rawPlan);
-            const limitedSteps = limitedPlan.split('\n- ').filter(s => s.trim().length > 0 && !s.startsWith('(Note:'));
+            const limitedSteps = this.limitSubtasks(rawPlan);
             q.nowQueue.push(...limitedSteps);
         }
 

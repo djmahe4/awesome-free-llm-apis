@@ -94,6 +94,23 @@
     .progress-bar {
       background-color: var(--mcp-primary);
     }
+
+    #memory-session-input {
+      max-width: 340px;
+    }
+
+    #memory-session-select {
+      max-width: 240px;
+    }
+
+    #memory-knowledge {
+      background: #0f1117;
+      color: #c9d1d9;
+      border-color: #2e3250;
+      resize: vertical;
+      min-height: 200px;
+      font-size: 0.78rem;
+    }
   </style>
 </head>
 
@@ -253,11 +270,11 @@ npm run dashboard</code></pre>
           <div class="d-flex gap-2 align-items-center flex-wrap">
             <label class="text-muted small text-nowrap" for="memory-session-input">Session ID</label>
             <input id="memory-session-input" type="text" class="form-control form-control-sm font-monospace"
-              style="max-width:340px" placeholder="e.g. ws-abc123 or my-project" />
+              placeholder="e.g. ws-abc123 or my-project" />
             <button id="memory-load-btn" class="btn btn-sm btn-outline-warning">
               <i class="bi bi-play-fill me-1"></i>Load
             </button>
-            <select id="memory-session-select" class="form-select form-select-sm" style="max-width:240px">
+            <select id="memory-session-select" class="form-select form-select-sm">
               <option value="">— pick active session —</option>
             </select>
             <span id="memory-last-updated" class="text-muted small ms-auto"></span>
@@ -272,12 +289,11 @@ npm run dashboard</code></pre>
                 <h6 class="mb-0"><i class="bi bi-journal-text me-2 text-info"></i>knowledge.md
                   <span class="text-muted small font-monospace" id="memory-session-label"></span>
                 </h6>
-                <button id="memory-refresh-btn" class="btn btn-xs btn-link text-primary p-0 text-decoration-none">
+                <button id="memory-refresh-btn" class="btn btn-sm btn-link text-primary p-0 text-decoration-none">
                   <i class="bi bi-arrow-clockwise me-1"></i>Refresh
                 </button>
               </div>
               <textarea id="memory-knowledge" class="form-control font-monospace"
-                style="background:#0f1117;color:#c9d1d9;border-color:#2e3250;resize:vertical;min-height:200px;font-size:0.78rem"
                 readonly placeholder="Select a session above to view knowledge.md…"></textarea>
             </div>
           </div>
