@@ -283,7 +283,7 @@ export class AgenticMiddleware implements Middleware {
 
             // v1.0.4 optimization: Early exit if confidence is high or max iterations reached
             if (confidenceScore > 0.85 || iterationCount >= 3) {
-                console.error(`[AgenticMiddleware] Early exit: confidence=${confidenceScore} iterations=${iterationCount}`);
+                console.info(`[AgenticMiddleware] Early exit: confidence=${confidenceScore} iterations=${iterationCount}`);
                 q.nowQueue = [];
             }
 

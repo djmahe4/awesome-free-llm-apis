@@ -169,14 +169,17 @@ async function main() {
       // List all active agentic sessions (directories under data/projects/)
       app.get('/api/sessions', async (req, res) => {
         try {
-          const projectsDir = path.join(process.cwd(), 'data', 'projects');
-          if (!fs.existsSync(projectsDir)) {
+          const projectsBase = path.join(process.cwd(), 'data', 'projects');
+          if (!fs.existsSync(projectsBase)) {
             res.json({ sessions: [] });
             return;
           }
-          const sessions = fs.readdirSync(projectsDir).filter(d =>
-            fs.statSync(path.join(projectsDir, d)).isDirectory()
-          );
+          const entries = fs.readdirSync(projectsBase);
+          const sessions = entries.filter(d => {
+            const full = path.resolve(projectsBase, d);
+            // Guard: entry must be a direct child of projectsBase
+            return full.startsWith(projectsBase + path.sep) && fs.statSync(full).isDirectory();
+          });
           res.json({ sessions });
         } catch (err) {
           res.status(500).json({ error: String(err) });
@@ -187,12 +190,18 @@ async function main() {
       app.get('/api/memory/:sessionId', async (req, res) => {
         try {
           const { sessionId } = req.params;
-          // Reject IDs that could construct path traversal
+          // Step 1: Reject IDs with characters that could construct path traversal
           if (!/^[\w\-\.]{1,128}$/.test(sessionId)) {
             res.status(400).json({ error: 'Invalid sessionId' });
             return;
           }
-          const projectDir = path.join(process.cwd(), 'data', 'projects', sessionId);
+          // Step 2: Resolve and verify the resulting path stays inside data/projects/
+          const projectsBase = path.join(process.cwd(), 'data', 'projects');
+          const projectDir = path.resolve(projectsBase, sessionId);
+          if (!projectDir.startsWith(projectsBase + path.sep)) {
+            res.status(400).json({ error: 'Invalid sessionId' });
+            return;
+          }
           const knowledgePath = path.join(projectDir, 'knowledge.md');
           const queuesPath = path.join(projectDir, 'queues.json');
 
@@ -204,7 +213,11 @@ async function main() {
             nowQueue: [], nextQueue: [], blockedQueue: [], improveQueue: []
           };
           if (fs.existsSync(queuesPath)) {
-            try { queues = JSON.parse(fs.readFileSync(queuesPath, 'utf-8')); } catch { /* use defaults */ }
+            try {
+              queues = JSON.parse(fs.readFileSync(queuesPath, 'utf-8'));
+            } catch (parseErr) {
+              console.error(`[API] Failed to parse queues.json for session ${sessionId}: ${parseErr}`);
+            }
           }
 
           res.json({ sessionId, knowledge, queues });
