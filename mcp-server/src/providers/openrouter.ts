@@ -14,6 +14,7 @@ export class OpenRouterProvider extends BaseProvider {
     { id: 'arcee-ai/trinity-large-preview:free', name: 'Trinity Large Preview' },
     { id: 'z-ai/glm-4.5-air:free', name: 'GLM 4.5 Air' },
     { id: 'arcee-ai/trinity-mini:free', name: 'Trinity Mini' },
+    { id: 'google/gemma-4-31B-it', name: 'Gemma 4 31B IT' },
     { id: 'qwen/qwen3-coder-480b-a35b-instruct:free', name: 'Qwen 3 Coder 480B' },
     { id: 'qwen/qwen3-next-80b-a3b-instruct:free', name: 'Qwen 3 Next 80B' },
     { id: 'openai/gpt-oss-120b:free', name: 'GPT-OSS 120B' },

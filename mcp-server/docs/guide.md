@@ -214,7 +214,7 @@ Universal chat interface with automatic fallback cascade through 60+ free models
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `model` | string | ❌ | Model ID (e.g. `llama-3.3-70b-versatile`, `gemini-2.0-flash`) |
+| `model` | string | ❌ | Model ID (e.g. `llama-3.3-70b-versatile`, `gemini-2.5-flash`) |
 | `messages` | array | ✅ | Array of `{role, content}`. Roles: `system` \| `user` \| `assistant` |
 | `provider` | string | ❌ | Pin to a specific provider, bypassing routing |
 | `temperature` | number | ❌ | Sampling temperature 0.0–2.0 (default 0.7) |

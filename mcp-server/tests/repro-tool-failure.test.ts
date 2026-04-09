@@ -52,7 +52,7 @@ describe('IntelligentRouterMiddleware Full Repro', () => {
     it('should run without ReferenceError', async () => {
         const context: PipelineContext = {
             request: {
-                model: 'gemini-2.0-flash',
+                model: 'gemini-2.5-flash',
                 messages: [
                     { role: 'system', content: 'System prompt' },
                     { role: 'user', content: 'User message'.repeat(1000) }

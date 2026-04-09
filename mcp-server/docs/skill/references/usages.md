@@ -488,4 +488,4 @@ Extract only names from a large API response array — compresses context dramat
 | Deep reasoning | `deepseek-r1` | LLM7.io / Kluster |
 | High-quality summaries | `command-a-03-2025` | Cohere |
 | Budget/high-volume | `Qwen/Qwen2.5-7B-Instruct` | SiliconFlow |
-| Latest frontier (Gemini) | `gemini-2.0-flash` | Gemini |
+| Latest frontier (Gemini) | `gemini-2.5-flash` | Gemini |

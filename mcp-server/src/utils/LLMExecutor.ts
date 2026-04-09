@@ -306,7 +306,7 @@ export class LLMExecutor {
 
         // Pick matching models
         const targetModels = modelOverride === 'any'
-            ? ['gemini-2.0-flash', 'llama-3.3-70b-versatile', 'glm-4.7']
+            ? ['gemini-2.5-flash', 'llama-3.3-70b-versatile', 'glm-4.7']
             : [modelOverride];
 
         for (const modelId of targetModels) {

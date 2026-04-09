@@ -21,7 +21,6 @@ export class GeminiProvider extends BaseProvider {
     { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite Preview' },
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
   ];
 
   /** Attempt to locate the venv Python interpreter relative to the project root */
@@ -97,7 +96,7 @@ export class GeminiProvider extends BaseProvider {
   async chat(request: ChatRequest): Promise<ChatResponse> {
     this.checkRateLimit();
 
-    const actualModel = request.model || 'gemini-2.0-flash';
+    const actualModel = request.model || 'gemini-2.5-flash';
     let result;
     try {
       result = await this.runPythonClient({
@@ -164,7 +163,7 @@ export class GeminiProvider extends BaseProvider {
       env: { ...process.env }
     });
     const input = JSON.stringify({
-      model: request.model || 'gemini-2.0-flash',
+      model: request.model || 'gemini-2.5-flash',
       messages: request.messages,
       stream: true,
       temperature: request.temperature,

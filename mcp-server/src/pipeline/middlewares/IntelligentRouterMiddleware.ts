@@ -13,33 +13,69 @@ export class IntelligentRouterMiddleware implements Middleware {
     private contextManager: ContextManager;
 
     // Model capability scores (0.0 to 1.0)
+    // Model capability scores (0.0 to 1.0)
     private static readonly modelCapabilities: Record<string, number> = {
         'DeepSeek-R1': 1.0,
         'deepseek-ai/DeepSeek-R1': 1.0,
         'DeepSeek-V3': 0.9,
         'deepseek-ai/DeepSeek-V3': 0.9,
+        'deepseek-v3.2': 0.95,
         'gemini-3.1-pro-preview': 0.95,
+        'gemini-3.1-flash-preview': 0.85,
+        'gemini-3-flash-preview': 0.85, // Alias for older configs
+        'gemini-3.1-flash-lite-preview': 0.82,
         'gemini-2.5-pro': 0.9,
-        'gemini-2.0-flash': 0.8,
         'gemini-2.5-flash': 0.8,
         'command-r-plus-08-2024': 0.9,
         'command-a-03-2025': 0.8,
         'mistral-large-latest': 0.85,
         'mistralai/mistral-large-2-instruct': 0.85,
         'llama-3.3-70b-versatile': 0.85,
-        'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8': 0.85,
-        'qwen/qwen3-coder-480b-a35b-instruct:free': 0.9,
-        'qwen/qwen3-next-80b-a3b-instruct:free': 0.8,
-        'openai/gpt-oss-120b:free': 0.85,
-        'gpt-oss-20b': 0.7,
+        'qwen/qwen3-coder-480b-a35b-instruct:free': 0.94,
+        'qwen/qwen3-next-80b-a3b-instruct:free': 0.89,
+        'google/gemma-4-31B-it': 0.91,
+        'openai/gpt-oss-120b:free': 0.90,
+        'openai/gpt-oss-20b:free': 0.75,
+        'gpt-oss-20b': 0.75,
         'glm-5.1': 0.95,
         'glm-5-turbo': 0.9,
         'glm-4.7': 0.85,
         'glm-4.6': 0.8,
+        'GLM-4.6V-Flash': 0.82,
         'glm-4.5-air': 0.7,
         'Qwen/Qwen2.5-72B-Instruct': 0.85,
         'Qwen/Qwen2.5-Coder-32B-Instruct': 0.82,
         'Qwen/Qwen3-8B': 0.7,
+        'qwen-3-235b-a22b-instruct-2507': 0.93,
+        'Qwen/Qwen3-235B-A22B': 0.91,
+        'qwen3.5': 0.92,
+        'kimi-k2.5': 0.90,
+        'meta/llama-3.3-70b-instruct': 0.85,
+        'Llama-3.3-70B-Instruct': 0.85,
+        'meta-llama/Llama-3.3-70B-Instruct': 0.85,
+        'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo': 0.75,
+        'ministral-8b-2512': 0.82,
+        'llama-4-scout-17b-16e-instruct': 0.87,
+        'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8': 0.87,
+        'moonshotai/kimi-k2-instruct': 0.82,
+        'c4ai-aya-expanse-32b': 0.8,
+        'stepfun/step-3.5-flash:free': 0.8,
+        'z-ai/glm-4.5-air:free': 0.8,
+        'liquid/lfm2.5-1.2b-thinking:free': 0.88,
+        'nvidia/nemotron-3-super-120b-a12b:free': 0.93,
+        'nvidia/nemotron-nano-12b-v2-vl:free': 0.85,
+        'nvidia/nemotron-3-nano-30b-a3b:free': 0.82,
+        'nvidia/nemotron-mini-4b-instruct:free': 0.65,
+        'nvidia/nemotron-mini-4b-instruct': 0.65,
+        'nvidia/nemotron-nano-9b-v2:free': 0.65,
+        'mistral-small-latest': 0.82,
+        'gpt-4o': 0.9,
+        'arcee-ai/trinity-large-preview:free': 0.8,
+        'arcee-ai/trinity-mini:free': 0.75,
+        'openrouter/free': 0.75,
+        '@cf/meta/llama-3.3-70b-instruct-fp8-fast': 0.85,
+        '@cf/qwen/qwq-32b': 0.85,
+        '@cf/qwen/qwen2.5-coder-32b-instruct': 0.82,
     };
 
     constructor(executor?: LLMExecutor) {
@@ -81,7 +117,9 @@ export class IntelligentRouterMiddleware implements Middleware {
         // Moderation
         'moderate': TaskType.Moderation, 'moderation': TaskType.Moderation, 'safety': TaskType.Moderation,
         'filter': TaskType.Moderation, 'policy': TaskType.Moderation,
-        // User Intent / Planning
+        // Reasoning
+        'think': TaskType.Reasoning, 'thinking': TaskType.Reasoning, 'reason': TaskType.Reasoning,
+        'logic': TaskType.Reasoning, 'proof': TaskType.Reasoning, 'math': TaskType.Reasoning,
     };
 
     /**
@@ -153,10 +191,10 @@ export class IntelligentRouterMiddleware implements Middleware {
         console.debug(`[Router] Decomposing complex task...`);
 
         // 1. Pick a Planner model (SiliconFlow V3 or Gemini Flash)
-        const plannerModels = ['deepseek-ai/DeepSeek-V3', 'gemini-2.0-flash', 'llama3.1-8b'];
+        const plannerModels = ['deepseek-ai/DeepSeek-V3', 'gemini-2.5-flash', 'llama3.1-8b'];
         let plannerResponse: string | null = null;
 
-        const lastMessage = context.request.messages.length > 0 
+        const lastMessage = context.request.messages.length > 0
             ? getMessageContent(context.request.messages[context.request.messages.length - 1])
             : 'No content provided';
 
@@ -239,109 +277,142 @@ Request: ${lastMessage}`;
     /**
      * Optimized task-to-model routing map.
      */
-    public static taskRouteMap: Record<string, string[]> = {
+    public static taskRouteMap: Record<TaskType, string[]> = {
         [TaskType.Coding]: [
             'qwen/qwen3-coder-480b-a35b-instruct:free',
-            'Codestral-22B-v0.1',
-            'Qwen/Qwen2.5-Coder-32B-Instruct',
+            'google/gemma-4-31B-it',
             'DeepSeek-R1',
-            'gpt-oss-20b',
+            'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
+            'qwen-3-235b-a22b-instruct-2507',
             'codestral-latest',
+            'Qwen/Qwen2.5-Coder-32B-Instruct',
             '@cf/qwen/qwen2.5-coder-32b-instruct',
             '@cf/qwen/qwq-32b',
+            'deepseek-v3.2',
+            'gpt-oss-20b',
             'gemini-3.1-pro-preview',
-            'deepseek-ai/DeepSeek-R1',
             'gemini-2.5-flash',
             'mistral-large-latest',
-            'mistral-small-latest',
             'openai/gpt-oss-120b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
             'glm-5.1',
             'glm-5-turbo',
+            'z-ai/glm-4.5-air:free',
             'glm-4.5-air',
+        ],
+        [TaskType.Reasoning]: [
+            'DeepSeek-R1',
+            'deepseek-ai/DeepSeek-R1',
+            'liquid/lfm2.5-1.2b-thinking:free',
+            'qwen-3-235b-a22b-instruct-2507',
+            'glm-5.1',
+            'qwen/qwen3-coder-480b-a35b-instruct:free',
+            'google/gemma-4-31B-it',
+            'nvidia/nemotron-3-super-120b-a12b:free',
         ],
         [TaskType.Moderation]: [
             'llama-3.3-70b-versatile',
-            'gemini-3.1-flash-lite-preview',
-            'gemini-2.5-flash',
-            'gemini-2.0-flash',
+            'google/gemma-4-31B-it',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-            'ministral-8b-latest',
-            'mistral-small-latest',
-            'nvidia/nemotron-3-super-120b-a12b:free',
-            'nvidia/nemotron-mini-4b-instruct',
-            'glm-4.6',
+            'gemini-2.5-flash',
             'glm-4.5-air',
+            'ministral-8b-latest',
+            'nvidia/nemotron-3-super-120b-a12b:free',
+            'glm-4.6',
             'llama3.1-8b',
         ],
         [TaskType.Classification]: [
+            'google/gemma-4-31B-it',
             'llama-3.3-70b-versatile',
+            'ministral-8b-2512',
+            'GLM-4.6V-Flash',
             'gemini-3.1-flash-lite-preview',
+            'mistral-small-latest',
+            '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+            'gemini-3.1-flash-preview',
+            'gemini-3-flash-preview',
+            'mistralai/Mistral-7B-Instruct-v0.3',
             'gemini-2.5-flash',
             'glm-4.6',
             'glm-4.5-air',
-            'gemini-2.0-flash',
-            '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-            'mistral-small-latest',
             'nvidia/nemotron-3-nano-30b-a3b:free',
         ],
         [TaskType.UserIntent]: [
+            'google/gemma-4-31B-it',
+            'mistral-small-latest',
             'gemini-3.1-flash-lite-preview',
+            'gemini-3.1-flash-preview',
             'llama-3.3-70b-versatile',
             'gemini-2.5-flash',
             'glm-4.6',
             'glm-4.5-air',
-            'gemini-2.0-flash',
+            'nvidia/nemotron-mini-4b-instruct:free',
             'nvidia/nemotron-mini-4b-instruct',
-            'mistral-small-latest',
         ],
         [TaskType.SemanticSearch]: [
+            'nvidia/nemotron-3-super-120b-a12b:free',
+            'qwen-3-235b-a22b-instruct-2507',
+            'arcee-ai/trinity-large-preview:free',
+            'qwen/qwen3-next-80b-a3b-instruct:free',
+            'llama-4-scout-17b-16e-instruct',
             'command-r-plus-08-2024',
             'gemini-3.1-pro-preview',
-            'arcee-ai/trinity-large-preview:free',
             'gemini-2.5-flash',
             'mistral-large-latest',
-            'qwen/qwen3-next-80b-a3b-instruct:free',
             'openai/gpt-oss-120b:free',
             'gemini-2.5-pro',
             'llama-3.3-70b-versatile',
+            'glm-4.5-air',
         ],
         [TaskType.Summarization]: [
+            'google/gemma-4-31B-it',
+            'kimi-k2.5',
+            'gemini-3.1-flash-preview',
+            'mistral-small-latest',
+            'gemini-3.1-flash-lite-preview',
+            'meta-llama/Llama-3.3-70B-Instruct',
+            'moonshotai/kimi-k2-instruct',
             'command-a-03-2025',
             'mistralai/mistral-small-3.1-24b:free',
-            'llama-3.3-70b-versatile',
             'gemini-2.5-flash',
-            'gemini-3-flash-preview',
             'glm-4.7',
             'glm-4.5-air',
         ],
         [TaskType.EntityExtraction]: [
+            'google/gemma-4-31B-it',
             'gemini-3.1-pro-preview',
-            'llama-3.3-70b-versatile',
             'arcee-ai/trinity-large-preview:free',
-            'command-r-plus-08-2024',
+            'llama-3.3-70b-versatile',
             'gemini-2.5-flash',
             'glm-4.7',
             'glm-4.5-air',
         ],
         [TaskType.Chat]: [
             'DeepSeek-R1',
+            'deepseek-ai/DeepSeek-R1',
+            'nvidia/nemotron-3-super-120b-a12b:free',
+            'qwen3.5',
+            'Qwen/Qwen3-235B-A22B',
+            'qwen-3-235b-a22b-instruct-2507',
+            'google/gemma-4-31B-it',
+            'openai/gpt-oss-20b:free',
             'gpt-oss-20b',
-            'gpt-4o',
-            'gemini-3.1-pro-preview',
-            'gemini-3-flash-preview',
-            'gemini-2.0-flash',
-            'glm-5.1',
-            'glm-5-turbo',
-            'glm-4.7',
-            'glm-4.6',
-            'glm-4.5-air',
-            'meta-llama/Llama-3.3-70B-Instruct',
+            'Llama-3.3-70B-Instruct',
+            'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
+            'Qwen/Qwen2.5-72B-Instruct',
+            'c4ai-aya-expanse-32b',
+            'stepfun/step-3.5-flash:free',
             'openai/gpt-oss-120b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
-            'openrouter/free',
-            'Qwen/Qwen2.5-72B-Instruct',
+            'meta/llama-3.3-70b-instruct',
+            'mistralai/mistral-large-2-instruct',
+            'gpt-4o',
             'Qwen/Qwen3-8B',
+            'arcee-ai/trinity-mini:free',
+            'nvidia/nemotron-nano-12b-v2-vl:free',
+            'nvidia/nemotron-nano-9b-v2:free',
+            'openrouter/free',
+            'gemini-2.5-flash',
         ]
     };
 
@@ -575,7 +646,7 @@ Request: ${lastMessage}`;
         }
 
         // --- Emergency Fallback: Last Resort Deep Truncation ---
-        const emergencyModels = ['gemini-2.0-flash', 'glm-4.5-air', 'llama-3.3-70b-versatile'];
+        const emergencyModels = ['gemini-2.5-flash', 'glm-4.5-air', 'llama-3.3-70b-versatile'];
         const emergencyTruncation = this.contextManager.truncateOldest(context.request.messages, 1500);
         context.request.messages = emergencyTruncation.messages;
         delete context.estimatedTokens;

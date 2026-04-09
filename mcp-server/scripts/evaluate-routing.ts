@@ -107,6 +107,7 @@ async function evaluateRouting() {
         { taskType: TaskType.EntityExtraction, model: 'auto', description: 'Entity Extraction (auto-select)' },
         { taskType: TaskType.Moderation, model: 'auto', description: 'Moderation (auto-select)' },
         { taskType: TaskType.UserIntent, model: 'auto', description: 'User Intent (auto-select)' },
+        { taskType: TaskType.Reasoning, model: 'auto', description: 'Deep Reasoning (auto-select)' },
         { taskType: TaskType.Chat, model: 'auto', description: 'Context Pressure (high token count)', isStress: true },
         { taskType: TaskType.Chat, model: 'failover-test', description: 'Failover Simulation (forced error)', isStress: true },
     ];
@@ -120,6 +121,7 @@ async function evaluateRouting() {
         [TaskType.EntityExtraction]: 'Extract the person name from "John went to Paris". One word.',
         [TaskType.Moderation]: 'Is "hello friend" safe content? Yes/No.',
         [TaskType.UserIntent]: 'What is the intent of "Book a flight"? One word.',
+        [TaskType.Reasoning]: 'If I have 3 apples and give one to Joe, then Joe gives me a banana, how many fruits do I have? Think step by step.',
     };
 
     console.error('\n' + '─'.repeat(70));

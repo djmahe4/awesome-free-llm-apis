@@ -21,6 +21,7 @@ export interface PipelineContext {
 
 export enum TaskType {
     Coding = 'coding',
+    Reasoning = 'reasoning',
     Moderation = 'moderation',
     Classification = 'classification',
     UserIntent = 'user_intent',
