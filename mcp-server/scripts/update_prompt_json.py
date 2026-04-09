@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from datetime import datetime
 
 def extract_main_prompt(txt, marker):
     startIndex = txt.find(marker)
@@ -73,10 +74,12 @@ def generate_keywords(title, content):
     return sorted(list(set(words)))
 
 def main():
-    # Use environment variable or default relative path
+    # Use environment variable or derive relative path from script location
     base_dir = os.environ.get('AGENT_PROMPT_PATH')
     if not base_dir:
-        base_dir = os.path.abspath(os.path.join(os.getcwd(), '../external/agent-prompt'))
+        # Script is in repo_root/scripts/, prompt is in repo_root/external/agent-prompt
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        base_dir = os.path.abspath(os.path.join(script_dir, '../external/agent-prompt'))
     
     readme_path = os.path.join(base_dir, 'README.md')
     json_path = os.path.join(base_dir, 'prompt.json')
@@ -104,7 +107,7 @@ def main():
         "metadata": {
             "version": "1.2.0",
             "source": "README.md",
-            "generated_at": None
+            "generated_at": datetime.now().isoformat()
         },
         "introduction": "",
         "sections": []

@@ -40,7 +40,7 @@ import { listAvailableFreeModels } from './tools/list-models.js';
 import { validateProvider } from './tools/validate-provider.js';
 import { flushSystem } from './tools/use-free-llm.js';
 import { execSync } from 'child_process';
-import fs from 'fs';
+import fs, { promises as fsp } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -138,6 +138,30 @@ async function main() {
       app.use(express.json());
 
       // API endpoints for dashboard
+
+      // Simple in-memory rate limiter for filesystem-backed routes (dashboard-only, local server)
+      const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+      const RATE_LIMIT_WINDOW_MS = 60_000; // 1-minute window
+      const RATE_LIMIT_MAX = 120;           // 2 requests/second burst over a minute
+
+      function checkRateLimit(req: express.Request, res: express.Response): boolean {
+        const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+          ?? req.socket.remoteAddress
+          ?? 'unknown';
+        const now = Date.now();
+        let entry = rateLimitMap.get(ip);
+        if (!entry || now >= entry.resetAt) {
+          entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+          rateLimitMap.set(ip, entry);
+        }
+        entry.count++;
+        if (entry.count > RATE_LIMIT_MAX) {
+          res.status(429).json({ error: 'Too many requests' });
+          return false;
+        }
+        return true;
+      }
+
       app.get('/api/token-stats', async (req, res) => {
         try {
           const stats = await getTokenStats();
@@ -161,6 +185,79 @@ async function main() {
           const { providerId } = req.body;
           const result = await validateProvider(providerId);
           res.json(result);
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // List all active agentic sessions (directories under data/projects/)
+      app.get('/api/sessions', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const projectsBase = path.join(process.cwd(), 'data', 'projects');
+          try {
+            await fsp.access(projectsBase);
+          } catch {
+            res.json({ sessions: [] });
+            return;
+          }
+          const entries = await fsp.readdir(projectsBase);
+          const sessions: string[] = [];
+          
+          for (const d of entries) {
+            const full = path.resolve(projectsBase, d);
+            // Guard: entry must be a *direct* child of projectsBase
+            if (path.dirname(full) === projectsBase) {
+              const stat = await fsp.stat(full);
+              if (stat.isDirectory()) {
+                sessions.push(d);
+              }
+            }
+          }
+          res.json({ sessions });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // Return knowledge.md content and momentum queues for a given session
+      app.get('/api/memory/:sessionId', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { sessionId } = req.params;
+          // Step 1: Reject IDs with dots-only sequences or characters outside word/hyphen/dot
+          if (!/^(?!\.\.?$)[\w\-\.]{1,128}$/.test(sessionId)) {
+            res.status(400).json({ error: 'Invalid sessionId' });
+            return;
+          }
+          // Step 2: Resolve and verify the resulting path is a direct child of data/projects/
+          const projectsBase = path.join(process.cwd(), 'data', 'projects');
+          const projectDir = path.resolve(projectsBase, sessionId);
+          if (path.dirname(projectDir) !== projectsBase) {
+            res.status(400).json({ error: 'Invalid sessionId' });
+            return;
+          }
+          const knowledgePath = path.join(projectDir, 'knowledge.md');
+          const queuesPath = path.join(projectDir, 'queues.json');
+
+          let knowledge = 'No memory yet – session not started.';
+          try {
+            knowledge = await fsp.readFile(knowledgePath, 'utf-8');
+          } catch {
+            // file missing is expected if session hasn't written yet
+          }
+
+          let queues: Record<string, string[]> = {
+            nowQueue: [], nextQueue: [], blockedQueue: [], improveQueue: []
+          };
+          try {
+            const qData = await fsp.readFile(queuesPath, 'utf-8');
+            queues = JSON.parse(qData);
+          } catch (parseErr) {
+            // expected if file missing
+          }
+
+          res.json({ sessionId, knowledge, queues });
         } catch (err) {
           res.status(500).json({ error: String(err) });
         }

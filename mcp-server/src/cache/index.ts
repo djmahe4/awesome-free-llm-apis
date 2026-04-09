@@ -1,5 +1,5 @@
 import { LRUCache } from 'lru-cache';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { promises as fs, readFileSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { debounce } from '../utils/debounce.js';
 import type { ChatRequest, ChatResponse } from '../providers/types.js';
@@ -12,8 +12,10 @@ export class ResponseCache {
   constructor(maxSize = 500, persistPath: string | null = null) {
     this.cache = new LRUCache<string, ChatResponse>({ max: maxSize });
     this.persistPath = persistPath;
-    this.debouncedPersist = debounce(() => this.persist(), 2000);
-    this.loadFromDisk();
+    this.debouncedPersist = debounce(() => {
+      this.persist().catch(err => console.error('Background persistence failed:', err));
+    }, 2000);
+    this.loadFromDiskSync();
   }
 
   flush(): void {
@@ -40,19 +42,19 @@ export class ResponseCache {
     });
   }
 
-  private persist(): void {
+  private async persist(): Promise<void> {
     if (!this.persistPath) return;
     try {
       const data = JSON.stringify(Array.from(this.cache.entries()));
       const dir = dirname(this.persistPath);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      writeFileSync(this.persistPath, data);
+      if (!existsSync(dir)) await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(this.persistPath, data, 'utf-8');
     } catch (err) {
       console.error('Failed to persist cache:', err);
     }
   }
 
-  private loadFromDisk(): void {
+  private loadFromDiskSync(): void {
     if (!this.persistPath || !existsSync(this.persistPath)) return;
     try {
       const data = readFileSync(this.persistPath, 'utf8');

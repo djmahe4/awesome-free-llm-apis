@@ -9,7 +9,7 @@ async function verifyHeaderExtraction() {
         process.exit(1);
     }
 
-    console.log(`=== Verifying Header Extraction for: ${providerId} ===\n`);
+    console.error(`=== Verifying Header Extraction for: ${providerId} ===\n`);
 
     const registry = ProviderRegistry.getInstance();
     const provider = registry.getProvider(providerId);
@@ -36,7 +36,7 @@ async function verifyHeaderExtraction() {
         metadata: {}
     };
 
-    console.log(`Making minimal request to ${providerId} (${modelId})...`);
+    console.error(`Making minimal request to ${providerId} (${modelId})...`);
     
     try {
         const response = await executor.tryProvider(context, providerId, modelId);
@@ -46,7 +46,7 @@ async function verifyHeaderExtraction() {
             return;
         }
 
-        console.log('\n--- Received Headers ---');
+        console.error('\n--- Received Headers ---');
         const headers = response._headers || {};
         const ratelimitHeaders = Object.keys(headers)
             .filter(k => k.toLowerCase().includes('ratelimit'))
@@ -56,35 +56,35 @@ async function verifyHeaderExtraction() {
             }, {} as Record<string, any>);
 
         if (Object.keys(ratelimitHeaders).length === 0) {
-            console.log('No "ratelimit" specific headers found.');
-            console.log('Full headers (truncated):', Object.keys(headers).slice(0, 5));
+            console.error('No "ratelimit" specific headers found.');
+            console.error('Full headers (truncated):', Object.keys(headers).slice(0, 5));
         } else {
-            console.log(JSON.stringify(ratelimitHeaders, null, 2));
+            console.error(JSON.stringify(ratelimitHeaders, null, 2));
         }
 
-        console.log('\n--- Parsed Token State ---');
+        console.error('\n--- Parsed Token State ---');
         const state = executor.getTokenState()[providerId];
-        console.log(JSON.stringify(state, null, 2));
+        console.error(JSON.stringify(state, null, 2));
 
         if (state && (state.remainingTokens !== undefined || state.remainingRequests !== undefined)) {
-            console.log('\n✅ Extraction verified! Token tracking is working for this provider.');
+            console.error('\n✅ Extraction verified! Token tracking is working for this provider.');
         } else {
-            console.log('\n⚠️ No token/request data was extracted. Verify standard rate limit headers for this provider.');
+            console.error('\n⚠️ No token/request data was extracted. Verify standard rate limit headers for this provider.');
         }
 
     } catch (err: any) {
         console.error('\nError during verification:', err.status ? `HTTP ${err.status}: ${err.message}` : err.message);
     } finally {
-        console.log('\n--- Final Parsed Token State ---');
+        console.error('\n--- Final Parsed Token State ---');
         const state = executor.getTokenState()[providerId];
-        console.log(JSON.stringify(state, null, 2));
+        console.error(JSON.stringify(state, null, 2));
 
         if (state && (state.remainingTokens === 0 || state.remainingRequests === 0)) {
-            console.log('\n✅ Robustness verified! Rate limit detection updated the state.');
+            console.error('\n✅ Robustness verified! Rate limit detection updated the state.');
         } else if (state && (state.remainingTokens !== undefined)) {
-             console.log('\n✅ Header extraction verified!');
+             console.error('\n✅ Header extraction verified!');
         } else {
-            console.log('\n⚠️ No token data available in state.');
+            console.error('\n⚠️ No token data available in state.');
         }
     }
 }

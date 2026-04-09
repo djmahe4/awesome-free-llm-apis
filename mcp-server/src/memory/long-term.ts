@@ -49,8 +49,8 @@ export class LongTermMemory {
     this.debouncedPersist();
   }
 
-  flush(): void {
-    this.debouncedPersist.flush();
+  async flush(): Promise<void> {
+    await this.debouncedPersist.flush();
   }
 
   async list(): Promise<string[]> {

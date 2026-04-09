@@ -94,6 +94,23 @@
     .progress-bar {
       background-color: var(--mcp-primary);
     }
+
+    #memory-session-input {
+      max-width: 340px;
+    }
+
+    #memory-session-select {
+      max-width: 240px;
+    }
+
+    #memory-knowledge {
+      background: #0f1117;
+      color: #c9d1d9;
+      border-color: #2e3250;
+      resize: vertical;
+      min-height: 200px;
+      font-size: 0.78rem;
+    }
   </style>
 </head>
 
@@ -242,12 +259,74 @@ npm run dashboard</code></pre>
 
       <!-- Tab 4: Cache & Memory -->
       <div class="tab-pane fade" id="cache" role="tabpanel">
-        <div class="card p-5 text-center bg-dark-subtle border-dashed">
-          <i class="bi bi-hourglass-split display-1 mb-3 text-muted"></i>
-          <h4>Future Advanced Feature</h4>
-          <p class="text-muted mb-0">Coming soon in v1.0.4: Real-time visualization of Short-term memory buffers, </p>
-          <p class="text-muted">cache hit ratios, and workspace context compression stats.</p>
+
+        <!-- Session selector -->
+        <div class="card p-4 mb-4">
+          <h5 class="mb-3"><i class="bi bi-brain me-2 text-warning"></i>Short-Term Memory Buffers</h5>
+          <p class="text-muted small mb-3">
+            Live content of the active session's <code>knowledge.md</code> and momentum queues (now / next / blocked),
+            as written by <code>AgenticMiddleware</code>. Auto-refreshes every 3 seconds when a session is selected.
+          </p>
+          <div class="d-flex gap-2 align-items-center flex-wrap">
+            <label class="text-muted small text-nowrap" for="memory-session-input">Session ID</label>
+            <input id="memory-session-input" type="text" class="form-control form-control-sm font-monospace"
+              placeholder="e.g. ws-abc123 or my-project" />
+            <button id="memory-load-btn" class="btn btn-sm btn-outline-warning">
+              <i class="bi bi-play-fill me-1"></i>Load
+            </button>
+            <select id="memory-session-select" class="form-select form-select-sm">
+              <option value="">— pick active session —</option>
+            </select>
+            <span id="memory-last-updated" class="text-muted small ms-auto"></span>
+          </div>
         </div>
+
+        <!-- Knowledge.md preview -->
+        <div class="row g-3 mb-3">
+          <div class="col-12">
+            <div class="card p-3">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0"><i class="bi bi-journal-text me-2 text-info"></i>knowledge.md
+                  <span class="text-muted small font-monospace" id="memory-session-label"></span>
+                </h6>
+                <button id="memory-refresh-btn" class="btn btn-sm btn-link text-primary p-0 text-decoration-none">
+                  <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                </button>
+              </div>
+              <textarea id="memory-knowledge" class="form-control font-monospace"
+                readonly placeholder="Select a session above to view knowledge.md…"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- Momentum queues -->
+        <div class="row g-3">
+          <div class="col-md-4">
+            <div class="card p-3 h-100">
+              <h6 class="mb-2 text-success"><i class="bi bi-play-circle me-1"></i>Now Queue</h6>
+              <ul id="queue-now" class="list-unstyled mb-0 small text-muted">
+                <li class="text-muted fst-italic">—</li>
+              </ul>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="card p-3 h-100">
+              <h6 class="mb-2 text-info"><i class="bi bi-skip-forward me-1"></i>Next Queue</h6>
+              <ul id="queue-next" class="list-unstyled mb-0 small text-muted">
+                <li class="text-muted fst-italic">—</li>
+              </ul>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="card p-3 h-100">
+              <h6 class="mb-2 text-danger"><i class="bi bi-slash-circle me-1"></i>Blocked Queue</h6>
+              <ul id="queue-blocked" class="list-unstyled mb-0 small text-muted">
+                <li class="text-muted fst-italic">—</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
       </div>
 
     </div>

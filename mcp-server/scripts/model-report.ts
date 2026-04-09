@@ -19,9 +19,9 @@ async function run() {
         p.models.forEach(m => registeredModels.add(m.id));
     });
 
-    console.log('\n=================================================');
-    console.log('   INTELLIGENT ROUTER MODEL DIAGNOSTICS');
-    console.log('=================================================\n');
+    console.error('\n=================================================');
+    console.error('   INTELLIGENT ROUTER MODEL DIAGNOSTICS');
+    console.error('=================================================\n');
 
     const routerModels = new Set<string>();
     const modelToTasks: Record<string, string[]> = {};
@@ -34,36 +34,36 @@ async function run() {
         });
     }
 
-    console.log('--- 1. ORPHANED MODELS ---');
-    console.log('(In Router but NOT in any Provider - These will always fail)\n');
+    console.error('--- 1. ORPHANED MODELS ---');
+    console.error('(In Router but NOT in any Provider - These will always fail)\n');
     const orphaned = [...routerModels].filter(m => !registeredModels.has(m));
     if (orphaned.length > 0) {
         orphaned.forEach(m => {
-            console.log(`  [!] ${m.padEnd(40)} used in: ${modelToTasks[m].join(', ')}`);
+            console.error(`  [!] ${m.padEnd(40)} used in: ${modelToTasks[m].join(', ')}`);
         });
     } else {
-        console.log('  ✅ None! All router models are registered in providers.');
+        console.error('  ✅ None! All router models are registered in providers.');
     }
 
-    console.log('\n--- 2. UNDERUTILIZED MODELS ---');
-    console.log('(In Providers but NOT used by Router - Potential opportunities)\n');
+    console.error('\n--- 2. UNDERUTILIZED MODELS ---');
+    console.error('(In Providers but NOT used by Router - Potential opportunities)\n');
     const missing = [...registeredModels].filter(m => !routerModels.has(m));
     if (missing.length > 0) {
         missing.forEach(m => {
             const provider = allProviders.find(p => p.models.some(pm => pm.id === m));
-            console.log(`  [ ] ${m.padEnd(40)} (Provider: ${provider?.id})`);
+            console.error(`  [ ] ${m.padEnd(40)} (Provider: ${provider?.id})`);
         });
     } else {
-        console.log('  ✅ None! All provider models are utilized by the router.');
+        console.error('  ✅ None! All provider models are utilized by the router.');
     }
 
-    console.log('\n--- 3. PROVIDER -> TASK COVERAGE MATRIX ---');
-    console.log('(X = Provider has at least one model assigned to this task)\n');
+    console.error('\n--- 3. PROVIDER -> TASK COVERAGE MATRIX ---');
+    console.error('(X = Provider has at least one model assigned to this task)\n');
     
     const taskTypes = Object.values(TaskType);
     const header = 'Provider'.padEnd(20) + ' | ' + taskTypes.map(t => t.substring(0, 4).toUpperCase()).join(' | ');
-    console.log(header);
-    console.log('-'.repeat(header.length));
+    console.error(header);
+    console.error('-'.repeat(header.length));
 
     allProviders.forEach(p => {
         let row = p.id.padEnd(20) + ' | ';
@@ -72,14 +72,14 @@ async function run() {
             const hasModelForTask = modelsInTask.some(mId => p.models.some(m => m.id === mId));
             row += (hasModelForTask ? '  X ' : '    ') + ' | ';
         });
-        console.log(row);
+        console.error(row);
     });
 
-    console.log('\nLegend:');
+    console.error('\nLegend:');
     taskTypes.forEach(t => {
-        console.log(`  ${t.substring(0, 4).toUpperCase()}: ${t}`);
+        console.error(`  ${t.substring(0, 4).toUpperCase()}: ${t}`);
     });
-    console.log('\n');
+    console.error('\n');
 }
 
 run().catch(console.error);

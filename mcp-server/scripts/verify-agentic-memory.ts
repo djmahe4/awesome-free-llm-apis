@@ -2,8 +2,8 @@
 import { memoryManager } from '../src/memory/index.js';
 import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
 import { WorkspaceScanner } from '../src/cache/workspace.js';
-import path from 'path';
-import process from 'process';
+import path from 'node:path';
+import process from 'node:process';
 
 async function main() {
     console.error('--- Agentic Memory Verification ---');
@@ -27,11 +27,8 @@ async function main() {
     // Also store a secondary one with JSON format in key just in case
     await memoryManager.longTerm.save(`test2:{"ws":"${wsHash}"}`, { note: 'functioning correctly' });
     
-    // CRITICAL: Flush memory to ensure it's written to disk before the middleware tries to read it
     console.error('Flushing memory to disk...');
-    memoryManager.flush();
-    // Small sleep to ensure file system is ready (though flush is usually enough)
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await memoryManager.flush();
 
     console.error('2. Querying memory via Search...');
     // Use a SIMPLER query that is a guaranteed substring

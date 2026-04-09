@@ -4,12 +4,12 @@ import { LLMExecutor } from '../src/utils/LLMExecutor.js';
 import { TaskType, type PipelineContext } from '../src/pipeline/middleware.js';
 
 async function runTests() {
-    console.log('--- Deep Compression & Failover Debug Test ---');
+    console.error('--- Deep Compression & Failover Debug Test ---');
 
     const registry = ProviderRegistry.getInstance();
     const availableProviders = registry.getAllProviders().filter(p => p.isAvailable());
     if (availableProviders.length === 0) {
-        console.log('No providers available. Ensure .env is loaded.');
+        console.error('No providers available. Ensure .env is loaded.');
         process.exit(1);
     }
 
@@ -44,27 +44,7 @@ async function runTests() {
 
     const router = new IntelligentRouterMiddleware(executor);
 
-    // console.log('\n--- Test 1: Failover Simulation ---');
-    // providerLog = [];
-    // const ctx1: PipelineContext = {
-    //     request: {
-    //         model: 'failover-test',
-    //         messages: [{ role: 'user', content: 'Say hello' }],
-    //         max_tokens: 20
-    //     },
-    //     taskType: TaskType.Chat
-    // };
-
-    // try {
-    //     await router.execute(ctx1, async () => { console.log('Next called!'); });
-    //     console.log('✅ Success:', ctx1.providerId, ctx1.request.model);
-    //     console.log('Providers tried:', (ctx1 as any).providersAttempted);
-    // } catch (e: any) {
-    //     console.log('❌ Failed:', e.message);
-    //     console.log('Providers tried:', (ctx1 as any).providersAttempted);
-    // }
-
-    console.log('\n--- Test 2: Massive Prompt (forces emergency loop through window disqualification) ---');
+    console.error('\n--- Test 2: Massive Prompt (forces emergency loop through window disqualification) ---');
     providerLog = [];
     const largeText = 'A'.repeat(50000); // 50k characters
     const prompt = 'Please perform a test with this massive input. ' + largeText;
@@ -77,19 +57,19 @@ async function runTests() {
     };
 
     try {
-        await router.execute(ctx2, async () => { console.log('Next called!'); });
-        console.log('✅ Success:', ctx2.providerId, ctx2.request.model);
-        console.log('Final messages string sizes:', ctx2.request.messages.map(m => m.content.length));
+        await router.execute(ctx2, async () => { console.error('Next called!'); });
+        console.error('✅ Success:', ctx2.providerId, ctx2.request.model);
+        console.error('Final messages string sizes:', ctx2.request.messages.map(m => m.content.length));
         if (ctx2.request.messages.length > 0) {
             const lastMsg = ctx2.request.messages[ctx2.request.messages.length - 1];
             if (lastMsg.content.includes('[...truncated...]')) {
-                console.log('✅ TRUNCATION DETECTED in message content!');
+                console.error('✅ TRUNCATION DETECTED in message content!');
             }
         }
-        console.log('Providers tried:', (ctx2 as any).providersAttempted);
+        console.error('Providers tried:', (ctx2 as any).providersAttempted);
     } catch (e: any) {
-        console.log('❌ Failed:', e.message);
-        console.log('Providers tried:', (ctx2 as any).providersAttempted);
+        console.error('❌ Failed:', e.message);
+        console.error('Providers tried:', (ctx2 as any).providersAttempted);
     }
 }
 

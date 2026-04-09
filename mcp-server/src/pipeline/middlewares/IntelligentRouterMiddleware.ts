@@ -206,7 +206,7 @@ Request: ${lastMessage}`;
             try {
                 // Execute subtask with best model for its type
                 const subtaskRes = await this.executor.prompt(
-                    [...context.request.messages.slice(0, -1), { role: 'user', content: task }],
+                    [...context.request.messages.slice(0, -1), { role: 'user', content: taskStr }],
                     'any', // Let executor pick best for type if it can, otherwise defaults to chat
                     { taskType }
                 );

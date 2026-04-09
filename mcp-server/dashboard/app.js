@@ -83,7 +83,7 @@ function renderStats(providers) {
                         </div>
                     </div>
                     <div class="mt-3 pt-2 border-top border-secondary-subtle d-flex justify-content-end">
-                        <button class="btn btn-xs btn-link text-primary p-0 text-decoration-none" onclick="verifyProvider('${p.id}', event)">
+                        <button class="btn btn-sm btn-link text-primary p-0 text-decoration-none" onclick="verifyProvider('${p.id}', event)">
                             <i class="bi bi-shield-check me-1"></i>Verify Credential
                         </button>
                     </div>
@@ -143,6 +143,117 @@ refreshBtn.addEventListener('click', fetchStats);
 // Initial fetch and poll
 fetchStats();
 setInterval(fetchStats, 5000);
+
+// ─── Short-Term Memory Buffers (Tab 4) ───────────────────────────────────────
+
+const memorySessionInput = document.getElementById('memory-session-input');
+const memorySessionSelect = document.getElementById('memory-session-select');
+const memoryLoadBtn = document.getElementById('memory-load-btn');
+const memoryRefreshBtn = document.getElementById('memory-refresh-btn');
+const memoryKnowledge = document.getElementById('memory-knowledge');
+const memoryLastUpdated = document.getElementById('memory-last-updated');
+const memorySessionLabel = document.getElementById('memory-session-label');
+
+let activeMemorySession = '';
+let memoryPollInterval = null;
+
+async function fetchSessions() {
+    try {
+        const res = await fetch('/api/sessions');
+        if (!res.ok) return;
+        const data = await res.json();
+        const sessions = data.sessions || [];
+        // Repopulate dropdown, keeping the blank first option
+        while (memorySessionSelect.options.length > 1) memorySessionSelect.remove(1);
+        sessions.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s;
+            opt.textContent = s;
+            memorySessionSelect.appendChild(opt);
+        });
+    } catch (err) {
+        console.error(`[Dashboard] Failed to fetch sessions:`, err);
+    }
+}
+
+async function fetchMemory(sessionId) {
+    if (!sessionId) return;
+    try {
+        const res = await fetch(`/api/memory/${encodeURIComponent(sessionId)}`);
+        if (!res.ok) {
+            memoryKnowledge.value = `Error: ${res.status} – ${res.statusText}`;
+            return;
+        }
+        const data = await res.json();
+        memoryKnowledge.value = data.knowledge || '';
+        memorySessionLabel.textContent = ` — ${escapeHTML(data.sessionId)}`;
+        renderQueue('queue-now', data.queues?.nowQueue);
+        renderQueue('queue-next', data.queues?.nextQueue);
+        renderQueue('queue-blocked', data.queues?.blockedQueue);
+        memoryLastUpdated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    } catch (err) {
+        memoryKnowledge.value = `Fetch error: ${err.message}`;
+    }
+}
+
+function renderQueue(elementId, items) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    if (!items || items.length === 0) {
+        el.innerHTML = '<li class="text-muted fst-italic">—</li>';
+        return;
+    }
+    el.innerHTML = items.map(item =>
+        `<li class="mb-1 d-flex align-items-start gap-1">
+            <i class="bi bi-chevron-right text-secondary mt-1" style="font-size:0.7rem"></i>
+            <span>${escapeHTML(String(item))}</span>
+        </li>`
+    ).join('');
+}
+
+function startMemoryPoll(sessionId) {
+    stopMemoryPoll();
+    activeMemorySession = sessionId;
+    fetchMemory(sessionId);
+    memoryPollInterval = setInterval(() => fetchMemory(sessionId), 3000);
+}
+
+function stopMemoryPoll() {
+    if (memoryPollInterval) {
+        clearInterval(memoryPollInterval);
+        memoryPollInterval = null;
+    }
+}
+
+memoryLoadBtn.addEventListener('click', () => {
+    const sid = memorySessionInput.value.trim();
+    if (sid) startMemoryPoll(sid);
+});
+
+memorySessionSelect.addEventListener('change', () => {
+    const sid = memorySessionSelect.value;
+    if (sid) {
+        memorySessionInput.value = sid;
+        startMemoryPoll(sid);
+    }
+});
+
+memoryRefreshBtn.addEventListener('click', () => {
+    if (activeMemorySession) fetchMemory(activeMemorySession);
+});
+
+// Only poll when the Cache & Memory tab is visible to avoid wasted requests
+document.getElementById('cache-tab').addEventListener('shown.bs.tab', () => {
+    fetchSessions();
+    if (activeMemorySession) startMemoryPoll(activeMemorySession);
+});
+document.getElementById('cache-tab').addEventListener('hidden.bs.tab', stopMemoryPoll);
+
+// Refresh session list periodically so newly-started sessions appear automatically
+setInterval(() => {
+    const cacheTabActive = document.getElementById('cache')?.classList.contains('active');
+    if (cacheTabActive) fetchSessions();
+}, 10000);
 
 // Setup SSE connection to the new unified endpoint for real-time status
 let eventSource;
