@@ -166,6 +166,53 @@ async function main() {
         }
       });
 
+      // List all active agentic sessions (directories under data/projects/)
+      app.get('/api/sessions', async (req, res) => {
+        try {
+          const projectsDir = path.join(process.cwd(), 'data', 'projects');
+          if (!fs.existsSync(projectsDir)) {
+            res.json({ sessions: [] });
+            return;
+          }
+          const sessions = fs.readdirSync(projectsDir).filter(d =>
+            fs.statSync(path.join(projectsDir, d)).isDirectory()
+          );
+          res.json({ sessions });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // Return knowledge.md content and momentum queues for a given session
+      app.get('/api/memory/:sessionId', async (req, res) => {
+        try {
+          const { sessionId } = req.params;
+          // Reject IDs that could construct path traversal
+          if (!/^[\w\-\.]{1,128}$/.test(sessionId)) {
+            res.status(400).json({ error: 'Invalid sessionId' });
+            return;
+          }
+          const projectDir = path.join(process.cwd(), 'data', 'projects', sessionId);
+          const knowledgePath = path.join(projectDir, 'knowledge.md');
+          const queuesPath = path.join(projectDir, 'queues.json');
+
+          const knowledge = fs.existsSync(knowledgePath)
+            ? fs.readFileSync(knowledgePath, 'utf-8')
+            : 'No memory yet – session not started.';
+
+          let queues: Record<string, string[]> = {
+            nowQueue: [], nextQueue: [], blockedQueue: [], improveQueue: []
+          };
+          if (fs.existsSync(queuesPath)) {
+            try { queues = JSON.parse(fs.readFileSync(queuesPath, 'utf-8')); } catch { /* use defaults */ }
+          }
+
+          res.json({ sessionId, knowledge, queues });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
       const sessionMap = new Map<string, { server: any, transport: StreamableHTTPServerTransport }>();
 
       const handleMcpRequest = async (req: express.Request, res: express.Response) => {
