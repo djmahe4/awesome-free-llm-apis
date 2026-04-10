@@ -42,7 +42,7 @@ graph TD
 
 | Stage | Component | Purpose |
 |-------|-----------|---------|
-| 1 | `StructuralMarkdownMiddleware` *(new v1.0.4)* | Injects full `knowledge.md` session memory into agentic requests; enforces structured response format |
+| 1 | `StructuralMarkdownMiddleware` | Injects full `knowledge.md` session memory + **Resolves `file://` URIs** (v1.0.4) into agentic requests; enforces structured response format |
 | 2 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed |
 | 3 | `AgenticMiddleware` *(optional)* | Task decomposition (max 4 steps), research validation, system prompt injection, early-exit on confidence > 0.85 or 3 iterations |
 | 4 | `IntelligentRouterMiddleware` | Deterministic keyword-based model-tier selection with FREE-first fallback cascade |
@@ -94,7 +94,7 @@ await client.callTool('list_available_free_models', { available_only: true });
 // ⚠️ Both `agentic: true` AND `workspace_root` are required for memory injection.
 // Omitting either produces a context-blind response with no memory or session enrichment.
 await client.callTool('use_free_llm', {
-  messages: [{ role: 'user', content: 'Refactor the auth module to use JWTs' }],
+  messages: [{ role: 'user', content: 'Refactor the auth module based on [plan.md](file:///c:/project/plan.md)' }],
   agentic: true,
   workspace_root: '/abs/path/to/my-project',
   keywords: ['refactor', 'security', 'jwt']
@@ -180,6 +180,8 @@ PipelineExecutor.execute(request, taskType)
         ▼ ─────────────────────────────────────
 StructuralMarkdownMiddleware  (v1.0.4 — only when request.isAgentic is set)
   • Reads full knowledge.md for session into memory
+  • **Artifact Awareness**: Detects and inlines `file://` URIs and Markdown links
+  • **Local Summarization**: TF-style zero-latency compression for large files
   • Injects full memory state + response format instructions into user message
   • console.error() with Date.now() subtraction for standardized latency logging
         │

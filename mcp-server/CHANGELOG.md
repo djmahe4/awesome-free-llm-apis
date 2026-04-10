@@ -10,7 +10,9 @@
 - **Dynamic Greedy Budgeting**: Implemented cross-provider timeout management that dynamically allocates time across the fallback cascade, preventing deadlocks while maximizing success probability.
 - **Tiered Context Pressure Handling**: Introduced Tier 0/1/2 logic for extreme input pressure (100k+ characters), using parallel summarization and adaptive truncation to maintain critical context windows.
 - **Fixed 'codeastral-latest' mode bug**: `code_mode` now features proper dynamic mode detection. The execution mode (`'chat'` | `'coding'` | `'research'`) is inferred automatically from code content and command description, replacing any hardcoded model references.
-- **Added Structural Markdown Middleware**: New `StructuralMarkdownMiddleware` inserted as the first pipeline stage. For agentic requests it reads the full session memory (`data/projects/{sessionId}/`) and injects it into the user message, giving the LLM complete visibility into context on every turn.
+- **Artifact Awareness & Context Resolution**: Introduced a pre-processing pass in `use-free-llm.ts` that detects and inlines `file://` URIs and Markdown links. This allows the LLM to "see" referenced files directly in the user message.
+- **Deterministic Local Summarization**: For large context files (>12k chars), implemented a TF-style (word-frequency) local summarization engine. This enables high-density context injection without external API calls or latency.
+- **Structural Markdown Middleware**: New `StructuralMarkdownMiddleware` inserted as the first pipeline stage. For agentic requests it reads the full session memory (`data/projects/{sessionId}/`) and injects it into the user message, giving the LLM complete visibility into context on every turn.
 - **Project Work Rule Enforcement**: Tool descriptions and all documentation (`README.md`, `guide.md`, `SKILL.md`) have been hardened to mandate `agentic: true` and `workspace_root` for repository-scoped tasks, preventing "context-blind" requests.
 - **Logic Collision Fixes**: Resolved auto-classification collisions (e.g., 'classify' matching as 'coding' due to name overlap) to ensure deterministic routing for complex intents.
 
@@ -19,10 +21,12 @@
 - **Classification Task Validation**: Fully implemented Moderation, UserIntent, and Reasoning task routing.
 - **Context Summarization Engine**: Tier 1 fallback that compresses history when it exceeds 40% of the model's budget.
 - `StructuralMarkdownMiddleware` (`src/middleware/agentic/structural-middleware.ts`) — registered as stage 1 in the pipeline
+- `resolveFileRefs(content, workspaceRoot)` — v1.0.4 helper for inlining `file://` URIs with security boundaries
+- `summarizeTextLocally(text, limit)` — zero-latency TF-style summarization for large files
 - `writeToSessionMemory(sessionId, filePath, content)` helper in `code-mode.ts` — safe file persistence with path-traversal guard
 - `detectMode(code, command)` in `code-mode.ts` — auto-detects `'coding'` | `'research'` mode
 - `limitSubtasks(plan)` in `AgenticMiddleware` — hard cap of 4 subtasks
-- **Test Matrix Expansion**: Added `tests/task-routing-matrix.test.ts` to verify the "Prompt → Task → Model" routing pipeline across all 9 categories.
+- **Test Matrix Expansion**: Added `tests/task-routing-matrix.test.ts` and `tests/context-resolution.test.ts` to verify the "Prompt → Task → Model" routing pipeline and file inlining logic.
 - **Dynamic Timeout Testing**: Switched test assertions to `expect.any(Number)` to support dynamic time budgets.
 
 ### 🔧 Improvements
