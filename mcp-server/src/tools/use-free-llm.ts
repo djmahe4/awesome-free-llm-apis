@@ -72,67 +72,119 @@ export function summarizeTextLocally(text: string, limit: number): string {
 }
 
 /**
- * v1.0.4: Resolves file:// references in user messages.
- * Only allows files inside workspaceRoot or the Antigravity app data directory.
+ * v1.0.4: Platform-aware artifact roots for model-specific context.
  */
-export async function resolveFileRefs(content: string, workspaceRoot?: string): Promise<string> {
-  // Regex matches [label](file://path) or bare file://path
-  const fileUriRegex = /(?:\[([^\]]+)\]\()?file:\/\/([^\s)]+)(?:\))?/g;
+const artifactRoots = {
+  claude: process.env.CLAUDE_ARTIFACTS_DIR || path.join(os.homedir(), '.anthropic', 'artifacts'),
+  chatgpt: process.env.CHATGPT_ARTIFACTS_DIR || path.join(os.homedir(), '.openai', 'artifacts'),
+  codex: process.env.CODEX_ARTIFACTS_DIR || path.join(os.homedir(), '.codex', 'artifacts'),
+  antigravity: process.env.ANTIGRAVITY_APP_DATA || path.join(os.homedir(), '.gemini', 'antigravity')
+};
+
+/**
+ * v1.0.4: Scans the last 2 messages for code blocks matching a filename.
+ * fufills the "user provided context via markdown" fallback.
+ */
+async function findInRecentMessages(filename: string, messages: any[]): Promise<string | null> {
+  const recent = messages.slice(-3, -1);
+  for (const msg of recent) {
+    if (typeof msg.content !== 'string') continue;
+    const codeBlockRegex = new RegExp(`\`\`\`(?:file:)?${filename}\\n([\\s\\S]*?)\`\`\``, 'i');
+    const match = codeBlockRegex.exec(msg.content);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+/**
+ * v1.0.4: Resolves file://, artifact://, ctx7://, and mcp:// references in user messages.
+ */
+export async function resolveFileRefs(content: string, messages: any[], workspaceRoot?: string): Promise<string> {
+  const uriRegex = /(?:\[([^\]]+)\]\()?(file|mcp|ctx7|artifact):\/\/([^\s)]+)(?:\))?/gi;
   let newContent = content;
-  const matches = [...content.matchAll(fileUriRegex)];
-  
-  const appDataRoot = path.join(os.homedir(), '.gemini', 'antigravity');
-  // v1.0.4 Hardening: Reject empty or whitespace strings to avoid resolving to process.cwd()
+  const matches = [...content.matchAll(uriRegex)];
+
   const wsRoot = (workspaceRoot && workspaceRoot.trim()) ? path.resolve(workspaceRoot) : undefined;
 
   for (const match of matches) {
     const fullMatch = match[0];
-    let uriPath = match[2];
-    
-    // Normalize path (handle Windows file:///C:/ style)
-    let filePath = uriPath;
-    if (filePath.startsWith('/')) {
-        if (/^\/[A-Za-z]:\//.test(filePath)) {
-            filePath = filePath.substring(1);
+    const protocol = match[2].toLowerCase();
+    const uriPath = match[3];
+    let resolvedContent: string | null = null;
+    let sourceLabel = '';
+
+    if (protocol === 'file' || protocol === 'artifact') {
+      let filePath = uriPath;
+      if (protocol === 'artifact') {
+        const platform = uriPath.split('/')[0].toLowerCase();
+        const relativePath = uriPath.split('/').slice(1).join('/');
+        const root = (artifactRoots as any)[platform] || artifactRoots.antigravity;
+        filePath = path.join(root, relativePath);
+        sourceLabel = `artifact:${platform}`;
+      } else {
+        if (filePath.startsWith('/')) {
+          if (/^\/[A-Za-z]:\//.test(filePath)) filePath = filePath.substring(1);
         }
-    }
-    filePath = path.normalize(decodeURIComponent(filePath));
-    const absPath = path.resolve(filePath);
+        sourceLabel = 'file';
+      }
 
-    // Security gate - Cross-platform normalization
-    const normAbs = absPath.replace(/\\/g, '/');
-    const normWs = wsRoot ? wsRoot.replace(/\\/g, '/') : null;
-    const normAppData = appDataRoot.replace(/\\/g, '/');
+      filePath = path.normalize(decodeURIComponent(filePath));
+      const absPath = path.resolve(filePath);
+      const normAbs = absPath.replace(/\\/g, '/');
 
-    // Case-insensitive check for drive-letter paths (Windows style)
-    const isWindowsPath = /^[A-Za-z]:\//.test(normAbs);
-    const isInsideWs = normWs && (
-        normAbs.startsWith(normWs) || 
-        (isWindowsPath && normAbs.toLowerCase().startsWith(normWs.toLowerCase()))
-    );
-    const isInsideAppData = normAbs.startsWith(normAppData);
+      const allowedRoots = [
+        wsRoot,
+        artifactRoots.claude,
+        artifactRoots.chatgpt,
+        artifactRoots.codex,
+        artifactRoots.antigravity
+      ].filter(Boolean).map(r => r!.replace(/\\/g, '/'));
 
-    if (!isInsideWs && !isInsideAppData) {
-        console.error(`[v1.0.4][resolveFileRefs] Security block: ${absPath} is outside allowed boundaries (ws: ${wsRoot}, appData: ${appDataRoot})`);
+      const isAuthorized = allowedRoots.some(root => {
+        if (process.platform === 'win32' && /^[A-Za-z]:\//.test(normAbs)) {
+          return normAbs.toLowerCase().startsWith(root.toLowerCase());
+        }
+        return normAbs.startsWith(root);
+      });
+
+      if (!isAuthorized) {
+        console.error(`[v1.0.4][resolveRefs] Security block: ${absPath} is outside allowed boundaries`);
         continue;
-    }
+      }
 
-    try {
+      try {
         if (await fs.pathExists(absPath) && (await fs.stat(absPath)).isFile()) {
-            let fileData = await fs.readFile(absPath, 'utf-8');
-            const MAX_CHARS = 12000;
-            
-            if (fileData.length > MAX_CHARS) {
-                fileData = summarizeTextLocally(fileData, MAX_CHARS);
-            }
-            
-            const baseName = path.basename(absPath);
-            const replacement = `${fullMatch}\n\n\`\`\`file:${baseName}\n${fileData}\n\`\`\``;
-            newContent = newContent.replace(fullMatch, replacement);
-            console.error(`[v1.0.4][resolveFileRefs] Inlined ${baseName} (${fileData.length} chars)`);
+          resolvedContent = await fs.readFile(absPath, 'utf-8');
         }
-    } catch (err) {
-        console.error(`[v1.0.4][resolveFileRefs] Failed to read ${absPath}:`, err);
+      } catch (err) {
+        console.error(`[v1.0.4][resolveRefs] Disk read failed for ${absPath}:`, err);
+      }
+
+      if (!resolvedContent) {
+        const fileName = path.basename(absPath);
+        resolvedContent = await findInRecentMessages(fileName, messages);
+        if (resolvedContent) sourceLabel += ':history';
+      }
+
+      if (resolvedContent) {
+        const MAX_CHARS = 12000;
+        if (resolvedContent.length > MAX_CHARS) {
+          resolvedContent = summarizeTextLocally(resolvedContent, MAX_CHARS);
+        }
+        const baseName = path.basename(absPath);
+        const replacement = `${fullMatch}\n\n\`\`\`${sourceLabel}:${baseName}\n${resolvedContent}\n\`\`\``;
+        newContent = newContent.replace(fullMatch, replacement);
+        console.error(`[v1.0.4][resolveRefs] Resolved ${baseName} via ${sourceLabel}`);
+      }
+    } else if (protocol === 'ctx7') {
+      /**
+       * v1.0.4 Placeholder: Context7 Integration
+       * FUTURE(TODO): Implement resolver using context7 MCP server.
+       * CONSTRAINT: Cap total tool calls to 3 per query.
+       */
+      console.warn(`[v1.0.4][resolveRefs] ctx7 protocol not yet implemented: ${uriPath}`);
+    } else if (protocol === 'mcp') {
+      console.warn(`[v1.0.4][resolveRefs] mcp protocol not yet implemented: ${uriPath}`);
     }
   }
   return newContent;
@@ -154,11 +206,11 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     keywords,
   } = input;
 
-  // v1.0.4 Resolution Pass: Resolve file:// references in user messages
+  // v1.0.4 Resolution Pass: Resolve file, artifact, ctx7 references in user messages
   if (agentic) {
     for (const msg of messages) {
       if (msg.role === 'user' && typeof msg.content === 'string') {
-        msg.content = await resolveFileRefs(msg.content, workspaceRoot);
+        msg.content = await resolveFileRefs(msg.content, messages, workspaceRoot);
       }
     }
   }

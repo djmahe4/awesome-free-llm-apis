@@ -48,7 +48,7 @@ describe('Context Resolution (v1.0.4) Unit Tests', () => {
             (fs.readFile as any).mockResolvedValue(targetContent);
 
             const input = `Check [plan](file://${targetFile.replace(/\\/g, '/')})`;
-            const result = await resolveFileRefs(input, mockWsRoot);
+            const result = await resolveFileRefs(input, [], mockWsRoot);
 
             expect(result).toContain('```file:plan.md');
             expect(result).toContain('# My Plan');
@@ -64,7 +64,7 @@ describe('Context Resolution (v1.0.4) Unit Tests', () => {
             (fs.readFile as any).mockResolvedValue(targetContent);
 
             const input = `file://${targetFile.replace(/\\/g, '/')}`;
-            const result = await resolveFileRefs(input, mockWsRoot);
+            const result = await resolveFileRefs(input, [], mockWsRoot);
 
             expect(result).toContain('```file:task.md');
             expect(result).toContain('Task 1');
@@ -74,7 +74,7 @@ describe('Context Resolution (v1.0.4) Unit Tests', () => {
             const outsideFile = '/etc/passwd';
             
             const input = `file://${outsideFile}`;
-            const result = await resolveFileRefs(input, mockWsRoot);
+            const result = await resolveFileRefs(input, [], mockWsRoot);
 
             expect(result).toBe(input);
             expect(fs.readFile).not.toHaveBeenCalled();
@@ -92,7 +92,7 @@ describe('Context Resolution (v1.0.4) Unit Tests', () => {
             // Mock absolute path check for Windows in test environment
             // Since we're likely on Windows (per user info), we can use real path.resolve
             const input = `[file](file:///C:/Users/test/project/file.txt)`;
-            const result = await resolveFileRefs(input, wsRoot);
+            const result = await resolveFileRefs(input, [], wsRoot);
 
             expect(result).toContain('```file:file.txt');
             expect(result).toContain(targetContent);
@@ -107,7 +107,7 @@ describe('Context Resolution (v1.0.4) Unit Tests', () => {
             (fs.readFile as any).mockResolvedValue(targetContent);
 
             const input = `file://${targetFile.replace(/\\/g, '/')}`;
-            const result = await resolveFileRefs(input, mockWsRoot);
+            const result = await resolveFileRefs(input, [], mockWsRoot);
 
             expect(result).toContain('<!-- summarized -->');
             expect(result.length).toBeLessThan(targetContent.length);
@@ -117,7 +117,7 @@ describe('Context Resolution (v1.0.4) Unit Tests', () => {
             const input = 'file:///C:/etc/passwd';
             const wsRoot = ''; // Potentially dangerous if resolved to process.cwd()
             
-            const result = await resolveFileRefs(input, wsRoot);
+            const result = await resolveFileRefs(input, [], wsRoot);
             
             expect(result).toBe(input);
             expect(fs.readFile).not.toHaveBeenCalled();
