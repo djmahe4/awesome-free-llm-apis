@@ -233,15 +233,15 @@ async function main() {
 
     // --- CASE 9: Robust Content Formats (Array/Object) ---
     console.error('\nTest Case 9: Multi-modal/Robust Format Parsing...');
-    
+
     // Test Array Content
     pipeline.flush();
     lastCapturedRequest = null;
     const ctx9a: PipelineContext = {
-        request: { 
-            model: 'auto', 
-            messages: [{ role: 'user', content: [{ type: 'text', text: 'Analyze this code ' + Date.now() }] }], 
-            agentic: true 
+        request: {
+            model: 'auto',
+            messages: [{ role: 'user', content: [{ type: 'text', text: 'Analyze this code ' + Date.now() }] }],
+            agentic: true
         },
         sessionId,
         taskType: TaskType.Chat
@@ -257,10 +257,10 @@ async function main() {
     pipeline.flush();
     lastCapturedRequest = null;
     const ctx9b: PipelineContext = {
-        request: { 
-            model: 'auto', 
-            messages: [{ role: 'user', content: { type: 'text', text: 'Single object message ' + Date.now() } as any }], 
-            agentic: true 
+        request: {
+            model: 'auto',
+            messages: [{ role: 'user', content: { type: 'text', text: 'Single object message ' + Date.now() } as any }],
+            agentic: true
         },
         sessionId,
         taskType: TaskType.Chat
@@ -283,7 +283,7 @@ async function main() {
         taskType: TaskType.Chat
     };
     await pipeline.execute(ctx10);
-    
+
     if (lastCapturedRequest && !hasInjectedContext(lastCapturedRequest)) {
         console.error('  [✓] Correctly bypassed invalid sessionId (Security Gate).');
     } else if (!lastCapturedRequest) {
@@ -432,8 +432,8 @@ async function main() {
     };
     await pipeline.execute(ctx13);
     const content13 = ctx13.request.messages[0].content as string;
-    const planIdx      = content13.indexOf('MISSION PLAN');
-    const queueIdx     = content13.indexOf('TASK QUEUE');
+    const planIdx = content13.indexOf('MISSION PLAN');
+    const queueIdx = content13.indexOf('TASK QUEUE');
     const knowledgeIdx = content13.indexOf('SESSION KNOWLEDGE');
 
     if (planIdx < queueIdx && queueIdx < knowledgeIdx) {
@@ -449,10 +449,10 @@ async function main() {
     // In production, useFreeLLM handles this derivation. We simulate it here to verify
     // the downstream middlewares (StructuralMarkdownMiddleware) receive the derived ID.
     pipeline.flush();
-    const mockRequest14 = { 
-        model: 'auto', 
-        messages: [{ role: 'user' as const, content: 'CWD check ' + Date.now() }], 
-        agentic: true 
+    const mockRequest14 = {
+        model: 'auto',
+        messages: [{ role: 'user' as const, content: 'CWD check ' + Date.now() }],
+        agentic: true
     };
     const wsHash14 = workspaceScanner.getWorkspaceHash(); // Default to CWD (uses the instance at top of main)
     const ctx14: PipelineContext = {
@@ -461,17 +461,17 @@ async function main() {
         wsHash: wsHash14,
         sessionId: `ws-${wsHash14.substring(0, 16)}` // Mimics derivation logic in use-free-llm.ts
     };
-    
+
     await pipeline.execute(ctx14);
-    
+
     if (ctx14.sessionId && ctx14.sessionId.startsWith('ws-')) {
         console.error(`  [✓] Derived sessionId correctly simulated: ${ctx14.sessionId}`);
         const content14 = ctx14.request.messages[0].content as string;
         // Verify that StructuralMarkdownMiddleware DID NOT reject it
         if (!content14.includes('Rejected missing sessionId')) {
-             console.error('  [✓] StructuralMarkdownMiddleware correctly accepted the derived session.');
+            console.error('  [✓] StructuralMarkdownMiddleware correctly accepted the derived session.');
         } else {
-             throw new Error('FAILED: StructuralMarkdownMiddleware rejected the derived session!');
+            throw new Error('FAILED: StructuralMarkdownMiddleware rejected the derived session!');
         }
     } else {
         throw new Error('FAILED: SessionId simulation failed!');
@@ -484,9 +484,9 @@ async function main() {
     // The resolveFileRefs logic expects file:// uris
     const testUri = `file://${testFilePath.replace(/\\/g, '/')}`;
     const userMessage = `Please review my plan in [test_plan.md](${testUri})`;
-    
-    const resolvedContent = await resolveFileRefs(userMessage, process.cwd());
-    
+
+    const resolvedContent = await resolveFileRefs(userMessage, [], process.cwd());
+
     if (resolvedContent.includes('Research Module Standardization Plan') && resolvedContent.includes('```file:test_plan.md')) {
         console.error('  [✓] File context inlined successfully.');
     } else {
