@@ -291,6 +291,156 @@ async function main() {
     }
 
 
+    // ============================================================
+    // INGESTION CYCLE TESTS: AgenticMiddleware WRITES, Structural READS
+    // ============================================================
+
+    // --- CASE 11: Full State Injection (Plan + Tasks + Queue + Knowledge) ---
+    console.error('\nTest Case 11: Full State Ingestion Cycle...');
+    const sessionId11 = 'stress-session-full-state-' + Date.now();
+    const projectDir11 = path.join(process.cwd(), 'data', 'projects', sessionId11);
+    await fs.ensureDir(projectDir11);
+
+    // Write all state files (simulating what AgenticMiddleware would produce)
+    await fs.writeFile(path.join(projectDir11, 'plan.md'), '# Plan\n\n1. Analyse the input\n2. Generate the output\n3. Validate the result\n4. Report summary');
+    await fs.writeFile(path.join(projectDir11, 'tasks.md'), '# Tasks\n\n- [x] Kickoff meeting\n- [ ] Implement feature\n- [ ] Write tests');
+    await fs.writeFile(path.join(projectDir11, 'queues.json'), JSON.stringify({
+        nowQueue: ['Implement feature'],
+        nextQueue: ['Write tests'],
+        blockedQueue: ['Deploy to prod'],
+        improveQueue: []
+    }, null, 2));
+    await fs.writeFile(path.join(projectDir11, 'knowledge.md'), '# Knowledge\n\nThe API uses Bearer tokens. Base URL is https://api.example.com.');
+
+    pipeline.flush();
+    lastCapturedRequest = null;
+    const ctx11: PipelineContext = {
+        request: { model: 'auto', messages: [{ role: 'user', content: 'Summarise the current plan and tasks.' }], agentic: true },
+        sessionId: sessionId11,
+        taskType: TaskType.Chat
+    };
+    await pipeline.execute(ctx11);
+
+    // ✅ Verify on the context object itself — structural-middleware mutates messages in-place
+    // before next() is called, so ctx11.request is the authoritative source regardless of router.
+    const injected11 = ctx11.request.messages[0].content as string;
+    const has = (marker: string) => injected11.includes(marker);
+    const pass11 = has('MISSION PLAN') && has('TASK QUEUE') && has('ACTIVE TASKS') && has('SESSION KNOWLEDGE');
+    if (pass11) {
+        console.error('  [✓] All 4 state sections injected: MISSION PLAN, TASK QUEUE, ACTIVE TASKS, SESSION KNOWLEDGE.');
+    } else {
+        const missing = ['MISSION PLAN', 'TASK QUEUE', 'ACTIVE TASKS', 'SESSION KNOWLEDGE'].filter(s => !has(s));
+        throw new Error(`FAILED: Missing sections in prompt: ${missing.join(', ')}`);
+    }
+
+    // Queue state specific assertions
+    if (has('Implement feature') && has('Write tests') && has('Deploy to prod')) {
+        console.error('  [✓] Queue task items correctly serialised into prompt.');
+    } else {
+        throw new Error('FAILED: Queue task items missing from prompt!');
+    }
+    await fs.remove(projectDir11);
+
+
+    // --- CASE 12: Partial State Combinations ---
+    console.error('\nTest Case 12: Partial State Combinations...');
+
+    // Subcase A: Only knowledge.md exists (legacy behaviour)
+    const sessionId12a = 'stress-session-partial-a-' + Date.now();
+    const projectDir12a = path.join(process.cwd(), 'data', 'projects', sessionId12a);
+    await fs.ensureDir(projectDir12a);
+    await fs.writeFile(path.join(projectDir12a, 'knowledge.md'), '# Knowledge\n\nLegacy API: v1 endpoints only.');
+
+    pipeline.flush();
+    const ctx12a: PipelineContext = {
+        request: { model: 'auto', messages: [{ role: 'user', content: 'Legacy check ' + Date.now() }], agentic: true },
+        sessionId: sessionId12a, taskType: TaskType.Chat
+    };
+    await pipeline.execute(ctx12a);
+    const content12a = ctx12a.request.messages[0].content as string;
+    if (content12a.includes('SESSION KNOWLEDGE') && !content12a.includes('MISSION PLAN')) {
+        console.error('  [✓] Partial state (knowledge only): correct – no plan injected.');
+    } else {
+        throw new Error('FAILED: Partial state (knowledge only) produced unexpected sections!');
+    }
+    await fs.remove(projectDir12a);
+
+    // Subcase B: Only plan.md + queues.json (no knowledge yet)
+    const sessionId12b = 'stress-session-partial-b-' + Date.now();
+    const projectDir12b = path.join(process.cwd(), 'data', 'projects', sessionId12b);
+    await fs.ensureDir(projectDir12b);
+    await fs.writeFile(path.join(projectDir12b, 'plan.md'), '# Plan\n\n1. Draft\n2. Review\n3. Publish');
+    await fs.writeFile(path.join(projectDir12b, 'queues.json'), JSON.stringify({ nowQueue: ['Draft'], nextQueue: ['Review'], blockedQueue: [], improveQueue: [] }));
+
+    pipeline.flush();
+    const ctx12b: PipelineContext = {
+        request: { model: 'auto', messages: [{ role: 'user', content: 'Plan check ' + Date.now() }], agentic: true },
+        sessionId: sessionId12b, taskType: TaskType.Chat
+    };
+    await pipeline.execute(ctx12b);
+    const content12b = ctx12b.request.messages[0].content as string;
+    if (content12b.includes('MISSION PLAN') && content12b.includes('TASK QUEUE') && !content12b.includes('SESSION KNOWLEDGE')) {
+        console.error('  [✓] Partial state (plan + queue, no knowledge): correct – no knowledge injected.');
+    } else {
+        throw new Error('FAILED: Partial state (plan only) produced unexpected sections!');
+    }
+    await fs.remove(projectDir12b);
+
+    // Subcase C: Empty scaffolds only (all files exist but are just the auto-generated templates)
+    const sessionId12c = 'stress-session-partial-c-' + Date.now();
+    const projectDir12c = path.join(process.cwd(), 'data', 'projects', sessionId12c);
+    await fs.ensureDir(projectDir12c);
+    // Exactly mimics what AgenticMiddleware.ensureProjectFiles() produces
+    await fs.writeFile(path.join(projectDir12c, 'plan.md'), '# Plan\n\n<!-- Auto-generated by Agentic Middleware -->');
+    await fs.writeFile(path.join(projectDir12c, 'tasks.md'), '# Tasks\n\n<!-- Auto-generated by Agentic Middleware -->');
+    await fs.writeFile(path.join(projectDir12c, 'knowledge.md'), '# Knowledge\n\n<!-- Auto-generated by Agentic Middleware -->');
+
+    pipeline.flush();
+    const ctx12c: PipelineContext = {
+        request: { model: 'auto', messages: [{ role: 'user', content: 'Fresh start ' + Date.now() }], agentic: true },
+        sessionId: sessionId12c, taskType: TaskType.Chat
+    };
+    await pipeline.execute(ctx12c);
+    const content12c = ctx12c.request.messages[0].content as string;
+    // Empty scaffolds (≤30 chars of real content) should be filtered out for plan, tasks and knowledge
+    const hasNoPlans = !content12c.includes('MISSION PLAN') && !content12c.includes('ACTIVE TASKS');
+    const hasNoKnowledge = !content12c.includes('SESSION KNOWLEDGE');
+    if (hasNoPlans && hasNoKnowledge) {
+        console.error('  [✓] All empty scaffolds suppressed (plan, tasks, knowledge filtered).');
+    } else {
+        throw new Error('FAILED: Empty scaffolds leaked into the prompt!');
+    }
+    await fs.remove(projectDir12c);
+
+
+    // --- CASE 13: Section Ordering ---
+    console.error('\nTest Case 13: Section Order Verification...');
+    const sessionId13 = 'stress-session-order-' + Date.now();
+    const projectDir13 = path.join(process.cwd(), 'data', 'projects', sessionId13);
+    await fs.ensureDir(projectDir13);
+    await fs.writeFile(path.join(projectDir13, 'plan.md'), '# Plan\n\n1. Draft\n2. Ship');
+    await fs.writeFile(path.join(projectDir13, 'queues.json'), JSON.stringify({ nowQueue: ['Draft'], nextQueue: [], blockedQueue: [], improveQueue: [] }));
+    await fs.writeFile(path.join(projectDir13, 'knowledge.md'), '# Knowledge\n\nAPI key is ABC123.');
+
+    pipeline.flush();
+    const ctx13: PipelineContext = {
+        request: { model: 'auto', messages: [{ role: 'user', content: 'Order check ' + Date.now() }], agentic: true },
+        sessionId: sessionId13, taskType: TaskType.Chat
+    };
+    await pipeline.execute(ctx13);
+    const content13 = ctx13.request.messages[0].content as string;
+    const planIdx      = content13.indexOf('MISSION PLAN');
+    const queueIdx     = content13.indexOf('TASK QUEUE');
+    const knowledgeIdx = content13.indexOf('SESSION KNOWLEDGE');
+
+    if (planIdx < queueIdx && queueIdx < knowledgeIdx) {
+        console.error('  [✓] Sections in correct order: MISSION PLAN → TASK QUEUE → SESSION KNOWLEDGE.');
+    } else {
+        throw new Error(`FAILED: Section order wrong! planIdx=${planIdx} queueIdx=${queueIdx} knowledgeIdx=${knowledgeIdx}`);
+    }
+    await fs.remove(projectDir13);
+
+
     // --- CLEANUP ---
     console.error('\nCleaning up stress test data...');
     await fs.remove(projectDir);
