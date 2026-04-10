@@ -77,23 +77,21 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
   pipeline.use(agenticMiddleware);
   pipeline.use(sharedRouter);
 
+  const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
+
   // Derive a foolproof sessionId if not explicitly provided
   let effectiveSessionId = inputSessionId;
-  if (!effectiveSessionId && workspaceRoot) {
-    try {
-      const normalizedPath = path.resolve(workspaceRoot).replace(/\\/g, '/');
-      const hash = crypto.createHash('sha256').update(normalizedPath).digest('hex').substring(0, 16);
-      effectiveSessionId = `ws-${hash}`;
-    } catch (err) {
-      console.error('[useFreeLLM] Failed to derive foolproof sessionId from workspaceRoot:', err);
-    }
+  if (!effectiveSessionId && (workspaceRoot || agentic)) {
+    // v1.0.4 Hardening: Use the stable wsHash to derive sessionId if missing
+    // This ensure agentic mode works even if workspace_root wasn't explicitly passed
+    effectiveSessionId = `ws-${wsHash.substring(0, 16)}`;
   }
 
   const context: PipelineContext = {
     request,
     taskType: (input as any).taskType as TaskType || TaskType.Chat,
     workspaceRoot,
-    wsHash: workspaceScanner.getWorkspaceHash(workspaceRoot),
+    wsHash,
     providerId: providerId,
     agentic,
     sessionId: effectiveSessionId,

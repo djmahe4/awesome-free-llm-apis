@@ -7,6 +7,7 @@ import { IntelligentRouterMiddleware } from '../src/pipeline/middlewares/Intelli
 import { PipelineExecutor, TaskType, type PipelineContext } from '../src/pipeline/middleware.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import { LLMExecutor } from '../src/utils/LLMExecutor.js';
+import { WorkspaceScanner } from '../src/cache/workspace.js';
 
 /**
  * FULL PIPELINE STRESS TEST
@@ -91,6 +92,7 @@ async function main() {
     await setupMocks();
 
     const sessionId = 'full-stress-session-' + Date.now();
+    const workspaceScanner = new WorkspaceScanner(process.cwd());
     const projectDir = path.join(process.cwd(), 'data', 'projects', sessionId);
     const knowledgePath = path.join(projectDir, 'knowledge.md');
 
@@ -439,6 +441,40 @@ async function main() {
         throw new Error(`FAILED: Section order wrong! planIdx=${planIdx} queueIdx=${queueIdx} knowledgeIdx=${knowledgeIdx}`);
     }
     await fs.remove(projectDir13);
+
+
+    // --- CASE 14: Agentic Request Without Workspace Root ---
+    console.error('\nTest Case 14: Missing Workspace Root Fallback Simulation...');
+    // In production, useFreeLLM handles this derivation. We simulate it here to verify
+    // the downstream middlewares (StructuralMarkdownMiddleware) receive the derived ID.
+    pipeline.flush();
+    const mockRequest14 = { 
+        model: 'auto', 
+        messages: [{ role: 'user' as const, content: 'CWD check ' + Date.now() }], 
+        agentic: true 
+    };
+    const wsHash14 = workspaceScanner.getWorkspaceHash(); // Default to CWD (uses the instance at top of main)
+    const ctx14: PipelineContext = {
+        request: mockRequest14,
+        taskType: TaskType.Chat,
+        wsHash: wsHash14,
+        sessionId: `ws-${wsHash14.substring(0, 16)}` // Mimics derivation logic in use-free-llm.ts
+    };
+    
+    await pipeline.execute(ctx14);
+    
+    if (ctx14.sessionId && ctx14.sessionId.startsWith('ws-')) {
+        console.error(`  [✓] Derived sessionId correctly simulated: ${ctx14.sessionId}`);
+        const content14 = ctx14.request.messages[0].content as string;
+        // Verify that StructuralMarkdownMiddleware DID NOT reject it
+        if (!content14.includes('Rejected missing sessionId')) {
+             console.error('  [✓] StructuralMarkdownMiddleware correctly accepted the derived session.');
+        } else {
+             throw new Error('FAILED: StructuralMarkdownMiddleware rejected the derived session!');
+        }
+    } else {
+        throw new Error('FAILED: SessionId simulation failed!');
+    }
 
 
     // --- CLEANUP ---
