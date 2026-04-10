@@ -18,7 +18,8 @@ export class StructuralMarkdownMiddleware implements Middleware {
         // Tightened Guard: Bypass if not agentic OR missing mandatory/valid sessionId
         if (!context.request?.agentic || !sessionId) {
             if (context.request?.agentic && !sessionId) {
-                console.error(`[structural-middleware] Rejected invalid or missing sessionId: ${sessionIdRaw}`);
+                const reason = sessionIdRaw ? 'invalid (Security Gate)' : 'missing';
+                console.error(`[structural-middleware] Rejected ${reason} sessionId: ${sessionIdRaw}`);
             }
             await next();
             console.error(`[structural-middleware] ${Date.now() - startMs}ms (pass-through)`);
