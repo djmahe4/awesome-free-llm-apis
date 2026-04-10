@@ -15,6 +15,7 @@
 | `use_free_llm` | Send chat messages to any model with fallback support | `model`, `messages` |
 | `code_mode` | Execute sandboxed code (JS/Python/Go/Rust) against input data | `code` |
 | `manage_memory` | Manage persistent workspace memory (search/list/stats/clear) | `action` |
+| `store_memory` | Save findings, decisions, or summaries to workspace memory | `key`, `content` |
 
 > **Agent Rule**: Always invoke `manage_memory` (action: "search") before wide-context actions to retrieve relevant prior context.
 

@@ -163,7 +163,7 @@ Execute sandboxed code against arbitrary data. Only `stdout` is returned — nev
 
 **Sandbox Constraints (all languages):** No filesystem, no network, no process/OS calls.
 
-> **Context Compression:** `compressionRatio` = stdout.length / data.length — a ratio < 1 means context savings were achieved. See TC-05 in [usages.md](references/usages.md) for benchmarks.
+> **Context Compression**: `compressionRatio` = stdout.length / data.length — a ratio < 1 means context savings were achieved. See [code-mode-logic.md](references/code-mode-logic.md) for advanced patterns and benchmarks, and TC-05 in [usages.md](references/usages.md) for execution results.
 
 ---
 
@@ -183,6 +183,7 @@ Manage persistent, workspace-aware memory across sessions.
 | `clear` | Flush all cached memory for the workspace |
 
 > **Rule:** Always `search` memory before starting any new research task.
+> **Documentation:** See [memory-usage.md](references/memory-usage.md) for architectural details and search optimization.
 
 ---
 
@@ -198,7 +199,8 @@ Store manual context or persistent thoughts into the long-term workspace memory.
 }
 ```
 
-> **Use Case**: Explicitly save findings, decisions, or summaries after concluding research or a large task. This ensures instant recall via `manage_memory (search)` in future sessions, preventing knowledge loss.
+> **Rule: Always `store_memory` upon task completion.** Explicitly save findings, decisions, or summaries after concluding research or a large task. This ensures instant recall via `manage_memory (search)` in future sessions, preventing knowledge loss.
+> **Documentation:** See [memory-usage.md](references/memory-usage.md) for versioning and schema patterns.
 
 ---
 
@@ -246,12 +248,23 @@ Each iteration builds on the last. Use `code_mode` to compress and deduplicate f
 3. **Rewrite** instructions if quality < threshold
 4. **Store** improved instructions with a timestamp key
 
+### Pattern 4: Terminal Task Completion (The Handshake)
+
+```
+1. finalize_task  →  Generate final summary/artifact
+2. store_memory   →  Save summary + decisions to "completion/<task_id>"
+3. manage_memory  →  Verify storage success
+4. [DONE]         →  Inform user and exit
+```
+Always conclude significant work by "checking in" your knowledge to the workspace memory.
+
 ---
 
 ## 🔴 Anti-Rationalization Rules
 
 - **DO NOT** use `use_free_llm` for project work without `agentic: true` and `workspace_root`.
 - **DO NOT** start a pipeline without checking memory for prior findings first.
+- **DO NOT** conclude a task or session without saving findings via `store_memory`.
 - **DO NOT** skip `validate_provider` if a provider fails two consecutive calls.
 - **DO NOT** accumulate raw LLM outputs — compress and deduplicate via `code_mode`.
 - **ALWAYS** version subagent instruction changes with a timestamp key.
