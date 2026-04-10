@@ -8,6 +8,7 @@ import { PipelineExecutor, TaskType, type PipelineContext } from '../src/pipelin
 import { ProviderRegistry } from '../src/providers/registry.js';
 import { LLMExecutor } from '../src/utils/LLMExecutor.js';
 import { WorkspaceScanner } from '../src/cache/workspace.js';
+import { resolveFileRefs, summarizeTextLocally } from '../src/tools/use-free-llm.js';
 
 /**
  * FULL PIPELINE STRESS TEST
@@ -474,6 +475,32 @@ async function main() {
         }
     } else {
         throw new Error('FAILED: SessionId simulation failed!');
+    }
+
+
+    // --- CASE 15: File Context Resolution (v1.0.4) ---
+    console.error('\nTest Case 15: Context Resolution Verification (v1.0.4)...');
+    const testFilePath = path.join(process.cwd(), 'data', 'test_plan.md');
+    // The resolveFileRefs logic expects file:// uris
+    const testUri = `file://${testFilePath.replace(/\\/g, '/')}`;
+    const userMessage = `Please review my plan in [test_plan.md](${testUri})`;
+    
+    const resolvedContent = await resolveFileRefs(userMessage, process.cwd());
+    
+    if (resolvedContent.includes('Research Module Standardization Plan') && resolvedContent.includes('```file:test_plan.md')) {
+        console.error('  [✓] File context inlined successfully.');
+    } else {
+        throw new Error('FAILED: File context was NOT inlined!');
+    }
+
+    // Subcase B: Summarization Check
+    console.error('  [i] Testing Local Summarization Logic...');
+    const longText = 'This is a long sentence with many words. '.repeat(1000); // Definitely > 12000
+    const summary = summarizeTextLocally(longText, 500);
+    if (summary.startsWith('<!-- summarized -->') && summary.length <= 600) {
+        console.error('  [✓] Local summarization returned valid condensed output.');
+    } else {
+        throw new Error(`FAILED: Summarization failed! Length: ${summary.length}`);
     }
 
 
