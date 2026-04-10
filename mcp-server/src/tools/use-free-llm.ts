@@ -82,7 +82,8 @@ export async function resolveFileRefs(content: string, workspaceRoot?: string): 
   const matches = [...content.matchAll(fileUriRegex)];
   
   const appDataRoot = path.join(os.homedir(), '.gemini', 'antigravity');
-  const wsRoot = workspaceRoot ? path.resolve(workspaceRoot) : undefined;
+  // v1.0.4 Hardening: Reject empty or whitespace strings to avoid resolving to process.cwd()
+  const wsRoot = (workspaceRoot && workspaceRoot.trim()) ? path.resolve(workspaceRoot) : undefined;
 
   for (const match of matches) {
     const fullMatch = match[0];
@@ -98,12 +99,21 @@ export async function resolveFileRefs(content: string, workspaceRoot?: string): 
     filePath = path.normalize(decodeURIComponent(filePath));
     const absPath = path.resolve(filePath);
 
-    // Security gate
-    const isInsideWs = wsRoot && absPath.startsWith(wsRoot);
-    const isInsideAppData = absPath.startsWith(appDataRoot);
+    // Security gate - Cross-platform normalization
+    const normAbs = absPath.replace(/\\/g, '/');
+    const normWs = wsRoot ? wsRoot.replace(/\\/g, '/') : null;
+    const normAppData = appDataRoot.replace(/\\/g, '/');
+
+    // Case-insensitive check for drive-letter paths (Windows style)
+    const isWindowsPath = /^[A-Za-z]:\//.test(normAbs);
+    const isInsideWs = normWs && (
+        normAbs.startsWith(normWs) || 
+        (isWindowsPath && normAbs.toLowerCase().startsWith(normWs.toLowerCase()))
+    );
+    const isInsideAppData = normAbs.startsWith(normAppData);
 
     if (!isInsideWs && !isInsideAppData) {
-        console.error(`[v1.0.4][resolveFileRefs] Security block: ${absPath} is outside allowed boundaries.`);
+        console.error(`[v1.0.4][resolveFileRefs] Security block: ${absPath} is outside allowed boundaries (ws: ${wsRoot}, appData: ${appDataRoot})`);
         continue;
     }
 

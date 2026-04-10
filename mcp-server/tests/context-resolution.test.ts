@@ -112,5 +112,15 @@ describe('Context Resolution (v1.0.4) Unit Tests', () => {
             expect(result).toContain('<!-- summarized -->');
             expect(result.length).toBeLessThan(targetContent.length);
         });
+
+        it('should reject resolution if workspaceRoot is an empty string (Security Hardening)', async () => {
+            const input = 'file:///C:/etc/passwd';
+            const wsRoot = ''; // Potentially dangerous if resolved to process.cwd()
+            
+            const result = await resolveFileRefs(input, wsRoot);
+            
+            expect(result).toBe(input);
+            expect(fs.readFile).not.toHaveBeenCalled();
+        });
     });
 });
