@@ -56,7 +56,7 @@ graph TD
 
 | Tool | Purpose | Required Params | Key Optional Params |
 |------|---------|----------------|---------------------|
-| `use_free_llm` | Universal chat with deterministic steering; returns ONLY text content | `messages` | `model`, `keywords`, `agentic`, `sessionId` |
+| `use_free_llm` | Universal chat with deterministic steering; returns ONLY text content | `messages` | `model`, `keywords`, `agentic`, `sessionId`, **`workspace_root`** (recommended for project tasks) |
 | `list_available_free_models` | Enumerate providers and models with metadata | *(none)* | `provider`, `available_only` |
 | `get_token_stats` | Real-time per-provider usage and quota stats | *(none)* | — |
 | `validate_provider` | Health-check and credential validation | `providerId` | — |
@@ -89,15 +89,27 @@ await client.callTool('manage_memory', {
 await client.callTool('list_available_free_models', { available_only: true });
 ```
 
-**Send a chat message with simplified parameters (Auto-Routing):**
+**Project-scoped task (agentic + workspace_root — ALWAYS use for project work):**
 ```ts
+// ⚠️ Both `agentic: true` AND `workspace_root` are required for memory injection.
+// Omitting either produces a context-blind response with no memory or session enrichment.
 await client.callTool('use_free_llm', {
-  messages: [{ role: 'user', content: 'What is the most efficient sorting algorithm?' }],
-  keywords: ['coding', 'algorithms'] // Router selects optimal coding model automatically
+  messages: [{ role: 'user', content: 'Refactor the auth module to use JWTs' }],
+  agentic: true,
+  workspace_root: '/abs/path/to/my-project',
+  keywords: ['refactor', 'security', 'jwt']
 });
 ```
 
-**Explicit Keyword Steering (bypasses fuzzy matching):**
+**One-off query (no workspace, no memory — use for simple standalone Q&A):**
+```ts
+await client.callTool('use_free_llm', {
+  messages: [{ role: 'user', content: 'What is the most efficient sorting algorithm?' }],
+  keywords: ['coding', 'algorithms']
+});
+```
+
+**Explicit model + keyword steering:**
 ```ts
 await client.callTool('use_free_llm', {
   model: 'llama-3.3-70b-versatile',
@@ -215,7 +227,7 @@ Response returned to agent
 
 1. **Always call `manage_memory` before wide-context steps** to retrieve relevant prior work.
 2. **Use `code_mode` for any large-data processing** — never dump raw API responses into LLM context.
-3. **Enable `agentic:true` with a stable `sessionId`** for multi-turn tasks needing decomposition.
+3. **For ANY project-scoped task, pass BOTH `agentic: true` AND `workspace_root`** — these two fields unlock memory injection, session persistence, and context enrichment. Passing only one (or neither) produces a context-blind, stateless response.
 4. **Call `validate_provider` or `get_token_stats`** before long-running workflows to confirm quota.
 5. **Research/external-knowledge requests are auto-logged** by `AgenticMiddleware` — check server logs for `[RESEARCH-VALIDATION]` entries.
 6. **Prefer `available_only:true`** with `list_available_free_models` to skip unconfigured providers.

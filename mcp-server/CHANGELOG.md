@@ -11,6 +11,7 @@
 - **Tiered Context Pressure Handling**: Introduced Tier 0/1/2 logic for extreme input pressure (100k+ characters), using parallel summarization and adaptive truncation to maintain critical context windows.
 - **Fixed 'codeastral-latest' mode bug**: `code_mode` now features proper dynamic mode detection. The execution mode (`'chat'` | `'coding'` | `'research'`) is inferred automatically from code content and command description, replacing any hardcoded model references.
 - **Added Structural Markdown Middleware**: New `StructuralMarkdownMiddleware` inserted as the first pipeline stage. For agentic requests it reads the full session memory (`data/projects/{sessionId}/`) and injects it into the user message, giving the LLM complete visibility into context on every turn.
+- **Project Work Rule Enforcement**: Tool descriptions and all documentation (`README.md`, `guide.md`, `SKILL.md`) have been hardened to mandate `agentic: true` and `workspace_root` for repository-scoped tasks, preventing "context-blind" requests.
 - **Logic Collision Fixes**: Resolved auto-classification collisions (e.g., 'classify' matching as 'coding' due to name overlap) to ensure deterministic routing for complex intents.
 
 ### ✨ New Features

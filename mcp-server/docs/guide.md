@@ -214,15 +214,18 @@ Universal chat interface with automatic fallback cascade through 60+ free models
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `model` | string | ❌ | Model ID (e.g. `llama-3.3-70b-versatile`, `gemini-2.5-flash`) |
 | `messages` | array | ✅ | Array of `{role, content}`. Roles: `system` \| `user` \| `assistant` |
+| `workspace_root` | string | ❌* | Path to workspace. **Mandatory for project work** to derive `sessionId`. |
+| `agentic` | boolean | ❌* | Enable agentic mode. **Mandatory for project work** to enable memory injection. |
+| `model` | string | ❌ | Model ID (e.g. `llama-3.3-70b-versatile`, `gemini-2.5-flash`) |
 | `provider` | string | ❌ | Pin to a specific provider, bypassing routing |
 | `temperature` | number | ❌ | Sampling temperature 0.0–2.0 (default 0.7) |
 | `max_tokens` | number | ❌ | Maximum tokens to generate (default 1024) |
-| `workspace_root` | string | ❌ | Path to workspace for cache-keying and sessionId derivation |
 | `fallback` | boolean | ❌ | Enable provider fallback cascade (default true) |
-| `agentic` | boolean | ❌ | Enable agentic mode (task decomposition + system prompt injection) |
-| `sessionId` | string | ❌ | Required for agentic mode — partitions state/logs per project |
+| `sessionId` | string | ❌ | Optional. Required for agentic mode if `workspace_root` is missing. |
+
+> [!IMPORTANT]
+> **PROJECT WORK RULE**: For any task within a project/workspace, you MUST set `"agentic": true` AND provide `"workspace_root"`.
 
 ### 2. `list_available_free_models`
 Discover all supported models across all providers with rate-limit metadata.
@@ -362,15 +365,16 @@ ENABLE_AGENTIC_MIDDLEWARE=true npm run dev
 ```
 
 #### 2. Selective Mode (Per-Request)
-You can opt-in on a per-call basis by passing `"agentic": true` in the request body along with a **`sessionId`**.
+You can opt-in on a per-call basis by passing `"agentic": true` in the request body along with a **`workspace_root`** or **`sessionId`**.
 
-| Trigger | `ENABLE_AGENTIC_MIDDLEWARE` | `request.agentic` | `sessionId` | Result |
+| Trigger | `ENABLE_AGENTIC_MIDDLEWARE` | `request.agentic` | `sessionId` / `workspace_root` | Result |
 |:---|:---|:---|:---|:---|
 | **Global** | `true` | (Any) | **Mandatory** | Agentic ON |
 | **Opt-In** | `false`/Unset | `true` | **Mandatory** | Agentic ON |
 | **Missing ID**| (Any) | (Any) | Missing | **Agentic OFF** (Bypass) |
 
-Without a `sessionId` and a trigger, the middleware is a transparent pass-through with zero overhead.
+> [!CAUTION]
+> If you call `use_free_llm` for project work without `agentic: true`, the middlewares for memory and agentic prompts will be skipped, leading to a context-blind response.
 
 #### 3. How to Create a Session ID
 

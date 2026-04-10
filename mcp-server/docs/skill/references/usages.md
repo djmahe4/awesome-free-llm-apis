@@ -207,13 +207,14 @@
 |-----------|------|----------|-------------|
 | `model` | string | ✅ | Model ID (e.g. `llama-3.3-70b-versatile`) |
 | `messages` | array | ✅ | Chat messages with `role` and `content` |
+| `agentic` | boolean | ❌* | **Mandatory for project work.** Enable memory injection. |
+| `workspace_root` | string | ❌* | **Mandatory for project work.** Path for context scanning. |
 | `provider` | string | ❌ | Override auto-routing to a specific provider |
 | `max_tokens` | number | ❌ | Max tokens to generate (default: 1024) |
 | `temperature` | number | ❌ | Sampling temperature (default: 0.7) |
 | `top_p` | number | ❌ | Top-p nucleus sampling |
 | `fallback` | boolean | ❌ | Enable fallback to other models on failure |
 | `stream` | boolean | ❌ | Stream response tokens |
-| `workspace_root` | string | ❌ | Workspace path for context scanning |
 
 ---
 

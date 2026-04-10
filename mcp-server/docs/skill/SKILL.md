@@ -53,14 +53,22 @@ Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-
 
 Perform a chat completion with optional fallback and workspace memory.
 
+> [!IMPORTANT]
+> **PROJECT WORK RULE**: For any task within a project/workspace, you MUST set `"agentic": true` AND provide `"workspace_root"`. Without these, the request is "context-blind" (no session memory, no project-specific prompts).
+
+**Project Task Example (Mandatory):**
 ```json
 {
-  "messages": [{ "role": "user", "content": "Your prompt here" }],
-  "keywords": ["security", "auth", "jwt"],
+  "messages": [{ "role": "user", "content": "Implement the auth logic in auth.ts" }],
   "agentic": true,
-  "sessionId": "project-name-v1",
-  "workspace_root": "/your/project",
-  "google_search": true
+  "workspace_root": "c:/Users/mahes/OneDrive/Desktop/Python-Projects/my-app"
+}
+```
+
+**One-off Query Example:**
+```json
+{
+  "messages": [{ "role": "user", "content": "Explain what a JWT is" }]
 }
 ```
 
@@ -71,9 +79,9 @@ Perform a chat completion with optional fallback and workspace memory.
 | `messages` | yes | — | Array of `{ role, content }` objects |
 | `model` | no | auto | Specific model ID. If omitted, the router auto-selects. |
 | `keywords` | no | — | Explicit steering keywords. **Bypasses fuzzy matching** and injects only sections matching these tags. |
-| `agentic` | no | `false` | Enable agentic mode: task decomposition and internal prompt injection. |
-| `sessionId` | no | — | Required for agentic mode. Partitions memory/logs per project. |
-| `workspace_root` | no | — | Path for context-aware cache keying and auto-session derivation. |
+| `agentic` | no | `false` | Enable agentic mode: task decomposition and internal prompt injection. **Mandatory for project work.** |
+| `workspace_root` | no | — | Path for context-aware cache keying. **Mandatory for project work.** |
+| `sessionId` | no | — | Optional. If omitted, it's auto-derived from `workspace_root`. |
 | `google_search` | no | `false` | Enable Google search for Gemini models. |
 
 > **Rule:** Always set `fallback: true` when building resilient pipelines.
@@ -242,11 +250,12 @@ Each iteration builds on the last. Use `code_mode` to compress and deduplicate f
 
 ## 🔴 Anti-Rationalization Rules
 
-- **DO NOT** start a pipeline without checking memory for prior findings first
-- **DO NOT** skip `validate_provider` if a provider fails two consecutive calls
-- **DO NOT** accumulate raw LLM outputs — compress and deduplicate via `code_mode`
-- **ALWAYS** version subagent instruction changes with a timestamp key
-- **ALWAYS** set `fallback: true` for critical or user-facing pipelines
+- **DO NOT** use `use_free_llm` for project work without `agentic: true` and `workspace_root`.
+- **DO NOT** start a pipeline without checking memory for prior findings first.
+- **DO NOT** skip `validate_provider` if a provider fails two consecutive calls.
+- **DO NOT** accumulate raw LLM outputs — compress and deduplicate via `code_mode`.
+- **ALWAYS** version subagent instruction changes with a timestamp key.
+- **ALWAYS** set `fallback: true` for critical or user-facing pipelines.
 
 ---
 
@@ -281,8 +290,8 @@ The middleware implements **Research Validation Logging** to ensure all agentic 
 
 ### 🛠️ Strategic Usage Patterns
 
-- **Activation**: Only set `agentic: true` for complex architectural changes or long-running feature developments. For simple one-off queries, leave it `false` to optimize latency.
-- **Session Consistency**: Use a unique, descriptive `sessionId` (e.g., `auth-refactor-2024`) per project to ensure memory remains isolated.
+- **Activation**: Set `agentic: true` and provide `workspace_root` for **ALL** project-related tasks. This ensures the agent has access to prior decisions, planned tasks, and project-specific guidelines. For simple, context-free queries (e.g., "how does X work?"), leave these out to optimize latency.
+- **Session Consistency**: The `sessionId` is typically auto-derived from your `workspace_root`. If you need to switch between multiple sub-tasks within the same workspace, you can provide an explicit `sessionId`.
 - **Explicit Steering**: Pass a `keywords` array to strictly control the injected system prompt AND the task routing tier. This documentation-first approach bypasses fuzzy logic, ensuring the agent receives ONLY relevant reference material and is routed to the optimal model tier (e.g., Coding vs. Research) via majority-voting, saving thousands of tokens.
 - **Architectural Discovery**: Instead of requesting the "whole map," request "references for [System X]". The booster will identify the relevant entries and provide deep links without exceeding the token budget.
 

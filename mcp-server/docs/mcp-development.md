@@ -246,8 +246,11 @@ The `AgenticMiddleware` (`src/middleware/agentic/agentic-middleware.ts`) provide
 ### Trigger Logic
 The middleware operates in three modes:
 - **Global**: Enabled via `ENABLE_AGENTIC_MIDDLEWARE=true` in `.env`.
-- **Selective**: Trigged per-request by setting `agentic: true` in the context or request body.
-- **Bypass**: If no `sessionId` is available (either provided by the client or derived from a `workspace_root`, see below), the middleware automatically steps out of the pipeline.
+- **Selective (Mandatory for Project Work)**: Triggered per-request by setting `agentic: true` in the context or request body along with a `workspace_root`.
+- **Bypass**: If no `sessionId` is available (either provided by the client or derived from a `workspace_root`), the middleware automatically steps out of the pipeline.
+
+> [!IMPORTANT]
+> To ensure memory injection and project-specific prompts, agents **MUST** set `agentic: true` and provide `workspace_root` for all tasks related to a repository or project.
 
 ### Foolproof Session ID Derivation
 To provide a zero-config experience, the `useFreeLLM` tool automatically derives a deterministic `sessionId` if a `workspace_root` is provided but an explicit ID is missing.
