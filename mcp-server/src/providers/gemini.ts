@@ -23,9 +23,16 @@ export class GeminiProvider extends BaseProvider {
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
   ];
 
+  private cachedPythonPath?: string;
+
   /** Attempt to locate the venv Python interpreter relative to the project root */
   private resolvePythonPath(): string {
-    if (process.env.PYTHON_EXECUTABLE) return process.env.PYTHON_EXECUTABLE;
+    if (this.cachedPythonPath) return this.cachedPythonPath;
+
+    if (process.env.PYTHON_EXECUTABLE) {
+        this.cachedPythonPath = process.env.PYTHON_EXECUTABLE;
+        return this.cachedPythonPath;
+    }
 
     const projectRoot = path.resolve(__dirname, '../../');
     const isWin = process.platform === 'win32';
@@ -38,11 +45,15 @@ export class GeminiProvider extends BaseProvider {
     ];
 
     for (const venvPython of possibleVenvs) {
-      if (existsSync(venvPython)) return venvPython;
+      if (existsSync(venvPython)) {
+          this.cachedPythonPath = venvPython;
+          return venvPython;
+      }
     }
 
     // Fallback to system python
-    return isWin ? 'python' : 'python3';
+    this.cachedPythonPath = isWin ? 'python' : 'python3';
+    return this.cachedPythonPath;
   }
 
   private async runPythonClient(request: any): Promise<any> {

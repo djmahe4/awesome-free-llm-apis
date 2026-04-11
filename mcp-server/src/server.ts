@@ -210,18 +210,27 @@ async function main() {
             return;
           }
           const entries = await fsp.readdir(projectsBase);
-          const sessions: string[] = [];
           
-          for (const d of entries) {
-            const full = path.resolve(projectsBase, d);
-            // Guard: entry must be a *direct* child of projectsBase
-            if (path.dirname(full) === projectsBase) {
-              const stat = await fsp.stat(full);
-              if (stat.isDirectory()) {
-                sessions.push(d);
+          // Phase 3 Optimization: Parallelize stats with a reasonable batch limit
+          // We limit concurrency to 20 to avoid descriptor exhaustion if there are thousands of sessions
+          const sessions: string[] = [];
+          const MAX_CONCURRENT = 20;
+          
+          for (let i = 0; i < entries.length; i += MAX_CONCURRENT) {
+            const batch = entries.slice(i, i + MAX_CONCURRENT);
+            const results = await Promise.all(batch.map(async d => {
+              const full = path.resolve(projectsBase, d);
+              if (path.dirname(full) !== projectsBase) return null;
+              try {
+                const stat = await fsp.stat(full);
+                return stat.isDirectory() ? d : null;
+              } catch {
+                return null;
               }
-            }
+            }));
+            sessions.push(...results.filter((d): d is string => d !== null));
           }
+
           res.json({ sessions });
         } catch (err) {
           res.status(500).json({ error: String(err) });
@@ -245,27 +254,25 @@ async function main() {
             res.status(400).json({ error: 'Invalid sessionId' });
             return;
           }
-          const knowledgePath = path.join(projectDir, 'knowledge.md');
-          const queuesPath = path.join(projectDir, 'queues.json');
 
-          let knowledge = 'No memory yet – session not started.';
-          try {
-            knowledge = await fsp.readFile(knowledgePath, 'utf-8');
-          } catch {
-            // file missing is expected if session hasn't written yet
-          }
+          // Phase 3 Optimization: Parallelize knowledge and queue reads
+          const [knowledgeRes, queuesRes] = await Promise.all([
+            fsp.readFile(path.join(projectDir, 'knowledge.md'), 'utf-8').catch(() => 'No memory yet – session not started.'),
+            fsp.readFile(path.join(projectDir, 'queues.json'), 'utf-8').catch(() => null)
+          ]);
 
           let queues: Record<string, string[]> = {
             nowQueue: [], nextQueue: [], blockedQueue: [], improveQueue: []
           };
-          try {
-            const qData = await fsp.readFile(queuesPath, 'utf-8');
-            queues = JSON.parse(qData);
-          } catch (parseErr) {
-            // expected if file missing
+          if (queuesRes) {
+            try {
+              queues = JSON.parse(queuesRes);
+            } catch {
+              // Ignore parse errors
+            }
           }
 
-          res.json({ sessionId, knowledge, queues });
+          res.json({ sessionId, knowledge: knowledgeRes, queues });
         } catch (err) {
           res.status(500).json({ error: String(err) });
         }

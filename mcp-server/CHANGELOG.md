@@ -16,6 +16,7 @@
 - **Project Work Rule Enforcement**: Tool descriptions and all documentation (`README.md`, `guide.md`, `SKILL.md`) have been hardened to mandate `agentic: true` and `workspace_root` for repository-scoped tasks, preventing "context-blind" requests.
 - **Logic Collision Fixes**: Resolved auto-classification collisions (e.g., 'classify' matching as 'coding' due to name overlap) to ensure deterministic routing for complex intents.
 - **Global Usage Persistence**: Implemented a robust telemetry layer with atomic Read-Merge-Write synchronization. Tracks daily and lifetime metrics across process restarts and concurrent agents (Claude, ChatGPT, Antigravity).
+- **Agentic Momentum Hardening**: Fixed a critical bug in `AgenticMiddleware` where `nowQueue` was aggressively cleared after any successful step. Multi-step plans now correctly persist and transition across turns.
 
 ### ✨ New Features
 

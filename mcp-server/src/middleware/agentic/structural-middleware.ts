@@ -9,10 +9,10 @@ export class StructuralMarkdownMiddleware implements Middleware {
         const startMs = Date.now();
         // v1.0.4 Harden: Optional chaining and strict type guard
         const sessionIdRaw = context.sessionId || (context.request as any)?.sessionId;
-        
+
         // v1.0.4 Security: Strict sessionId validation to prevent path traversal
-        const sessionId = (typeof sessionIdRaw === 'string' && /^(?!\.\.?$)[\w\-\.]{1,128}$/.test(sessionIdRaw)) 
-            ? sessionIdRaw 
+        const sessionId = (typeof sessionIdRaw === 'string' && /^(?!\.\.?$)[\w\-\.]{1,128}$/.test(sessionIdRaw))
+            ? sessionIdRaw
             : undefined;
 
         // Tightened Guard: Bypass if not agentic OR missing mandatory/valid sessionId
@@ -72,8 +72,6 @@ export class StructuralMarkdownMiddleware implements Middleware {
             return 'Security Error: Access denied.';
         }
 
-        const sections: string[] = [];
-
         /**
          * Returns true only if the file contains lines with real content
          * beyond auto-generated scaffolding (HTML comments, headings).
@@ -86,25 +84,32 @@ export class StructuralMarkdownMiddleware implements Middleware {
                 .some(l => l.length > 3);
         };
 
-        // 1. MISSION PLAN — what the agent is supposed to do
-        const planPath = path.join(projectDir, 'plan.md');
-        if (await fs.pathExists(planPath)) {
-            const planContent = (await fs.readFile(planPath, 'utf-8')).trim();
+        // v1.0.4 Optimization: Parallelize all session file I/O
+        const [planRes, queuesRes, tasksRes, knowledgeRes] = await Promise.all([
+            fs.pathExists(path.join(projectDir, 'plan.md')).then(exists => exists ? fs.readFile(path.join(projectDir, 'plan.md'), 'utf-8') : null),
+            fs.pathExists(path.join(projectDir, 'queues.json')).then(exists => exists ? fs.readFile(path.join(projectDir, 'queues.json'), 'utf-8') : null),
+            fs.pathExists(path.join(projectDir, 'tasks.md')).then(exists => exists ? fs.readFile(path.join(projectDir, 'tasks.md'), 'utf-8') : null),
+            fs.pathExists(path.join(projectDir, 'knowledge.md')).then(exists => exists ? fs.readFile(path.join(projectDir, 'knowledge.md'), 'utf-8') : null),
+        ]);
+
+        const sections: string[] = [];
+
+        // 1. MISSION PLAN
+        if (planRes) {
+            const planContent = planRes.trim();
             if (hasSubstantiveContent(planContent)) {
                 sections.push(`## MISSION PLAN\n${planContent}`);
                 console.error(`[structural-middleware] Loaded plan.md (${planContent.length}b)`);
             }
         }
 
-        // 2. TASK QUEUE — live queues persisted by AgenticMiddleware
-        const queuesPath = path.join(projectDir, 'queues.json');
-        if (await fs.pathExists(queuesPath)) {
+        // 2. TASK QUEUE
+        if (queuesRes) {
             try {
-                const queuesRaw = await fs.readFile(queuesPath, 'utf-8');
-                const queues = JSON.parse(queuesRaw);
+                const queues = JSON.parse(queuesRes);
                 const queueBlock = [
-                    queues.nowQueue?.length    ? `**Now:**      ${queues.nowQueue.join(', ')}` : null,
-                    queues.nextQueue?.length   ? `**Next:**     ${queues.nextQueue.join(', ')}` : null,
+                    queues.nowQueue?.length ? `**Now:**      ${queues.nowQueue.join(', ')}` : null,
+                    queues.nextQueue?.length ? `**Next:**     ${queues.nextQueue.join(', ')}` : null,
                     queues.blockedQueue?.length ? `**Blocked:**  ${queues.blockedQueue.join(', ')}` : null,
                     queues.improveQueue?.length ? `**Improve:**  ${queues.improveQueue.join(', ')}` : null,
                 ].filter(Boolean).join('\n');
@@ -117,23 +122,19 @@ export class StructuralMarkdownMiddleware implements Middleware {
             }
         }
 
-        // 3. ACTIVE TASKS — markdown task list (tasks.md)
-        const tasksPath = path.join(projectDir, 'tasks.md');
-        if (await fs.pathExists(tasksPath)) {
-            const tasksContent = (await fs.readFile(tasksPath, 'utf-8')).trim();
+        // 3. ACTIVE TASKS
+        if (tasksRes) {
+            const tasksContent = tasksRes.trim();
             if (hasSubstantiveContent(tasksContent)) {
                 sections.push(`## ACTIVE TASKS\n${tasksContent}`);
-                console.error(`[structural-middleware] Loaded tasks.md (${tasksContent.length}b)`);
             }
         }
 
-        // 4. SESSION KNOWLEDGE — persistent learnings (knowledge.md)
-        const knowledgePath = path.join(projectDir, 'knowledge.md');
-        if (await fs.pathExists(knowledgePath)) {
-            const knowledgeContent = (await fs.readFile(knowledgePath, 'utf-8')).trim();
+        // 4. SESSION KNOWLEDGE
+        if (knowledgeRes) {
+            const knowledgeContent = knowledgeRes.trim();
             if (hasSubstantiveContent(knowledgeContent)) {
                 sections.push(`## SESSION KNOWLEDGE\n${knowledgeContent}`);
-                console.error(`[structural-middleware] Loaded knowledge.md (${knowledgeContent.length}b)`);
             }
         }
 

@@ -454,7 +454,7 @@ async function main() {
         messages: [{ role: 'user' as const, content: 'CWD check ' + Date.now() }],
         agentic: true
     };
-    const wsHash14 = workspaceScanner.getWorkspaceHash(); // Default to CWD (uses the instance at top of main)
+    const wsHash14 = await workspaceScanner.getWorkspaceHash(); // Default to CWD (uses the instance at top of main)
     const ctx14: PipelineContext = {
         request: mockRequest14,
         taskType: TaskType.Chat,

@@ -10,7 +10,7 @@ async function main() {
 
     const workspaceRoot = process.cwd();
     const scanner = new WorkspaceScanner(workspaceRoot);
-    const wsHash = scanner.getWorkspaceHash(workspaceRoot);
+    const wsHash = await scanner.getWorkspaceHash(workspaceRoot);
     console.error(`Workspace Hash: ${wsHash}`);
 
     const testContent = { 

@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { LRUCache } from 'lru-cache';
+import { debounce } from '../../utils/debounce.js';
 import { getIntelligentSystemPrompt } from './prompts.js';
 import type { Middleware, PipelineContext, NextFunction } from '../../pipeline/middleware.js';
 import { memoryManager } from '../../memory/index.js';
@@ -41,9 +42,10 @@ function getQueues(sessionId: string): QueueState {
 }
 
 /**
- * Async Persistence: Prevents event-loop blocking.
+ * Debounced Persistence: Batches writes to reduce I/O under high throughput.
+ * Matches debounce pattern from LLMExecutor.ts.
  */
-async function persistQueues(sessionId: string, projectDir: string): Promise<void> {
+const persistQueuesDebounced = debounce(async (sessionId: string, projectDir: string) => {
     const state = getQueues(sessionId);
     try {
         await fs.writeFile(
@@ -54,7 +56,7 @@ async function persistQueues(sessionId: string, projectDir: string): Promise<voi
     } catch {
         // non-fatal: in-memory state is still maintained
     }
-}
+}, 2000);
 
 /**
  * Async Project Setup: Ensures session boundaries and initializes state files.
@@ -192,7 +194,7 @@ export class AgenticMiddleware implements Middleware {
         let wsHash: string | undefined;
         if (context.workspaceRoot) {
             try {
-                wsHash = workspaceScanner.getWorkspaceHash(context.workspaceRoot);
+                wsHash = await workspaceScanner.getWorkspaceHash(context.workspaceRoot);
             } catch (err) {
                 console.error(`[AgenticMiddleware] Failed to derive workspace hash: ${err}`);
             }
@@ -250,7 +252,7 @@ export class AgenticMiddleware implements Middleware {
             q.nowQueue.push(...limitedSteps);
         }
 
-        await persistQueues(sessionId, projectDir);
+        persistQueuesDebounced(sessionId, projectDir);
 
         // v1.0.4 optimization: Track iteration count per session for early-exit logic
         const iterationCountKey = `_iteration_${sessionId}`;
@@ -275,20 +277,22 @@ export class AgenticMiddleware implements Middleware {
                 logResearchValidation(sessionId, responseContent, 'post-execution-response-grounding-check');
             }
 
-            // v1.0.4 optimization: Early exit if verification passes or max iterations reached
-            if (verifyResult === 'PASS' || iterationCount >= 3) {
+            // v1.0.4 final: Only clear nowQueue if it was a single task or iteration limit reached.
+            // If it's a multi-step plan, we let it shift naturally unless we hit the safety cap.
+            if ((verifyResult === 'PASS' && q.nowQueue.length <= 1) || iterationCount >= 3) {
                 console.error(`[AgenticMiddleware] Early exit: result=${verifyResult} iterations=${iterationCount}`);
                 q.nowQueue = [];
             }
-
-            // Store a snapshot for observability (cloned to avoid post-shift mutation in traces)
-            context['agenticQueues'] = JSON.parse(JSON.stringify(getQueues(sessionId)));
         }
 
         if (q.nowQueue.length > 0) {
             q.nowQueue.shift();
         }
-        await persistQueues(sessionId, projectDir);
+
+        // Store a snapshot for observability (captured AFTER shift to show remaining momentum)
+        context['agenticQueues'] = JSON.parse(JSON.stringify(getQueues(sessionId)));
+
+        persistQueuesDebounced(sessionId, projectDir);
         console.error(`[agentic-middleware] ${Date.now() - startMs}ms session=${sessionId}`);
     }
 }

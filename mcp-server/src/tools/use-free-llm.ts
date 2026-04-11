@@ -237,7 +237,7 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
   pipeline.use(agenticMiddleware);
   pipeline.use(sharedRouter);
 
-  const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
+  const wsHash = await workspaceScanner.getWorkspaceHash(workspaceRoot);
 
   // Derive a foolproof sessionId if not explicitly provided
   let effectiveSessionId = inputSessionId;
