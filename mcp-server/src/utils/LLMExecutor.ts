@@ -10,6 +10,8 @@ export interface TokenTrackingInfo {
     remainingRequests?: number;
     requestsRefreshTime?: number;
     lastSuccessTime?: number;
+    localTotalRequests?: number;
+    localTotalTokens?: number;
 }
 
 /**
@@ -112,14 +114,24 @@ export class LLMExecutor {
      * Deduct tokens and requests from provider's tracked quota
      */
     private deductTokens(providerId: string, tokens: number): void {
+        if (!this.tokenTracking[providerId]) {
+            this.tokenTracking[providerId] = {
+                localTotalRequests: 0,
+                localTotalTokens: 0
+            };
+        }
+        
         const tracker = this.tokenTracking[providerId];
-        if (tracker) {
-            if (tracker.remainingTokens !== undefined) {
-                tracker.remainingTokens -= tokens;
-            }
-            if (tracker.remainingRequests !== undefined) {
-                tracker.remainingRequests -= 1;
-            }
+        
+        // Update local totals
+        tracker.localTotalRequests = (tracker.localTotalRequests || 0) + 1;
+        tracker.localTotalTokens = (tracker.localTotalTokens || 0) + tokens;
+
+        if (tracker.remainingTokens !== undefined) {
+            tracker.remainingTokens -= tokens;
+        }
+        if (tracker.remainingRequests !== undefined) {
+            tracker.remainingRequests -= 1;
         }
     }
 

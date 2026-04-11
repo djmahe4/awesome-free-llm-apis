@@ -50,9 +50,15 @@ function renderStats(providers) {
         if (p.isAvailable) activeCount++;
 
         const tokensLimit = p.rateLimits.tokensPerMonth || p.rateLimits.rpd || p.rateLimits.rpm || 'Free';
-        const usageStr = (p.usage && (p.usage.requests !== '?' || p.usage.tokens !== '?'))
-            ? `Remaining: ${p.usage.requests} reqs / ${p.usage.tokens} tokens`
-            : 'Awaiting activity...';
+        
+        let usageStr = 'Awaiting activity...';
+        if (p.usage) {
+            if (p.usage.requests !== '?' || p.usage.tokens !== '?') {
+                usageStr = `Remaining: ${p.usage.requests} reqs / ${p.usage.tokens} tokens`;
+            } else if (p.usage.localTotalRequests > 0) {
+                usageStr = `Used locally: ${p.usage.localTotalRequests} reqs / ${p.usage.localTotalTokens} tokens`;
+            }
+        }
 
         return `
         <div class="col-md-6 col-lg-4">

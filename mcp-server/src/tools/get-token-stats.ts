@@ -13,7 +13,9 @@ export async function getTokenStats() {
         rateLimits: p.rateLimits,
         usage: {
             requests: tracking[p.id]?.remainingRequests ?? '?',
-            tokens: tracking[p.id]?.remainingTokens ?? '?'
+            tokens: tracking[p.id]?.remainingTokens ?? '?',
+            localTotalRequests: tracking[p.id]?.localTotalRequests ?? 0,
+            localTotalTokens: tracking[p.id]?.localTotalTokens ?? 0
         }
 
     }));
