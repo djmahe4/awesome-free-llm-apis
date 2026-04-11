@@ -84,6 +84,13 @@ export class IntelligentRouterMiddleware implements Middleware {
     }
 
     /**
+     * Initializes the underlying persistence layer
+     */
+    async init(): Promise<void> {
+        await (this.executor as any).init();
+    }
+
+    /**
      * Clear token tracking state
      */
     flush(): void {

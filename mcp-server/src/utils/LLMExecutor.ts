@@ -1,7 +1,9 @@
+import { debounce } from './debounce.js';
+import { persistence, PersistentUsage } from './PersistenceManager.js';
 import { getEncoding } from 'js-tiktoken';
+import type { Message, ChatResponse } from '../providers/types.js';
 import { ProviderRegistry } from '../providers/registry.js';
-import type { PipelineContext } from '../pipeline/middleware.js';
-import type { ChatResponse, Message } from '../providers/types.js';
+import type { PipelineContext } from '../pipeline/index.js';
 import { getMessageContent } from './MessageUtils.js';
 
 export interface TokenTrackingInfo {
@@ -12,6 +14,8 @@ export interface TokenTrackingInfo {
     lastSuccessTime?: number;
     localTotalRequests?: number;
     localTotalTokens?: number;
+    dailyTotalRequests?: number;
+    dailyTotalTokens?: number;
 }
 
 /**
@@ -24,6 +28,61 @@ export interface TokenTrackingInfo {
 export class LLMExecutor {
     private tokenTracking: Record<string, TokenTrackingInfo> = {};
     private encoder = getEncoding('cl100k_base');
+    private persistence = persistence;
+    private saveStats = debounce(() => this.persistStats(), 2000);
+
+    /**
+     * Initializes the executor by loading persisted usage stats
+     */
+    async init(): Promise<void> {
+        const stats = await this.persistence.load();
+        
+        // Merge persisted stats into tokenTracking
+        for (const [id, prov] of Object.entries(stats.providers)) {
+            this.tokenTracking[id] = {
+                localTotalRequests: prov.localTotalRequests,
+                localTotalTokens: prov.localTotalTokens,
+                remainingRequests: prov.remainingRequests ?? undefined,
+                remainingTokens: prov.remainingTokens ?? undefined,
+                lastSuccessTime: prov.lastSyncTime
+            };
+        }
+
+        // Global daily counters are managed via the persistence manager internally
+        // but we can expose them if needed for the dashboard summary.
+    }
+
+    /**
+     * Persists current state to disk
+     */
+    private async persistStats(): Promise<void> {
+        const state: PersistentUsage = {
+            lastResetDate: new Date().toISOString().split('T')[0],
+            dailyTotalRequests: 0, // This is actually managed by merging in PersistenceManager
+            dailyTotalTokens: 0,
+            lifetimeTotalRequests: 0,
+            lifetimeTotalTokens: 0,
+            providers: {}
+        };
+
+        for (const [id, tracker] of Object.entries(this.tokenTracking)) {
+            state.providers[id] = {
+                lastSyncTime: tracker.lastSuccessTime || Date.now(),
+                localTotalRequests: tracker.localTotalRequests || 0,
+                localTotalTokens: tracker.localTotalTokens || 0,
+                remainingRequests: tracker.remainingRequests,
+                remainingTokens: tracker.remainingTokens
+            };
+            
+            // Increment totals (PersistenceManager will merge these)
+            state.lifetimeTotalRequests += tracker.localTotalRequests || 0;
+            state.lifetimeTotalTokens += tracker.localTotalTokens || 0;
+            state.dailyTotalRequests += tracker.localTotalRequests || 0; 
+            state.dailyTotalTokens += tracker.localTotalTokens || 0;
+        }
+
+        await this.persistence.save(state);
+    }
 
     /**
      * Calculate estimated tokens for a request
@@ -113,19 +172,23 @@ export class LLMExecutor {
     /**
      * Deduct tokens and requests from provider's tracked quota
      */
-    private deductTokens(providerId: string, tokens: number): void {
+    public deductTokens(providerId: string, tokens: number): void {
         if (!this.tokenTracking[providerId]) {
             this.tokenTracking[providerId] = {
                 localTotalRequests: 0,
-                localTotalTokens: 0
+                localTotalTokens: 0,
+                dailyTotalRequests: 0,
+                dailyTotalTokens: 0
             };
         }
         
         const tracker = this.tokenTracking[providerId];
         
-        // Update local totals
+        // Update local and daily totals
         tracker.localTotalRequests = (tracker.localTotalRequests || 0) + 1;
         tracker.localTotalTokens = (tracker.localTotalTokens || 0) + tokens;
+        tracker.dailyTotalRequests = (tracker.dailyTotalRequests || 0) + 1;
+        tracker.dailyTotalTokens = (tracker.dailyTotalTokens || 0) + tokens;
 
         if (tracker.remainingTokens !== undefined) {
             tracker.remainingTokens -= tokens;
@@ -133,6 +196,9 @@ export class LLMExecutor {
         if (tracker.remainingRequests !== undefined) {
             tracker.remainingRequests -= 1;
         }
+
+        // Trigger persistence
+        this.saveStats();
     }
 
     /**
@@ -205,6 +271,9 @@ export class LLMExecutor {
                 }
             }
         }
+
+        // Trigger persistence on header update too
+        this.saveStats();
     }
 
     /**
@@ -333,7 +402,7 @@ export class LLMExecutor {
 
         for (const modelId of targetModels) {
             for (const p of providers) {
-                if (modelOverride === 'any' || p.models.some(m => m.id === modelId)) {
+                if (modelOverride === 'any' || p.models.some((m: any) => m.id === modelId)) {
                     try {
                         const res = await p.chat({
                             model: modelId === 'any' ? p.models[0].id : modelId,

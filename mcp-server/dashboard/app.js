@@ -32,6 +32,14 @@ async function fetchStats() {
 
         const data = await response.json();
         stats = data.stats;
+        const serverTotals = data.serverTotals || {};
+
+        // Update Overview Cards
+        if (serverTotals.dailyRequests !== undefined) {
+            document.getElementById('global-daily-requests').innerText = serverTotals.dailyRequests.toLocaleString();
+            document.getElementById('global-daily-tokens').innerText = serverTotals.dailyTokens.toLocaleString();
+            document.getElementById('global-lifetime-requests').innerText = serverTotals.lifetimeRequests.toLocaleString();
+        }
 
         renderStats(stats);
     } catch (err) {
@@ -51,13 +59,12 @@ function renderStats(providers) {
 
         const tokensLimit = p.rateLimits.tokensPerMonth || p.rateLimits.rpd || p.rateLimits.rpm || 'Free';
         
-        let usageStr = 'Awaiting activity...';
+        let dailyUsageStr = '0 reqs / 0 tokens today';
+        let lifetimeStr = '0 reqs / 0 tokens lifetime';
+        
         if (p.usage) {
-            if (p.usage.requests !== '?' || p.usage.tokens !== '?') {
-                usageStr = `Remaining: ${p.usage.requests} reqs / ${p.usage.tokens} tokens`;
-            } else if (p.usage.localTotalRequests > 0) {
-                usageStr = `Used locally: ${p.usage.localTotalRequests} reqs / ${p.usage.localTotalTokens} tokens`;
-            }
+            dailyUsageStr = `${p.usage.dailyTotalRequests || 0} reqs / ${p.usage.dailyTotalTokens || 0} tokens today`;
+            lifetimeStr = `${p.usage.localTotalRequests || 0} reqs / ${p.usage.localTotalTokens || 0} tokens lifetime`;
         }
 
         return `
@@ -83,9 +90,14 @@ function renderStats(providers) {
                     </div>
 
                     <div class="small">
-                        <div class="d-flex justify-content-between text-muted mb-1">
-                            <span>Current Usage</span>
-                            <span class="text-light">${escapeHTML(usageStr)}</span>
+                        <div class="text-muted small mb-1">Session Usage (Persistent)</div>
+                        <div class="d-flex justify-content-between text-info mb-1 fw-bold">
+                            <span><i class="bi bi-calendar-event me-1"></i>Daily</span>
+                            <span>${escapeHTML(dailyUsageStr)}</span>
+                        </div>
+                        <div class="d-flex justify-content-between text-muted mb-1 opacity-75">
+                            <span><i class="bi bi-clock-history me-1"></i>Lifetime</span>
+                            <span>${escapeHTML(lifetimeStr)}</span>
                         </div>
                     </div>
                     <div class="mt-3 pt-2 border-top border-secondary-subtle d-flex justify-content-end">

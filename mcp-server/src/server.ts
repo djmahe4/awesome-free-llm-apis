@@ -39,7 +39,7 @@ import crypto from 'crypto';
 import { getTokenStats } from './tools/get-token-stats.js';
 import { listAvailableFreeModels } from './tools/list-models.js';
 import { validateProvider } from './tools/validate-provider.js';
-import { flushSystem } from './tools/use-free-llm.js';
+import { flushSystem, sharedRouter } from './tools/use-free-llm.js';
 import { execSync } from 'child_process';
 import fs, { promises as fsp } from 'fs';
 
@@ -115,6 +115,10 @@ async function validateSandboxDependencies() {
 async function main() {
   try {
     await validateSandboxDependencies();
+    
+    // Initialize persistent tracking
+    await sharedRouter.init();
+    
     const isSse = process.argv.includes('--sse');
     if (isSse) {
       const app = express();

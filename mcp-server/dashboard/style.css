@@ -108,3 +108,28 @@ pre {
 .queue-icon {
   font-size: 0.7rem;
 }
+
+/* Premium Border Accents */
+.border-primary-subtle { border-left: 4px solid var(--mcp-primary) !important; }
+.border-warning-subtle { border-left: 4px solid #ffc107 !important; }
+.border-info-subtle { border-left: 4px solid #0dcaf0 !important; }
+.border-success-subtle { border-left: 4px solid var(--mcp-secondary) !important; }
+
+.pulse {
+  animation: pulse-animation 2s infinite;
+}
+
+@keyframes pulse-animation {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+.card {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.card:hover {
+  box-shadow: 0 8px 24px rgba(108, 99, 255, 0.15);
+  transform: translateY(-2px);
+}

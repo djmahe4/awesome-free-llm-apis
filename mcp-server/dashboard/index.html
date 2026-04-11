@@ -57,31 +57,31 @@
       <div class="tab-pane fade show active" id="overview" role="tabpanel">
         <div class="row g-4 mb-4">
           <div class="col-md-3">
-            <div class="card p-3 h-100">
-              <div class="text-muted small text-uppercase mb-2">Total Providers</div>
-              <div id="total-providers" class="stat-value">15</div>
-              <div class="small text-muted">Configured in registry</div>
+            <div class="card p-3 h-100 border-primary-subtle">
+              <div class="text-primary small text-uppercase fw-bold mb-2"><i class="bi bi-cpu me-2"></i>Active Providers</div>
+              <div id="active-providers" class="stat-value text-primary">--</div>
+              <div class="small text-muted">Ready for routing</div>
             </div>
           </div>
           <div class="col-md-3">
-            <div class="card p-3 h-100">
-              <div class="text-muted small text-uppercase mb-2">Active Providers</div>
-              <div id="active-providers" class="stat-value text-success">--</div>
-              <div class="small text-muted">With valid API keys</div>
+            <div class="card p-3 h-100 border-warning-subtle">
+              <div class="text-warning small text-uppercase fw-bold mb-2"><i class="bi bi-calendar-check me-2"></i>Today's Requests</div>
+              <div id="global-daily-requests" class="stat-value text-warning">0</div>
+              <div class="small text-muted">System-wide daily total</div>
             </div>
           </div>
           <div class="col-md-3">
-            <div class="card p-3 h-100">
-              <div class="text-muted small text-uppercase mb-2">Total Models</div>
-              <div id="total-models" class="stat-value text-info">45+</div>
-              <div class="small text-muted">Across all tiers</div>
+            <div class="card p-3 h-100 border-info-subtle">
+              <div class="text-info small text-uppercase fw-bold mb-2"><i class="bi bi-lightning-charge me-2"></i>Today's Tokens</div>
+              <div id="global-daily-tokens" class="stat-value text-info">0</div>
+              <div class="small text-muted">Aggregated usage today</div>
             </div>
           </div>
           <div class="col-md-3">
-            <div class="card p-3 h-100">
-              <div class="text-muted small text-uppercase mb-2">Requests Today</div>
-              <div id="total-requests" class="stat-value text-warning">0</div>
-              <div class="small text-muted">Tracked via pipeline</div>
+            <div class="card p-3 h-100 border-success-subtle">
+              <div class="text-success small text-uppercase fw-bold mb-2"><i class="bi bi-infinity me-2"></i>Lifetime Requests</div>
+              <div id="global-lifetime-requests" class="stat-value text-success">0</div>
+              <div class="small text-muted">Total since installation</div>
             </div>
           </div>
         </div>
