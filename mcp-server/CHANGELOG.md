@@ -15,6 +15,7 @@
 - **Structural Markdown Middleware**: New `StructuralMarkdownMiddleware` inserted as the first pipeline stage. For agentic requests it reads the full session memory (`data/projects/{sessionId}/`) and injects it into the user message, giving the LLM complete visibility into context on every turn.
 - **Project Work Rule Enforcement**: Tool descriptions and all documentation (`README.md`, `guide.md`, `SKILL.md`) have been hardened to mandate `agentic: true` and `workspace_root` for repository-scoped tasks, preventing "context-blind" requests.
 - **Logic Collision Fixes**: Resolved auto-classification collisions (e.g., 'classify' matching as 'coding' due to name overlap) to ensure deterministic routing for complex intents.
+- **Global Usage Persistence**: Implemented a robust telemetry layer with atomic Read-Merge-Write synchronization. Tracks daily and lifetime metrics across process restarts and concurrent agents (Claude, ChatGPT, Antigravity).
 
 ### ✨ New Features
 
@@ -26,6 +27,10 @@
 - `writeToSessionMemory(sessionId, filePath, content)` helper in `code-mode.ts` — safe file persistence with path-traversal guard
 - `detectMode(code, command)` in `code-mode.ts` — auto-detects `'coding'` | `'research'` mode
 - `limitSubtasks(plan)` in `AgenticMiddleware` — hard cap of 4 subtasks
+- **Global Usage Hub**: Real-time "Global Server Hub" summary in dashboard displaying today's vs lifetime request/token totals.
+- `PersistenceManager` (`src/utils/PersistenceManager.ts`) — atomic file-based state management with temp-file swap safety.
+- **Daily usage resets**: Local-time-aware logic that clears daily counters while preserving lifetime totals.
+- **Persistence Verification Suite**: Added `tests/persistence.test.ts` to validate atomic merging and state recovery.
 - **Test Matrix Expansion**: Added `tests/task-routing-matrix.test.ts` and `tests/context-resolution.test.ts` to verify the "Prompt → Task → Model" routing pipeline and file inlining logic.
 - **Dynamic Timeout Testing**: Switched test assertions to `expect.any(Number)` to support dynamic time budgets.
 
@@ -40,6 +45,7 @@
 - **Multi-modal Robustness**: `StructuralMarkdownMiddleware` updated to handle complex message content (Array/Object) for visual/multi-modal compatibility.
 - **Memory Optimization**: Migrated to `LRUCache` for session management (1000 entries, 1h TTL) with automatic `transport.close()` on eviction to prevent resource leaks.
 - **Async Cache Initialization**: Refactored `ResponseCache` to eliminate synchronous file I/O during server startup, moving to a lazy-loading async `init()` pattern.
+- **Debounced Persistence Flushes**: `LLMExecutor` now uses a 2-second debounce for usage flushes to prevent I/O thrashing during heavy agentic sequences.
 - **Logic Simplification**: Removed redundant `confidenceScore` mapping and added robust optional chaining (`?.`) across all middleware context lookups.
 
 ### ⚠️ Breaking Changes

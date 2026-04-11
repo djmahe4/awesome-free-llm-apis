@@ -35,6 +35,7 @@ This server includes an orchestration pipeline for routing, token management, an
 - **🆕 v1.0.4: Structural Memory Middleware**: `StructuralMarkdownMiddleware` injects full `knowledge.md` into every agentic request for complete session context visibility
 - **🆕 v1.0.4: Anti-Over-Iteration**: `AgenticMiddleware` now limits decomposed plans to 4 high-level steps and exits early when confidence > 0.85 or after 3 iterations
 - **🆕 v1.0.4: Stateful Coding Mode**: `code_mode` with `mode:"coding"` writes ` ```file:...``` ` output blocks to `data/projects/{sessionId}/` for persistent session files
+- **🆕 v1.0.4: Global Usage Persistence**: Atomic Read-Merge-Write telemetry that tracks daily and lifetime token/request usage across server restarts and multiple concurrent agents.
 - **Task-Based Routing**: Maps coding tasks to QwQ-32B/Qwen Coder and chat to Llama 3.3-70B/GPT-4o
 - **Token Management**: Uses `js-tiktoken` for proactive usage estimation and rate limit prevention
 - **Intelligent Failover**: Automatically cascades through 5-15 models per task if a provider is unavailable
