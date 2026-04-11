@@ -11,7 +11,11 @@ export async function getTokenStats() {
         name: p.name,
         isAvailable: p.isAvailable(),
         rateLimits: p.rateLimits,
-        usage: tracking[p.id] || { remainingTokens: undefined, refreshTime: undefined }
+        usage: {
+            requests: tracking[p.id]?.remainingRequests ?? '?',
+            tokens: tracking[p.id]?.remainingTokens ?? '?'
+        }
+
     }));
 
     return {

@@ -1,5 +1,5 @@
 import { LRUCache } from 'lru-cache';
-import { promises as fs, readFileSync, existsSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import { dirname } from 'node:path';
 import { debounce } from '../utils/debounce.js';
 import type { ChatRequest, ChatResponse } from '../providers/types.js';
@@ -58,7 +58,7 @@ export class ResponseCache {
     try {
       const data = JSON.stringify(Array.from(this.cache.entries()));
       const dir = dirname(this.persistPath);
-      if (!existsSync(dir)) await fs.mkdir(dir, { recursive: true });
+      await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(this.persistPath, data, 'utf-8');
     } catch (err) {
       console.error('Failed to persist cache:', err);
@@ -68,12 +68,17 @@ export class ResponseCache {
   private async load(): Promise<void> {
     if (!this.persistPath) return;
     try {
-      if (existsSync(this.persistPath)) {
+      try {
         const data = await fs.readFile(this.persistPath, 'utf8');
         const entries = JSON.parse(data) as Array<[string, ChatResponse]>;
         for (const [key, value] of entries) {
           this.cache.set(key, value);
         }
+      } catch (err: any) {
+        if (err.code !== 'ENOENT') {
+          throw err;
+        }
+        // File doesn't exist, ignore
       }
       this.isLoaded = true;
     } catch (err) {

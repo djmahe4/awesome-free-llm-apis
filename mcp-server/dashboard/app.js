@@ -50,9 +50,9 @@ function renderStats(providers) {
         if (p.isAvailable) activeCount++;
 
         const tokensLimit = p.rateLimits.tokensPerMonth || p.rateLimits.rpd || p.rateLimits.rpm || 'Free';
-        const usageStr = p.usage
-            ? `${p.usage.requests} reqs / ${p.usage.tokens} tokens`
-            : 'No usage yet';
+        const usageStr = (p.usage && (p.usage.requests !== '?' || p.usage.tokens !== '?'))
+            ? `Remaining: ${p.usage.requests} reqs / ${p.usage.tokens} tokens`
+            : 'Awaiting activity...';
 
         return `
         <div class="col-md-6 col-lg-4">
@@ -72,7 +72,7 @@ function renderStats(providers) {
                             <span>${escapeHTML(String(tokensLimit))}</span>
                         </div>
                         <div class="progress">
-                            <div class="progress-bar" role="progressbar" style="width: 100%"></div>
+                            <div class="progress-bar progress-bar-full" role="progressbar"></div>
                         </div>
                     </div>
 
@@ -83,7 +83,7 @@ function renderStats(providers) {
                         </div>
                     </div>
                     <div class="mt-3 pt-2 border-top border-secondary-subtle d-flex justify-content-end">
-                        <button class="btn btn-sm btn-link text-primary p-0 text-decoration-none" onclick="verifyProvider('${p.id}', event)">
+                        <button class="btn btn-sm btn-link text-primary p-0 text-decoration-none verify-provider-btn" data-provider-id="${p.id}">
                             <i class="bi bi-shield-check me-1"></i>Verify Credential
                         </button>
                     </div>
@@ -139,6 +139,15 @@ function updateConnectionStatus(online) {
 }
 
 refreshBtn.addEventListener('click', fetchStats);
+
+// Event delegation for verification buttons (more secure than inline onclick)
+containerEl.addEventListener('click', (event) => {
+    const verifyBtn = event.target.closest('.verify-provider-btn');
+    if (verifyBtn) {
+        const providerId = verifyBtn.getAttribute('data-provider-id');
+        verifyProvider(providerId, event);
+    }
+});
 
 // Initial fetch and poll
 fetchStats();
@@ -205,7 +214,7 @@ function renderQueue(elementId, items) {
     }
     el.innerHTML = items.map(item =>
         `<li class="mb-1 d-flex align-items-start gap-1">
-            <i class="bi bi-chevron-right text-secondary mt-1" style="font-size:0.7rem"></i>
+            <i class="bi bi-chevron-right text-secondary mt-1 queue-icon"></i>
             <span>${escapeHTML(String(item))}</span>
         </li>`
     ).join('');

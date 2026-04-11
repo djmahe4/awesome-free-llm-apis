@@ -127,6 +127,7 @@ async function main() {
             "script-src": ["'self'", "https://cdn.jsdelivr.net"],
             "style-src": ["'self'", "https://cdn.jsdelivr.net"],
             "img-src": ["'self'", "data:", "https:*"],
+            "connect-src": ["'self'", "https://cdn.jsdelivr.net"],
           },
         },
         hsts: {
