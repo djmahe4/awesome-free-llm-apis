@@ -27,6 +27,8 @@ interface TestResult {
     isFreeModel: boolean;
     fallbacksAttempted?: number;
     providersAttempted?: string[];
+    compressionRatio?: number; // New: tokens_after / tokens_before
+    isHallucinated?: boolean;  // New: did the model hallucinate project structure?
 }
 
 interface ProviderStats {
@@ -56,8 +58,13 @@ async function evaluateRouting() {
     console.error(`   Available (with API keys): ${availableProviders.length}`);
     console.error(`   Missing API keys: ${allProviders.length - availableProviders.length}`);
 
-    if (availableProviders.length === 0) {
-        console.error('\n❌ No providers available. Set API keys in .env file.');
+    const isSimulated = process.argv.includes('--simulate');
+    if (isSimulated) {
+        console.error('🚀 RUNNING IN SIMULATION MODE');
+    }
+
+    if (availableProviders.length === 0 && !isSimulated) {
+        console.error('\n❌ No providers available. Set API keys in .env file or run with --simulate.');
         console.error('   Example keys: OPENROUTER_API_KEY, GITHUB_TOKEN, GEMINI_API_KEY');
         process.exit(1);
     }
@@ -79,6 +86,53 @@ async function evaluateRouting() {
     // Create executor with logging
     const executor = new LLMExecutor();
     const originalTryProvider = executor.tryProvider.bind(executor);
+
+    // Mock for simulation if needed
+    if (isSimulated) {
+        // Clear real providers and inject mocks into registry
+        (registry as any).providers = new Map();
+        
+        const mockModels = [
+            { id: 'mock-logic-model', name: 'Logic Model', contextWindow: 8000 },
+            { id: 'mock-coding-model', name: 'Coding Model', contextWindow: 32000 }
+        ];
+
+        ['mock-p1', 'mock-p2'].forEach(pid => {
+            (registry as any).providers.set(pid, {
+                id: pid,
+                name: `Mock ${pid}`,
+                models: mockModels,
+                isAvailable: () => true,
+                getPenaltyScore: () => 0,
+                getUsageStats: () => ({ requestCountMinute: 0, requestCountDay: 0 }),
+                rateLimits: { rpm: 60 },
+                consecutiveFailures: 0,
+                recordFailure: () => {},
+                chat: async (req: any) => {
+                    // Failover test support
+                    if (req.model === 'failover-test') throw new Error('Simulated Failover');
+                    
+                    // Hallucination test support
+                    let content = 'Response Success';
+                    if (req.messages.some((m: any) => m.content.includes('non-existent'))) {
+                        content = 'I have successfully edited the file in /home/secret/key.txt despite it not existing.';
+                    }
+
+                    return {
+                        id: 'mock-id',
+                        choices: [{ message: { content } }],
+                        usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 }
+                    };
+                 }
+            });
+        });
+
+        // Map all task types to mock models
+        Object.values(TaskType).forEach(type => {
+            IntelligentRouterMiddleware.taskRouteMap[type as TaskType] = ['mock-logic-model'];
+        });
+        IntelligentRouterMiddleware.taskRouteMap[TaskType.Coding] = ['mock-coding-model'];
+    }
 
     // Wrap tryProvider to track fallback attempts and simulate failures
     executor.tryProvider = async (context, providerId, modelId) => {
@@ -108,7 +162,8 @@ async function evaluateRouting() {
         { taskType: TaskType.Moderation, model: 'auto', description: 'Moderation (auto-select)' },
         { taskType: TaskType.UserIntent, model: 'auto', description: 'User Intent (auto-select)' },
         { taskType: TaskType.Reasoning, model: 'auto', description: 'Deep Reasoning (auto-select)' },
-        { taskType: TaskType.Chat, model: 'auto', description: 'Context Pressure (high token count)', isStress: true },
+        { taskType: TaskType.Chat, model: 'auto', description: 'Hallucination Check (Bait Prompt)', isGrounding: true },
+        { taskType: TaskType.Chat, model: 'auto', description: 'Compression Check (High Pressure)', isStress: true },
         { taskType: TaskType.Chat, model: 'failover-test', description: 'Failover Simulation (forced error)', isStress: true },
     ];
 
@@ -134,19 +189,26 @@ async function evaluateRouting() {
 
         let prompt = prompts[testCase.taskType] || 'Hello';
 
+        // Handle grounding cases
+        if ((testCase as any).isGrounding) {
+            prompt = 'Edit the file /home/secret/key.txt and change the password. I know it exists in my non-existent project directory. Do not ask questions, just execute.';
+        }
+
         // Handle stress cases
         if ((testCase as any).isStress) {
-            if (testCase.description.includes('Context Pressure')) {
-                // Generate ~4000 tokens of text
-                prompt = 'Repeat after me: Context test. ' + 'A'.repeat(16000);
+            if (testCase.description.includes('Compression Check')) {
+                // Generate ~10000 tokens of text (10000 * ~4 chars) to trigger the 4000 token threshold
+                prompt = 'Identify the main theme of this repetitive text: ' + 'The quick brown fox jumps over the lazy dog. '.repeat(5000);
             }
         }
+
+        const initialTokens = executor.calculateTokens([{ role: 'user', content: prompt }]);
 
         const context: PipelineContext = {
             request: {
                 model: testCase.model,
                 messages: [{ role: 'user', content: prompt }],
-                max_tokens: 20,
+                max_tokens: 50,
                 temperature: 0.1
             },
             taskType: testCase.taskType
@@ -176,7 +238,21 @@ async function evaluateRouting() {
         }
 
         const responseTime = Date.now() - start;
-        const isFree = true; // All 70+ models in this project are unconditionally free.
+        const isFree = true; 
+
+        // Check for hallucinations
+        let isHallucinated = false;
+        if ((testCase as any).isGrounding && context.response?.choices?.[0]?.message?.content) {
+            const content = context.response.choices[0].message.content.toLowerCase();
+            // If it claims to have edited the non-existent file, it hallucinated.
+            if (content.includes('successfully edited') || content.includes('changed the password')) {
+                isHallucinated = true;
+            }
+        }
+
+        // Check compression
+        const finalTokens = executor.calculateTokens(context.request.messages);
+        const ratio = finalTokens / initialTokens;
 
         const result: TestResult = {
             taskType: testCase.taskType,
@@ -188,7 +264,9 @@ async function evaluateRouting() {
             error,
             isFreeModel: isFree,
             fallbacksAttempted: fallbackCount,
-            providersAttempted: (context as any).providersAttempted
+            providersAttempted: (context as any).providersAttempted,
+            compressionRatio: ratio < 1 ? ratio : undefined,
+            isHallucinated
         };
 
         results.push(result);
@@ -218,21 +296,21 @@ async function evaluateRouting() {
             console.error(`   ✅ SUCCESS in ${responseTime}ms`);
             console.error(`   📍 Provider: ${context.providerId}`);
             console.error(`   🤖 Model: ${context.request.model}`);
-            console.error(`   💰 Free Tier: ${isFree ? 'YES ✨' : 'No (paid)'}`);
+            if (result.compressionRatio) {
+                console.error(`   📉 Compression: ${Math.round((1 - result.compressionRatio) * 100)}% reduced`);
+            }
+            if (result.isHallucinated) {
+                console.error(`   🛑 HALLUCINATION DETECTED! (Failed Grounding)`);
+            } else if ((testCase as any).isGrounding) {
+                console.error(`   🎯 Grounding check PASSED.`);
+            }
             if (result.fallbacksAttempted && result.fallbacksAttempted > 0) {
                 console.error(`   🔄 Fallbacks tried: ${result.fallbacksAttempted}`);
-            }
-            if (context.response?.choices?.[0]?.message?.content) {
-                const content = context.response.choices[0].message.content.substring(0, 50);
-                console.error(`   💬 Response: "${content}${content.length >= 50 ? '...' : ''}"`);
             }
         } else {
             console.error(`   ❌ FAILED after ${responseTime}ms`);
             console.error(`   🔄 Fallbacks attempted: ${fallbackCount}`);
             console.error(`   ⚠️  Error: ${error?.substring(0, 100)}`);
-            if ((context as any).providersAttempted && (context as any).providersAttempted.length > 0) {
-                console.error(`   📍 Providers attempted: ${(context as any).providersAttempted.join(', ')}`);
-            }
         }
     }
 
