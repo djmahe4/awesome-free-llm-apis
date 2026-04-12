@@ -162,10 +162,10 @@ function logResearchValidation(sessionId: string, userContent: string, step: str
 export class AgenticMiddleware implements Middleware {
     name = 'AgenticMiddleware';
 
-    // v1.0.4 optimization: Cap decomposed plan to 4 high-level steps to prevent over-iteration
+    // v1.0.4 optimization: Cap decomposed plan to 2 high-level steps to prevent over-iteration
     private limitSubtasks(steps: string[]): string[] {
-        if (steps.length > 4) {
-            return steps.slice(0, 4);
+        if (steps.length > 2) {
+            return steps.slice(0, 2);
         }
         return steps;
     }

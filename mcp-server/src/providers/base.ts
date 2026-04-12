@@ -133,12 +133,24 @@ export abstract class BaseProvider implements Provider {
     const url = `${this.baseURL}chat/completions`;
 
     // Sanitize request: Remove internal-only fields that strict APIs reject
-    const { agentic, timeoutMs: _timeoutMs, ...sanitizedRequest } = request as any;
+    const { agentic, timeoutMs: _timeoutMs, abortSignal: _abort, ...sanitizedRequest } = request as any;
 
     // Ensure model is set
     sanitizedRequest.model = sanitizedRequest.model || (this.models.length > 0 ? this.models[0].id : '');
 
     const controller = new AbortController();
+    
+    // Wire up external abort signal for Hedged Execution
+    if (request.abortSignal) {
+      if (request.abortSignal.aborted) {
+        controller.abort();
+      } else {
+        request.abortSignal.addEventListener('abort', () => {
+          controller.abort();
+        });
+      }
+    }
+
     const timeoutMs = request.timeoutMs || this.defaultTimeout;
     let timer: NodeJS.Timeout | null = null;
 

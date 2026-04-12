@@ -44,8 +44,8 @@ graph TD
 |-------|-----------|---------|
 | 1 | `StructuralMarkdownMiddleware` | Injects full `knowledge.md` session memory + **Resolves `file://` URIs** (v1.0.4) into agentic requests; enforces structured response format |
 | 2 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed |
-| 3 | `AgenticMiddleware` *(optional)* | Task decomposition (max 4 steps), research validation, system prompt injection, early-exit on confidence > 0.85 or 3 iterations |
-| 4 | `IntelligentRouterMiddleware` | Deterministic keyword-based model-tier selection with **Persistent Health Memory** (v1.0.4); handles fallback cascade with **Adaptive Timeout Floor (12s)** |
+| 3 | `AgenticMiddleware` *(optional)* | Task decomposition (max 2 steps), research validation, system prompt injection, early-exit on confidence > 0.85 or 3 iterations |
+| 4 | `IntelligentRouterMiddleware` | Deterministic keyword-based model-tier selection with **Persistent Health Memory** (v1.0.4); handles fallback cascade with **Adaptive Timeout Floor (12s)** and **Hedged Execution Strategy** (v1.0.5) combining parallel delay-based requests and graceful network abortions. |
 | 5 | `LLMExecutor` | HTTPS request to provider; token tracking via response headers + **centralized circuit-breaking** + **bridge: writes `providerRemainingTokens` into context for ContextManager** |
 
 ---

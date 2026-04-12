@@ -9,7 +9,7 @@ async function runTask(name: string, prompt: string) {
     console.log(`📝 PROMPT: "${prompt}"`);
 
     const context: PipelineContext = {
-        request: { 
+        request: {
             messages: [{ role: 'user', content: prompt }],
             max_tokens: 8000 // Required for DeepSeek-R1's deep reasoning `<think>` blocks
         }
@@ -36,30 +36,27 @@ async function runTask(name: string, prompt: string) {
 
 const tasks = [
     {
-        name: "Sophisticated Coding",
-        prompt: "Write a high-performance TypeScript implementation of a thread-safe 'Circuit Breaker' pattern with exponential backoff and localized state management."
+        name: "Hedged Execution Test (Reasoning)",
+        prompt: "Provide a 10-paragraph detailed analysis of the impact of the printing press on the European Reformation, including theological, social, and political ramifications. Use a deep reasoning model. (Expect 20s hedge delay)"
     },
     {
-        name: "Deep Reasoning",
-        prompt: "A man is looking at a photograph. His friend asks, 'Who is it?' The man replies, 'Brothers and sisters I have none, but that man's father is my father's son.' Who is in the photograph? Explain the logic."
+        name: "Stress Test (Standard)",
+        prompt: "Generate a 500-line Python implementation of a distributed hash table using the Chord protocol, including stabilization and finger tables. (Expect 4s hedge delay)"
     },
     {
-        name: "Entity/JSON Extraction",
+        name: "Entity/JSON Extraction (Fast)",
         prompt: "Convert this list into a strictly valid JSON array of objects with keys 'api_name', 'tier', 'status': 'The Gemini Pro API offers a free tier for testing, whereas OpenAI GPT-4o is paid. QuantPi-X2 is currently in closed beta.'"
-    },
-    {
-        name: "Full Project Decomposition",
-        prompt: "I need to build a secure document indexing service. First, design a vector database schema using Pinecone. Second, provide a Node.js snippet for chunking PDF text. Finally, describe the security protocol for encrypting PII at rest."
-    },
-    {
-        name: "Extreme Stress Test",
-        prompt: "I need you to write a highly detailed technical specification for a multi-tenant Kubernetes architecture spanning AWS and Azure. It must include exact YAML manifests for: 1) Cross-cluster Service Mesh using Linkerd. 2) GitOps deployment strategy using ArgoCD enforcing OPA Gatekeeper policies. 3) CockroachDB StatefulSets spread across 3 regions with zero-trust networking. Explain the failover mechanisms in extreme detail. Furthermore, validate this against ISO 27001 compliance standards. Provide code for the custom admission controllers in Golang. Ensure that you explain the rationale behind every single configuration option. Include performance benchmarking strategies for the ingress controllers."
     }
 ];
 
 async function start() {
     console.log("🌟 STARTING FREE-LLMS LIVE DEMO 🌟");
-    console.log("Using Production build IDs: Qwen3 Coder, DeepSeek R1, Gemma 3/4");
+    console.log("--------------------------------------------------");
+    console.log("MONITORING HEDGED EXECUTION:");
+    console.log("1. Look for '[Router][Hedge] Launching...' logs.");
+    console.error("2. If a provider takes > 8s (Standard) or > 20s (Reasoning),");
+    console.error("   you will see a parallel provider launch automatically.");
+    console.log("--------------------------------------------------");
 
     for (const task of tasks) {
         await runTask(task.name, task.prompt);

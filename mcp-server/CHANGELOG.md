@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.5 – Hedged Execution + Latency Optimization (April 2026)
+
+**Released:** 2026-04-12
+
+### 🚀 Highlights
+
+- **Hedged Execution Strategy (`IntelligentRouterMiddleware`)**: Substantially reduces latency during partial provider outages by racing executing provider requests against a parallel timeout delayed request.
+- **Graceful Execution Abortion**: Requests aborted due to successful parallel resolution automatically close open network sockets using `AbortController` signals to reduce token wastage.
+- **Deep Reasoning Accommodations**: Automatically boosts `max_tokens` limits (up to 8192) and increases hedge delay parameters up to 20 seconds specifically for high-capacity models (DeepSeek-R1, O1, O3, Gemini Pro).
+- **Subtask Pipeline Limiter**: Hardcoded subtask generation limit in `AgenticMiddleware` to 2 segments to avoid deeply orchestrated timeout spirals.
+
 ## v1.0.4 – Hardened Resilience + Persistent Memory + structural Fix (April 2026)
 
 **Released:** 2026-04-12 (Updated)

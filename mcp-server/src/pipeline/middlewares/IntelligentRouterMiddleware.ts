@@ -1,6 +1,6 @@
 import { ProviderRegistry } from '../../providers/registry.js';
 import { TaskType } from '../middleware.js';
-import type { Message } from '../../providers/types.js';
+import type { Message, ChatResponse } from '../../providers/types.js';
 import type { Middleware, PipelineContext, NextFunction } from '../middleware.js';
 import { ContextManager } from '../../utils/ContextManager.js';
 import { getMessageContent } from '../../utils/MessageUtils.js';
@@ -685,78 +685,122 @@ Request: ${lastMessage}`;
                 .sort((a, b) => b.score - a.score);
 
             const triedProviders = new Set<string>();
+            let successfulResponse: ChatResponse | null = null;
+            let successfulProviderId: string | null = null;
+            let lastError: Error | null = null;
 
-            for (const { provider } of scoredProviders) {
+            const globalAbortController = new AbortController();
+            const attemptPromises: Promise<void>[] = [];
+
+            let index = 0;
+            while (index < scoredProviders.length) {
+                if (globalAbortController.signal.aborted) break;
+
+                const { provider } = scoredProviders[index];
+                index++;
+
                 const stats = this.executor.getProviderStats()[provider.id];
                 if (stats?.circuitOpen) {
                     console.error(`[Router][CircuitBreaker] Processing cooling-down provider ${provider.id} because it matched task requirements (Score: penalty -0.5 apply)`);
                 }
 
-                // Provider diversity: skip models from already-tried providers
-                if (triedProviders.has(provider.id)) {
-                    continue;
+                if (triedProviders.has(provider.id)) continue;
+                triedProviders.add(provider.id);
+
+                const remainingTimeout = getRemainingTimeout();
+                if (remainingTimeout < 2000) continue;
+
+                // Adaptive Timeout Floor
+                const perAttemptTimeout = Math.min(remainingTimeout, Math.max(12000, Math.floor(remainingTimeout / 2)));
+
+                const lowerModel = modelId.toLowerCase();
+                const isReasoning = lowerModel.includes('deepseek') || lowerModel.includes('r1') || lowerModel.includes('o1') || lowerModel.includes('o3') || lowerModel.includes('gemini-pro') || lowerModel.includes('pro-preview');
+                const hedgeDelay = isReasoning ? 20000 : 4000;
+
+                console.error(`[Router][Hedge] Launching ${provider.id}/${modelId} (budget: ${remainingTimeout}ms, attempt timeout: ${perAttemptTimeout}ms, hedge: ${hedgeDelay}ms)`);
+                (context as any).providersAttempted.push(`${provider.id}/${modelId}`);
+
+                // Clone request for thread safety
+                const attemptRequest = {
+                    ...context.request,
+                    model: modelId,
+                    abortSignal: globalAbortController.signal
+                };
+
+                // Boost tokens for reasoning models
+                if (isReasoning) {
+                    attemptRequest.max_tokens = Math.max(attemptRequest.max_tokens || 0, 8192);
                 }
 
+                const attemptPromise = (async () => {
+                    try {
+                        const tempContext = { ...context, request: attemptRequest };
+                        const response = await this.executor.tryProvider(tempContext, provider.id, modelId, perAttemptTimeout);
+
+                        if (response && !globalAbortController.signal.aborted) {
+                            globalAbortController.abort(); // Cancel other parallel attempts
+                            successfulResponse = response;
+                            successfulProviderId = provider.id;
+                            if (contextCompressed) (context as any).contextCompressed = true;
+                        }
+                    } catch (err: any) {
+                        if (globalAbortController.signal.aborted) return; // Silent suppression of aborted fetch errors
+
+                        lastError = err;
+
+                        const errMsg = err.message?.toLowerCase() || '';
+                        const isContextOverflow =
+                            errMsg.includes('context_length_exceeded') ||
+                            errMsg.includes('too many tokens') ||
+                            errMsg.includes('string is too long') ||
+                            (err.status === 400 && (errMsg.includes('context') || errMsg.includes('token') || errMsg.includes('length')));
+
+                        if (isContextOverflow) {
+                            console.error(`[Router][Overflow] Triggering dynamic compression due to error: ${err.message}`);
+                            try {
+                                const currentTokens = context.estimatedTokens || 4000;
+                                const compResult = await this.contextManager.compress(context, currentTokens * 0.5, sharedSummarizer);
+                                context.request.messages = compResult.messages;
+                                context.estimatedTokens = this.executor.calculateTokens(context.request.messages);
+                                contextCompressed = true;
+                            } catch (compErr) {
+                                console.error(`[Router][Overflow] Compression fallback failed: ${compErr}`);
+                            }
+                        }
+
+                        if (context.providerId && provider.id === context.providerId && !primaryError) {
+                            primaryError = err;
+                        }
+                        allErrors.push(`${provider.id}/${modelId}: ${err.message}`);
+                        // Use centralized executor to record failures to sync with persistent telemetry
+                        this.executor.recordProviderFailure(provider.id, err.status || 500);
+                    }
+                })();
+
+                attemptPromises.push(attemptPromise);
+
+                if (globalAbortController.signal.aborted) break;
+
+                // Hedged wait: Proceed to the next provider if this one doesn't finish within 'hedgeDelay'
+                const timerPromise = new Promise<void>(resolve => setTimeout(resolve, hedgeDelay));
+                await Promise.race([attemptPromise, timerPromise]);
+
+                if (globalAbortController.signal.aborted) break;
+            }
+
+            // Sync tail of parallel executions
+            await Promise.all(attemptPromises);
+
+            if (successfulResponse && successfulProviderId) {
+                context.response = successfulResponse;
+                context.providerId = successfulProviderId;
+                context.request.model = modelId;
                 try {
-                    const remainingTimeout = getRemainingTimeout();
-                    if (remainingTimeout < 2000) continue;
-
-                    // Adaptive Timeout Floor: Ensure every model gets a fair chance to stream its first token
-                    const perAttemptTimeout = Math.min(remainingTimeout, Math.max(12000, Math.floor(remainingTimeout / 2)));
-
-                    console.error(`[Router][Fallback] Trying ${provider.id}/${modelId} (remaining budget: ${remainingTimeout}ms, attempt timeout: ${perAttemptTimeout}ms)`);
-                    (context as any).providersAttempted.push(`${provider.id}/${modelId}`);
-                    context.request.model = modelId;
-                    const response = await this.executor.tryProvider(context, provider.id, modelId, perAttemptTimeout);
-
-                    if (response) {
-                        if (contextCompressed) (context as any).contextCompressed = true;
-                        context.response = response;
-                        context.providerId = provider.id;
-                        triedProviders.add(provider.id);
-
-                        try {
-                            await next();
-                        } catch (nextErr) {
-                            throw nextErr;
-                        }
-                        return;
-                    }
-                } catch (err: any) {
-                    lastError = err;
-
-                    // --- Intelligent Error Routing (v1.0.4) ---
-                    // If we hit a context limit error (400), we should compress BEFORE trying the next provider
-                    // because the next provider might have an even smaller window.
-                    const errMsg = err.message?.toLowerCase() || '';
-                    const isContextOverflow =
-                        errMsg.includes('context_length_exceeded') ||
-                        errMsg.includes('too many tokens') ||
-                        errMsg.includes('string is too long') ||
-                        (err.status === 400 && (errMsg.includes('context') || errMsg.includes('token') || errMsg.includes('length')));
-
-                    if (isContextOverflow) {
-                        console.error(`[Router][Overflow] Triggering dynamic compression due to error: ${err.message}`);
-                        try {
-                            const currentTokens = context.estimatedTokens || 4000;
-                            // Uses the sharedSummarizer defined above which tracks total attempts
-                            const compResult = await this.contextManager.compress(context, currentTokens * 0.5, sharedSummarizer);
-                            context.request.messages = compResult.messages;
-                            context.estimatedTokens = this.executor.calculateTokens(context.request.messages);
-                            contextCompressed = true;
-                        } catch (compErr) {
-                            console.error(`[Router][Overflow] Compression fallback failed (limit reached?): ${compErr}`);
-                        }
-                    }
-
-                    if (context.providerId && provider.id === context.providerId && !primaryError) {
-                        primaryError = err;
-                    }
-                    allErrors.push(`${provider.id}/${modelId}: ${err.message}`);
-                    provider.recordFailure(err.status || 500);
-                    triedProviders.add(provider.id);
-                    continue;
+                    await next();
+                } catch (nextErr) {
+                    throw nextErr;
                 }
+                return;
             }
         }
 

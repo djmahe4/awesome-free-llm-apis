@@ -14,6 +14,7 @@ export interface ChatRequest {
   response_format?: { type: 'json_object' | 'text' } | { type: 'json_schema', json_schema?: { name: string, strict?: boolean, schema: any } } | any;
   google_search?: boolean;
   timeoutMs?: number;
+  abortSignal?: AbortSignal;
 }
 
 export interface ChatResponse {
