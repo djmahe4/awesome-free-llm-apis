@@ -76,7 +76,7 @@ describe('Pipeline Orchestration', () => {
         await router.execute(context, next);
 
         // Coding task should pick the best FREE coding model first (Qwen 480B via OpenRouter)
-        expect(context.request.model).toBe('qwen/qwen3-coder-480b-a35b-instruct:free');
+        expect(context.request.model).toBe('qwen/qwen3-coder:free');
         expect(context.providerId).toBe('openrouter');
         expect(next).toHaveBeenCalledTimes(1);
     });

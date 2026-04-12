@@ -52,9 +52,10 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         // Register a provider that has MOST models from our routing map
         // This allows us to verify if the router picks the TOP suggested model when available
         const prov = new MockProvider('main-mock', [
-            { id: 'qwen/qwen3-coder-480b-a35b-instruct:free', name: 'Qwen3 Coder' },
+            { id: 'qwen/qwen3-coder:free', name: 'Qwen3 Coder' },
             { id: 'DeepSeek-R1', name: 'DeepSeek R1' },
             { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3' },
+            { id: 'google/gemma-3-27b-it:free', name: 'Gemma 3' },
             { id: 'google/gemma-4-31B-it', name: 'Gemma 4' },
             { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'Nemotron 3' },
             { id: 'qwen3.5', name: 'Qwen 3.5' },
@@ -85,7 +86,7 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await verifyRouting(
             'Write a high-performance Rust implementation of a priority queue.',
             TaskType.Coding,
-            'qwen/qwen3-coder-480b-a35b-instruct:free'
+            'qwen/qwen3-coder:free'
         );
     });
 
@@ -165,6 +166,6 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await router.execute(context, async () => { });
 
         expect(context.taskType).toBe(TaskType.Coding);
-        expect(trySpy).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'qwen/qwen3-coder-480b-a35b-instruct:free', expect.any(Number));
+        expect(trySpy).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'qwen/qwen3-coder:free', expect.any(Number));
     });
 });

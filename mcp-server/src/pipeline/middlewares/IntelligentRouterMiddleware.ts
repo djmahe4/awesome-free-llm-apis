@@ -31,8 +31,9 @@ export class IntelligentRouterMiddleware implements Middleware {
         'mistral-large-latest': 0.85,
         'mistralai/mistral-large-2-instruct': 0.85,
         'llama-3.3-70b-versatile': 0.85,
-        'qwen/qwen3-coder-480b-a35b-instruct:free': 0.94,
+        'qwen/qwen3-coder:free': 0.94,
         'qwen/qwen3-next-80b-a3b-instruct:free': 0.89,
+        'google/gemma-3-27b-it:free': 0.91,
         'google/gemma-4-31B-it': 0.91,
         'openai/gpt-oss-120b:free': 0.90,
         'openai/gpt-oss-20b:free': 0.75,
@@ -59,7 +60,6 @@ export class IntelligentRouterMiddleware implements Middleware {
         'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8': 0.87,
         'moonshotai/kimi-k2-instruct': 0.82,
         'c4ai-aya-expanse-32b': 0.8,
-        'stepfun/step-3.5-flash:free': 0.8,
         'z-ai/glm-4.5-air:free': 0.8,
         'liquid/lfm2.5-1.2b-thinking:free': 0.88,
         'nvidia/nemotron-3-super-120b-a12b:free': 0.93,
@@ -205,9 +205,9 @@ export class IntelligentRouterMiddleware implements Middleware {
         // multiple distinct questions, or strong sequential signals.
         const stepCount = (lastMsg.match(/^\s*\d+[.)]\s/gm) || []).length;
         const questionCount = (lastMsg.match(/\?/g) || []).length;
-        const hasSequencers = (lower.includes('first') || lower.includes('initial')) && 
-                             (lower.includes('then') || lower.includes('secondary')) && 
-                             (lower.includes('finally') || lower.includes('lastly'));
+        const hasSequencers = (lower.includes('first') || lower.includes('initial')) &&
+            (lower.includes('then') || lower.includes('secondary')) &&
+            (lower.includes('finally') || lower.includes('lastly'));
         const isLong = lastMsg.length > 2500;
 
         return stepCount >= 5 || (questionCount >= 3 && isLong) || hasSequencers;
@@ -315,7 +315,8 @@ Request: ${lastMessage}`;
      */
     public static taskRouteMap: Record<TaskType, string[]> = {
         [TaskType.Coding]: [
-            'qwen/qwen3-coder-480b-a35b-instruct:free',
+            'qwen/qwen3-coder:free',
+            'google/gemma-3-27b-it:free',
             'google/gemma-4-31B-it',
             'DeepSeek-R1',
             'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
@@ -342,7 +343,8 @@ Request: ${lastMessage}`;
             'liquid/lfm2.5-1.2b-thinking:free',
             'qwen-3-235b-a22b-instruct-2507',
             'glm-5.1',
-            'qwen/qwen3-coder-480b-a35b-instruct:free',
+            'qwen/qwen3-coder:free',
+            'google/gemma-3-27b-it:free',
             'google/gemma-4-31B-it',
             'nvidia/nemotron-3-super-120b-a12b:free',
         ],
@@ -437,7 +439,6 @@ Request: ${lastMessage}`;
             'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
             'Qwen/Qwen2.5-72B-Instruct',
             'c4ai-aya-expanse-32b',
-            'stepfun/step-3.5-flash:free',
             'openai/gpt-oss-120b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
             'meta/llama-3.3-70b-instruct',
@@ -488,10 +489,10 @@ Request: ${lastMessage}`;
         let lastError: Error | null = null;
         let primaryError: Error | null = null;
         const allErrors: string[] = [];
-        
+
         const startTime = Date.now();
         const totalBudget = context.request.timeoutMs || 30000;
-        
+
         const getRemainingTimeout = () => {
             const elapsed = Date.now() - startTime;
             return Math.max(0, totalBudget - elapsed);
@@ -531,11 +532,11 @@ Request: ${lastMessage}`;
                             const res = await p.chat({
                                 model: modelId,
                                 messages: [{ role: 'user', content: summaryPrompt }],
-                                timeoutMs: Math.min(10000, Math.floor(currentRemaining * 0.4)) 
+                                timeoutMs: Math.min(10000, Math.floor(currentRemaining * 0.4))
                             });
                             return res.choices[0].message.content;
-                        } catch (err: any) { 
-                            continue; 
+                        } catch (err: any) {
+                            continue;
                         }
                     }
                 }
@@ -552,11 +553,11 @@ Request: ${lastMessage}`;
                         const res = await p.chat({
                             model: m.id,
                             messages: [{ role: 'user', content: summaryPrompt }],
-                            timeoutMs: Math.min(8000, Math.floor(currentRemaining * 0.3)) 
+                            timeoutMs: Math.min(8000, Math.floor(currentRemaining * 0.3))
                         });
                         return res.choices[0].message.content;
-                    } catch (err: any) { 
-                        continue; 
+                    } catch (err: any) {
+                        continue;
                     }
                 }
             }
@@ -722,11 +723,11 @@ Request: ${lastMessage}`;
                     }
                 } catch (err: any) {
                     lastError = err;
-                    
+
                     // --- Intelligent Error Routing (v1.0.4) ---
                     // If we hit a context limit error (400), we should compress BEFORE trying the next provider
                     // because the next provider might have an even smaller window.
-                    const isContextOverflow = err.status === 400 || 
+                    const isContextOverflow = err.status === 400 ||
                         err.message?.toLowerCase().includes('context_length_exceeded') ||
                         err.message?.toLowerCase().includes('too many tokens') ||
                         err.message?.toLowerCase().includes('string is too long');
