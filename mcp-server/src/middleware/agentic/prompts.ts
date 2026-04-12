@@ -31,6 +31,17 @@ When your output contains matches from the 'RESEARCH APPENDIX' or 'SUBSYSTEM REF
    - [Project Name](URL): Description / Useful pattern.
 `;
 
+/**
+ * Mandatory Grounding Protocol (v1.0.4)
+ * Forces the model to explicitly verify its source before answering.
+ */
+const GROUNDING_PROTOCOL = `
+## 🔍 GROUNDING PROTOCOL
+All file and artifact references in this prompt have been resolved and injected by the server pipeline.
+When citing file content, prefix with \`[RETRIEVED]\` and reference the specific injected code block by filename.
+Do not infer or reconstruct information that is not explicitly present in a resolved block.
+`;
+
 interface PromptSection {
     id: string;
     title: string;
@@ -154,8 +165,8 @@ export async function getIntelligentSystemPrompt(
         const isReference = section.id === 'research_appendix' || section.id === 'subsystem_reference_map';
         if (isReference) {
             const architecturalKeywords = [
-                'rest', 'api', 'url', 'github', 'appendix', 'reference', 'map', 
-                'architecture', 'research', 'review', 'reviewer', 'implementation', 
+                'rest', 'api', 'url', 'github', 'appendix', 'reference', 'map',
+                'architecture', 'research', 'review', 'reviewer', 'implementation',
                 'patterns', 'best practices', 'audit', 'python', 'javascript', 'golang', 'rust'
             ];
             architecturalKeywords.forEach(ak => {
@@ -179,7 +190,7 @@ export async function getIntelligentSystemPrompt(
         if (section.id === 'research_appendix' || section.id === 'subsystem_reference_map') {
             // Split by any list item to separate category headers from links
             const parts = content.split(/\n(?=\s*- )/).map(p => p.trim()).filter(p => p.length > 0);
-            
+
             const scoredEntries: { entry: string, entryScore: number }[] = [];
             let currentCategory = "";
 
@@ -189,12 +200,12 @@ export async function getIntelligentSystemPrompt(
                     let entryScore = 0;
                     const entryLower = part.toLowerCase();
                     const contextText = (currentCategory + " " + part).toLowerCase();
-                    
+
                     // Score based on tokens in the link text AND category context
                     contextText.split(/\W+/).forEach(et => {
                         if (tokens.has(et)) entryScore += 2.0;
                     });
-                    
+
                     tokens.forEach(t => {
                         if (t.length > 3 && contextText.includes(t)) entryScore += 0.5;
                     });
@@ -232,6 +243,9 @@ export async function getIntelligentSystemPrompt(
     if (hasReferences) {
         assembled += `\n\n${REFERENCE_SUGGESTION_PROTOCOL}`;
     }
+
+    // Always inject Grounding Protocol for agentic consistency
+    assembled += `\n\n${GROUNDING_PROTOCOL}`;
 
     return assembled;
 }

@@ -175,6 +175,13 @@ export async function resolveFileRefs(content: string, messages: any[], workspac
         const replacement = `${fullMatch}\n\n\`\`\`${sourceLabel}:${baseName}\n${resolvedContent}\n\`\`\``;
         newContent = newContent.replace(fullMatch, replacement);
         console.error(`[v1.0.4][resolveRefs] Resolved ${baseName} via ${sourceLabel}`);
+      } else {
+        // v1.0.4 Hard Stop: Replace the unresolved URI with a machine-readable sentinel.
+        // This prevents the LLM from seeing a dangling reference and hallucinating its content.
+        const baseName = path.basename(absPath);
+        const sentinel = `[NOT_FOUND_HARD_STOP: ${baseName} (${fullMatch}) could not be resolved. Provide the correct file:/// path.]`;
+        newContent = newContent.replace(fullMatch, sentinel);
+        console.error(`[v1.0.4][resolveRefs] UNRESOLVED — injecting sentinel for ${baseName}`);
       }
     } else if (protocol === 'ctx7') {
       /**
@@ -212,6 +219,30 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
       if (msg.role === 'user' && typeof msg.content === 'string') {
         msg.content = await resolveFileRefs(msg.content, messages, workspaceRoot);
       }
+    }
+
+    // v1.0.4 Hard Stop Gate: If any sentinel is present after resolution, short-circuit
+    // the entire pipeline and return a structured error. The LLM is never called.
+    const sentinelPattern = /\[NOT_FOUND_HARD_STOP:[^\]]+\]/g;
+    const allSentinels: string[] = [];
+    for (const msg of messages) {
+      if (typeof msg.content === 'string') {
+        const found = msg.content.match(sentinelPattern);
+        if (found) allSentinels.push(...found);
+      }
+    }
+    if (allSentinels.length > 0) {
+      const detail = allSentinels.join('\n');
+      const errorMsg = `❌ **File Not Found — Request Aborted**\n\nThe following file URI(s) could not be resolved. The request was not forwarded to the model to prevent hallucination:\n\n${detail}\n\nPlease provide the correct absolute path(s) and try again.`;
+      console.error(`[v1.0.4][useFreeLLM] Hard Stop — ${allSentinels.length} unresolved URI(s), aborting pipeline.`);
+      return {
+        id: 'middleware-gate',
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: 'middleware-gate',
+        choices: [{ index: 0, message: { role: 'assistant', content: errorMsg }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      };
     }
   }
 

@@ -792,7 +792,19 @@ Request: ${lastMessage}`;
             await Promise.all(attemptPromises);
 
             if (successfulResponse && successfulProviderId) {
-                context.response = successfulResponse;
+                const res = successfulResponse as ChatResponse;
+                // Clean response content (trim leading/trailing newlines/whitespace around brackets)
+                if (res.choices && res.choices[0]?.message) {
+                    const msg = res.choices[0].message;
+                    if (typeof msg.content === 'string') {
+                        msg.content = msg.content
+                            .replace(/\n+(?=[{\[])/g, '') // Remove \n before { or [
+                            .replace(/([}\]])\n+/g, '$1') // Remove \n after } or ]
+                            .trim();
+                    }
+                }
+
+                context.response = res;
                 context.providerId = successfulProviderId;
                 context.request.model = modelId;
                 try {

@@ -269,6 +269,25 @@ Always conclude significant work by "checking in" your knowledge to the workspac
 - **DO NOT** accumulate raw LLM outputs — compress and deduplicate via `code_mode`.
 - **ALWAYS** version subagent instruction changes with a timestamp key.
 - **ALWAYS** set `fallback: true` for critical or user-facing pipelines.
+- **ALWAYS** pass the correct absolute `workspace_root` for project tasks — the pipeline derives its grounding signals from this path.
+
+---
+
+## 🛡️ Internal Grounding & Attestation Protocol (v1.0.4)
+
+> [!NOTE]
+> This section describes **pipeline-internal** behavior. These mechanisms are automatically enforced by the server and are **not** responsibilities of the calling agent.
+
+The pipeline injects a **Grounding Protocol** into the system prompt of every LLM it calls. This forces the model to tag its claims:
+- **`[RETRIEVED]`** — fact is directly present in injected context blocks (e.g., resolved `file://` or `artifact://` URIs, session memory).
+- **`[NOT FOUND]`** — the file or context is mentioned but its content was not found or resolved. The model MUST stop and ask the user to provide it.
+
+### 🚪 Read-First Gate
+Triggered automatically when `workspace_root` contains a `README.md`. The pipeline injects a mandatory instruction forcing the model to verify all assertions against the provided context blocks **before** proposing any architecture or implementation.
+
+**Note on Tools**: The hosted LLM in the pipeline has NO direct tool-access to the filesystem. It relies entirely on the server's automated URI resolution and context injection. If it needs more data, it must ask the caller.
+
+**What the calling agent must do:** Simply provide an accurate `workspace_root` and ensure files are mentioned using `file:///` URIs. The gate fires automatically.
 
 ---
 

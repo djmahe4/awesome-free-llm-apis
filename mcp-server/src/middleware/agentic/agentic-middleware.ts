@@ -95,7 +95,8 @@ async function prependSystemPrompt(
     context: PipelineContext,
     userContent?: string,
     explicitKeywords?: string[],
-    memoryContext?: string
+    memoryContext?: string,
+    groundingGate?: string
 ): Promise<void> {
     const messages = context.request.messages;
     if (!messages || messages.length === 0) return;
@@ -103,15 +104,17 @@ async function prependSystemPrompt(
     const dynamicPrompt = await getIntelligentSystemPrompt(userContent, explicitKeywords, memoryContext);
     // v1.0.4 optimization: Force HIGH-LEVEL STEPS section (max 4 items) to constrain iteration
     const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **4** high-level steps. Example:\n1. Understand the task\n2. Implement the core change\n3. Validate correctness\n4. Summarize\nDo not list more than 4 steps.`;
+
+    const fullSystemPrompt = `${dynamicPrompt}${highLevelStepsSection}${groundingGate || ''}`;
     const hasSystem = messages[0].role === 'system';
 
     if (hasSystem) {
         messages[0] = {
             ...messages[0],
-            content: `${dynamicPrompt}${highLevelStepsSection}\n\n${messages[0].content}`,
+            content: `${fullSystemPrompt}\n\n${messages[0].content}`,
         };
     } else {
-        messages.unshift({ role: 'system', content: `${dynamicPrompt}${highLevelStepsSection}` });
+        messages.unshift({ role: 'system', content: fullSystemPrompt });
     }
 }
 
@@ -229,8 +232,24 @@ export class AgenticMiddleware implements Middleware {
 
 
 
+        // v1.0.4 Grounding Gate: Implement 'Read-First' check
+        let groundingGate = '';
+        if (context.workspaceRoot) {
+            const readmePath = path.join(context.workspaceRoot, 'README.md');
+            try {
+                // Check for existence of README.md to trigger grounding gate
+                await fs.access(readmePath);
+                groundingGate = `\n\n## 📖 READ-FIRST GATE ACTIVATED\nA README.md or project documentation is detected in the workspace root: ${context.workspaceRoot}.\nYou MUST verify all assertions against the provided context blocks in this prompt before proposing any architecture or implementation. If a file context is missing, mention it as [NOT FOUND] and ask the user to provide it. Do not assume standard patterns apply. Ground your assertions in local file contents.`;
+            } catch {
+                // README not found, check for file:// URIs in user message as secondary trigger
+                if (userContent?.includes('file://')) {
+                    groundingGate = `\n\n## 🔍 SOURCE-SPECIFIC GROUNDING\nYou are being asked to interact with specific file URIs. You MUST verify their contents via tools BEFORE asserting their structure or state.`;
+                }
+            }
+        }
+
         try {
-            await prependSystemPrompt(context, userContent, context.keywords, memoryContext);
+            await prependSystemPrompt(context, userContent, context.keywords, memoryContext, groundingGate);
         } catch (err) {
             console.error(`[AgenticMiddleware] Error prepending system prompt: ${err}`);
             // Continue without the prepended prompt

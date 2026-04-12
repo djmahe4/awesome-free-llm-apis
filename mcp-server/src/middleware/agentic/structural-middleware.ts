@@ -1,6 +1,7 @@
 import { Middleware, PipelineContext, NextFunction } from '../../pipeline/index.js';
 import * as path from 'path';
 import fs from 'fs-extra';
+import { extractMdContext } from '../../utils/md-extract.js';
 
 export class StructuralMarkdownMiddleware implements Middleware {
     name = 'StructuralMarkdownMiddleware';
@@ -72,17 +73,6 @@ export class StructuralMarkdownMiddleware implements Middleware {
             return 'Security Error: Access denied.';
         }
 
-        /**
-         * Returns true only if the file contains lines with real content
-         * beyond auto-generated scaffolding (HTML comments, headings).
-         */
-        const hasSubstantiveContent = (raw: string): boolean => {
-            return raw
-                .split('\n')
-                .map(l => l.replace(/<!--.*?-->/gs, '').trim())
-                .filter(l => l.length > 0 && !l.startsWith('#'))
-                .some(l => l.length > 3);
-        };
 
         // v1.0.4 Optimization: Parallelize all session file I/O
         const [planRes, queuesRes, tasksRes, knowledgeRes] = await Promise.all([
@@ -94,12 +84,27 @@ export class StructuralMarkdownMiddleware implements Middleware {
 
         const sections: string[] = [];
 
+        // v1.0.4 Hardening: Only add sections if they have substantive content
+        // (beyond just echoing the section title or metadata).
+        const isSubstantive = (text: string) => {
+            const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+            if (lines.length === 0) return false;
+
+            // If any line is a list item, code block, or prose (no # or [META: or <!--)
+            if (lines.some(l => !l.startsWith('#') && !l.startsWith('[META:') && !l.startsWith('<!--'))) return true;
+
+            // If all we have are headings/meta, check if there are multiple headings
+            // (e.g. # MISSION PLAN followed by # Phase 1 is substantive)
+            const contentLines = lines.filter(l => !l.startsWith('[META:') && !l.startsWith('<!--'));
+            return contentLines.length > 1;
+        };
+
         // 1. MISSION PLAN
         if (planRes) {
-            const planContent = planRes.trim();
-            if (hasSubstantiveContent(planContent)) {
-                sections.push(`## MISSION PLAN\n${planContent}`);
-                console.error(`[structural-middleware] Loaded plan.md (${planContent.length}b)`);
+            const extracted = await extractMdContext(planRes, 1500);
+            if (extracted && isSubstantive(extracted)) {
+                sections.push(`## MISSION PLAN\n${extracted}`);
+                console.error(`[structural-middleware] Loaded plan.md (extracted ${extracted.length}b)`);
             }
         }
 
@@ -124,17 +129,17 @@ export class StructuralMarkdownMiddleware implements Middleware {
 
         // 3. ACTIVE TASKS
         if (tasksRes) {
-            const tasksContent = tasksRes.trim();
-            if (hasSubstantiveContent(tasksContent)) {
-                sections.push(`## ACTIVE TASKS\n${tasksContent}`);
+            const extracted = await extractMdContext(tasksRes, 1500);
+            if (extracted && isSubstantive(extracted)) {
+                sections.push(`## ACTIVE TASKS\n${extracted}`);
             }
         }
 
         // 4. SESSION KNOWLEDGE
         if (knowledgeRes) {
-            const knowledgeContent = knowledgeRes.trim();
-            if (hasSubstantiveContent(knowledgeContent)) {
-                sections.push(`## SESSION KNOWLEDGE\n${knowledgeContent}`);
+            const extracted = await extractMdContext(knowledgeRes, 1500);
+            if (extracted && isSubstantive(extracted)) {
+                sections.push(`## SESSION KNOWLEDGE\n${extracted}`);
             }
         }
 
