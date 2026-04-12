@@ -45,8 +45,8 @@ graph TD
 | 1 | `StructuralMarkdownMiddleware` | Injects full `knowledge.md` session memory + **Resolves `file://` URIs** (v1.0.4) into agentic requests; enforces structured response format |
 | 2 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed |
 | 3 | `AgenticMiddleware` *(optional)* | Task decomposition (max 4 steps), research validation, system prompt injection, early-exit on confidence > 0.85 or 3 iterations |
-| 4 | `IntelligentRouterMiddleware` | Deterministic keyword-based model-tier selection with FREE-first fallback cascade |
-| 5 | `LLMExecutor` | HTTPS request to provider; token tracking via response headers + **reactive drift correction** + **bridge: writes `providerRemainingTokens` into context for ContextManager** |
+| 4 | `IntelligentRouterMiddleware` | Deterministic keyword-based model-tier selection with **Persistent Health Memory** (v1.0.4); handles fallback cascade with **Adaptive Timeout Floor (12s)** |
+| 5 | `LLMExecutor` | HTTPS request to provider; token tracking via response headers + **centralized circuit-breaking** + **bridge: writes `providerRemainingTokens` into context for ContextManager** |
 
 ---
 
@@ -405,6 +405,7 @@ Verification of the system's intelligence is grounded in **live, execution-based
 
 The server features a **hardened long-term memory system** designed for long-running agentic tasks:
 
+- **Persistent Health State**: Provider failures and circuit-breaker cooldowns are saved to disk. The router will "remember" that a provider is rate-limiting even if the server is restarted.
 - **Identity Hashes**: Workspaces are identified by stable, path-based hashes. Your stored facts persist even if you modify your codebase.
 - **Anti-Poisoning**: Strict `fs.existsSync` validation prevents memory pollution from hallucinated paths.
 - **Explicit Injection**: Use `store_memory` to deliberately persist architectural decisions, research findings, or task summaries across sessions.

@@ -629,8 +629,11 @@ Request: ${lastMessage}`;
                     let baseScore = capability;
 
                     // 2. Health and Weighting
-                    const healthScore = provider.consecutiveFailures > 0 ? 0.3 : 1.0;
-                    const penalty = provider.getPenaltyScore();
+                    const stats = this.executor.getProviderStats()[provider.id];
+                    const isCoolingDown = stats?.circuitOpen;
+                    const healthScore = stats?.errors > 0 ? 0.3 : 1.0;
+                    const penalty = isCoolingDown ? 0.5 : (stats?.errors > 0 ? Math.min(0.4, stats.errors * 0.1) : 0);
+
                     const usage = provider.getUsageStats();
                     const rpmLimit = provider.rateLimits.rpm || 60;
                     const loadFactor = Math.max(0.1, 1 - (usage.requestCountMinute / rpmLimit));
@@ -684,12 +687,9 @@ Request: ${lastMessage}`;
             const triedProviders = new Set<string>();
 
             for (const { provider } of scoredProviders) {
-                // Circuit breaker: skip if provider is cooling down
-                if (this.executor.isProviderCircuitOpen(provider.id)) {
-                    const stats = this.executor.getProviderStats()[provider.id];
-                    const remaining = stats?.cooldownRemaining ? Math.ceil(stats.cooldownRemaining / 1000) : '?';
-                    console.error(`[Router] Skipping ${provider.id} - circuit breaker OPEN (${remaining}s remaining)`);
-                    continue;
+                const stats = this.executor.getProviderStats()[provider.id];
+                if (stats?.circuitOpen) {
+                    console.error(`[Router][CircuitBreaker] Processing cooling-down provider ${provider.id} because it matched task requirements (Score: penalty -0.5 apply)`);
                 }
 
                 // Provider diversity: skip models from already-tried providers
@@ -729,7 +729,7 @@ Request: ${lastMessage}`;
                     // If we hit a context limit error (400), we should compress BEFORE trying the next provider
                     // because the next provider might have an even smaller window.
                     const errMsg = err.message?.toLowerCase() || '';
-                    const isContextOverflow = 
+                    const isContextOverflow =
                         errMsg.includes('context_length_exceeded') ||
                         errMsg.includes('too many tokens') ||
                         errMsg.includes('string is too long') ||

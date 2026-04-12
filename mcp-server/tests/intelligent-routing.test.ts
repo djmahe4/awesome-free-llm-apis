@@ -236,8 +236,10 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
         registry.registerProvider(prov1);
         registry.registerProvider(prov2);
 
-        // Simulate that prov1 recently had a 429 failure
-        (prov1 as any).recordFailure(429);
+        // Simulate that prov1 recently had multiple 429 failures to trigger circuit breaker
+        executor.recordProviderFailure('prov1', 429);
+        executor.recordProviderFailure('prov1', 429);
+        executor.recordProviderFailure('prov1', 429);
 
         const context: PipelineContext = {
             request: { model: 'm1', messages: [{ role: 'user', content: 'test' }] },

@@ -124,6 +124,16 @@ export class LLMExecutor {
                 remainingTokens: prov.remainingTokens ?? undefined,
                 lastSuccessTime: prov.lastSyncTime
             };
+
+            // Restore circuit breaker persistence
+            if (prov.cooldownUntil || prov.failures || prov.totalErrors) {
+                this.providerCircuits.set(id, {
+                    failures: prov.failures || 0,
+                    lastFailure: prov.lastFailure || 0,
+                    cooldownUntil: prov.cooldownUntil || 0,
+                    totalErrors: prov.totalErrors || 0
+                });
+            }
         }
 
         // Global daily counters are managed via the persistence manager internally
@@ -144,12 +154,17 @@ export class LLMExecutor {
         };
 
         for (const [id, tracker] of Object.entries(this.tokenTracking)) {
+            const cb = this.providerCircuits.get(id);
             state.providers[id] = {
                 lastSyncTime: tracker.lastSuccessTime || Date.now(),
                 localTotalRequests: tracker.localTotalRequests || 0,
                 localTotalTokens: tracker.localTotalTokens || 0,
                 remainingRequests: tracker.remainingRequests,
-                remainingTokens: tracker.remainingTokens
+                remainingTokens: tracker.remainingTokens,
+                failures: cb?.failures || 0,
+                lastFailure: cb?.lastFailure || 0,
+                cooldownUntil: cb?.cooldownUntil || 0,
+                totalErrors: cb?.totalErrors || 0
             };
             
             // Increment totals (PersistenceManager will merge these)

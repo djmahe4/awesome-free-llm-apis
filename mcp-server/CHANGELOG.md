@@ -1,10 +1,16 @@
 # Changelog
 
-## v1.0.4 – Mode Fix + Structural Memory + Anti-Over-Iteration (April 2026)
+## v1.0.4 – Hardened Resilience + Persistent Memory + structural Fix (April 2026)
 
-**Released:** 2026-04-09
+**Released:** 2026-04-12 (Updated)
 
 ### 🚀 Highlights
+
+- **Intelligent Router Hardening & Persistence**: Integrated discrete circuit-breaker stats (`failures`, `cooldownUntil`) into `PersistenceManager`. The router now "remembers" provider health across process restarts, eliminating "memory amnesia" for failing providers.
+- **Adaptive Timeout Floor**: Implemented a mandatory 12s floor per model attempt in the routing cascade. This prevents late-stage fallbacks from receiving unworkable <2s timeouts, dramatically improving reliability in deep provider chains.
+- **Soft Circuit Breaking**: Migrated from a binary "skip" model to a "penalty" model. Cooling-down providers are now deprioritized (Score: -0.5) instead of ignored, allowing them to serve as a last resort if no other models match task requirements.
+- **Improved 400 Error Classification**: Refined context overflow detection to prevent false-positive compression on property errors.
+- **Payload Sanitization**: Automatic stripping of internal metadata (e.g., `timeoutMs`) from outgoing LLM requests to ensure compatibility with strict schema providers like Groq.
 
 - **Intelligent Router Task Matrix**: Expanded `autoClassify` logic into a high-fidelity classification engine supporting 9 distinct categories (Coding, Reasoning, Moderation, Classification, UserIntent, SemanticSearch, Summarization, EntityExtraction, Chat).
 - **Dynamic Greedy Budgeting**: Implemented cross-provider timeout management that dynamically allocates time across the fallback cascade, preventing deadlocks while maximizing success probability.

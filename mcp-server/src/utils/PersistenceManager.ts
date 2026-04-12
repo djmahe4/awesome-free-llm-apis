@@ -15,9 +15,13 @@ export interface PersistentUsage {
     lastSyncTime: number;
     localTotalRequests: number;
     localTotalTokens: number;
-    // We might also want to cache the last known global remaining counts
     remainingRequests?: number | null;
     remainingTokens?: number | null;
+    // Health Tracking Persistence
+    failures?: number;
+    lastFailure?: number;
+    cooldownUntil?: number;
+    totalErrors?: number;
   }>;
 }
 
