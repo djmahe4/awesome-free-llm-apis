@@ -199,7 +199,7 @@ AgenticMiddleware  (only when agentic:true or ENABLE_AGENTIC_MIDDLEWARE=true)
   • prependSystemPrompt(context) → dynamic prompt + HIGH-LEVEL STEPS section (v1.0.4)
   • next()
   • verifySelf(response) → logs [VERIFY] on FAIL, pushes to improveQueue
-  • confidenceScore > 0.85 or iterationCount >= 3 → early exit, clears nowQueue (v1.0.4)
+  • verifySelf() returns PASS or iterationCount >= 3 → early exit, clears nowQueue (v1.0.4)
   • Persists queue state to projects/{sessionId}/queues.json
         │
         ▼ ─────────────────────────────────────

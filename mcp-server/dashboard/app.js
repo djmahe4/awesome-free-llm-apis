@@ -25,6 +25,16 @@ function showToast(title, message, isError = false) {
 
 let stats = [];
 
+async function fetchProviderStats() {
+    try {
+        const response = await fetch('/api/provider-stats');
+        if (!response.ok) return {};
+        return await response.json();
+    } catch (err) {
+        return {};
+    }
+}
+
 async function fetchStats() {
     try {
         const response = await fetch('/api/token-stats');
@@ -41,13 +51,14 @@ async function fetchStats() {
             document.getElementById('global-lifetime-requests').innerText = serverTotals.lifetimeRequests.toLocaleString();
         }
 
-        renderStats(stats);
+        const providerStats = await fetchProviderStats();
+        renderStats(stats, providerStats);
     } catch (err) {
         console.error('Fetch failed:', err);
     }
 }
 
-function renderStats(providers) {
+function renderStats(providers, providerStats = {}) {
     if (!providers || providers.length === 0) {
         containerEl.innerHTML = '<div class="col-12 text-center py-5">No providers configured</div>';
         return;
@@ -55,7 +66,8 @@ function renderStats(providers) {
 
     let activeCount = 0;
     containerEl.innerHTML = providers.map(p => {
-        if (p.isAvailable) activeCount++;
+        const stats = providerStats[p.id] || { errors: 0, circuitOpen: false };
+        if (p.isAvailable && !stats.circuitOpen) activeCount++;
 
         const tokensLimit = p.rateLimits.tokensPerMonth || p.rateLimits.rpd || p.rateLimits.rpm || 'Free';
         
@@ -67,17 +79,33 @@ function renderStats(providers) {
             lifetimeStr = `${p.usage.localTotalRequests || 0} reqs / ${p.usage.localTotalTokens || 0} tokens lifetime`;
         }
 
+        let statusBadge, statusClass;
+        if (stats.circuitOpen) {
+            statusBadge = 'Circuit';
+            statusClass = 'bg-danger-subtle text-danger';
+        } else if (p.isAvailable) {
+            statusBadge = 'Online';
+            statusClass = 'bg-success-subtle text-success';
+        } else {
+            statusBadge = 'Offline';
+            statusClass = 'bg-danger-subtle text-danger';
+        }
+
         return `
         <div class="col-md-6 col-lg-4">
             <div class="card h-100">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-start mb-2">
                         <h6 class="card-title mb-0">${escapeHTML(p.name)}</h6>
-                        <span class="badge ${p.isAvailable ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'} rounded-pill">
-                            <i class="bi bi-circle-fill me-1 small"></i>${p.isAvailable ? 'Online' : 'Offline'}
+                        <span class="badge ${statusClass} rounded-pill">
+                            ${p.isAvailable || stats.circuitOpen ? '<i class="bi bi-circle-fill me-1 small"></i>' : ''}
+                            ${statusBadge}
                         </span>
                     </div>
-                    <div class="provider-id mb-3">${escapeHTML(p.id)}</div>
+                    <div class="provider-id mb-2">${escapeHTML(p.id)}</div>
+                    
+                    ${stats.errors > 0 ? `<div class="text-danger small mb-2"><i class="bi bi-exclamation-triangle me-1"></i>${stats.errors} errors</div>` : ''}
+                    ${stats.circuitOpen ? `<div class="text-danger small mb-2"><i class="bi bi-hourglass-split me-1"></i>${Math.ceil(stats.cooldownRemaining / 1000)}s cooldown</div>` : ''}
                     
                     <div class="mb-3">
                         <div class="d-flex justify-content-between small text-muted mb-1">

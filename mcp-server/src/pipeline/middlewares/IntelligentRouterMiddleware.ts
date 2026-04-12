@@ -104,6 +104,13 @@ export class IntelligentRouterMiddleware implements Middleware {
         return this.executor.getTokenState();
     }
 
+    /**
+     * Get the executor instance for external access (e.g., dashboard stats)
+     */
+    public getExecutor(): LLMExecutor {
+        return this.executor;
+    }
+
     private static readonly keywordTaskMap: Record<string, TaskType> = {
         // Coding
         'code': TaskType.Coding, 'coding': TaskType.Coding, 'debug': TaskType.Coding, 'implement': TaskType.Coding,
@@ -194,13 +201,16 @@ export class IntelligentRouterMiddleware implements Middleware {
         const lastMsg = getMessageContent(messages[messages.length - 1]);
         const lower = lastMsg.toLowerCase();
 
-        // Complex if it has numbered steps, multiple questions, or specific keywords
-        const stepCount = (lastMsg.match(/\d\./g) || []).length;
+        // Complex if it has significant numbered steps (ignore short lists), 
+        // multiple distinct questions, or strong sequential signals.
+        const stepCount = (lastMsg.match(/^\s*\d+[.)]\s/gm) || []).length;
         const questionCount = (lastMsg.match(/\?/g) || []).length;
-        const hasSequencers = lower.includes('first') && (lower.includes('then') || lower.includes('finally'));
-        const isLong = lastMsg.length > 1000;
+        const hasSequencers = (lower.includes('first') || lower.includes('initial')) && 
+                             (lower.includes('then') || lower.includes('secondary')) && 
+                             (lower.includes('finally') || lower.includes('lastly'));
+        const isLong = lastMsg.length > 2500;
 
-        return stepCount >= 3 || (questionCount >= 2 && isLong) || hasSequencers;
+        return stepCount >= 5 || (questionCount >= 3 && isLong) || hasSequencers;
     }
 
     /**
@@ -218,6 +228,13 @@ export class IntelligentRouterMiddleware implements Middleware {
             : 'No content provided';
 
         const planningPrompt = `Analyze this request and split it into a list of independent subtasks. 
+
+### GROUNDING RULES:
+1. USE ONLY the file paths and project structures explicitly mentioned in the "# FULL MEMORY STATE" or "# TASK CONTEXT" sections above.
+2. DO NOT hallucinate or imagine files, directories, or external libraries that are not in the context.
+3. If the user refers to a project (like 'py2rust') that is NOT in the memory, your subtasks must first be to SEARCH and DISCOVER the structure, NOT to assume it.
+4. Keep the list concise (max 8 subtasks).
+
 Return ONLY a JSON array of strings, where each string is a clear subtask instruction.
 Request: ${lastMessage}`;
 
@@ -486,6 +503,66 @@ Request: ${lastMessage}`;
 
         let estimatedTokens = originalTokens;
         let contextCompressed = false;
+        let summarizationAttempts = 0;
+        const MAX_SUMMARIZATION_ATTEMPTS = 3;
+
+        // Shared summarizer helper that respects global attempt and timeout limits
+        const sharedSummarizer = async (text: string) => {
+            summarizationAttempts++;
+            const remaining = getRemainingTimeout();
+
+            // Strategic Bailout: If we've tried too many times or have < 60% budget left, 
+            // stop trying to summarize and fall back to Tier 2 (Truncation) which is instant.
+            if (summarizationAttempts > MAX_SUMMARIZATION_ATTEMPTS || remaining < (totalBudget * 0.6)) {
+                throw new Error('Summarization budget or attempt limit exhausted');
+            }
+
+            const summaryPrompt = `Summarize precisely while preserving technical context: ${text}`;
+            const preferredModels = IntelligentRouterMiddleware.taskRouteMap[TaskType.Summarization];
+
+            // 1. Try preferred models first
+            for (const modelId of preferredModels) {
+                for (const p of availableProviders) {
+                    if (p.models.some(m => m.id === modelId)) {
+                        try {
+                            const currentRemaining = getRemainingTimeout();
+                            if (currentRemaining < 2000) throw new Error('Timeout budget exhausted for summarization');
+
+                            const res = await p.chat({
+                                model: modelId,
+                                messages: [{ role: 'user', content: summaryPrompt }],
+                                timeoutMs: Math.min(10000, Math.floor(currentRemaining * 0.4)) 
+                            });
+                            return res.choices[0].message.content;
+                        } catch (err: any) { 
+                            continue; 
+                        }
+                    }
+                }
+            }
+
+            // 2. Fallback: try ANY available provider with ANY model that has space
+            for (const p of availableProviders) {
+                if (p.models.length > 0) {
+                    const m = p.models[0];
+                    try {
+                        const currentRemaining = getRemainingTimeout();
+                        if (currentRemaining < 2000) throw new Error('Timeout budget exhausted for summarization fallback');
+
+                        const res = await p.chat({
+                            model: m.id,
+                            messages: [{ role: 'user', content: summaryPrompt }],
+                            timeoutMs: Math.min(8000, Math.floor(currentRemaining * 0.3)) 
+                        });
+                        return res.choices[0].message.content;
+                    } catch (err: any) { 
+                        continue; 
+                    }
+                }
+            }
+
+            throw new Error('All summarization providers failed.');
+        };
 
         // Level 1: Context Compression for complex prompts (> 4000 tokens) or imminent overflow
         const maxWindow = Math.max(...availableProviders.flatMap(p => p.models).map(m => m.contextWindow || 0));
@@ -493,69 +570,9 @@ Request: ${lastMessage}`;
 
         if (estimatedTokens > 4000 || absoluteOverflow) {
             const targetTokens = absoluteOverflow ? Math.min(estimatedTokens * 0.5, maxWindow * 0.8) : Math.max(2000, estimatedTokens * 0.4);
-            let summarizationAttempts = 0;
-            const MAX_SUMMARIZATION_ATTEMPTS = 3;
-
-            const summarizer = async (text: string) => {
-                summarizationAttempts++;
-                const remaining = getRemainingTimeout();
-
-                // Strategic Bailout: If we've tried too many times or have < 60% budget left, 
-                // stop trying to summarize and fall back to Tier 2 (Truncation) which is instant.
-                if (summarizationAttempts > MAX_SUMMARIZATION_ATTEMPTS || remaining < (totalBudget * 0.6)) {
-                    throw new Error('Summarization budget or attempt limit exhausted');
-                }
-
-                // Use a stable summarization model
-                const summaryPrompt = `Summarize precisely while preserving technical context: ${text}`;
-                const preferredModels = IntelligentRouterMiddleware.taskRouteMap[TaskType.Summarization];
-
-                // Try preferred models first
-                for (const modelId of preferredModels) {
-                    for (const p of availableProviders) {
-                        if (p.models.some(m => m.id === modelId)) {
-                                try {
-                                    const currentRemaining = getRemainingTimeout();
-                                    if (currentRemaining < 2000) throw new Error('Timeout budget exhausted for summarization');
-
-                                    const res = await p.chat({
-                                        model: modelId,
-                                        messages: [{ role: 'user', content: summaryPrompt }],
-                                        timeoutMs: Math.min(10000, Math.floor(currentRemaining * 0.4)) 
-                                    });
-                                    return res.choices[0].message.content;
-                                } catch (err: any) { 
-                                    continue; 
-                                }
-                        }
-                    }
-                }
-
-                // Fallback: try ANY available provider with ANY model that has space
-                for (const p of availableProviders) {
-                    if (p.models.length > 0) {
-                        const m = p.models[0];
-                                try {
-                                    const currentRemaining = getRemainingTimeout();
-                                    if (currentRemaining < 2000) throw new Error('Timeout budget exhausted for summarization fallback');
-
-                                    const res = await p.chat({
-                                        model: m.id,
-                                        messages: [{ role: 'user', content: summaryPrompt }],
-                                        timeoutMs: Math.min(8000, Math.floor(currentRemaining * 0.3)) 
-                                    });
-                                    return res.choices[0].message.content;
-                                } catch (err: any) { 
-                                    continue; 
-                                }
-                    }
-                }
-
-                throw new Error('All summarization providers failed.');
-            };
 
             try {
-                const compResult = await this.contextManager.compress(context, targetTokens, summarizer);
+                const compResult = await this.contextManager.compress(context, targetTokens, sharedSummarizer);
                 context.request.messages = compResult.messages;
                 estimatedTokens = this.executor.calculateTokens(context.request.messages);
                 context.estimatedTokens = estimatedTokens;
@@ -660,43 +677,81 @@ Request: ${lastMessage}`;
 
                     return { provider: provider as any, score: finalScore };
                 })
-                .filter(p => p.score > -0.5) // Circuit Breaker: Block hard overloads (-1) or significant penalties
+                .filter(p => p.score > -0.5)
                 .sort((a, b) => b.score - a.score);
 
+            const triedProviders = new Set<string>();
 
             for (const { provider } of scoredProviders) {
+                // Circuit breaker: skip if provider is cooling down
+                if (this.executor.isProviderCircuitOpen(provider.id)) {
+                    const stats = this.executor.getProviderStats()[provider.id];
+                    const remaining = stats?.cooldownRemaining ? Math.ceil(stats.cooldownRemaining / 1000) : '?';
+                    console.error(`[Router] Skipping ${provider.id} - circuit breaker OPEN (${remaining}s remaining)`);
+                    continue;
+                }
+
+                // Provider diversity: skip models from already-tried providers
+                if (triedProviders.has(provider.id)) {
+                    continue;
+                }
+
                 try {
                     const remainingTimeout = getRemainingTimeout();
                     if (remainingTimeout < 2000) continue;
 
-                    const perAttemptTimeout = Math.floor(remainingTimeout / 2); // Greedy: use half of remaining
+                    const perAttemptTimeout = Math.floor(remainingTimeout / 2);
 
                     console.error(`[Router][Fallback] Trying ${provider.id}/${modelId} (remaining budget: ${remainingTimeout}ms, attempt timeout: ${perAttemptTimeout}ms)`);
                     (context as any).providersAttempted.push(`${provider.id}/${modelId}`);
-                    context.request.model = modelId; // Update state before attempt
+                    context.request.model = modelId;
                     const response = await this.executor.tryProvider(context, provider.id, modelId, perAttemptTimeout);
 
                     if (response) {
                         if (contextCompressed) (context as any).contextCompressed = true;
                         context.response = response;
                         context.providerId = provider.id;
+                        triedProviders.add(provider.id);
 
-                        // SUCCESS: Single path execution call to next()
                         try {
                             await next();
                         } catch (nextErr) {
-                            throw nextErr; // Bubble up next() errors, do NOT fallback to other LLMs
+                            throw nextErr;
                         }
                         return;
                     }
                 } catch (err: any) {
                     lastError = err;
+                    
+                    // --- Intelligent Error Routing (v1.0.4) ---
+                    // If we hit a context limit error (400), we should compress BEFORE trying the next provider
+                    // because the next provider might have an even smaller window.
+                    const isContextOverflow = err.status === 400 || 
+                        err.message?.toLowerCase().includes('context_length_exceeded') ||
+                        err.message?.toLowerCase().includes('too many tokens') ||
+                        err.message?.toLowerCase().includes('string is too long');
+
+                    if (isContextOverflow) {
+                        console.error(`[Router][Overflow] Triggering dynamic compression due to error: ${err.message}`);
+                        try {
+                            const currentTokens = context.estimatedTokens || 4000;
+                            // Uses the sharedSummarizer defined above which tracks total attempts
+                            const compResult = await this.contextManager.compress(context, currentTokens * 0.5, sharedSummarizer);
+                            context.request.messages = compResult.messages;
+                            context.estimatedTokens = this.executor.calculateTokens(context.request.messages);
+                            contextCompressed = true;
+                        } catch (compErr) {
+                            console.error(`[Router][Overflow] Compression fallback failed (limit reached?): ${compErr}`);
+                        }
+                    }
+
                     if (context.providerId && provider.id === context.providerId && !primaryError) {
                         primaryError = err;
                     }
                     allErrors.push(`${provider.id}/${modelId}: ${err.message}`);
                     provider.recordFailure(err.status || 500);
-                    continue; // Try next provider/model
+                    triedProviders.add(provider.id);
+                    continue;
                 }
             }
         }

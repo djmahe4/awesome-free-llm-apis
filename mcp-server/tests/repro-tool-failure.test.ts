@@ -44,7 +44,11 @@ describe('IntelligentRouterMiddleware Full Repro', () => {
                 usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 }
             }),
             flush: vi.fn(),
-            getTokenState: vi.fn().mockReturnValue({})
+            getTokenState: vi.fn().mockReturnValue({}),
+            isProviderCircuitOpen: vi.fn().mockReturnValue(false),
+            getProviderStats: vi.fn().mockReturnValue({}),
+            recordProviderSuccess: vi.fn(),
+            recordProviderFailure: vi.fn()
         };
         middleware = new IntelligentRouterMiddleware(mockExecutor as any);
     });

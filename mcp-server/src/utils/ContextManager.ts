@@ -204,6 +204,12 @@ export class ContextManager {
                 
                 if (currentChunkText) chunks.push(currentChunkText.trim());
 
+                const MAX_CHUNKS = 5;
+                if (chunks.length > MAX_CHUNKS) {
+                    console.error(`[ContextManager] Too many chunks (${chunks.length}), falling back to truncation...`);
+                    throw new Error('Too many chunks for summarization');
+                }
+
                 const chunkSummaries = await Promise.allSettled(
                     chunks.map(chunk => summarizer(`Summarize this segment of conversation concisely:\n\n${chunk}`))
                 );

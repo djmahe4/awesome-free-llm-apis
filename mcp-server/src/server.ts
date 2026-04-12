@@ -205,6 +205,15 @@ async function main() {
         }
       });
 
+      app.get('/api/provider-stats', async (req, res) => {
+        try {
+          const stats = sharedRouter.getExecutor().getProviderStats();
+          res.json(stats);
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
       app.get('/api/list-models', async (req, res) => {
         try {
           const models = await listAvailableFreeModels({});
