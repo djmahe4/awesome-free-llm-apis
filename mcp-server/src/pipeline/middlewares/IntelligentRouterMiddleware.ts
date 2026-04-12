@@ -795,7 +795,16 @@ Request: ${lastMessage}`;
                 const res = successfulResponse as ChatResponse;
                 // Clean response content (trim leading/trailing newlines/whitespace around brackets)
                 if (res.choices && res.choices[0]?.message) {
-                    const msg = res.choices[0].message;
+                    const msg = res.choices[0].message as any;
+
+                    // Concatenate thinking/reasoning if present (as requested: "THOUGHTS: ...")
+                    const thoughts = (msg.thinking || msg.reasoning || '').toString().trim();
+                    if (thoughts) {
+                        msg.content = `THOUGHTS: ${thoughts}\n\n${msg.content || ''}`.trim();
+                        delete msg.thinking;
+                        delete msg.reasoning;
+                    }
+
                     if (typeof msg.content === 'string') {
                         msg.content = msg.content
                             .replace(/\n+(?=[{\[])/g, '') // Remove \n before { or [
