@@ -491,7 +491,7 @@ Request: ${lastMessage}`;
         const allErrors: string[] = [];
 
         const startTime = Date.now();
-        const totalBudget = context.request.timeoutMs || 30000;
+        const totalBudget = context.request.timeoutMs || 60000;
 
         const getRemainingTimeout = () => {
             const elapsed = Date.now() - startTime;
@@ -505,7 +505,7 @@ Request: ${lastMessage}`;
         let estimatedTokens = originalTokens;
         let contextCompressed = false;
         let summarizationAttempts = 0;
-        const MAX_SUMMARIZATION_ATTEMPTS = 3;
+        const MAX_SUMMARIZATION_ATTEMPTS = 5;
 
         // Shared summarizer helper that respects global attempt and timeout limits
         const sharedSummarizer = async (text: string) => {
@@ -532,7 +532,7 @@ Request: ${lastMessage}`;
                             const res = await p.chat({
                                 model: modelId,
                                 messages: [{ role: 'user', content: summaryPrompt }],
-                                timeoutMs: Math.min(10000, Math.floor(currentRemaining * 0.4))
+                                timeoutMs: Math.min(currentRemaining, Math.max(15000, Math.floor(currentRemaining * 0.4)))
                             });
                             return res.choices[0].message.content;
                         } catch (err: any) {
@@ -553,7 +553,7 @@ Request: ${lastMessage}`;
                         const res = await p.chat({
                             model: m.id,
                             messages: [{ role: 'user', content: summaryPrompt }],
-                            timeoutMs: Math.min(8000, Math.floor(currentRemaining * 0.3))
+                            timeoutMs: Math.min(currentRemaining, Math.max(12000, Math.floor(currentRemaining * 0.3)))
                         });
                         return res.choices[0].message.content;
                     } catch (err: any) {
@@ -701,7 +701,8 @@ Request: ${lastMessage}`;
                     const remainingTimeout = getRemainingTimeout();
                     if (remainingTimeout < 2000) continue;
 
-                    const perAttemptTimeout = Math.floor(remainingTimeout / 2);
+                    // Adaptive Timeout Floor: Ensure every model gets a fair chance to stream its first token
+                    const perAttemptTimeout = Math.min(remainingTimeout, Math.max(12000, Math.floor(remainingTimeout / 2)));
 
                     console.error(`[Router][Fallback] Trying ${provider.id}/${modelId} (remaining budget: ${remainingTimeout}ms, attempt timeout: ${perAttemptTimeout}ms)`);
                     (context as any).providersAttempted.push(`${provider.id}/${modelId}`);
@@ -727,10 +728,12 @@ Request: ${lastMessage}`;
                     // --- Intelligent Error Routing (v1.0.4) ---
                     // If we hit a context limit error (400), we should compress BEFORE trying the next provider
                     // because the next provider might have an even smaller window.
-                    const isContextOverflow = err.status === 400 ||
-                        err.message?.toLowerCase().includes('context_length_exceeded') ||
-                        err.message?.toLowerCase().includes('too many tokens') ||
-                        err.message?.toLowerCase().includes('string is too long');
+                    const errMsg = err.message?.toLowerCase() || '';
+                    const isContextOverflow = 
+                        errMsg.includes('context_length_exceeded') ||
+                        errMsg.includes('too many tokens') ||
+                        errMsg.includes('string is too long') ||
+                        (err.status === 400 && (errMsg.includes('context') || errMsg.includes('token') || errMsg.includes('length')));
 
                     if (isContextOverflow) {
                         console.error(`[Router][Overflow] Triggering dynamic compression due to error: ${err.message}`);
