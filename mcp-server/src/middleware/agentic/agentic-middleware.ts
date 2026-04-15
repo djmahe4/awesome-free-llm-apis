@@ -7,6 +7,10 @@ import type { Middleware, PipelineContext, NextFunction } from '../../pipeline/m
 import { memoryManager } from '../../memory/index.js';
 import { WorkspaceScanner } from '../../cache/workspace.js';
 import { getMessageContent } from '../../utils/MessageUtils.js';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
@@ -95,12 +99,13 @@ async function prependSystemPrompt(
     context: PipelineContext,
     userContent?: string,
     explicitKeywords?: string[],
-    memoryContext?: string
+    memoryContext?: string,
+    isSubtask: boolean = false
 ): Promise<void> {
     const messages = context.request.messages;
     if (!messages || messages.length === 0) return;
 
-    const dynamicPrompt = await getIntelligentSystemPrompt(userContent, explicitKeywords, memoryContext);
+    const dynamicPrompt = await getIntelligentSystemPrompt(userContent, explicitKeywords, memoryContext, isSubtask);
     // v1.0.4 optimization: Force HIGH-LEVEL STEPS section (max 4 items) to constrain iteration
     const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **4** high-level steps. Example:\n1. Understand the task\n2. Implement the core change\n3. Validate correctness\n4. Summarize\nDo not list more than 4 steps.`;
     const hasSystem = messages[0].role === 'system';
@@ -170,18 +175,131 @@ export class AgenticMiddleware implements Middleware {
         return steps;
     }
 
+    /**
+     * Proactive Grep Context: Gathers accurate context for memory from the workspace.
+     * Uses environment detection, code block extraction, and .gitignore respect.
+     */
+    public async gatherGrepContext(workspaceRoot: string, query?: string): Promise<string[]> {
+        if (!query || query.length < 5) return [];
+
+        // 1. Code Extraction: Parse backtick blocks for high-precision terms
+        const codeBlocks: string[] = [];
+        const codeRegex = /```[\s\S]*?```/g;
+        let m;
+        while ((m = codeRegex.exec(query)) !== null) {
+            codeBlocks.push(m[0].replace(/```[\w]*\n?|```/g, '').trim());
+        }
+
+        // 2. Identify Environment
+        let envType: 'node' | 'python' | 'generic' = 'generic';
+        try {
+            const hasPkgJson = await fs.access(path.join(workspaceRoot, 'package.json')).then(() => true).catch(() => false);
+            if (hasPkgJson) {
+                envType = 'node';
+            } else {
+                const hasReqs = await fs.access(path.join(workspaceRoot, 'requirements.txt')).then(() => true).catch(() => false);
+                if (hasReqs) envType = 'python';
+            }
+        } catch { }
+
+        // 3. Extract Terms
+        const terms = new Set<string>();
+        codeBlocks.forEach(block => {
+            block.split(/\W+/).filter(t => t.length > 5).forEach(t => terms.add(t));
+        });
+
+        const broadKeywords = ['architecture', 'review', 'implementation', 'system', 'senior', 'software', 'project'];
+        query.split(/\W+/)
+            .filter(t => t.length > 4 && !broadKeywords.includes(t.toLowerCase()))
+            .forEach(t => terms.add(t));
+
+        const finalTerms = Array.from(terms).slice(0, 5);
+        if (finalTerms.length === 0) return [];
+
+        // 4. Task Sensitivity: Detect if theoretical/documentation focused
+        const isTheoretical = /\b(doc|documentation|guide|explain|theory|writeup|summary|overview)\b/i.test(query);
+
+        // 5. Build rg command
+        const exclusions = envType === 'node'
+            ? ["package-lock.json", "node_modules/*", "dist/*", ".next/*"]
+            : envType === 'python' ? [".venv/*", "__pycache__/*", "*.pyc"] : [];
+
+        let globFlags = exclusions.map(e => `-g "!${e}"`).join(" ");
+
+        // Focus on file types based on task
+        if (isTheoretical) {
+            globFlags += ' -g "*.md" -g "*.txt" -g "*.pdf"';
+        } else {
+            // Coding task: prioritize source files
+            globFlags += ' -g "*.{ts,js,py,rs,go,java,c,cpp,h}"';
+        }
+
+        const results: string[] = [];
+
+        // 5. Graceful Fallback: Detect available tool (rg or grep)
+        let tool: 'rg' | 'grep' | 'none' = 'none';
+        try {
+            await execAsync('rg --version');
+            tool = 'rg';
+        } catch {
+            try {
+                await execAsync('grep --version');
+                tool = 'grep';
+            } catch {
+                return []; // Both unavailable
+            }
+        }
+
+        for (const term of finalTerms) {
+            try {
+                let command = '';
+                if (tool === 'rg') {
+                    // rg uses .gitignore by default. Limit to 4 matches per term.
+                    command = `rg -m 4 ${globFlags} -n --no-heading "${term}" "${workspaceRoot}"`;
+                } else {
+                    // fallback to standard grep
+                    // Note: globFlags for rg like -g "!..." are not directly compatible with grep --include
+                    // Standard grep expects multiple --include flags for multiple patterns
+                    const patterns = isTheoretical
+                        ? ['*.md', '*.txt', '*.pdf']
+                        : ['*.ts', '*.js', '*.py', '*.rs', '*.go', '*.java', '*.c', '*.cpp', '*.h'];
+                    const includeFlags = patterns.map(p => `--include="${p}"`).join(' ');
+                    const excludeDirs = envType === 'node'
+                        ? ['node_modules', 'dist', '.next']
+                        : envType === 'python' ? ['venv', '.venv', '__pycache__'] : [];
+                    const excludeFlags = excludeDirs.map(d => `--exclude-dir="${d}"`).join(' ');
+
+                    command = `grep -rEi -m 4 ${includeFlags} ${excludeFlags} "${term}" "${workspaceRoot}" | head -n 4`;
+                }
+
+                const { stdout } = await execAsync(command);
+                if (stdout) {
+                    results.push(...stdout.split('\n').filter(Boolean).map(line => `[Context] ${line.trim()}`));
+                }
+            } catch {
+                // grep returns non-zero on no match
+            }
+        }
+        return results;
+    }
+
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
         const startMs = Date.now();
         // Dual-Mode Trigger: Global Env OR Per-Request Flag
         const isAgenticExplicitlyRequested = context.agentic === true || context.request?.agentic === true;
+
+        // Hardened Session ID: Must be provided for agentic state to exist
+        const sessionId: string | undefined = context.sessionId || (context.request as any)?.sessionId;
+
+        const iterationCountKey = `_iteration_${sessionId}`;
+        const iterationCount: number = (context[iterationCountKey] as number | undefined) ?? 0;
+        context[iterationCountKey] = iterationCount + 1;
+
         if (process.env.ENABLE_AGENTIC_MIDDLEWARE !== 'true' && !isAgenticExplicitlyRequested) {
             await next();
             console.error(`[agentic-middleware] ${Date.now() - startMs}ms (pass-through)`);
             return;
         }
-
-        // Hardened Session ID: Must be provided for agentic state to exist
-        const sessionId: string | undefined = context.sessionId || (context.request as any)?.sessionId;
 
         if (!sessionId) {
             console.error('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
@@ -208,15 +326,19 @@ export class AgenticMiddleware implements Middleware {
         const userMessage = context.request.messages.find(m => m.role === 'user');
         const userContent = userMessage ? String(userMessage.content) : undefined;
 
+        // Proactive Grep Context for Memory: Only on FIRST iteration to save I/O
+        let grepResults: string[] = [];
+        if (context.workspaceRoot && userContent && iterationCount === 1) {
+            grepResults = await this.gatherGrepContext(context.workspaceRoot, userContent);
+        }
+
         // Retrieve relevant workspace memory context
         let memoryContext: string | undefined;
         if (wsHash) {
             try {
-                console.error(`[AgenticMiddleware][DEBUG] Searching for wsHash=${wsHash} query="${userContent}"`);
-                const memoryResults = await memoryManager.search(wsHash, userContent);
-                console.error(`[AgenticMiddleware][DEBUG] Found ${memoryResults.length} memory results`);
+                const queryForMemory = userContent + (grepResults.length > 0 ? " " + grepResults.join(" ").slice(0, 500) : "");
+                const memoryResults = await memoryManager.search(wsHash, queryForMemory);
                 if (Array.isArray(memoryResults) && memoryResults.length > 0) {
-                    // Limit to top 5 results and format as bullet points
                     memoryContext = memoryResults
                         .slice(0, 5)
                         .map(m => `- ${typeof m === 'string' ? m : JSON.stringify(m)}`)
@@ -227,10 +349,10 @@ export class AgenticMiddleware implements Middleware {
             }
         }
 
-
+        const isSubtask = q.nowQueue.length > 1;
 
         try {
-            await prependSystemPrompt(context, userContent, context.keywords, memoryContext);
+            await prependSystemPrompt(context, userContent, context.keywords, memoryContext, isSubtask);
         } catch (err) {
             console.error(`[AgenticMiddleware] Error prepending system prompt: ${err}`);
             // Continue without the prepended prompt
@@ -254,11 +376,6 @@ export class AgenticMiddleware implements Middleware {
 
         persistQueuesDebounced(sessionId, projectDir);
 
-        // v1.0.4 optimization: Track iteration count per session for early-exit logic
-        const iterationCountKey = `_iteration_${sessionId}`;
-        const iterationCount: number = (context[iterationCountKey] as number | undefined) ?? 0;
-        context[iterationCountKey] = iterationCount + 1;
-
         // Execute the pipeline
         await next();
 
@@ -277,11 +394,22 @@ export class AgenticMiddleware implements Middleware {
                 logResearchValidation(sessionId, responseContent, 'post-execution-response-grounding-check');
             }
 
-            // v1.0.4 final: Only clear nowQueue if it was a single task or iteration limit reached.
-            // If it's a multi-step plan, we let it shift naturally unless we hit the safety cap.
-            if ((verifyResult === 'PASS' && q.nowQueue.length <= 1) || iterationCount >= 3) {
-                console.error(`[AgenticMiddleware] Early exit: result=${verifyResult} iterations=${iterationCount}`);
-                q.nowQueue = [];
+            // Store a snapshot for observability (cloned to avoid post-shift mutation in traces)
+            context['agenticQueues'] = JSON.parse(JSON.stringify(getQueues(sessionId)));
+
+            // v1.0.5: Automatically update workspace memory with progress if success
+            if (verifyResult === 'PASS' && wsHash) {
+                try {
+                    const progressKey = `progress:${sessionId}`;
+                    const progressData = {
+                        step: q.nowQueue[0] || 'complete',
+                        status: verifyResult,
+                        context: responseContent.slice(0, 1000)
+                    };
+                    await memoryManager.storeToolOutput('agentic_progress', { key: progressKey, ws: wsHash }, progressData);
+                } catch {
+                    // ignore memory store failures in middleware
+                }
             }
         }
 

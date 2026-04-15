@@ -191,8 +191,8 @@ describe('Agentic Intelligence & Middleware', () => {
             // Debounced: wait for queues.json write (2000ms debounce + buffer)
             await new Promise(resolve => setTimeout(resolve, 2100));
             // queues.json is written twice (pre/post execution) - check for either
-            const writeCalls = fsp.writeFile.mock.calls;
-            const queuesCall = writeCalls.find(call => 
+            const writeCalls = vi.mocked(fsp.writeFile).mock.calls;
+            const queuesCall = writeCalls.find((call: any[]) => 
                 typeof call[0] === 'string' && call[0].includes('queues.json')
             );
             expect(queuesCall).toBeDefined();
