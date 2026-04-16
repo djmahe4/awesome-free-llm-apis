@@ -40,6 +40,12 @@ const GROUNDING_PROTOCOL = `
 All file and artifact references in this prompt have been resolved and injected by the server pipeline.
 When citing file content, prefix with \`[RETRIEVED]\` and reference the specific injected code block by filename.
 Do not infer or reconstruct information that is not explicitly present in a resolved block.
+
+### Absence = Unavailable
+The middleware controls all context injection. If no \`[Context]\` block exists for a topic, file, or symbol,
+it means the pipeline found no workspace match — **not** that it is defined elsewhere.
+Respond with: "Workspace context unavailable for [topic]" and ask the user to provide the file.
+Do NOT fill the gap using training-data assumptions.
 `;
 
 interface PromptSection {

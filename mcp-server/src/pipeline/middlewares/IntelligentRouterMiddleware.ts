@@ -732,6 +732,14 @@ Request: ${lastMessage}`;
                     attemptRequest.max_tokens = Math.max(attemptRequest.max_tokens || 0, 8192);
                 }
 
+                // Temperature pinning: Cap at 0.5 for precision-critical task types.
+                // Coding, extraction, and classification require factual/structural accuracy —
+                // higher temperatures increase creative drift and hallucination risk.
+                const precisionTasks: string[] = [TaskType.Coding, TaskType.EntityExtraction, TaskType.Classification];
+                if (precisionTasks.includes(taskType)) {
+                    attemptRequest.temperature = Math.min(attemptRequest.temperature ?? 0.7, 0.5);
+                }
+
                 const attemptPromise = (async () => {
                     try {
                         const tempContext = { ...context, request: attemptRequest };
