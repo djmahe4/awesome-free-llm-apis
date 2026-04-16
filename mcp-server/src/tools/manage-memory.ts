@@ -13,7 +13,7 @@ const workspaceScanner = new WorkspaceScanner(process.cwd());
 
 export async function manageMemory(input: ManageMemoryInput) {
     const { action, workspace_root: workspaceRoot, query, limit = 10 } = input;
-    const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
+    const wsHash = await workspaceScanner.getWorkspaceHash(workspaceRoot);
     const contextManager = new ContextManager();
 
     switch (action) {

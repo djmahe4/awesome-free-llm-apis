@@ -84,7 +84,7 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
 
         // Should ONLY have tried prov2 (prov1 rejected due to context window)
         expect(trySpy).toHaveBeenCalledTimes(1);
-        expect(trySpy).toHaveBeenCalledWith(expect.anything(), 'prov2', 'model-a');
+        expect(trySpy).toHaveBeenCalledWith(expect.anything(), 'prov2', 'model-a', expect.any(Number));
     });
 
     it('should rank providers by rate limit headroom', async () => {
@@ -222,7 +222,7 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
         await router.execute(context, async () => { });
 
         // Should HAVE tried small-model (bypassing the 80% upscaling check because it was explicitly requested)
-        expect(trySpy).toHaveBeenCalledWith(expect.anything(), 'smallProv', 'small-model');
+        expect(trySpy).toHaveBeenCalledWith(expect.anything(), 'smallProv', 'small-model', expect.any(Number));
     });
 
     it('should apply penalty score to recently rate-limited providers', async () => {

@@ -1,0 +1,135 @@
+:root {
+  --mcp-primary: #6c63ff;
+  --mcp-secondary: #48c774;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #0f1117;
+}
+
+.navbar-brand {
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--mcp-primary), var(--mcp-secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-size: 1.5rem;
+}
+
+.card {
+  border: 1px solid #2e3250;
+  background-color: #1a1d2e;
+  transition: transform 0.2s, border-color 0.2s;
+}
+
+.card:hover {
+  border-color: var(--mcp-primary);
+}
+
+.stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--mcp-primary);
+}
+
+.provider-id {
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: #8892a4;
+}
+
+.nav-tabs .nav-link {
+  color: #8892a4;
+  border: none;
+}
+
+.nav-tabs .nav-link.active {
+  color: var(--mcp-primary);
+  background: transparent;
+  border-bottom: 2px solid var(--mcp-primary);
+}
+
+pre {
+  background-color: #0f1117;
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid #2e3250;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 5px;
+}
+
+.status-online {
+  background-color: var(--mcp-secondary);
+  box-shadow: 0 0 5px var(--mcp-secondary);
+}
+
+.status-offline {
+  background-color: #ff4757;
+}
+
+.progress {
+  height: 8px;
+  background-color: #2e3250;
+}
+
+.progress-bar {
+  background-color: var(--mcp-primary);
+}
+
+#memory-session-input {
+  max-width: 340px;
+}
+
+#memory-session-select {
+  max-width: 240px;
+}
+
+#memory-knowledge {
+  background: #0f1117;
+  color: #c9d1d9;
+  border-color: #2e3250;
+  resize: vertical;
+  min-height: 200px;
+  font-size: 0.78rem;
+}
+
+/* New helpers to replace inline styles */
+.progress-bar-full {
+  width: 100%;
+}
+
+.queue-icon {
+  font-size: 0.7rem;
+}
+
+/* Premium Border Accents */
+.border-primary-subtle { border-left: 4px solid var(--mcp-primary) !important; }
+.border-warning-subtle { border-left: 4px solid #ffc107 !important; }
+.border-info-subtle { border-left: 4px solid #0dcaf0 !important; }
+.border-success-subtle { border-left: 4px solid var(--mcp-secondary) !important; }
+
+.pulse {
+  animation: pulse-animation 2s infinite;
+}
+
+@keyframes pulse-animation {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+.card {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.card:hover {
+  box-shadow: 0 8px 24px rgba(108, 99, 255, 0.15);
+  transform: translateY(-2px);
+}

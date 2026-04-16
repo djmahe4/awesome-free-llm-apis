@@ -188,12 +188,15 @@ describe('Agentic Intelligence & Middleware', () => {
 
             // Should have initialized project files
             expect(fsp.mkdir).toHaveBeenCalled();
-            // Should have persisted queues
-            expect(fsp.writeFile).toHaveBeenCalledWith(
-                expect.stringContaining('queues.json'),
-                expect.stringContaining('Step 1: Build'),
-                'utf-8'
+            // Debounced: wait for queues.json write (2000ms debounce + buffer)
+            await new Promise(resolve => setTimeout(resolve, 2100));
+            // queues.json is written twice (pre/post execution) - check for either
+            const writeCalls = vi.mocked(fsp.writeFile).mock.calls;
+            const queuesCall = writeCalls.find((call: any[]) => 
+                typeof call[0] === 'string' && call[0].includes('queues.json')
             );
+            expect(queuesCall).toBeDefined();
+            expect(queuesCall![1]).toContain('Step'); // Contains decomposed steps
         });
 
         it('respects ENABLE_AGENTIC_MIDDLEWARE toggle', async () => {

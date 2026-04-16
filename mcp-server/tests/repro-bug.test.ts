@@ -13,8 +13,8 @@ class MockProvider extends BaseProvider {
     id = 'mock';
     baseURL = 'http://mock';
     envVar = 'MOCK_API_KEY';
-    // Use a model ID that is actually in the router's configuration (e.g., gemini-2.0-flash)
-    models = [{ id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', contextWindow: 32768 }];
+    // Use a model ID that is actually in the router's configuration (e.g., gemini-2.5-flash)
+    models = [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', contextWindow: 32768 }];
     rateLimits = { rpm: 60 };
     constructor() {
         super();
@@ -35,8 +35,8 @@ describe('Intelligent Router - Multi-modal Content Bug Repro', () => {
         const context: PipelineContext = {
             request: {
                 messages: [
-                    { 
-                        role: 'user', 
+                    {
+                        role: 'user',
                         content: [
                             { type: 'text', text: 'what is an atom?' },
                             { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }
@@ -51,7 +51,7 @@ describe('Intelligent Router - Multi-modal Content Bug Repro', () => {
 
         // This should NOT throw "TypeError: content.toLowerCase is not a function"
         await expect(router.execute(context, async () => { })).resolves.not.toThrow();
-        
+
         expect(trySpy).toHaveBeenCalled();
     });
 
@@ -73,7 +73,7 @@ describe('Intelligent Router - Multi-modal Content Bug Repro', () => {
         // We use (router as any) because it's a private method
         const taskType = (router as any).autoClassify(context.request.messages, context.keywords);
         context.taskType = taskType;
-        
+
         // "2+2" should be classified as Chat or something similar (not empty)
         expect(context.taskType).toBeDefined();
         // Since "solve this math problem: 2+2" doesn't have explicit coding keywords, it will default to Chat
@@ -110,7 +110,7 @@ describe('Intelligent Router - Multi-modal Content Bug Repro', () => {
 
         // This should NOT throw "TypeError: task.slice is not a function"
         await expect((router as any).decomposeAndExecute(context)).resolves.not.toThrow();
-        
+
         // Final response should contain the results
         expect(context.response?.choices[0].message.content).toContain('Subtask 1');
         expect(context.response?.choices[0].message.content).toContain('Subtask 2');

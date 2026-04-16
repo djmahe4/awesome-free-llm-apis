@@ -1,6 +1,6 @@
 export interface Message {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | any; // Supports multi-modal arrays or objects
 }
 
 export interface ChatRequest {
@@ -13,6 +13,7 @@ export interface ChatRequest {
   agentic?: boolean;
   response_format?: { type: 'json_object' | 'text' } | { type: 'json_schema', json_schema?: { name: string, strict?: boolean, schema: any } } | any;
   google_search?: boolean;
+  timeoutMs?: number;
 }
 
 export interface ChatResponse {

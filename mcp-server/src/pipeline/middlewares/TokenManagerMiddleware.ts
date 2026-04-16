@@ -77,6 +77,6 @@ export class TokenManagerMiddleware implements Middleware {
     }
 
     flush(): void {
-        // Token state is Currently RAM-only, no-op flush
+        this.tokenTracking = {};
     }
 }

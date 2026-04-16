@@ -30,6 +30,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { LRUCache } from 'lru-cache';
 import { createMCPServer } from './mcp/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -38,9 +39,9 @@ import crypto from 'crypto';
 import { getTokenStats } from './tools/get-token-stats.js';
 import { listAvailableFreeModels } from './tools/list-models.js';
 import { validateProvider } from './tools/validate-provider.js';
-import { flushSystem } from './tools/use-free-llm.js';
+import { flushSystem, sharedRouter } from './tools/use-free-llm.js';
 import { execSync } from 'child_process';
-import fs from 'fs';
+import fs, { promises as fsp } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,41 +53,67 @@ async function validateSandboxDependencies() {
   console.error('[Startup] Validating sandbox dependencies...');
 
   // 1. Python Validation
-  let pythonPath = 'python3';
-  const projectRoot = path.resolve(__dirname, '../../');
+  let pythonPath: string | null = null;
+  const projectRoot = path.resolve(__dirname, '..');
+  const isWin = process.platform === 'win32';
+  
   const venvPaths = [
-    path.join(projectRoot, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python3'),
-    path.join(projectRoot, 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python3')
+    path.join(projectRoot, '.venv', isWin ? 'Scripts/python.exe' : 'bin/python3'),
+    path.join(projectRoot, 'venv', isWin ? 'Scripts/python.exe' : 'bin/python3'),
+    path.join(projectRoot, '.venv', isWin ? 'Scripts/python' : 'bin/python3'),
+    path.join(projectRoot, 'venv', isWin ? 'Scripts/python' : 'bin/python3'),
+    path.join(projectRoot, '.venv', isWin ? 'python.exe' : 'bin/python3'),
+    path.join(projectRoot, 'venv', isWin ? 'python.exe' : 'bin/python3'),
   ];
-
+  
   for (const vp of venvPaths) {
     if (fs.existsSync(vp)) {
       pythonPath = vp;
       break;
     }
   }
+  
+  const pythonCommands = isWin 
+    ? ['python', 'python3', 'py']
+    : ['python3', 'python'];
 
-  try {
-    execSync(`${pythonPath} --version`, { stdio: 'ignore' });
-    try {
-      execSync(`${pythonPath} -c "import RestrictedPython"`, { stdio: 'ignore' });
-      console.error(`  [✓] Python: ${pythonPath} and RestrictedPython available`);
-    } catch {
-      console.error(`  [!] Python: ${pythonPath} found but RestrictedPython missing. Run: ${pythonPath} -m pip install RestrictedPython`);
+  if (!pythonPath) {
+    for (const cmd of pythonCommands) {
+      try {
+        execSync(`${cmd} --version`, { stdio: 'ignore' });
+        pythonPath = cmd;
+        break;
+      } catch {
+        // Continue to next
+      }
     }
-  } catch {
-    console.error('  [!] Python: python3 not found on PATH or in venv');
+  }
+
+  if (pythonPath) {
+    try {
+      execSync(`${pythonPath} --version`, { stdio: 'ignore' });
+      try {
+        execSync(`${pythonPath} -c "import RestrictedPython"`, { stdio: 'ignore' });
+        console.error(`  [✓] Python: ${pythonPath} and RestrictedPython available`);
+      } catch {
+        console.error(`  [!] Python: ${pythonPath} found but RestrictedPython missing. Run: ${pythonPath} -m pip install RestrictedPython`);
+      }
+    } catch {
+      console.error(`  [!] Python: ${pythonPath} failed to execute`);
+    }
+  } else {
+    console.error('  [!] Python: not found on PATH or in venv');
   }
 
   // 2. Go Validation
-  const goRunnerPath = path.join(__dirname, '../../scripts/go-sandbox-runner/sandbox-runner');
+  const goRunnerPath = path.join(__dirname, '../scripts/go-sandbox-runner/sandbox-runner' + (isWin ? '.exe' : ''));
   if (fs.existsSync(goRunnerPath)) {
     console.error('  [✓] Go: Pre-built sandbox-runner available');
   } else {
     try {
       execSync('go version', { stdio: 'ignore' });
       console.error('  [i] Go: Building sandbox-runner...');
-      const goDir = path.join(__dirname, '../../scripts/go-sandbox-runner');
+      const goDir = path.join(__dirname, '../scripts/go-sandbox-runner');
       execSync('go build -o sandbox-runner .', { cwd: goDir, stdio: 'ignore' });
       console.error('  [✓] Go: sandbox-runner built successfully');
     } catch {
@@ -95,14 +122,14 @@ async function validateSandboxDependencies() {
   }
 
   // 3. Rust Validation
-  const rustRunnerPath = path.join(__dirname, '../../scripts/rust-sandbox-runner/target/release/sandbox-runner');
+  const rustRunnerPath = path.join(__dirname, '../scripts/rust-sandbox-runner/target/release/sandbox-runner' + (isWin ? '.exe' : ''));
   if (fs.existsSync(rustRunnerPath)) {
     console.error('  [✓] Rust: Pre-built sandbox-runner available');
   } else {
     try {
       execSync('cargo --version', { stdio: 'ignore' });
       console.error('  [i] Rust: Building sandbox-runner...');
-      const rustDir = path.join(__dirname, '../../scripts/rust-sandbox-runner');
+      const rustDir = path.join(__dirname, '../scripts/rust-sandbox-runner');
       execSync('cargo build --release', { cwd: rustDir, stdio: 'ignore' });
       console.error('  [✓] Rust: sandbox-runner built successfully');
     } catch {
@@ -114,6 +141,10 @@ async function validateSandboxDependencies() {
 async function main() {
   try {
     await validateSandboxDependencies();
+    
+    // Initialize persistent tracking
+    await sharedRouter.init();
+    
     const isSse = process.argv.includes('--sse');
     if (isSse) {
       const app = express();
@@ -126,6 +157,7 @@ async function main() {
             "script-src": ["'self'", "https://cdn.jsdelivr.net"],
             "style-src": ["'self'", "https://cdn.jsdelivr.net"],
             "img-src": ["'self'", "data:", "https:*"],
+            "connect-src": ["'self'", "https://cdn.jsdelivr.net"],
           },
         },
         hsts: {
@@ -138,6 +170,32 @@ async function main() {
       app.use(express.json());
 
       // API endpoints for dashboard
+
+      // Long-term session-less rate limiting using TTL cache to prevent memory leaks
+      const rateLimitCache = new LRUCache<string, { count: number; resetAt: number }>({
+        max: 1000,
+        ttl: 60_000, // 1 minute
+      });
+      const RATE_LIMIT_MAX = 120;           // 2 requests/second burst over a minute
+
+      function checkRateLimit(req: express.Request, res: express.Response): boolean {
+        const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+          ?? req.socket.remoteAddress
+          ?? 'unknown';
+        const now = Date.now();
+        let entry = rateLimitCache.get(ip);
+        if (!entry || now >= entry.resetAt) {
+          entry = { count: 0, resetAt: now + 60_000 };
+          rateLimitCache.set(ip, entry);
+        }
+        entry.count++;
+        if (entry.count > RATE_LIMIT_MAX) {
+          res.status(429).json({ error: 'Too many requests' });
+          return false;
+        }
+        return true;
+      }
+
       app.get('/api/token-stats', async (req, res) => {
         try {
           const stats = await getTokenStats();
@@ -166,7 +224,100 @@ async function main() {
         }
       });
 
-      const sessionMap = new Map<string, { server: any, transport: StreamableHTTPServerTransport }>();
+      // List all active agentic sessions (directories under data/projects/)
+      app.get('/api/sessions', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const projectsBase = path.join(process.cwd(), 'data', 'projects');
+          try {
+            await fsp.access(projectsBase);
+          } catch {
+            res.json({ sessions: [] });
+            return;
+          }
+          const entries = await fsp.readdir(projectsBase);
+          
+          // Phase 3 Optimization: Parallelize stats with a reasonable batch limit
+          // We limit concurrency to 20 to avoid descriptor exhaustion if there are thousands of sessions
+          const sessions: string[] = [];
+          const MAX_CONCURRENT = 20;
+          
+          for (let i = 0; i < entries.length; i += MAX_CONCURRENT) {
+            const batch = entries.slice(i, i + MAX_CONCURRENT);
+            const results = await Promise.all(batch.map(async d => {
+              const full = path.resolve(projectsBase, d);
+              if (path.dirname(full) !== projectsBase) return null;
+              try {
+                const stat = await fsp.stat(full);
+                return stat.isDirectory() ? d : null;
+              } catch {
+                return null;
+              }
+            }));
+            sessions.push(...results.filter((d): d is string => d !== null));
+          }
+
+          res.json({ sessions });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // Return knowledge.md content and momentum queues for a given session
+      app.get('/api/memory/:sessionId', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { sessionId } = req.params;
+          // Step 1: Reject IDs with dots-only sequences or characters outside word/hyphen/dot
+          if (!/^(?!\.\.?$)[\w\-\.]{1,128}$/.test(sessionId)) {
+            res.status(400).json({ error: 'Invalid sessionId' });
+            return;
+          }
+          // Step 2: Resolve and verify the resulting path is a direct child of data/projects/
+          const projectsBase = path.join(process.cwd(), 'data', 'projects');
+          const projectDir = path.resolve(projectsBase, sessionId);
+          if (path.dirname(projectDir) !== projectsBase) {
+            res.status(400).json({ error: 'Invalid sessionId' });
+            return;
+          }
+
+          // Phase 3 Optimization: Parallelize knowledge and queue reads
+          const [knowledgeRes, queuesRes] = await Promise.all([
+            fsp.readFile(path.join(projectDir, 'knowledge.md'), 'utf-8').catch(() => 'No memory yet – session not started.'),
+            fsp.readFile(path.join(projectDir, 'queues.json'), 'utf-8').catch(() => null)
+          ]);
+
+          let queues: Record<string, string[]> = {
+            nowQueue: [], nextQueue: [], blockedQueue: [], improveQueue: []
+          };
+          if (queuesRes) {
+            try {
+              queues = JSON.parse(queuesRes);
+            } catch {
+              // Ignore parse errors
+            }
+          }
+
+          res.json({ sessionId, knowledge: knowledgeRes, queues });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // v1.0.4 Memory Hardening: Use LRUCache for sessions to prevent memory leaks
+      const sessionMap = new LRUCache<string, { server: any, transport: StreamableHTTPServerTransport }>({
+        max: 1000,
+        ttl: 1000 * 60 * 60, // 1 hour idle TTL
+        dispose: (value) => {
+          // Attempt to close transport if it's still alive when purged from cache
+          try {
+            console.error(`[Server] Purging stagnant session: closing transport`);
+            value.transport.close();
+          } catch (err) {
+            // Ignore closure errors for already closed transports
+          }
+        }
+      });
 
       const handleMcpRequest = async (req: express.Request, res: express.Response) => {
         // Support for dashboard status heartbeat

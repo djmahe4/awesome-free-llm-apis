@@ -13,35 +13,81 @@ export class IntelligentRouterMiddleware implements Middleware {
     private contextManager: ContextManager;
 
     // Model capability scores (0.0 to 1.0)
+    // Model capability scores (0.0 to 1.0)
     private static readonly modelCapabilities: Record<string, number> = {
         'DeepSeek-R1': 1.0,
         'deepseek-ai/DeepSeek-R1': 1.0,
         'DeepSeek-V3': 0.9,
         'deepseek-ai/DeepSeek-V3': 0.9,
+        'deepseek-v3.2': 0.95,
         'gemini-3.1-pro-preview': 0.95,
+        'gemini-3.1-flash-preview': 0.85,
+        'gemini-3-flash-preview': 0.85, // Alias for older configs
+        'gemini-3.1-flash-lite-preview': 0.82,
         'gemini-2.5-pro': 0.9,
-        'gemini-2.0-flash': 0.8,
         'gemini-2.5-flash': 0.8,
         'command-r-plus-08-2024': 0.9,
         'command-a-03-2025': 0.8,
         'mistral-large-latest': 0.85,
         'mistralai/mistral-large-2-instruct': 0.85,
         'llama-3.3-70b-versatile': 0.85,
-        'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8': 0.85,
-        'qwen/qwen3-coder-480b-a35b-instruct:free': 0.9,
-        'qwen/qwen3-next-80b-a3b-instruct:free': 0.8,
-        'openai/gpt-oss-120b:free': 0.85,
-        'gpt-oss-20b': 0.7,
+        'qwen/qwen3-coder-480b-a35b-instruct:free': 0.94,
+        'qwen/qwen3-next-80b-a3b-instruct:free': 0.89,
+        'google/gemma-4-31B-it': 0.91,
+        'openai/gpt-oss-120b:free': 0.90,
+        'openai/gpt-oss-20b:free': 0.75,
+        'gpt-oss-20b': 0.75,
         'glm-5.1': 0.95,
         'glm-5-turbo': 0.9,
         'glm-4.7': 0.85,
         'glm-4.6': 0.8,
+        'GLM-4.6V-Flash': 0.82,
         'glm-4.5-air': 0.7,
+        'Qwen/Qwen2.5-72B-Instruct': 0.85,
+        'Qwen/Qwen2.5-Coder-32B-Instruct': 0.82,
+        'Qwen/Qwen3-8B': 0.7,
+        'qwen-3-235b-a22b-instruct-2507': 0.93,
+        'Qwen/Qwen3-235B-A22B': 0.91,
+        'qwen3.5': 0.92,
+        'kimi-k2.5': 0.90,
+        'meta/llama-3.3-70b-instruct': 0.85,
+        'Llama-3.3-70B-Instruct': 0.85,
+        'meta-llama/Llama-3.3-70B-Instruct': 0.85,
+        'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo': 0.75,
+        'ministral-8b-2512': 0.82,
+        'llama-4-scout-17b-16e-instruct': 0.87,
+        'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8': 0.87,
+        'moonshotai/kimi-k2-instruct': 0.82,
+        'c4ai-aya-expanse-32b': 0.8,
+        'stepfun/step-3.5-flash:free': 0.8,
+        'z-ai/glm-4.5-air:free': 0.8,
+        'liquid/lfm2.5-1.2b-thinking:free': 0.88,
+        'nvidia/nemotron-3-super-120b-a12b:free': 0.93,
+        'nvidia/nemotron-nano-12b-v2-vl:free': 0.85,
+        'nvidia/nemotron-3-nano-30b-a3b:free': 0.82,
+        'nvidia/nemotron-mini-4b-instruct:free': 0.65,
+        'nvidia/nemotron-mini-4b-instruct': 0.65,
+        'nvidia/nemotron-nano-9b-v2:free': 0.65,
+        'mistral-small-latest': 0.82,
+        'gpt-4o': 0.9,
+        'arcee-ai/trinity-large-preview:free': 0.8,
+        'arcee-ai/trinity-mini:free': 0.75,
+        'openrouter/free': 0.75,
+        '@cf/meta/llama-3.3-70b-instruct-fp8-fast': 0.85,
+        '@cf/qwen/qwq-32b': 0.85,
+        '@cf/qwen/qwen2.5-coder-32b-instruct': 0.82,
     };
 
     constructor(executor?: LLMExecutor) {
         this.executor = executor || new LLMExecutor();
         this.contextManager = new ContextManager();
+    }
+
+    /**
+     * Initializes the underlying persistence layer
+     */
+    async init(): Promise<void> {
+        await (this.executor as any).init();
     }
 
     /**
@@ -78,7 +124,9 @@ export class IntelligentRouterMiddleware implements Middleware {
         // Moderation
         'moderate': TaskType.Moderation, 'moderation': TaskType.Moderation, 'safety': TaskType.Moderation,
         'filter': TaskType.Moderation, 'policy': TaskType.Moderation,
-        // User Intent / Planning
+        // Reasoning
+        'think': TaskType.Reasoning, 'thinking': TaskType.Reasoning, 'reason': TaskType.Reasoning,
+        'logic': TaskType.Reasoning, 'proof': TaskType.Reasoning, 'math': TaskType.Reasoning,
     };
 
     /**
@@ -108,8 +156,12 @@ export class IntelligentRouterMiddleware implements Middleware {
         // 2. Fallback to Message Content Analysis
         const lastMsg = getMessageContent(messages[messages.length - 1]).toLowerCase();
 
-        if (lastMsg.includes('```') || lastMsg.includes('function') || lastMsg.includes('class') || lastMsg.includes('debug') || lastMsg.includes('implement')) {
-            return TaskType.Coding;
+        // Specific Tasks First
+        if (lastMsg.includes('classify') || lastMsg.includes('sentiment') || lastMsg.includes('categorize')) {
+            return TaskType.Classification;
+        }
+        if (lastMsg.includes('moderate') || lastMsg.includes('safety') || lastMsg.includes('policy') || lastMsg.includes('violation')) {
+            return TaskType.Moderation;
         }
         if (lastMsg.includes('summarize') || lastMsg.includes('summarization') || lastMsg.includes('tldr') || lastMsg.includes('tl;dr') || lastMsg.includes('concise')) {
             return TaskType.Summarization;
@@ -117,11 +169,19 @@ export class IntelligentRouterMiddleware implements Middleware {
         if (lastMsg.includes('extract') || lastMsg.includes('entities') || lastMsg.includes('json') || lastMsg.includes('fields')) {
             return TaskType.EntityExtraction;
         }
-        if (lastMsg.includes('classify') || lastMsg.includes('sentiment') || lastMsg.includes('categorize')) {
-            return TaskType.Classification;
-        }
         if (lastMsg.includes('search') || lastMsg.includes('find') || lastMsg.includes('lookup')) {
             return TaskType.SemanticSearch;
+        }
+        if (lastMsg.includes('think') || lastMsg.includes('reason') || lastMsg.includes('logic') || lastMsg.includes('step by step')) {
+            return TaskType.Reasoning;
+        }
+        if (lastMsg.includes('who are you') || lastMsg.includes('what can you do') || lastMsg.includes('help') || lastMsg.includes('capabilities')) {
+            return TaskType.UserIntent;
+        }
+
+        // Coding last as it has some very common words like 'class' or 'debug'
+        if (lastMsg.includes('```') || lastMsg.includes('function ') || lastMsg.includes('class ') || lastMsg.includes('debug') || lastMsg.includes('implement')) {
+            return TaskType.Coding;
         }
 
         return TaskType.Chat;
@@ -150,10 +210,10 @@ export class IntelligentRouterMiddleware implements Middleware {
         console.debug(`[Router] Decomposing complex task...`);
 
         // 1. Pick a Planner model (SiliconFlow V3 or Gemini Flash)
-        const plannerModels = ['deepseek-ai/DeepSeek-V3', 'gemini-2.0-flash', 'llama3.1-8b'];
+        const plannerModels = ['deepseek-ai/DeepSeek-V3', 'gemini-2.5-flash', 'llama3.1-8b'];
         let plannerResponse: string | null = null;
 
-        const lastMessage = context.request.messages.length > 0 
+        const lastMessage = context.request.messages.length > 0
             ? getMessageContent(context.request.messages[context.request.messages.length - 1])
             : 'No content provided';
 
@@ -206,7 +266,7 @@ Request: ${lastMessage}`;
             try {
                 // Execute subtask with best model for its type
                 const subtaskRes = await this.executor.prompt(
-                    [...context.request.messages.slice(0, -1), { role: 'user', content: task }],
+                    [...context.request.messages.slice(0, -1), { role: 'user', content: taskStr }],
                     'any', // Let executor pick best for type if it can, otherwise defaults to chat
                     { taskType }
                 );
@@ -236,105 +296,142 @@ Request: ${lastMessage}`;
     /**
      * Optimized task-to-model routing map.
      */
-    public static taskRouteMap: Record<string, string[]> = {
+    public static taskRouteMap: Record<TaskType, string[]> = {
         [TaskType.Coding]: [
             'qwen/qwen3-coder-480b-a35b-instruct:free',
+            'google/gemma-4-31B-it',
             'DeepSeek-R1',
-            'gpt-oss-20b',
+            'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
+            'qwen-3-235b-a22b-instruct-2507',
             'codestral-latest',
+            'Qwen/Qwen2.5-Coder-32B-Instruct',
             '@cf/qwen/qwen2.5-coder-32b-instruct',
             '@cf/qwen/qwq-32b',
+            'deepseek-v3.2',
+            'gpt-oss-20b',
             'gemini-3.1-pro-preview',
-            'deepseek-ai/DeepSeek-R1',
             'gemini-2.5-flash',
             'mistral-large-latest',
-            'mistral-small-latest',
             'openai/gpt-oss-120b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
             'glm-5.1',
             'glm-5-turbo',
+            'z-ai/glm-4.5-air:free',
             'glm-4.5-air',
+        ],
+        [TaskType.Reasoning]: [
+            'DeepSeek-R1',
+            'deepseek-ai/DeepSeek-R1',
+            'liquid/lfm2.5-1.2b-thinking:free',
+            'qwen-3-235b-a22b-instruct-2507',
+            'glm-5.1',
+            'qwen/qwen3-coder-480b-a35b-instruct:free',
+            'google/gemma-4-31B-it',
+            'nvidia/nemotron-3-super-120b-a12b:free',
         ],
         [TaskType.Moderation]: [
             'llama-3.3-70b-versatile',
-            'gemini-3.1-flash-lite-preview',
-            'gemini-2.5-flash',
-            'gemini-2.0-flash',
+            'google/gemma-4-31B-it',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-            'ministral-8b-latest',
-            'mistral-small-latest',
-            'nvidia/nemotron-3-super-120b-a12b:free',
-            'nvidia/nemotron-mini-4b-instruct',
-            'glm-4.6',
+            'gemini-2.5-flash',
             'glm-4.5-air',
+            'ministral-8b-latest',
+            'nvidia/nemotron-3-super-120b-a12b:free',
+            'glm-4.6',
             'llama3.1-8b',
         ],
         [TaskType.Classification]: [
+            'google/gemma-4-31B-it',
             'llama-3.3-70b-versatile',
+            'ministral-8b-2512',
+            'GLM-4.6V-Flash',
             'gemini-3.1-flash-lite-preview',
+            'mistral-small-latest',
+            '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+            'gemini-3.1-flash-preview',
+            'gemini-3-flash-preview',
+            'mistralai/Mistral-7B-Instruct-v0.3',
             'gemini-2.5-flash',
             'glm-4.6',
             'glm-4.5-air',
-            'gemini-2.0-flash',
-            '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-            'mistral-small-latest',
             'nvidia/nemotron-3-nano-30b-a3b:free',
         ],
         [TaskType.UserIntent]: [
+            'google/gemma-4-31B-it',
+            'mistral-small-latest',
             'gemini-3.1-flash-lite-preview',
+            'gemini-3.1-flash-preview',
             'llama-3.3-70b-versatile',
             'gemini-2.5-flash',
             'glm-4.6',
             'glm-4.5-air',
-            'gemini-2.0-flash',
+            'nvidia/nemotron-mini-4b-instruct:free',
             'nvidia/nemotron-mini-4b-instruct',
-            'mistral-small-latest',
         ],
         [TaskType.SemanticSearch]: [
+            'nvidia/nemotron-3-super-120b-a12b:free',
+            'qwen-3-235b-a22b-instruct-2507',
+            'arcee-ai/trinity-large-preview:free',
+            'qwen/qwen3-next-80b-a3b-instruct:free',
+            'llama-4-scout-17b-16e-instruct',
             'command-r-plus-08-2024',
             'gemini-3.1-pro-preview',
-            'arcee-ai/trinity-large-preview:free',
             'gemini-2.5-flash',
             'mistral-large-latest',
-            'qwen/qwen3-next-80b-a3b-instruct:free',
             'openai/gpt-oss-120b:free',
             'gemini-2.5-pro',
             'llama-3.3-70b-versatile',
+            'glm-4.5-air',
         ],
         [TaskType.Summarization]: [
+            'google/gemma-4-31B-it',
+            'kimi-k2.5',
+            'gemini-3.1-flash-preview',
+            'mistral-small-latest',
+            'gemini-3.1-flash-lite-preview',
+            'meta-llama/Llama-3.3-70B-Instruct',
+            'moonshotai/kimi-k2-instruct',
             'command-a-03-2025',
             'mistralai/mistral-small-3.1-24b:free',
-            'llama-3.3-70b-versatile',
             'gemini-2.5-flash',
-            'gemini-3-flash-preview',
             'glm-4.7',
             'glm-4.5-air',
         ],
         [TaskType.EntityExtraction]: [
+            'google/gemma-4-31B-it',
             'gemini-3.1-pro-preview',
-            'llama-3.3-70b-versatile',
             'arcee-ai/trinity-large-preview:free',
-            'command-r-plus-08-2024',
+            'llama-3.3-70b-versatile',
             'gemini-2.5-flash',
             'glm-4.7',
             'glm-4.5-air',
         ],
         [TaskType.Chat]: [
             'DeepSeek-R1',
+            'deepseek-ai/DeepSeek-R1',
+            'nvidia/nemotron-3-super-120b-a12b:free',
+            'qwen3.5',
+            'Qwen/Qwen3-235B-A22B',
+            'qwen-3-235b-a22b-instruct-2507',
+            'google/gemma-4-31B-it',
+            'openai/gpt-oss-20b:free',
             'gpt-oss-20b',
-            'gpt-4o',
-            'gemini-3.1-pro-preview',
-            'gemini-3-flash-preview',
-            'gemini-2.0-flash',
-            'glm-5.1',
-            'glm-5-turbo',
-            'glm-4.7',
-            'glm-4.6',
-            'glm-4.5-air',
-            'meta-llama/Llama-3.3-70B-Instruct',
+            'Llama-3.3-70B-Instruct',
+            'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
+            'Qwen/Qwen2.5-72B-Instruct',
+            'c4ai-aya-expanse-32b',
+            'stepfun/step-3.5-flash:free',
             'openai/gpt-oss-120b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
+            'meta/llama-3.3-70b-instruct',
+            'mistralai/mistral-large-2-instruct',
+            'gpt-4o',
+            'Qwen/Qwen3-8B',
+            'arcee-ai/trinity-mini:free',
+            'nvidia/nemotron-nano-12b-v2-vl:free',
+            'nvidia/nemotron-nano-9b-v2:free',
             'openrouter/free',
+            'gemini-2.5-flash',
         ]
     };
 
@@ -374,6 +471,14 @@ Request: ${lastMessage}`;
         let lastError: Error | null = null;
         let primaryError: Error | null = null;
         const allErrors: string[] = [];
+        
+        const startTime = Date.now();
+        const totalBudget = context.request.timeoutMs || 30000;
+        
+        const getRemainingTimeout = () => {
+            const elapsed = Date.now() - startTime;
+            return Math.max(0, totalBudget - elapsed);
+        };
 
         // --- Context Management Strategic Workflow ---
         const originalTokens = context.estimatedTokens ?? this.executor.calculateTokens(context.request.messages);
@@ -388,7 +493,19 @@ Request: ${lastMessage}`;
 
         if (estimatedTokens > 4000 || absoluteOverflow) {
             const targetTokens = absoluteOverflow ? Math.min(estimatedTokens * 0.5, maxWindow * 0.8) : Math.max(2000, estimatedTokens * 0.4);
+            let summarizationAttempts = 0;
+            const MAX_SUMMARIZATION_ATTEMPTS = 3;
+
             const summarizer = async (text: string) => {
+                summarizationAttempts++;
+                const remaining = getRemainingTimeout();
+
+                // Strategic Bailout: If we've tried too many times or have < 60% budget left, 
+                // stop trying to summarize and fall back to Tier 2 (Truncation) which is instant.
+                if (summarizationAttempts > MAX_SUMMARIZATION_ATTEMPTS || remaining < (totalBudget * 0.6)) {
+                    throw new Error('Summarization budget or attempt limit exhausted');
+                }
+
                 // Use a stable summarization model
                 const summaryPrompt = `Summarize precisely while preserving technical context: ${text}`;
                 const preferredModels = IntelligentRouterMiddleware.taskRouteMap[TaskType.Summarization];
@@ -397,13 +514,19 @@ Request: ${lastMessage}`;
                 for (const modelId of preferredModels) {
                     for (const p of availableProviders) {
                         if (p.models.some(m => m.id === modelId)) {
-                            try {
-                                const res = await p.chat({
-                                    model: modelId,
-                                    messages: [{ role: 'user', content: summaryPrompt }]
-                                });
-                                return res.choices[0].message.content;
-                            } catch { continue; }
+                                try {
+                                    const currentRemaining = getRemainingTimeout();
+                                    if (currentRemaining < 2000) throw new Error('Timeout budget exhausted for summarization');
+
+                                    const res = await p.chat({
+                                        model: modelId,
+                                        messages: [{ role: 'user', content: summaryPrompt }],
+                                        timeoutMs: Math.min(10000, Math.floor(currentRemaining * 0.4)) 
+                                    });
+                                    return res.choices[0].message.content;
+                                } catch (err: any) { 
+                                    continue; 
+                                }
                         }
                     }
                 }
@@ -412,13 +535,19 @@ Request: ${lastMessage}`;
                 for (const p of availableProviders) {
                     if (p.models.length > 0) {
                         const m = p.models[0];
-                        try {
-                            const res = await p.chat({
-                                model: m.id,
-                                messages: [{ role: 'user', content: summaryPrompt }]
-                            });
-                            return res.choices[0].message.content;
-                        } catch { continue; }
+                                try {
+                                    const currentRemaining = getRemainingTimeout();
+                                    if (currentRemaining < 2000) throw new Error('Timeout budget exhausted for summarization fallback');
+
+                                    const res = await p.chat({
+                                        model: m.id,
+                                        messages: [{ role: 'user', content: summaryPrompt }],
+                                        timeoutMs: Math.min(8000, Math.floor(currentRemaining * 0.3)) 
+                                    });
+                                    return res.choices[0].message.content;
+                                } catch (err: any) { 
+                                    continue; 
+                                }
                     }
                 }
 
@@ -432,7 +561,6 @@ Request: ${lastMessage}`;
                 context.estimatedTokens = estimatedTokens;
                 contextCompressed = true;
             } catch (err: any) {
-                console.error(`[Router][Tier1] Compression failed, falling back to Tier 2: ${err.message}`);
                 const truncated = this.contextManager.truncateOldest(context.request.messages, targetTokens);
                 context.request.messages = truncated.messages;
                 estimatedTokens = truncated.compressedTokens;
@@ -538,14 +666,20 @@ Request: ${lastMessage}`;
 
             for (const { provider } of scoredProviders) {
                 try {
+                    const remainingTimeout = getRemainingTimeout();
+                    if (remainingTimeout < 2000) continue;
+
+                    const perAttemptTimeout = Math.floor(remainingTimeout / 2); // Greedy: use half of remaining
+
+                    console.error(`[Router][Fallback] Trying ${provider.id}/${modelId} (remaining budget: ${remainingTimeout}ms, attempt timeout: ${perAttemptTimeout}ms)`);
                     (context as any).providersAttempted.push(`${provider.id}/${modelId}`);
-                    const response = await this.executor.tryProvider(context, provider.id, modelId);
+                    context.request.model = modelId; // Update state before attempt
+                    const response = await this.executor.tryProvider(context, provider.id, modelId, perAttemptTimeout);
 
                     if (response) {
                         if (contextCompressed) (context as any).contextCompressed = true;
                         context.response = response;
                         context.providerId = provider.id;
-                        context.request.model = modelId;
 
                         // SUCCESS: Single path execution call to next()
                         try {
@@ -568,7 +702,7 @@ Request: ${lastMessage}`;
         }
 
         // --- Emergency Fallback: Last Resort Deep Truncation ---
-        const emergencyModels = ['gemini-2.0-flash', 'glm-4.5-air', 'llama-3.3-70b-versatile'];
+        const emergencyModels = ['gemini-2.5-flash', 'glm-4.5-air', 'llama-3.3-70b-versatile'];
         const emergencyTruncation = this.contextManager.truncateOldest(context.request.messages, 1500);
         context.request.messages = emergencyTruncation.messages;
         delete context.estimatedTokens;
@@ -578,12 +712,12 @@ Request: ${lastMessage}`;
             for (const p of providers) {
                 try {
                     (context as any).providersAttempted.push(`EMERGENCY:${p.id}/${modelId}`);
+                    context.request.model = modelId; // Update state before attempt
                     const res = await this.executor.tryProvider(context, p.id, modelId);
                     if (res) {
                         (context as any).contextCompressed = true;
                         context.response = res;
                         context.providerId = p.id;
-                        context.request.model = modelId;
                         await next();
                         return;
                     }

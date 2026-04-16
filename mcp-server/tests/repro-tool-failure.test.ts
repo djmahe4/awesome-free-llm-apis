@@ -9,13 +9,13 @@ vi.mock('../src/providers/registry.js', () => {
         ProviderRegistry: {
             getInstance: vi.fn().mockReturnValue({
                 getAvailableProviders: vi.fn().mockReturnValue([
-                    { id: 'mock', name: 'Mock', baseURL: '', models: [{ id: 'qwen/qwen3-coder-480b-a35b-instruct:free' }], chat: vi.fn(), chatStream: vi.fn(), getPenaltyScore: () => 0, isAvailable: () => true, recordFailure: vi.fn(), getUsageStats: () => ({ requestCountMinute: 0, requestCountDay: 0 }), rateLimits: { rpm: 60 }, envVar: '', consecutiveFailures: 0 }
+                    { id: 'mock', name: 'Mock', baseURL: '', models: [{ id: 'gemini-2.5-flash', contextWindow: 128000 }], chat: vi.fn(), chatStream: vi.fn(), getPenaltyScore: () => 0, isAvailable: () => true, recordFailure: vi.fn(), getUsageStats: () => ({ requestCountMinute: 0, requestCountDay: 0 }), rateLimits: { rpm: 60 }, envVar: '', consecutiveFailures: 0 }
                 ]),
                 getProvider: vi.fn().mockReturnValue({
                     id: 'mock',
                     name: 'Mock',
                     baseURL: '',
-                    models: [{ id: 'mock-model' }],
+                    models: [{ id: 'gemini-2.5-flash', contextWindow: 128000 }],
                     isAvailable: () => true,
                     getPenaltyScore: () => 0,
                     recordFailure: vi.fn(),
@@ -52,7 +52,7 @@ describe('IntelligentRouterMiddleware Full Repro', () => {
     it('should run without ReferenceError', async () => {
         const context: PipelineContext = {
             request: {
-                model: 'gemini-2.0-flash',
+                model: 'gemini-2.5-flash',
                 messages: [
                     { role: 'system', content: 'System prompt' },
                     { role: 'user', content: 'User message'.repeat(1000) }

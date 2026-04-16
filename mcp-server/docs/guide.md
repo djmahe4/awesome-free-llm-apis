@@ -214,15 +214,18 @@ Universal chat interface with automatic fallback cascade through 60+ free models
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `model` | string | ❌ | Model ID (e.g. `llama-3.3-70b-versatile`, `gemini-2.0-flash`) |
 | `messages` | array | ✅ | Array of `{role, content}`. Roles: `system` \| `user` \| `assistant` |
+| `workspace_root` | string | ❌* | Path to workspace. **Mandatory for project work** to derive `sessionId`. |
+| `agentic` | boolean | ❌* | Enable agentic mode. **Mandatory for project work** to enable memory injection. |
+| `model` | string | ❌ | Model ID (e.g. `llama-3.3-70b-versatile`, `gemini-2.5-flash`) |
 | `provider` | string | ❌ | Pin to a specific provider, bypassing routing |
 | `temperature` | number | ❌ | Sampling temperature 0.0–2.0 (default 0.7) |
 | `max_tokens` | number | ❌ | Maximum tokens to generate (default 1024) |
-| `workspace_root` | string | ❌ | Path to workspace for cache-keying and sessionId derivation |
 | `fallback` | boolean | ❌ | Enable provider fallback cascade (default true) |
-| `agentic` | boolean | ❌ | Enable agentic mode (task decomposition + system prompt injection) |
-| `sessionId` | string | ❌ | Required for agentic mode — partitions state/logs per project |
+| `sessionId` | string | ❌ | Optional. Required for agentic mode if `workspace_root` is missing. |
+
+> [!IMPORTANT]
+> **PROJECT WORK RULE**: For any task within a project/workspace, you MUST set `"agentic": true` AND provide `"workspace_root"`.
 
 ### 2. `list_available_free_models`
 Discover all supported models across all providers with rate-limit metadata.
@@ -362,15 +365,16 @@ ENABLE_AGENTIC_MIDDLEWARE=true npm run dev
 ```
 
 #### 2. Selective Mode (Per-Request)
-You can opt-in on a per-call basis by passing `"agentic": true` in the request body along with a **`sessionId`**.
+You can opt-in on a per-call basis by passing `"agentic": true` in the request body along with a **`workspace_root`** or **`sessionId`**.
 
-| Trigger | `ENABLE_AGENTIC_MIDDLEWARE` | `request.agentic` | `sessionId` | Result |
+| Trigger | `ENABLE_AGENTIC_MIDDLEWARE` | `request.agentic` | `sessionId` / `workspace_root` | Result |
 |:---|:---|:---|:---|:---|
 | **Global** | `true` | (Any) | **Mandatory** | Agentic ON |
 | **Opt-In** | `false`/Unset | `true` | **Mandatory** | Agentic ON |
 | **Missing ID**| (Any) | (Any) | Missing | **Agentic OFF** (Bypass) |
 
-Without a `sessionId` and a trigger, the middleware is a transparent pass-through with zero overhead.
+> [!CAUTION]
+> If you call `use_free_llm` for project work without `agentic: true`, the middlewares for memory and agentic prompts will be skipped, leading to a context-blind response.
 
 #### 3. How to Create a Session ID
 
@@ -397,4 +401,160 @@ AgenticMiddleware.execute()
   │    └─ FAIL → push reason to improveQueue
   └─ Shift nowQueue, persist state
 ```
+
+---
+
+### High-Density Synthesis for Multi-Agent Workflows
+
+This section shows how to orchestrate multiple independent agent sessions and then synthesise their outputs into a single coherent result with minimal token overhead.
+
+#### How sessions share memory via `knowledge.md`
+
+Every session created by `AgenticMiddleware` gets an isolated directory:
+
+```
+data/projects/
+├── session-backend/      ← Agent A (API implementation)
+│   ├── knowledge.md      ← Accumulated facts & decisions
+│   ├── plan.md
+│   └── queues.json
+├── session-frontend/     ← Agent B (UI layer)
+│   ├── knowledge.md
+│   └── ...
+└── session-synthesiser/  ← Agent C (final merge)
+    └── knowledge.md
+```
+
+A **synthesiser agent** can read the `knowledge.md` of the specialist agents and compose a final output. Because `StructuralMarkdownMiddleware` (v1.0.4) injects the **full** `knowledge.md` on every turn, the synthesiser never has a partial view of prior state.
+
+#### How `StructuralMarkdownMiddleware` enables clean handoff
+
+When `agentic: true` is set and a `sessionId` is supplied, the middleware prepends this block into the user message **before any LLM call**:
+
+```
+# TASK CONTEXT
+<original user message>
+
+# FULL MEMORY STATE (session session-backend)
+<entire knowledge.md — no truncation>
+
+# RESPONSE FORMAT
+Reply only in clean Markdown. For any code or file changes use exactly this block:
+```file:relative/path/from/session/root.ts
+// FULL file content here (never partial diffs)
+```
+```
+
+This means the receiving agent has full context with zero prompt-engineering overhead. Handoff between agents is simply switching `sessionId`.
+
+#### Example 1 — Parallel feature development + synthesis
+
+```typescript
+// Agent A: implement the data model
+await client.callTool('use_free_llm', {
+  messages: [{ role: 'user', content: 'Implement the User model with Zod validation' }],
+  agentic: true,
+  sessionId: 'session-model',
+});
+
+// Agent B: implement the HTTP layer (runs concurrently)
+await client.callTool('use_free_llm', {
+  messages: [{ role: 'user', content: 'Implement POST /users endpoint with Express' }],
+  agentic: true,
+  sessionId: 'session-http',
+});
+
+// Agent C: synthesise — reads both knowledge.md files via store_memory
+await client.callTool('store_memory', {
+  key: 'model-summary',
+  content: fs.readFileSync('data/projects/session-model/knowledge.md', 'utf-8'),
+  workspace_root: '/my-project',
+});
+await client.callTool('store_memory', {
+  key: 'http-summary',
+  content: fs.readFileSync('data/projects/session-http/knowledge.md', 'utf-8'),
+  workspace_root: '/my-project',
+});
+
+await client.callTool('use_free_llm', {
+  messages: [{
+    role: 'user',
+    content: 'Using the model and HTTP layer outputs stored in memory, write integration tests covering all endpoints.',
+  }],
+  agentic: true,
+  sessionId: 'session-tests',
+  workspace_root: '/my-project',   // triggers memory lookup for both keys above
+});
+```
+
+**Token savings:** Each specialist agent's `knowledge.md` is typically 200–600 tokens after compression. Injecting two summaries (≈1 000 tokens total) is **90% cheaper** than re-running both agents in the same context window.
+
+#### Example 2 — Research → Synthesise → Implement pipeline
+
+```typescript
+// Turn 1 — research agent gathers facts
+const researchSession = 'project-research';
+await client.callTool('use_free_llm', {
+  messages: [{ role: 'user', content: 'Research the best JWT refresh-token strategies for Node.js 2025' }],
+  agentic: true, sessionId: researchSession,
+  keywords: ['research', 'security', 'jwt'],
+});
+
+// Turn 2 — implementation agent reads the research knowledge.md via structural middleware
+await client.callTool('use_free_llm', {
+  messages: [{
+    role: 'user',
+    content: 'Implement the best JWT strategy identified in the research. Write full TypeScript source.',
+  }],
+  agentic: true,
+  sessionId: 'project-impl',
+  // StructuralMarkdownMiddleware will inject 'project-research/knowledge.md' if you copy it:
+  // cp data/projects/project-research/knowledge.md data/projects/project-impl/knowledge.md
+});
+```
+
+#### Example 3 — Summarising 2-3 parallel agent outputs
+
+Use this prompt pattern when three agents produce independent outputs and you need a single consolidated answer:
+
+```
+# SYNTHESIS TASK
+You are the synthesis agent. Below are the outputs of three specialist agents.
+Merge them into a single coherent document. Eliminate redundancy.
+Preserve every unique fact, decision, and code snippet.
+Output only the merged document — no commentary.
+
+## Agent A output (session-a/knowledge.md)
+${knowledgeA}
+
+## Agent B output (session-b/knowledge.md)
+${knowledgeB}
+
+## Agent C output (session-c/knowledge.md)
+${knowledgeC}
+```
+
+Call this with `agentic: false` (no further decomposition needed — it's a single-shot merge):
+
+```typescript
+await client.callTool('use_free_llm', {
+  messages: [{
+    role: 'user',
+    content: synthPrompt,  // the template above, filled in
+  }],
+  agentic: false,
+  keywords: ['summarization'],   // routes to a high-context model tier
+  max_tokens: 2048,
+});
+```
+
+#### Benefits at a glance
+
+| Metric | Single monolithic agent | Multi-agent + synthesis |
+|--------|------------------------|------------------------|
+| Context per turn | 12 000–32 000 tokens | 800–2 000 tokens |
+| Parallelism | None | Full (agents run concurrently) |
+| Memory persistence | In-context only | `knowledge.md` survives restarts |
+| Handoff clarity | Implicit (entire history) | Explicit (structured Markdown blocks) |
+| Final output quality | Degrades with depth | Consistent — synthesiser sees full state |
 
