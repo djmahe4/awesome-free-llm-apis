@@ -1,4 +1,4 @@
-import { getIntelligentSystemPrompt } from '../src/middleware/agentic/prompts';
+import { getIntelligentSystemPrompt } from '../src/middleware/agentic/prompts.js';
 import * as fs from 'fs';
 import * as path from 'path';
 

@@ -70,6 +70,13 @@
 
 - None. `code_mode` calls without `sessionId` or `mode` continue to work exactly as before (sandbox-only execution).
 
+### Next updates
+
+- Remove `code_mode` tool(make it deprecated and retain the code and just comment the integrations) and replace it with `code_review` which uses kluster ai
+- Remove the kluster from providers list
+- Plan to integraate knowlege, plan and tasks in the agentic worklflow atleast one of them.
+- Add image processeing which utilises free image apis within the `use_free_llm` tool.(using `file:///` in `workspace_root` as the image path)
+
 ---
 
 ## v1.0.3 — High-Fidelity Benchmarking & Intelligence Refinement

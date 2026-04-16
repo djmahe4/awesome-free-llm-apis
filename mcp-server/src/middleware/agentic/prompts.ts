@@ -104,7 +104,8 @@ async function loadPromptData(): Promise<PromptData | null> {
 export async function getIntelligentSystemPrompt(
     context?: string,
     explicitKeywords?: string[],
-    memoryContext?: string
+    memoryContext?: string,
+    isSubtask: boolean = false
 ): Promise<string> {
     const data = await loadPromptData();
     if (!data) {
@@ -136,8 +137,13 @@ export async function getIntelligentSystemPrompt(
         tokens = new Set(explicitKeywords.map(k => k.toLowerCase()));
     } else {
         // Fuzzy Fallback: Tokenize context
-        tokens = new Set(contextLower.split(/\W+/).filter(t => t.length > 2));
+        const stopwords = new Set(['and', 'the', 'with', 'your', 'from', 'that', 'this', 'for', 'are', 'you', 'was', 'were', 'been', 'have', 'has', 'had']);
+        tokens = new Set(
+            contextLower.split(/\W+/)
+                .filter(t => t.length >= 3 && !stopwords.has(t))
+        );
     }
+    console.error(`[DEBUG] Tokens: ${Array.from(tokens).join(', ')}`);
 
     // Score sections
     const scoredSections = data.sections.map(section => {
@@ -162,7 +168,9 @@ export async function getIntelligentSystemPrompt(
         if (section.level === 1) score += 2.0;
         if (section.level === 2) score += 1.1; // Ensure single keyword match (3) + level boost (1.1) > threshold (4.0)
 
-        const isReference = section.id === 'research_appendix' || section.id === 'subsystem_reference_map';
+        const isReference = section.id === 'research_appendix' ||
+            section.id === 'subsystem_reference_map' ||
+            section.id === 'open_source_architecture_references';
         if (isReference) {
             const architecturalKeywords = [
                 'rest', 'api', 'url', 'github', 'appendix', 'reference', 'map',
@@ -170,7 +178,7 @@ export async function getIntelligentSystemPrompt(
                 'patterns', 'best practices', 'audit', 'python', 'javascript', 'golang', 'rust'
             ];
             architecturalKeywords.forEach(ak => {
-                if (tokens.has(ak) || contextLower.includes(ak)) score += 4;
+                if (tokens.has(ak) || contextLower.includes(ak)) score += 5;
             });
         }
 
@@ -178,21 +186,38 @@ export async function getIntelligentSystemPrompt(
     });
 
     const relevant = scoredSections
-        .filter(s => s.score >= 4)
+        .filter(s => {
+            if (s.score < 4) return false;
+            // Suppress broad references in subtasks unless they match VERY strongly
+            const isRef = s.id === 'research_appendix' ||
+                s.id === 'subsystem_reference_map' ||
+                s.id === 'open_source_architecture_references';
+            if (isSubtask && isRef) {
+                return s.score > 20;
+            }
+            return true;
+        })
         .sort((a, b) => b.score - a.score)
-        .slice(0, 7);
+        .slice(0, isSubtask ? 3 : 7); // Shorter budget for subtasks
 
     let currentSize = assembled.length;
 
     for (const section of relevant) {
         let content = section.content;
 
-        if (section.id === 'research_appendix' || section.id === 'subsystem_reference_map') {
+        const isRef = section.id === 'research_appendix' ||
+            section.id === 'subsystem_reference_map' ||
+            section.id === 'open_source_architecture_references';
+        if (isRef) {
             // Split by any list item to separate category headers from links
             const parts = content.split(/\n(?=\s*- )/).map(p => p.trim()).filter(p => p.length > 0);
 
             const scoredEntries: { entry: string, entryScore: number }[] = [];
             let currentCategory = "";
+
+            // Dynamic Thresholding: individual entries must have a stronger match
+            // to survive if the section matches only on broad architectural terms.
+            const minEntryScore = section.score > 12 ? 1.0 : 2.5;
 
             for (const part of parts) {
                 if (part.includes('[')) {
@@ -203,22 +228,35 @@ export async function getIntelligentSystemPrompt(
 
                     // Score based on tokens in the link text AND category context
                     contextText.split(/\W+/).forEach(et => {
-                        if (tokens.has(et)) entryScore += 2.0;
+                        if (tokens.has(et)) {
+                            // Give less weight to super common languages in references to avoid broad noise
+                            if (['python', 'rust', 'js', 'javascript', 'ts', 'typescript', 'golang', 'go'].includes(et)) {
+                                entryScore += 0.5;
+                            } else {
+                                entryScore += 2.0;
+                            }
+                        }
                     });
 
                     tokens.forEach(t => {
-                        if (t.length > 3 && contextText.includes(t)) entryScore += 0.5;
+                        if (t.length > 3 && contextText.includes(t)) {
+                            const boost = (['python', 'rust', 'javascript', 'typescript', 'golang'].includes(t)) ? 0.1 : 0.5;
+                            entryScore += boost;
+                            if (part.includes('LangGraph')) {
+                                console.error(`[LANGGRAPH-DEBUG] Match Token: ${t} Boost: ${boost} CurrentScore: ${entryScore}`);
+                            }
+                        }
                     });
 
                     scoredEntries.push({ entry: part, entryScore });
+                    if (entryScore >= 2.0) {
+                        console.error(`[DEBUG] Entry: ${part.slice(0, 30)}... Score: ${entryScore} contextText: ${contextText.slice(0, 100)}`);
+                    }
                 } else {
                     // It's a category header - update context for subsequent links
                     currentCategory = part.replace(/^-\s*/, '');
                 }
             }
-
-            // Relax entry requirements if the overall section relevance is high
-            const minEntryScore = section.score > 8 ? 0.2 : 1.5;
 
             content = scoredEntries
                 .filter(se => se.entryScore >= minEntryScore)
