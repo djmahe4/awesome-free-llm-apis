@@ -1,5 +1,84 @@
 # Changelog
 
+## v1.0.5 – Hedged Execution + Latency Optimization (April 2026)
+
+**Released:** 2026-04-12
+
+### 🚀 Highlights
+
+- **Hedged Execution Strategy (`IntelligentRouterMiddleware`)**: Substantially reduces latency during partial provider outages by racing executing provider requests against a parallel timeout delayed request.
+- **Graceful Execution Abortion**: Requests aborted due to successful parallel resolution automatically close open network sockets using `AbortController` signals to reduce token wastage.
+- **Deep Reasoning Accommodations**: Automatically boosts `max_tokens` limits (up to 8192) and increases hedge delay parameters up to 20 seconds specifically for high-capacity models (DeepSeek-R1, O1, O3, Gemini Pro).
+- **Subtask Pipeline Limiter**: Hardcoded subtask generation limit in `AgenticMiddleware` to 2 segments to avoid deeply orchestrated timeout spirals.
+
+## v1.0.4 – Hardened Resilience + Persistent Memory + structural Fix (April 2026)
+
+**Released:** 2026-04-12 (Updated)
+
+### 🚀 Highlights
+
+- **Intelligent Router Hardening & Persistence**: Integrated discrete circuit-breaker stats (`failures`, `cooldownUntil`) into `PersistenceManager`. The router now "remembers" provider health across process restarts, eliminating "memory amnesia" for failing providers.
+- **Adaptive Timeout Floor**: Implemented a mandatory 12s floor per model attempt in the routing cascade. This prevents late-stage fallbacks from receiving unworkable <2s timeouts, dramatically improving reliability in deep provider chains.
+- **Soft Circuit Breaking**: Migrated from a binary "skip" model to a "penalty" model. Cooling-down providers are now deprioritized (Score: -0.5) instead of ignored, allowing them to serve as a last resort if no other models match task requirements.
+- **Improved 400 Error Classification**: Refined context overflow detection to prevent false-positive compression on property errors.
+- **Payload Sanitization**: Automatic stripping of internal metadata (e.g., `timeoutMs`) from outgoing LLM requests to ensure compatibility with strict schema providers like Groq.
+
+- **Intelligent Router Task Matrix**: Expanded `autoClassify` logic into a high-fidelity classification engine supporting 9 distinct categories (Coding, Reasoning, Moderation, Classification, UserIntent, SemanticSearch, Summarization, EntityExtraction, Chat).
+- **Dynamic Greedy Budgeting**: Implemented cross-provider timeout management that dynamically allocates time across the fallback cascade, preventing deadlocks while maximizing success probability.
+- **Tiered Context Pressure Handling**: Introduced Tier 0/1/2 logic for extreme input pressure (100k+ characters), using parallel summarization and adaptive truncation to maintain critical context windows.
+- **Fixed 'codeastral-latest' mode bug**: `code_mode` now features proper dynamic mode detection. The execution mode (`'chat'` | `'coding'` | `'research'`) is inferred automatically from code content and command description, replacing any hardcoded model references.
+- **Artifact Awareness & Context Resolution**: Introduced a pre-processing pass in `use-free-llm.ts` that detects and inlines `file://` URIs and Markdown links. This allows the LLM to "see" referenced files directly in the user message.
+- **Deterministic Local Summarization**: For large context files (>12k chars), implemented a TF-style (word-frequency) local summarization engine. This enables high-density context injection without external API calls or latency.
+- **Structural Markdown Middleware**: New `StructuralMarkdownMiddleware` inserted as the first pipeline stage. For agentic requests it reads the full session memory (`data/projects/{sessionId}/`) and injects it into the user message, giving the LLM complete visibility into context on every turn.
+- **Project Work Rule Enforcement**: Tool descriptions and all documentation (`README.md`, `guide.md`, `SKILL.md`) have been hardened to mandate `agentic: true` and `workspace_root` for repository-scoped tasks, preventing "context-blind" requests.
+- **Logic Collision Fixes**: Resolved auto-classification collisions (e.g., 'classify' matching as 'coding' due to name overlap) to ensure deterministic routing for complex intents.
+- **Global Usage Persistence**: Implemented a robust telemetry layer with atomic Read-Merge-Write synchronization. Tracks daily and lifetime metrics across process restarts and concurrent agents (Claude, ChatGPT, Antigravity).
+- **Agentic Momentum Hardening**: Fixed a critical bug in `AgenticMiddleware` where `nowQueue` was aggressively cleared after any successful step. Multi-step plans now correctly persist and transition across turns.
+
+### ✨ New Features
+
+- **Classification Task Validation**: Fully implemented Moderation, UserIntent, and Reasoning task routing.
+- **Context Summarization Engine**: Tier 1 fallback that compresses history when it exceeds 40% of the model's budget.
+- `StructuralMarkdownMiddleware` (`src/middleware/agentic/structural-middleware.ts`) — registered as stage 1 in the pipeline
+- `resolveFileRefs(content, workspaceRoot)` — v1.0.4 helper for inlining `file://` URIs with security boundaries
+- `summarizeTextLocally(text, limit)` — zero-latency TF-style summarization for large files
+- `writeToSessionMemory(sessionId, filePath, content)` helper in `code-mode.ts` — safe file persistence with path-traversal guard
+- `detectMode(code, command)` in `code-mode.ts` — auto-detects `'coding'` | `'research'` mode
+- `limitSubtasks(plan)` in `AgenticMiddleware` — hard cap of 4 subtasks
+- **Global Usage Hub**: Real-time "Global Server Hub" summary in dashboard displaying today's vs lifetime request/token totals.
+- `PersistenceManager` (`src/utils/PersistenceManager.ts`) — atomic file-based state management with temp-file swap safety.
+- **Daily usage resets**: Local-time-aware logic that clears daily counters while preserving lifetime totals.
+- **Persistence Verification Suite**: Added `tests/persistence.test.ts` to validate atomic merging and state recovery.
+- **Test Matrix Expansion**: Added `tests/task-routing-matrix.test.ts` and `tests/context-resolution.test.ts` to verify the "Prompt → Task → Model" routing pipeline and file inlining logic.
+- **Dynamic Timeout Testing**: Switched test assertions to `expect.any(Number)` to support dynamic time budgets.
+
+### 🔧 Improvements
+
+- **Stability & Timeout Enforcement**: Implemented `AbortController` and `Promise.race` in `BaseProvider` for hard-stop guarantees.
+- `CodeModeInput` now accepts optional `sessionId` and `mode` fields
+- `CodeModeResult` now includes `mode` and optional `filesWritten` fields
+- MCP server name version string bumped to `1.0.4`
+- Pipeline middleware order updated: `StructuralMarkdownMiddleware` → `ResponseCacheMiddleware` → `AgenticMiddleware` → `IntelligentRouterMiddleware`
+- **Security Hardening**: Implemented strict `sessionId` regex validation (`/^(?!\.\.?$)[\w\-\.]{1,128}$/`) and `path.resolve` prefix checks in `StructuralMarkdownMiddleware` to prevent unauthorized file access.
+- **Multi-modal Robustness**: `StructuralMarkdownMiddleware` updated to handle complex message content (Array/Object) for visual/multi-modal compatibility.
+- **Memory Optimization**: Migrated to `LRUCache` for session management (1000 entries, 1h TTL) with automatic `transport.close()` on eviction to prevent resource leaks.
+- **Async Cache Initialization**: Refactored `ResponseCache` to eliminate synchronous file I/O during server startup, moving to a lazy-loading async `init()` pattern.
+- **Debounced Persistence Flushes**: `LLMExecutor` now uses a 2-second debounce for usage flushes to prevent I/O thrashing during heavy agentic sequences.
+- **Logic Simplification**: Removed redundant `confidenceScore` mapping and added robust optional chaining (`?.`) across all middleware context lookups.
+
+### ⚠️ Breaking Changes
+
+- None. `code_mode` calls without `sessionId` or `mode` continue to work exactly as before (sandbox-only execution).
+
+### Next updates
+
+- Remove `code_mode` tool(make it deprecated and retain the code and just comment the integrations) and replace it with `code_review` which uses kluster ai
+- Remove the kluster from providers list
+- Plan to integraate knowlege, plan and tasks in the agentic worklflow atleast one of them.
+- Add image processeing which utilises free image apis within the `use_free_llm` tool.(using `file:///` in `workspace_root` as the image path)
+
+---
+
 ## v1.0.3 — High-Fidelity Benchmarking & Intelligence Refinement
 
 **Released:** 2026-04-04

@@ -11,7 +11,7 @@ const workspaceScanner = new WorkspaceScanner(process.cwd());
 
 export async function storeMemory(input: StoreMemoryInput) {
     const { key, content, workspace_root: workspaceRoot } = input;
-    const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
+    const wsHash = await workspaceScanner.getWorkspaceHash(workspaceRoot);
 
     await memoryManager.storeToolOutput('store_memory', {
         key,

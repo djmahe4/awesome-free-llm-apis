@@ -21,12 +21,18 @@ export class GeminiProvider extends BaseProvider {
     { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite Preview' },
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
   ];
+
+  private cachedPythonPath?: string;
 
   /** Attempt to locate the venv Python interpreter relative to the project root */
   private resolvePythonPath(): string {
-    if (process.env.PYTHON_EXECUTABLE) return process.env.PYTHON_EXECUTABLE;
+    if (this.cachedPythonPath) return this.cachedPythonPath;
+
+    if (process.env.PYTHON_EXECUTABLE) {
+        this.cachedPythonPath = process.env.PYTHON_EXECUTABLE;
+        return this.cachedPythonPath;
+    }
 
     const projectRoot = path.resolve(__dirname, '../../');
     const isWin = process.platform === 'win32';
@@ -39,11 +45,15 @@ export class GeminiProvider extends BaseProvider {
     ];
 
     for (const venvPython of possibleVenvs) {
-      if (existsSync(venvPython)) return venvPython;
+      if (existsSync(venvPython)) {
+          this.cachedPythonPath = venvPython;
+          return venvPython;
+      }
     }
 
     // Fallback to system python
-    return isWin ? 'python' : 'python3';
+    this.cachedPythonPath = isWin ? 'python' : 'python3';
+    return this.cachedPythonPath;
   }
 
   private async runPythonClient(request: any): Promise<any> {
@@ -97,7 +107,7 @@ export class GeminiProvider extends BaseProvider {
   async chat(request: ChatRequest): Promise<ChatResponse> {
     this.checkRateLimit();
 
-    const actualModel = request.model || 'gemini-2.0-flash';
+    const actualModel = request.model || 'gemini-2.5-flash';
     let result;
     try {
       result = await this.runPythonClient({
@@ -164,7 +174,7 @@ export class GeminiProvider extends BaseProvider {
       env: { ...process.env }
     });
     const input = JSON.stringify({
-      model: request.model || 'gemini-2.0-flash',
+      model: request.model || 'gemini-2.5-flash',
       messages: request.messages,
       stream: true,
       temperature: request.temperature,

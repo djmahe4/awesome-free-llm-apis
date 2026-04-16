@@ -20,6 +20,7 @@ export abstract class BaseProvider implements Provider {
   public consecutiveFailures = 0;
   public shrink = false;
   protected cooldownUntil = 0;
+  protected defaultTimeout = 30000;
 
   getPenaltyScore(): number {
     if (Date.now() < this.cooldownUntil) {
@@ -132,38 +133,72 @@ export abstract class BaseProvider implements Provider {
     const url = `${this.baseURL}chat/completions`;
 
     // Sanitize request: Remove internal-only fields that strict APIs reject
-    const { agentic, ...sanitizedRequest } = request as any;
+    const { agentic, timeoutMs: _timeoutMs, abortSignal: _abort, ...sanitizedRequest } = request as any;
 
     // Ensure model is set
     sanitizedRequest.model = sanitizedRequest.model || (this.models.length > 0 ? this.models[0].id : '');
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        Origin: new URL(this.baseURL).origin,
-        Referer: new URL(this.baseURL).origin + '/',
-      },
-      body: JSON.stringify(sanitizedRequest),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      const error: any = new Error(`HTTP ${response.status}: ${text}`);
-      error.status = response.status;
-      throw error;
+    const controller = new AbortController();
+    
+    // Wire up external abort signal for Hedged Execution
+    if (request.abortSignal) {
+      if (request.abortSignal.aborted) {
+        controller.abort();
+      } else {
+        request.abortSignal.addEventListener('abort', () => {
+          controller.abort();
+        });
+      }
     }
-    this.consecutiveFailures = 0;
-    this.cooldownUntil = 0;
-    const json = await response.json() as ChatResponse;
-    const tokens = json.usage?.total_tokens || 0;
-    this.recordRequest(tokens);
 
-    const headers: Record<string, string> = {};
-    response.headers.forEach((val, key) => { headers[key] = val; });
-    json._headers = headers;
-    return json;
+    const timeoutMs = request.timeoutMs || this.defaultTimeout;
+    let timer: NodeJS.Timeout | null = null;
+
+    const hardTimeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error(`Request timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+
+    const workPromise = (async () => {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Origin: new URL(this.baseURL).origin,
+            Referer: new URL(this.baseURL).origin + '/',
+          },
+          body: JSON.stringify(sanitizedRequest),
+          signal: controller.signal as any,
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          const error: any = new Error(`HTTP ${response.status}: ${text}`);
+          error.status = response.status;
+          throw error;
+        }
+
+        this.consecutiveFailures = 0;
+        this.cooldownUntil = 0;
+        const json = await response.json() as ChatResponse;
+        const tokens = json.usage?.total_tokens || 0;
+        this.recordRequest(tokens);
+
+        const headers: Record<string, string> = {};
+        response.headers.forEach((val, key) => { headers[key] = val; });
+        json._headers = headers;
+        return json;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    })();
+
+    return Promise.race([workPromise, hardTimeoutPromise]);
   }
 
   async *chatStream(request: ChatRequest): AsyncIterable<string> {

@@ -21,6 +21,7 @@ export interface PipelineContext {
 
 export enum TaskType {
     Coding = 'coding',
+    Reasoning = 'reasoning',
     Moderation = 'moderation',
     Classification = 'classification',
     UserIntent = 'user_intent',
@@ -59,5 +60,16 @@ export class PipelineExecutor {
 
         await dispatch(0);
         return context;
+    }
+
+    /**
+     * Resets the state of all middlewares in the pipeline that support flushing.
+     */
+    flush(): void {
+        for (const middleware of this.middlewares) {
+            if ('flush' in middleware && typeof (middleware as any).flush === 'function') {
+                (middleware as any).flush();
+            }
+        }
     }
 }

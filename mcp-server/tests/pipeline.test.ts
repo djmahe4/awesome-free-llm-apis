@@ -76,7 +76,7 @@ describe('Pipeline Orchestration', () => {
         await router.execute(context, next);
 
         // Coding task should pick the best FREE coding model first (Qwen 480B via OpenRouter)
-        expect(context.request.model).toBe('qwen/qwen3-coder-480b-a35b-instruct:free');
+        expect(context.request.model).toBe('qwen/qwen3-coder:free');
         expect(context.providerId).toBe('openrouter');
         expect(next).toHaveBeenCalledTimes(1);
     });
@@ -142,5 +142,50 @@ describe('Pipeline Orchestration', () => {
         expect(context.estimatedTokens).toBeGreaterThan(0);
         const stats = manager.getTrackingState();
         expect(stats['test-p'].remainingTokens).toBe(5000);
+    });
+
+    it('IntelligentRouterMiddleware concatenates thinking/reasoning into content and cleans artifacts', async () => {
+        const executor = new LLMExecutor();
+        vi.spyOn(executor, 'tryProvider').mockImplementation(async (context, providerId, modelId) => {
+            return {
+                id: 'test',
+                object: 'chat.completion',
+                created: Date.now(),
+                model: modelId,
+                choices: [{ 
+                    index: 0, 
+                    message: { 
+                        role: 'assistant', 
+                        content: '\n{\n  "result": "ok"\n}\n',
+                        thinking: 'Thinking about the bracket fix' 
+                    } as any, 
+                    finish_reason: 'stop' 
+                }],
+            } as ChatResponse;
+        });
+
+        const registry = ProviderRegistry.getInstance();
+        const geminiProvider = registry.getProvider('gemini')!;
+        vi.spyOn(registry, 'getAvailableProviders').mockReturnValue([geminiProvider]);
+        vi.spyOn(registry, 'getProviderForModel').mockReturnValue(geminiProvider);
+
+        const router = new IntelligentRouterMiddleware(executor);
+        
+        const context: PipelineContext = {
+            request: { model: 'gemini-exp-1206', messages: [{ role: 'user', content: 'test' }] }
+        };
+
+        await router.execute(context, vi.fn());
+
+        const res = context.response as any;
+        const msg = res.choices[0].message;
+        
+        // Should have THOUGHTS
+        expect(msg.content).toContain('THOUGHTS: Thinking about the bracket fix');
+        // Should have the cleaned result (no newline before '{')
+        expect(msg.content).toMatch(/bracket fix\{/);
+        expect(msg.content).toContain('"result": "ok"');
+        // Original thinking field should be deleted
+        expect(msg.thinking).toBeUndefined();
     });
 });

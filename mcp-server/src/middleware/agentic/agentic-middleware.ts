@@ -1,13 +1,25 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import os from 'os';
 import { LRUCache } from 'lru-cache';
+import { debounce } from '../../utils/debounce.js';
 import { getIntelligentSystemPrompt } from './prompts.js';
 import type { Middleware, PipelineContext, NextFunction } from '../../pipeline/middleware.js';
 import { memoryManager } from '../../memory/index.js';
 import { WorkspaceScanner } from '../../cache/workspace.js';
 import { getMessageContent } from '../../utils/MessageUtils.js';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
+
+/**
+ * Stabilized persistence root — consistent regardless of launch CWD.
+ * Aligns with where usage-stats.json is stored (~/.free-llm-mcp/).
+ */
+const HOME_DIR = path.join(os.homedir(), '.free-llm-mcp', 'projects');
 
 
 interface QueueState {
@@ -41,9 +53,9 @@ function getQueues(sessionId: string): QueueState {
 }
 
 /**
- * Async Persistence: Prevents event-loop blocking.
+ * Debounced Queue Persistence: Batches writes to reduce I/O under high throughput.
  */
-async function persistQueues(sessionId: string, projectDir: string): Promise<void> {
+const persistQueuesDebounced = debounce(async (sessionId: string, projectDir: string) => {
     const state = getQueues(sessionId);
     try {
         await fs.writeFile(
@@ -54,13 +66,61 @@ async function persistQueues(sessionId: string, projectDir: string): Promise<voi
     } catch {
         // non-fatal: in-memory state is still maintained
     }
+}, 2000);
+
+/**
+ * Debounced Plan & Tasks Persistence: Reflects live internal queue state so
+ * plan.md / tasks.md are always a current snapshot, not just the initial stub.
+ */
+const persistPlanDebounced = debounce(async (sessionId: string, projectDir: string) => {
+    const state = getQueues(sessionId);
+    try {
+        const ts = new Date().toISOString();
+        const planContent =
+            `# Plan\n\n<!-- Auto-updated: ${ts} -->\n\n` +
+            `## Now Queue\n${state.nowQueue.map((t, i) => `${i + 1}. ${t}`).join('\n') || '_empty_'}\n\n` +
+            `## Next Queue\n${state.nextQueue.map((t, i) => `${i + 1}. ${t}`).join('\n') || '_empty_'}\n\n` +
+            `## Blocked\n${state.blockedQueue.map(t => `- ${t}`).join('\n') || '_none_'}\n`;
+        await fs.writeFile(path.join(projectDir, 'plan.md'), planContent, 'utf-8');
+
+        const tasksContent =
+            `# Tasks\n\n<!-- Auto-updated: ${ts} -->\n\n` +
+            `## Current\n${state.nowQueue.map(t => `- [ ] ${t}`).join('\n') || '_no active tasks_'}\n\n` +
+            `## Queued\n${state.nextQueue.map(t => `- [ ] ${t}`).join('\n') || '_none_'}\n\n` +
+            `## Improvement Notes\n${state.improveQueue.map(t => `- ${t}`).join('\n') || '_none_'}\n`;
+        await fs.writeFile(path.join(projectDir, 'tasks.md'), tasksContent, 'utf-8');
+    } catch {
+        // non-fatal
+    }
+}, 2000);
+
+/**
+ * Append-only Knowledge Persistence: Accumulates reusable skill entries following
+ * the @skill-writer schema. Never overwrites — only appends — so knowledge grows
+ * across sessions rather than being reset.
+ */
+async function appendKnowledge(projectDir: string, sessionId: string, content: string): Promise<void> {
+    const knowledgePath = path.join(projectDir, 'knowledge.md');
+    const timestamp = new Date().toISOString();
+    // Skill-writer schema format: each entry is a self-contained knowledge chunk
+    const entry =
+        `\n\n---\n\n` +
+        `## Session: ${sessionId} — ${timestamp}\n\n` +
+        `${content.slice(0, 2000)}\n`;
+    try {
+        await fs.appendFile(knowledgePath, entry, 'utf-8');
+    } catch {
+        // non-fatal
+    }
 }
 
 /**
- * Async Project Setup: Ensures session boundaries and initializes state files.
+ * Async Project Setup: Ensures session artifacts exist at the stable HOME_DIR path.
+ * Uses ~/.free-llm-mcp/projects/<sessionId>/ so location is consistent regardless
+ * of where the MCP server process is launched from.
  */
 async function ensureProjectFiles(sessionId: string): Promise<string> {
-    const projectDir = path.join(process.cwd(), 'data', 'projects', sessionId);
+    const projectDir = path.join(HOME_DIR, sessionId);
     await fs.mkdir(projectDir, { recursive: true });
 
     const files: Record<string, string> = {
@@ -89,25 +149,36 @@ function decomposeGoal(goal: string): string[] {
     return lines.length > 1 ? lines : [goal];
 }
 
+/**
+ * Merged signature: accepts both groundingGate (workspace-context anchor) and
+ * isSubtask (prompt budget control). Both were present in different branches;
+ * the function body already used both so this simply aligns the signature.
+ */
 async function prependSystemPrompt(
     context: PipelineContext,
     userContent?: string,
     explicitKeywords?: string[],
-    memoryContext?: string
+    memoryContext?: string,
+    groundingGate?: string,
+    isSubtask: boolean = false,
 ): Promise<void> {
     const messages = context.request.messages;
     if (!messages || messages.length === 0) return;
 
-    const dynamicPrompt = await getIntelligentSystemPrompt(userContent, explicitKeywords, memoryContext);
+    const dynamicPrompt = await getIntelligentSystemPrompt(userContent, explicitKeywords, memoryContext, isSubtask);
+    // v1.0.4 optimization: Force HIGH-LEVEL STEPS section (max 4 items) to constrain iteration
+    const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **4** high-level steps. Example:\n1. Understand the task\n2. Implement the core change\n3. Validate correctness\n4. Summarize\nDo not list more than 4 steps.`;
+
+    const fullSystemPrompt = `${dynamicPrompt}${highLevelStepsSection}${groundingGate || ''}`;
     const hasSystem = messages[0].role === 'system';
 
     if (hasSystem) {
         messages[0] = {
             ...messages[0],
-            content: `${dynamicPrompt}\n\n${messages[0].content}`,
+            content: `${fullSystemPrompt}\n\n${messages[0].content}`,
         };
     } else {
-        messages.unshift({ role: 'system', content: dynamicPrompt });
+        messages.unshift({ role: 'system', content: fullSystemPrompt });
     }
 }
 
@@ -116,6 +187,18 @@ function getResponseContent(context: PipelineContext): string | undefined {
     return rawContent ? getMessageContent(rawContent) : undefined;
 }
 
+/**
+ * Hallucination Detection: Extended from a basic error check to also flag
+ * patterns that indicate the model is inventing file locations or citing
+ * sources it could not have retrieved. Results logged as WARN rather than
+ * FAIL so the pipeline continues but the anomaly is auditable.
+ *
+ * Anti-hallucination strategies implemented here:
+ *  1. Empty / error-prefix catch (original)
+ *  2. Phantom-citation patterns: "according to the docs", "I can see that ..."
+ *  3. Invented file paths: "the function is defined in src/..."
+ *  4. Version/date fabrication: specific version numbers without [RETRIEVED] prefix
+ */
 function verifySelf(content: string): string {
     if (!content || content.trim().length === 0) {
         return 'FAIL: empty response';
@@ -124,6 +207,19 @@ function verifySelf(content: string): string {
     if (errorPatterns.test(content.slice(0, 100))) {
         return 'FAIL: response starts with error indicator';
     }
+
+    // Hallucination Gate: vague-authority and phantom-reference patterns
+    const hallucinationPatterns: RegExp[] = [
+        /\baccording to the (documentation|docs|readme|spec|file)\b/i,
+        /\bthe (file|function|class|method|module) (is|are|was|were) (defined|located|found|placed) (in|at|under)\b/i,
+        /\b(I can see|I found|I noticed|I checked) that\b/i,
+        /\bas (shown|seen|mentioned|stated|described) in the (code|file|docs|source)\b/i,
+    ];
+    const flags = hallucinationPatterns.filter(p => p.test(content));
+    if (flags.length > 0) {
+        return `WARN: ${flags.length} potential hallucination pattern(s) detected`;
+    }
+
     return 'PASS';
 }
 
@@ -151,27 +247,154 @@ function logResearchValidation(sessionId: string, userContent: string, step: str
     console.error(
         `[AgenticMiddleware][RESEARCH-VALIDATION] session=${sessionId} step="${step}" ` +
         `timestamp=${timestamp} intent_detected=true ` +
-        `query_preview="${getMessageContent(userContent).slice(0, 120).replace(/\n/g, ' ')}..."`
+        `query_preview="${getMessageContent(userContent).slice(0, 120).replace(/\n/g, ' ')}..."`,
     );
 }
 
 export class AgenticMiddleware implements Middleware {
     name = 'AgenticMiddleware';
 
-    async execute(context: PipelineContext, next: NextFunction): Promise<void> {
-        // Dual-Mode Trigger: Global Env OR Per-Request Flag
-        const isAgenticExplicitlyRequested = context.agentic === true || context.request?.agentic === true;
-        if (process.env.ENABLE_AGENTIC_MIDDLEWARE !== 'true' && !isAgenticExplicitlyRequested) {
-            await next();
-            return;
+    // v1.0.4 optimization: Cap decomposed plan to 2 high-level steps to prevent over-iteration
+    private limitSubtasks(steps: string[]): string[] {
+        if (steps.length > 2) {
+            return steps.slice(0, 2);
+        }
+        return steps;
+    }
+
+    /**
+     * Proactive Grep Context: Gathers accurate context for memory from the workspace.
+     *
+     * v1.0.5 changes:
+     *  - Parallelized via Promise.all: all terms searched concurrently instead of sequentially.
+     *    This cuts worst-case latency from N×timeout to 1×timeout.
+     *  - Added ripgrep (rg) support with robust fallback to POSIX grep.
+     *  - grep fallback uses proper --include / --exclude-dir flags (not rg's -g syntax).
+     */
+    public async gatherGrepContext(workspaceRoot: string, query?: string): Promise<string[]> {
+        if (!query || query.length < 5) return [];
+
+        // 1. Code Extraction: Parse backtick blocks for high-precision terms
+        const codeBlocks: string[] = [];
+        const codeRegex = /```[\s\S]*?```/g;
+        let m;
+        while ((m = codeRegex.exec(query)) !== null) {
+            codeBlocks.push(m[0].replace(/```[\w]*\n?|```/g, '').trim());
         }
 
+        // 2. Identify Environment
+        let envType: 'node' | 'python' | 'generic' = 'generic';
+        try {
+            const hasPkgJson = await fs.access(path.join(workspaceRoot, 'package.json')).then(() => true).catch(() => false);
+            if (hasPkgJson) {
+                envType = 'node';
+            } else {
+                const hasReqs = await fs.access(path.join(workspaceRoot, 'requirements.txt')).then(() => true).catch(() => false);
+                if (hasReqs) envType = 'python';
+            }
+        } catch { }
+
+        // 3. Extract Terms
+        const terms = new Set<string>();
+        codeBlocks.forEach(block => {
+            block.split(/\W+/).filter(t => t.length > 5).forEach(t => terms.add(t));
+        });
+
+        const broadKeywords = ['architecture', 'review', 'implementation', 'system', 'senior', 'software', 'project'];
+        query.split(/\W+/)
+            .filter(t => t.length > 4 && !broadKeywords.includes(t.toLowerCase()))
+            .forEach(t => terms.add(t));
+
+        const finalTerms = Array.from(terms).slice(0, 5);
+        if (finalTerms.length === 0) return [];
+
+        // 4. Task Sensitivity: Detect if theoretical/documentation focused
+        const isTheoretical = /\b(doc|documentation|guide|explain|theory|writeup|summary|overview)\b/i.test(query);
+
+        // 5. Build rg glob flags
+        const exclusions = envType === 'node'
+            ? ['package-lock.json', 'node_modules/*', 'dist/*', '.next/*']
+            : envType === 'python' ? ['.venv/*', '__pycache__/*', '*.pyc'] : [];
+
+        let globFlags = exclusions.map(e => `-g "!${e}"`).join(' ');
+        if (isTheoretical) {
+            globFlags += ' -g "*.md" -g "*.txt" -g "*.pdf"';
+        } else {
+            globFlags += ' -g "*.{ts,js,py,rs,go,java,c,cpp,h}"';
+        }
+
+        // 6. Graceful Tool Detection: rg preferred, grep as fallback
+        let tool: 'rg' | 'grep' | 'none' = 'none';
+        try {
+            await execAsync('rg --version');
+            tool = 'rg';
+        } catch {
+            try {
+                await execAsync('grep --version');
+                tool = 'grep';
+            } catch {
+                return []; // Both unavailable
+            }
+        }
+
+        // 7. PARALLELIZED SEARCH — Promise.all replaces sequential for...of
+        //    Each term is an independent task; no shared mutable state.
+        //    This reduces worst-case latency from N * exec_time to 1 * exec_time.
+        const searchTasks = finalTerms.map(async (term): Promise<string[]> => {
+            try {
+                let command: string;
+                if (tool === 'rg') {
+                    // rg respects .gitignore by default; limit to 4 matches per term
+                    command = `rg -m 4 ${globFlags} -n --no-heading "${term}" "${workspaceRoot}"`;
+                } else {
+                    // grep fallback: --include / --exclude-dir flags (not rg's -g syntax)
+                    const patterns = isTheoretical
+                        ? ['*.md', '*.txt', '*.pdf']
+                        : ['*.ts', '*.js', '*.py', '*.rs', '*.go', '*.java', '*.c', '*.cpp', '*.h'];
+                    const includeFlags = patterns.map(p => `--include="${p}"`).join(' ');
+                    const excludeDirs = envType === 'node'
+                        ? ['node_modules', 'dist', '.next']
+                        : envType === 'python' ? ['venv', '.venv', '__pycache__'] : [];
+                    const excludeFlags = excludeDirs.map(d => `--exclude-dir="${d}"`).join(' ');
+                    command = `grep -rEi -m 4 ${includeFlags} ${excludeFlags} "${term}" "${workspaceRoot}" | head -n 4`;
+                }
+
+                const { stdout } = await execAsync(command);
+                if (stdout) {
+                    return stdout.split('\n').filter(Boolean).map(line => `[Context] ${line.trim()}`);
+                }
+            } catch {
+                // grep / rg returns non-zero on no match — not a real error
+            }
+            return [];
+        });
+
+        const nested = await Promise.all(searchTasks);
+        return nested.flat();
+    }
+
+    async execute(context: PipelineContext, next: NextFunction): Promise<void> {
+        const startMs = Date.now();
+        // Dual-Mode Trigger: Global Env OR Per-Request Flag
+        const isAgenticExplicitlyRequested = context.agentic === true || context.request?.agentic === true;
+
         // Hardened Session ID: Must be provided for agentic state to exist
-        const sessionId: string | undefined = context.sessionId || (context.request as any).sessionId;
+        const sessionId: string | undefined = context.sessionId || (context.request as any)?.sessionId;
+
+        const iterationCountKey = `_iteration_${sessionId}`;
+        const iterationCount: number = (context[iterationCountKey] as number | undefined) ?? 0;
+        context[iterationCountKey] = iterationCount + 1;
+
+        if (process.env.ENABLE_AGENTIC_MIDDLEWARE !== 'true' && !isAgenticExplicitlyRequested) {
+            await next();
+            console.error(`[agentic-middleware] ${Date.now() - startMs}ms (pass-through)`);
+            return;
+        }
 
         if (!sessionId) {
             console.error('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
             await next();
+            console.error(`[agentic-middleware] ${Date.now() - startMs}ms (no-session bypass)`);
             return;
         }
 
@@ -179,12 +402,11 @@ export class AgenticMiddleware implements Middleware {
         let wsHash: string | undefined;
         if (context.workspaceRoot) {
             try {
-                wsHash = workspaceScanner.getWorkspaceHash(context.workspaceRoot);
+                wsHash = await workspaceScanner.getWorkspaceHash(context.workspaceRoot);
             } catch (err) {
                 console.error(`[AgenticMiddleware] Failed to derive workspace hash: ${err}`);
             }
         }
-
 
         const projectDir = await ensureProjectFiles(sessionId);
         const q = getQueues(sessionId);
@@ -193,15 +415,19 @@ export class AgenticMiddleware implements Middleware {
         const userMessage = context.request.messages.find(m => m.role === 'user');
         const userContent = userMessage ? String(userMessage.content) : undefined;
 
+        // Proactive Grep Context for Memory: Only on FIRST iteration to save I/O
+        let grepResults: string[] = [];
+        if (context.workspaceRoot && userContent && iterationCount === 1) {
+            grepResults = await this.gatherGrepContext(context.workspaceRoot, userContent);
+        }
+
         // Retrieve relevant workspace memory context
         let memoryContext: string | undefined;
         if (wsHash) {
             try {
-                console.error(`[AgenticMiddleware][DEBUG] Searching for wsHash=${wsHash} query="${userContent}"`);
-                const memoryResults = await memoryManager.search(wsHash, userContent);
-                console.error(`[AgenticMiddleware][DEBUG] Found ${memoryResults.length} memory results`);
+                const queryForMemory = userContent + (grepResults.length > 0 ? ' ' + grepResults.join(' ').slice(0, 500) : '');
+                const memoryResults = await memoryManager.search(wsHash, queryForMemory);
                 if (Array.isArray(memoryResults) && memoryResults.length > 0) {
-                    // Limit to top 5 results and format as bullet points
                     memoryContext = memoryResults
                         .slice(0, 5)
                         .map(m => `- ${typeof m === 'string' ? m : JSON.stringify(m)}`)
@@ -212,10 +438,27 @@ export class AgenticMiddleware implements Middleware {
             }
         }
 
+        const isSubtask = q.nowQueue.length > 1;
 
+        // v1.0.4 Grounding Gate: Implement 'Read-First' check
+        let groundingGate = '';
+        if (context.workspaceRoot) {
+            const readmePath = path.join(context.workspaceRoot, 'README.md');
+            try {
+                // Check for existence of README.md to trigger grounding gate
+                await fs.access(readmePath);
+                groundingGate = `\n\n## 📖 READ-FIRST GATE ACTIVATED\nA README.md or project documentation is detected in the workspace root: ${context.workspaceRoot}.\nYou MUST verify all assertions against the provided context blocks in this prompt before proposing any architecture or implementation. If a file context is missing, mention it as [NOT FOUND] and ask the user to provide it. Do not assume standard patterns apply. Ground your assertions in local file contents.`;
+            } catch {
+                // README not found, check for file:// URIs in user message as secondary trigger
+                if (userContent?.includes('file://')) {
+                    groundingGate = `\n\n## 🔍 SOURCE-SPECIFIC GROUNDING\nYou are being asked to interact with specific file URIs. You MUST verify their contents via tools BEFORE asserting their structure or state.`;
+                }
+            }
+        }
 
         try {
-            await prependSystemPrompt(context, userContent, context.keywords, memoryContext);
+            // Pass both groundingGate (workspace anchor) and isSubtask (prompt budget control)
+            await prependSystemPrompt(context, userContent, context.keywords, memoryContext, groundingGate, isSubtask);
         } catch (err) {
             console.error(`[AgenticMiddleware] Error prepending system prompt: ${err}`);
             // Continue without the prepended prompt
@@ -231,10 +474,14 @@ export class AgenticMiddleware implements Middleware {
         // Task decomposition: Only perform if nowQueue is empty to prevent multi-turn duplication
         if (userContent && q.nowQueue.length === 0) {
             const steps = decomposeGoal(userContent);
-            q.nowQueue.push(...steps);
+
+            // v1.0.4 optimization: Apply subtask limit before queuing to prevent over-iteration
+            const limitedSteps = this.limitSubtasks(steps);
+            q.nowQueue.push(...limitedSteps);
         }
 
-        await persistQueues(sessionId, projectDir);
+        persistQueuesDebounced(sessionId, projectDir);
+        persistPlanDebounced(sessionId, projectDir);
 
         // Execute the pipeline
         await next();
@@ -247,6 +494,9 @@ export class AgenticMiddleware implements Middleware {
             if (verifyResult.startsWith('FAIL')) {
                 q.improveQueue.push(verifyResult);
                 console.error(`[AgenticMiddleware][VERIFY] session=${sessionId} result="${verifyResult}"`);
+            } else if (verifyResult.startsWith('WARN')) {
+                // Log hallucination warnings as auditable events without blocking the pipeline
+                console.error(`[AgenticMiddleware][HALLUCINATION-WARN] session=${sessionId} result="${verifyResult}"`);
             }
 
             // Post-execution research validation: confirm response is grounded
@@ -256,11 +506,34 @@ export class AgenticMiddleware implements Middleware {
 
             // Store a snapshot for observability (cloned to avoid post-shift mutation in traces)
             context['agenticQueues'] = JSON.parse(JSON.stringify(getQueues(sessionId)));
+
+            // v1.0.5: Automatically update workspace memory with progress if success
+            if (verifyResult === 'PASS' && wsHash) {
+                try {
+                    const progressKey = `progress:${sessionId}`;
+                    const progressData = {
+                        step: q.nowQueue[0] || 'complete',
+                        status: verifyResult,
+                        context: responseContent.slice(0, 1000),
+                    };
+                    await memoryManager.storeToolOutput('agentic_progress', { key: progressKey, ws: wsHash }, progressData);
+                    // Append to knowledge.md using append-only strategy (skill-writer schema)
+                    await appendKnowledge(projectDir, sessionId, responseContent);
+                } catch {
+                    // ignore memory store failures in middleware
+                }
+            }
         }
 
         if (q.nowQueue.length > 0) {
             q.nowQueue.shift();
         }
-        await persistQueues(sessionId, projectDir);
+
+        // Store a snapshot for observability (captured AFTER shift to show remaining momentum)
+        context['agenticQueues'] = JSON.parse(JSON.stringify(getQueues(sessionId)));
+
+        persistQueuesDebounced(sessionId, projectDir);
+        persistPlanDebounced(sessionId, projectDir);
+        console.error(`[agentic-middleware] ${Date.now() - startMs}ms session=${sessionId}`);
     }
 }

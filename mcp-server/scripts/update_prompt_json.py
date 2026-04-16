@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from datetime import datetime
 
 def extract_main_prompt(txt, marker):
     startIndex = txt.find(marker)
@@ -73,17 +74,34 @@ def generate_keywords(title, content):
     return sorted(list(set(words)))
 
 def main():
-    # Use environment variable or default relative path
-    base_dir = os.environ.get('AGENT_PROMPT_PATH')
+    # Use environment variable or derive relative path from script location.
+    # Select the first candidate that actually contains README.md.
+    env_base_dir = os.environ.get('AGENT_PROMPT_PATH')
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Check local external/ (if mcp-server is standalone)
+    local_external = os.path.abspath(os.path.join(script_dir, '../external/agent-prompt'))
+    # Check repo-root external/ (normal monorepo case)
+    root_external = os.path.abspath(os.path.join(script_dir, '../../external/agent-prompt'))
+
+    candidate_dirs = [env_base_dir] if env_base_dir else [local_external, root_external]
+    candidate_dirs = [d for d in candidate_dirs if d]
+
+    base_dir = None
+    for candidate in candidate_dirs:
+        candidate_readme = os.path.join(candidate, 'README.md')
+        if os.path.exists(candidate_readme):
+            base_dir = candidate
+            break
+
     if not base_dir:
-        base_dir = os.path.abspath(os.path.join(os.getcwd(), '../external/agent-prompt'))
-    
+        checked = '\n  - '.join(candidate_dirs)
+        print('Error: README.md not found in any expected agent-prompt path:')
+        print(f'  - {checked}')
+        return
+
     readme_path = os.path.join(base_dir, 'README.md')
     json_path = os.path.join(base_dir, 'prompt.json')
-    
-    if not os.path.exists(readme_path):
-        print(f"Error: README.md not found at {readme_path}")
-        return
 
     with open(readme_path, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -104,7 +122,7 @@ def main():
         "metadata": {
             "version": "1.2.0",
             "source": "README.md",
-            "generated_at": None
+            "generated_at": datetime.now().isoformat()
         },
         "introduction": "",
         "sections": []

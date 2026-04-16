@@ -12,37 +12,41 @@ graph TD
     B --> C[PipelineExecutor]
     
     subgraph "Core Tools & Subsystems"
-        I[MemoryManager<br/>src/memory/]
-        J[SandboxExecutor<br/>src/sandbox/]
+        J[MemoryManager<br/>src/memory/]
+        K[SandboxExecutor<br/>src/sandbox/]
     end
 
-    C --> D[ResponseCacheMiddleware]
-    D -->|Cache Miss| E[AgenticMiddleware]
-    E --> F[IntelligentRouterMiddleware]
-    F -->|Tier selection + fallback| G[LLMExecutor<br/>Headers + Error Recovery]
-    G --> H[(Free LLM Provider)]
+    C --> D[StructuralMarkdownMiddleware<br/>src/middleware/agentic/structural-middleware.ts]
+    D -->|Agentic requests: inject full session memory| E[ResponseCacheMiddleware]
+    E -->|Cache Miss| F[AgenticMiddleware]
+    F --> G[IntelligentRouterMiddleware]
+    G -->|Tier selection + fallback| H[LLMExecutor<br/>Headers + Error Recovery]
+    H --> I[(Free LLM Provider)]
 
-    C --> I
-    C --> J
+    C --> J[MemoryManager<br/>src/memory/]
+    C --> K[SandboxExecutor<br/>src/sandbox/]
     
-    D -->|Cache Hit| A
-    H --> G --> F --> E --> D --> A
+    D -->|"Pass-through (non-agentic)"| E
+    E -->|Cache Hit| A
+    I --> H --> G --> F --> E --> D --> A
 
-    style E fill:#ffe082,stroke:#f9a825
-    style D fill:#b3e5fc,stroke:#0288d1
-    style F fill:#c8e6c9,stroke:#388e3c
-    style I fill:#f8bbd0,stroke:#c2185b
-    style J fill:#f3e5f5,stroke:#7b1fa2
+    style D fill:#ffd54f,stroke:#f57f17
+    style F fill:#ffe082,stroke:#f9a825
+    style E fill:#b3e5fc,stroke:#0288d1
+    style G fill:#c8e6c9,stroke:#388e3c
+    style J fill:#f8bbd0,stroke:#c2185b
+    style K fill:#f3e5f5,stroke:#7b1fa2
 ```
 
-### Pipeline Order (v1.0.3)
+### Pipeline Order (v1.0.4)
 
 | Stage | Component | Purpose |
 |-------|-----------|---------|
-| 1 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed |
-| 2 | `AgenticMiddleware` *(optional)* | Task decomposition, research validation, system prompt injection |
-| 3 | `IntelligentRouterMiddleware` | Deterministic keyword-based model-tier selection with FREE-first fallback cascade |
-| 4 | `LLMExecutor` | HTTPS request to provider; token tracking via response headers + **reactive drift correction** + **bridge: writes `providerRemainingTokens` into context for ContextManager** |
+| 1 | `StructuralMarkdownMiddleware` | Injects full `knowledge.md` session memory + **Resolves `file://` URIs** (v1.0.4) into agentic requests; enforces structured response format |
+| 2 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed |
+| 3 | `AgenticMiddleware` *(optional)* | Task decomposition (max 2 steps), research validation, system prompt injection, early-exit on confidence > 0.85 or 3 iterations |
+| 4 | `IntelligentRouterMiddleware` | Deterministic keyword-based model-tier selection with **Persistent Health Memory** (v1.0.4); handles fallback cascade with **Adaptive Timeout Floor (12s)** and **Hedged Execution Strategy** (v1.0.5) combining parallel delay-based requests and graceful network abortions. |
+| 5 | `LLMExecutor` | HTTPS request to provider; token tracking via response headers + **centralized circuit-breaking** + **bridge: writes `providerRemainingTokens` into context for ContextManager** |
 
 ---
 
@@ -52,7 +56,7 @@ graph TD
 
 | Tool | Purpose | Required Params | Key Optional Params |
 |------|---------|----------------|---------------------|
-| `use_free_llm` | Universal chat with deterministic steering; returns ONLY text content | `messages` | `model`, `keywords`, `agentic`, `sessionId` |
+| `use_free_llm` | Universal chat with deterministic steering; returns ONLY text content | `messages` | `model`, `keywords`, `agentic`, `sessionId`, **`workspace_root`** (recommended for project tasks) |
 | `list_available_free_models` | Enumerate providers and models with metadata | *(none)* | `provider`, `available_only` |
 | `get_token_stats` | Real-time per-provider usage and quota stats | *(none)* | — |
 | `validate_provider` | Health-check and credential validation | `providerId` | — |
@@ -85,15 +89,27 @@ await client.callTool('manage_memory', {
 await client.callTool('list_available_free_models', { available_only: true });
 ```
 
-**Send a chat message with simplified parameters (Auto-Routing):**
+**Project-scoped task (agentic + workspace_root — ALWAYS use for project work):**
 ```ts
+// ⚠️ Both `agentic: true` AND `workspace_root` are required for memory injection.
+// Omitting either produces a context-blind response with no memory or session enrichment.
 await client.callTool('use_free_llm', {
-  messages: [{ role: 'user', content: 'What is the most efficient sorting algorithm?' }],
-  keywords: ['coding', 'algorithms'] // Router selects optimal coding model automatically
+  messages: [{ role: 'user', content: 'Refactor the auth module based on [plan.md](file:///c:/project/plan.md)' }],
+  agentic: true,
+  workspace_root: '/abs/path/to/my-project',
+  keywords: ['refactor', 'security', 'jwt']
 });
 ```
 
-**Explicit Keyword Steering (bypasses fuzzy matching):**
+**One-off query (no workspace, no memory — use for simple standalone Q&A):**
+```ts
+await client.callTool('use_free_llm', {
+  messages: [{ role: 'user', content: 'What is the most efficient sorting algorithm?' }],
+  keywords: ['coding', 'algorithms']
+});
+```
+
+**Explicit model + keyword steering:**
 ```ts
 await client.callTool('use_free_llm', {
   model: 'llama-3.3-70b-versatile',
@@ -162,6 +178,14 @@ Tool Call (use_free_llm)
 PipelineExecutor.execute(request, taskType)
         │
         ▼ ─────────────────────────────────────
+StructuralMarkdownMiddleware  (v1.0.4 — only when request.isAgentic is set)
+  • Reads full knowledge.md for session into memory
+  • **Artifact Awareness**: Detects and inlines `file://` URIs and Markdown links
+  • **Local Summarization**: TF-style zero-latency compression for large files
+  • Injects full memory state + response format instructions into user message
+  • console.error() with Date.now() subtraction for standardized latency logging
+        │
+        ▼ ─────────────────────────────────────
 ResponseCacheMiddleware
   • generateKey(request, workspaceHash)
   • If cache hit → return immediately (no LLM call)
@@ -171,10 +195,11 @@ ResponseCacheMiddleware
 AgenticMiddleware  (only when agentic:true or ENABLE_AGENTIC_MIDDLEWARE=true)
   • Requires sessionId (auto-derived from workspace_root if not provided)
   • detectResearchIntent(userContent) → logs [RESEARCH-VALIDATION] if detected
-  • decomposeGoal(userContent) → pushes steps to nowQueue
-  • prependSystemPrompt(context) → dynamic prompt from prompts.json
+  • decomposeGoal(userContent) → limitSubtasks() caps plan to 4 steps (v1.0.4)
+  • prependSystemPrompt(context) → dynamic prompt + HIGH-LEVEL STEPS section (v1.0.4)
   • next()
   • verifySelf(response) → logs [VERIFY] on FAIL, pushes to improveQueue
+  • verifySelf() returns PASS or iterationCount >= 3 → early exit, clears nowQueue (v1.0.4)
   • Persists queue state to projects/{sessionId}/queues.json
         │
         ▼ ─────────────────────────────────────
@@ -204,7 +229,7 @@ Response returned to agent
 
 1. **Always call `manage_memory` before wide-context steps** to retrieve relevant prior work.
 2. **Use `code_mode` for any large-data processing** — never dump raw API responses into LLM context.
-3. **Enable `agentic:true` with a stable `sessionId`** for multi-turn tasks needing decomposition.
+3. **For ANY project-scoped task, pass BOTH `agentic: true` AND `workspace_root`** — these two fields unlock memory injection, session persistence, and context enrichment. Passing only one (or neither) produces a context-blind, stateless response.
 4. **Call `validate_provider` or `get_token_stats`** before long-running workflows to confirm quota.
 5. **Research/external-knowledge requests are auto-logged** by `AgenticMiddleware` — check server logs for `[RESEARCH-VALIDATION]` entries.
 6. **Prefer `available_only:true`** with `list_available_free_models` to skip unconfigured providers.
@@ -380,6 +405,7 @@ Verification of the system's intelligence is grounded in **live, execution-based
 
 The server features a **hardened long-term memory system** designed for long-running agentic tasks:
 
+- **Persistent Health State**: Provider failures and circuit-breaker cooldowns are saved to disk. The router will "remember" that a provider is rate-limiting even if the server is restarted.
 - **Identity Hashes**: Workspaces are identified by stable, path-based hashes. Your stored facts persist even if you modify your codebase.
 - **Anti-Poisoning**: Strict `fs.existsSync` validation prevents memory pollution from hallucinated paths.
 - **Explicit Injection**: Use `store_memory` to deliberately persist architectural decisions, research findings, or task summaries across sessions.

@@ -15,6 +15,7 @@
 | `use_free_llm` | Send chat messages to any model with fallback support | `model`, `messages` |
 | `code_mode` | Execute sandboxed code (JS/Python/Go/Rust) against input data | `code` |
 | `manage_memory` | Manage persistent workspace memory (search/list/stats/clear) | `action` |
+| `store_memory` | Save findings, decisions, or summaries to workspace memory | `key`, `content` |
 
 > **Agent Rule**: Always invoke `manage_memory` (action: "search") before wide-context actions to retrieve relevant prior context.
 
@@ -207,13 +208,14 @@
 |-----------|------|----------|-------------|
 | `model` | string | ✅ | Model ID (e.g. `llama-3.3-70b-versatile`) |
 | `messages` | array | ✅ | Chat messages with `role` and `content` |
+| `agentic` | boolean | ❌* | **Mandatory for project work.** Enable memory injection. |
+| `workspace_root` | string | ❌* | **Mandatory for project work.** Path for context scanning. |
 | `provider` | string | ❌ | Override auto-routing to a specific provider |
 | `max_tokens` | number | ❌ | Max tokens to generate (default: 1024) |
 | `temperature` | number | ❌ | Sampling temperature (default: 0.7) |
 | `top_p` | number | ❌ | Top-p nucleus sampling |
 | `fallback` | boolean | ❌ | Enable fallback to other models on failure |
 | `stream` | boolean | ❌ | Stream response tokens |
-| `workspace_root` | string | ❌ | Workspace path for context scanning |
 
 ---
 
@@ -488,4 +490,4 @@ Extract only names from a large API response array — compresses context dramat
 | Deep reasoning | `deepseek-r1` | LLM7.io / Kluster |
 | High-quality summaries | `command-a-03-2025` | Cohere |
 | Budget/high-volume | `Qwen/Qwen2.5-7B-Instruct` | SiliconFlow |
-| Latest frontier (Gemini) | `gemini-2.0-flash` | Gemini |
+| Latest frontier (Gemini) | `gemini-2.5-flash` | Gemini |

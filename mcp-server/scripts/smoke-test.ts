@@ -8,16 +8,20 @@ async function runSmokeTest() {
     // but for this test, we might want to see which ones are missing keys too.
     const availableProviders = providers.filter(p => p.isAvailable());
 
-    console.log(`\n=== MCP Provider Smoke Test ===`);
-    console.log(`Found ${providers.length} total providers.`);
-    console.log(`Available providers: ${availableProviders.length > 0 ? availableProviders.map(p => p.id).join(', ') : 'NONE (set API keys in .env)'}`);
+    console.error(`\n=== MCP Provider Smoke Test ===`);
+    console.error(`Found ${providers.length} total providers.`);
+    console.error(`Available providers: ${availableProviders.length > 0 ? availableProviders.map(p => p.id).join(', ') : 'NONE (set API keys in .env)'}`);
 
     if (availableProviders.length === 0) {
-        console.log('\nTip: Create a .env file in the mcp-server directory with your API keys.');
+        console.error('\nTip: Create a .env file in the mcp-server directory with your API keys.');
         process.exit(0);
     }
 
     for (const provider of availableProviders) {
+        if (provider.id === 'github-models') {
+            console.error(`\n[ ] Skipping Provider: ${provider.name} (github-models)`);
+            continue;
+        }
         // Preference for gemini-2.5-flash if it exists, otherwise first model
         let model = provider.models[0];
         if (provider.id === 'gemini') {
@@ -26,20 +30,20 @@ async function runSmokeTest() {
         }
 
         if (!model) {
-            console.log(`\n[-] Provider: ${provider.name} - No models defined.`);
+            console.error(`\n[-] Provider: ${provider.name} - No models defined.`);
             continue;
         }
 
-        console.log(`\n[>] Testing Provider: ${provider.name} (${provider.id})`);
-        console.log(`    Model: ${model.id}`);
+        console.error(`\n[>] Testing Provider: ${provider.name} (${provider.id})`);
+        console.error(`    Model: ${model.id}`);
 
         try {
             // Set a 30s timeout for the chat call
             const start = Date.now();
-            const timeoutPromise = new Promise((_, reject) => 
+            const timeoutPromise = new Promise((_, reject) =>
                 setTimeout(() => reject(new Error('Request timed out after 30s')), 30000)
             );
-            
+
             const chatPromise = provider.chat({
                 model: model.id,
                 messages: [{ role: 'user', content: 'Say "OK"' }],
@@ -49,14 +53,14 @@ async function runSmokeTest() {
             await Promise.race([chatPromise, timeoutPromise]);
             const duration = Date.now() - start;
 
-            console.log(`    Status: SUCCESS (${duration}ms)`);
+            console.error(`    Status: SUCCESS (${duration}ms)`);
         } catch (error: any) {
             console.error(`    Status: FAILED`);
             console.error(`    Error: ${error.message}`);
         }
     }
 
-    console.log(`\n=== Test Completed ===\n`);
+    console.error(`\n=== Test Completed ===\n`);
 }
 
 runSmokeTest().catch(error => {

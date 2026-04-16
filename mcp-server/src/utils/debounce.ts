@@ -24,8 +24,9 @@ export function debounce<T extends (...args: any[]) => any>(
         if (timeout) {
             clearTimeout(timeout);
             timeout = null;
-            if (lastArgs) func(...lastArgs);
+            if (lastArgs) return func(...lastArgs);
         }
+        return undefined;
     };
 
     return debounced;
