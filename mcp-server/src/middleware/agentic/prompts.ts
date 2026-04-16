@@ -36,16 +36,10 @@ When your output contains matches from the 'RESEARCH APPENDIX' or 'SUBSYSTEM REF
  * Forces the model to explicitly verify its source before answering.
  */
 const GROUNDING_PROTOCOL = `
-## 🔍 GROUNDING PROTOCOL
-All file and artifact references in this prompt have been resolved and injected by the server pipeline.
-When citing file content, prefix with \`[RETRIEVED]\` and reference the specific injected code block by filename.
-Do not infer or reconstruct information that is not explicitly present in a resolved block.
-
-### Absence = Unavailable
-The middleware controls all context injection. If no \`[Context]\` block exists for a topic, file, or symbol,
-it means the pipeline found no workspace match — **not** that it is defined elsewhere.
-Respond with: "Workspace context unavailable for [topic]" and ask the user to provide the file.
-Do NOT fill the gap using training-data assumptions.
+## 🔍 GROUNDING
+- Cite files as: \`[RETRIEVED] filename\` — only from injected \`[Context]\` blocks.
+- No \`[Context]\` block for a topic = pipeline found no match. Say: "Workspace context unavailable for [X]."
+- Never infer file content from training data. Ask the user to share the file instead.
 `;
 
 interface PromptSection {
