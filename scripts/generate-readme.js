@@ -22,14 +22,21 @@ const HEADER = `<div align="center">
 \t<br>
 </div>`;
 
+function alignTable(header, rows) {
+	const widths = header.map((cell, i) => {
+		const longestRow = rows.reduce((max, row) => Math.max(max, row[i].length), 0);
+		return Math.max(cell.length, longestRow, 3);
+	});
+	const pad = (cell, i) => cell + ' '.repeat(widths[i] - cell.length);
+	const formatRow = cells => `| ${cells.map(pad).join(' | ')} |`;
+	const separator = `| ${widths.map(w => '-'.repeat(w)).join(' | ')} |`;
+	return [formatRow(header), separator, ...rows.map(formatRow)].join('\n');
+}
+
 function buildTable(models) {
-	const lines = [];
-	lines.push('| Model Name | Context | Max Output | Modality | Rate Limit |');
-	lines.push('|---|---|---|---|---|');
-	for (const m of models) {
-		lines.push(`| ${m.name} | ${m.context} | ${m.maxOutput} | ${m.modality} | ${m.rateLimit} |`);
-	}
-	return lines.join('\n');
+	const header = ['Model Name', 'Context', 'Max Output', 'Modality', 'Rate Limit'];
+	const rows = models.map(m => [m.name, m.context, m.maxOutput, m.modality, m.rateLimit]);
+	return alignTable(header, rows);
 }
 
 function buildProviderSection(provider) {
@@ -56,9 +63,10 @@ const inferenceProviders = data.providers
 	.filter(p => p.category === 'inference_provider')
 	.sort((a, b) => a.name.localeCompare(b.name));
 
-const glossaryRows = data.glossary
-	.map(g => `| **${g.abbreviation}** | ${g.meaning} |`)
-	.join('\n');
+const glossaryTable = alignTable(
+	['Abbreviation', 'Meaning'],
+	data.glossary.map(g => [`**${g.abbreviation}**`, g.meaning]),
+);
 
 const footnoteLines = data.footnotes
 	.sort((a, b) => a.id - b.id)
@@ -72,6 +80,8 @@ const parts = [
 	'',
 	'- [Provider APIs](#provider-apis)',
 	'- [Inference providers](#inference-providers)',
+	'- [Glossary](#glossary)',
+	'- [Notes](#notes)',
 	'',
 	'## Provider APIs',
 	'',
@@ -91,9 +101,7 @@ const parts = [
 	'',
 	'## Glossary',
 	'',
-	'| Abbreviation | Meaning |',
-	'|---|---|',
-	glossaryRows,
+	glossaryTable,
 	'',
 	'## Notes',
 	'',
