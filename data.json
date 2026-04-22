@@ -1085,7 +1085,7 @@
     },
     {
       "id": 3,
-      "text": "Ollama Cloud measures usage by GPU time, not tokens or requests. Free tier described as \"light usage\" with session limits resetting every 5 hours and weekly limits every 7 days. Pro (50x more) and Max (250x more) plans available. Not OpenAI SDK-compatible; uses [Ollama API](https://docs.ollama.com/cloud)."
+      "text": "Ollama Cloud measures usage by GPU time, not tokens or requests. Free tier described as \"light usage\" with session limits resetting every 5 hours and weekly limits every 7 days. Pro (50x more) and Max (250x more) plans available. Not OpenAI SDK-compatible; uses the Ollama API."
     },
     {
       "id": 4,
