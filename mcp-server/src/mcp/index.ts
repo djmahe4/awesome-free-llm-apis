@@ -6,7 +6,8 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { useFreeLLM } from '../tools/use-free-llm.js';
 import { listAvailableFreeModels } from '../tools/list-models.js';
-import { runCodeMode } from '../tools/code-mode.js';
+// v1.0.5 Deprecated: Unnecessary feature (DO NOT REMOVE THE CODE COMMENT)
+//import { runCodeMode } from '../tools/code-mode.js';
 import { manageMemory } from '../tools/manage-memory.js';
 import { storeMemory } from '../tools/store-memory.js';
 import { getTokenStats } from '../tools/get-token-stats.js';
@@ -14,7 +15,7 @@ import { validateProvider } from '../tools/validate-provider.js';
 
 export async function createMCPServer(): Promise<Server> {
   const server = new Server(
-    { name: 'free-llm-apis', version: '1.0.4' },
+    { name: 'free-llm-apis', version: '1.0.5' },
     { capabilities: { tools: {} } }
   );
 
@@ -194,75 +195,76 @@ export async function createMCPServer(): Promise<Server> {
           required: ['providerId'],
         },
       },
-      {
-        name: 'code_mode',
-        description: [
-          'Execute code in a sandboxed runtime against input data. Only stdout enters context.',
-          '',
-          'USER STORY: Process large API responses or datasets with a script without flooding',
-          'the LLM context window. Write a filtering/transformation script; only its printed',
-          'output (stdout) is returned — not the raw DATA payload.',
-          '',
-          'WHEN TO USE: When an API response is too large to pass directly to an LLM. Write a',
-          'script to extract only the relevant fields, then pass the compressed output to',
-          '`use_free_llm`. Also use for sandboxed computation, data transformation, or testing',
-          'code snippets in isolation.',
-          '',
-          'INPUTS:',
-          '  code (required)   — Script source. Use print() or console.log() to emit output.',
-          '                      DATA global contains the input string (from `data` param).',
-          '  language          — Sandbox runtime (default: "javascript"):',
-          '                      "javascript" — QuickJS (quickjs-emscripten), in-process',
-          '                      "python"     — RestrictedPython subprocess; requires python3 + pip install RestrictedPython',
-          '                      "go"         — goja (pure-Go ECMAScript); requires pre-built binary',
-          '                                     Build: cd scripts/go-sandbox-runner && go build -o sandbox-runner .',
-          '                      "rust"       — boa_engine (pure-Rust ECMAScript); requires pre-built binary',
-          '                                     Build: cd scripts/rust-sandbox-runner && cargo build --release',
-          '  data              — Raw input string injected as DATA global variable.',
-          '  command           — Human-readable description of what the script does (for logging).',
-          '  timeout_ms        — Max execution time in milliseconds (default 5000).',
-          '',
-          'OUTPUTS: { stdout, stderr, success, error?, executionTimeMs, compressionRatio? }',
-          '  compressionRatio = stdout.length / data.length (< 1 = context savings achieved).',
-          '',
-          'SANDBOX CONSTRAINTS (all languages):',
-          '  - No filesystem access (read or write)',
-          '  - No network access',
-          '  - No process/OS calls',
-          '  - Execution time limited by timeout_ms',
-          '',
-          'FAILURE STATES:',
-          '  - success:false + error:"Execution timed out": increase timeout_ms or simplify script.',
-          '  - success:false + error message: syntax or runtime error in script; check stderr.',
-          '  - Empty stdout: script ran but called no print()/console.log().',
-          '  - Binary not found (go/rust): build the runner first per instructions above.',
-          '',
-          'JAVASCRIPT EXAMPLE:',
-          '  code: "const items = JSON.parse(DATA); print(items.map(i=>i.name).join(\\"\\\\n\\"))"',
-          '  data: \'[{"name":"Alice"},{"name":"Bob"}]\'',
-          '  → stdout: "Alice\\nBob"',
-          '',
-          'PYTHON EXAMPLE:',
-          '  language: "python"',
-          '  code: "import json; items=json.loads(DATA); print(len(items))"',
-          '  data: \'[1,2,3]\'',
-        ].join('\n'),
-        inputSchema: {
-          type: 'object' as const,
-          properties: {
-            code: { type: 'string', description: 'Script source code. Use print() or console.log() to emit output. DATA global contains the input data string.' },
-            language: {
-              type: 'string',
-              enum: ['javascript', 'python', 'go', 'rust'],
-              description: 'Sandbox runtime language (default: "javascript"). Each runs in an isolated, network-free, filesystem-free environment.',
-            },
-            data: { type: 'string', description: 'Input data injected as DATA global variable in the sandbox' },
-            command: { type: 'string', description: 'Human-readable description of what the script does (used for logging and memory)' },
-            timeout_ms: { type: 'number', description: 'Execution timeout in milliseconds (default 5000). Increase for heavy computations.' },
-          },
-          required: ['code'],
-        },
-      },
+      // v1.0.5 Deprecated: Unnecessary feature (DO NOT REMOVE THE CODE )
+      // {
+      //   name: 'code_mode',
+      //   description: [
+      //     'Execute code in a sandboxed runtime against input data. Only stdout enters context.',
+      //     '',
+      //     'USER STORY: Process large API responses or datasets with a script without flooding',
+      //     'the LLM context window. Write a filtering/transformation script; only its printed',
+      //     'output (stdout) is returned — not the raw DATA payload.',
+      //     '',
+      //     'WHEN TO USE: When an API response is too large to pass directly to an LLM. Write a',
+      //     'script to extract only the relevant fields, then pass the compressed output to',
+      //     '`use_free_llm`. Also use for sandboxed computation, data transformation, or testing',
+      //     'code snippets in isolation.',
+      //     '',
+      //     'INPUTS:',
+      //     '  code (required)   — Script source. Use print() or console.log() to emit output.',
+      //     '                      DATA global contains the input string (from `data` param).',
+      //     '  language          — Sandbox runtime (default: "javascript"):',
+      //     '                      "javascript" — QuickJS (quickjs-emscripten), in-process',
+      //     '                      "python"     — RestrictedPython subprocess; requires python3 + pip install RestrictedPython',
+      //     '                      "go"         — goja (pure-Go ECMAScript); requires pre-built binary',
+      //     '                                     Build: cd scripts/go-sandbox-runner && go build -o sandbox-runner .',
+      //     '                      "rust"       — boa_engine (pure-Rust ECMAScript); requires pre-built binary',
+      //     '                                     Build: cd scripts/rust-sandbox-runner && cargo build --release',
+      //     '  data              — Raw input string injected as DATA global variable.',
+      //     '  command           — Human-readable description of what the script does (for logging).',
+      //     '  timeout_ms        — Max execution time in milliseconds (default 5000).',
+      //     '',
+      //     'OUTPUTS: { stdout, stderr, success, error?, executionTimeMs, compressionRatio? }',
+      //     '  compressionRatio = stdout.length / data.length (< 1 = context savings achieved).',
+      //     '',
+      //     'SANDBOX CONSTRAINTS (all languages):',
+      //     '  - No filesystem access (read or write)',
+      //     '  - No network access',
+      //     '  - No process/OS calls',
+      //     '  - Execution time limited by timeout_ms',
+      //     '',
+      //     'FAILURE STATES:',
+      //     '  - success:false + error:"Execution timed out": increase timeout_ms or simplify script.',
+      //     '  - success:false + error message: syntax or runtime error in script; check stderr.',
+      //     '  - Empty stdout: script ran but called no print()/console.log().',
+      //     '  - Binary not found (go/rust): build the runner first per instructions above.',
+      //     '',
+      //     'JAVASCRIPT EXAMPLE:',
+      //     '  code: "const items = JSON.parse(DATA); print(items.map(i=>i.name).join(\\"\\\\n\\"))"',
+      //     '  data: \'[{"name":"Alice"},{"name":"Bob"}]\'',
+      //     '  → stdout: "Alice\\nBob"',
+      //     '',
+      //     'PYTHON EXAMPLE:',
+      //     '  language: "python"',
+      //     '  code: "import json; items=json.loads(DATA); print(len(items))"',
+      //     '  data: \'[1,2,3]\'',
+      //   ].join('\n'),
+      //   inputSchema: {
+      //     type: 'object' as const,
+      //     properties: {
+      //       code: { type: 'string', description: 'Script source code. Use print() or console.log() to emit output. DATA global contains the input data string.' },
+      //       language: {
+      //         type: 'string',
+      //         enum: ['javascript', 'python', 'go', 'rust'],
+      //         description: 'Sandbox runtime language (default: "javascript"). Each runs in an isolated, network-free, filesystem-free environment.',
+      //       },
+      //       data: { type: 'string', description: 'Input data injected as DATA global variable in the sandbox' },
+      //       command: { type: 'string', description: 'Human-readable description of what the script does (used for logging and memory)' },
+      //       timeout_ms: { type: 'number', description: 'Execution timeout in milliseconds (default 5000). Increase for heavy computations.' },
+      //     },
+      //     required: ['code'],
+      //   },
+      // },
       {
         name: 'manage_memory',
         description: [
@@ -393,13 +395,14 @@ export async function createMCPServer(): Promise<Server> {
         };
       }
 
-      if (name === 'code_mode') {
-        const input = args as unknown as Parameters<typeof runCodeMode>[0];
-        const result = await runCodeMode(input);
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-        };
-      }
+      // v1.0.5 Deprecated: Unnecessary feature (DO NOT REMOVE THE CODE COMMENT)
+      // if (name === 'code_mode') {
+      //   const input = args as unknown as Parameters<typeof runCodeMode>[0];
+      //   const result = await runCodeMode(input);
+      //   return {
+      //     content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      //   };
+      // }
 
       if (name === 'manage_memory') {
         const input = args as unknown as Parameters<typeof manageMemory>[0];

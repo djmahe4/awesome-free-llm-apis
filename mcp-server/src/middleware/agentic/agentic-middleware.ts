@@ -13,13 +13,17 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
-const workspaceScanner = new WorkspaceScanner(process.cwd());
+import { 
+    PROJECTS_DIR, 
+    STATE_FILE, 
+    KNOWLEDGE_FILE,
+    EXCLUDE_DIRS,
+    EXCLUDE_EXTENSIONS,
+    LOCAL_SKILLS_DIR
+} from './constants.js';
+import { WorkspaceWalker } from './workspace-walker.js';
 
-/**
- * Stabilized persistence root — consistent regardless of launch CWD.
- * Aligns with where usage-stats.json is stored (~/.free-llm-mcp/).
- */
-const HOME_DIR = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+const workspaceScanner = new WorkspaceScanner(process.cwd());
 
 
 interface QueueState {
@@ -38,8 +42,23 @@ const queues = new LRUCache<string, QueueState>({
     ttl: 1000 * 60 * 60 * 24,
 });
 
-function getQueues(sessionId: string): QueueState {
+/**
+ * Stateless-first state recovery: load from disk if cache miss.
+ */
+async function getOrLoadState(sessionId: string): Promise<QueueState> {
     let state = queues.get(sessionId);
+    if (!state) {
+        // Cold start recovery
+        try {
+            const statePath = path.join(PROJECTS_DIR, sessionId, STATE_FILE);
+            const data = await fs.readFile(statePath, 'utf-8');
+            state = JSON.parse(data);
+            if (state) queues.set(sessionId, state);
+        } catch {
+            // No saved state or invalid, start fresh
+        }
+    }
+
     if (!state) {
         state = {
             nowQueue: [],
@@ -53,66 +72,194 @@ function getQueues(sessionId: string): QueueState {
 }
 
 /**
- * Debounced Queue Persistence: Batches writes to reduce I/O under high throughput.
+ * Debounced State Persistence: Batches writes to reduce I/O under high throughput.
  */
-const persistQueuesDebounced = debounce(async (sessionId: string, projectDir: string) => {
-    const state = getQueues(sessionId);
+const persistStateDebounced = debounce(async (sessionId: string, projectDir: string) => {
+    const state = queues.get(sessionId);
+    if (!state) return;
+
     try {
         await fs.writeFile(
-            path.join(projectDir, 'queues.json'),
+            path.join(projectDir, STATE_FILE),
             JSON.stringify(state, null, 2),
             'utf-8',
         );
     } catch {
-        // non-fatal: in-memory state is still maintained
-    }
-}, 2000);
-
-/**
- * Debounced Plan & Tasks Persistence: Reflects live internal queue state so
- * plan.md / tasks.md are always a current snapshot, not just the initial stub.
- */
-const persistPlanDebounced = debounce(async (sessionId: string, projectDir: string) => {
-    const state = getQueues(sessionId);
-    try {
-        const ts = new Date().toISOString();
-        const planContent =
-            `# Plan\n\n<!-- Auto-updated: ${ts} -->\n\n` +
-            `## Now Queue\n${state.nowQueue.map((t, i) => `${i + 1}. ${t}`).join('\n') || '_empty_'}\n\n` +
-            `## Next Queue\n${state.nextQueue.map((t, i) => `${i + 1}. ${t}`).join('\n') || '_empty_'}\n\n` +
-            `## Blocked\n${state.blockedQueue.map(t => `- ${t}`).join('\n') || '_none_'}\n`;
-        await fs.writeFile(path.join(projectDir, 'plan.md'), planContent, 'utf-8');
-
-        const tasksContent =
-            `# Tasks\n\n<!-- Auto-updated: ${ts} -->\n\n` +
-            `## Current\n${state.nowQueue.map(t => `- [ ] ${t}`).join('\n') || '_no active tasks_'}\n\n` +
-            `## Queued\n${state.nextQueue.map(t => `- [ ] ${t}`).join('\n') || '_none_'}\n\n` +
-            `## Improvement Notes\n${state.improveQueue.map(t => `- ${t}`).join('\n') || '_none_'}\n`;
-        await fs.writeFile(path.join(projectDir, 'tasks.md'), tasksContent, 'utf-8');
-    } catch {
         // non-fatal
     }
 }, 2000);
+
 
 /**
  * Append-only Knowledge Persistence: Accumulates reusable skill entries following
  * the @skill-writer schema. Never overwrites — only appends — so knowledge grows
  * across sessions rather than being reset.
+
+/**
+ * Distills an LLM response into a structured skill-writer-schema knowledge entry.
+ *
+ * Skill-writer schema fields (following standard SKILL.md frontmatter conventions):
+ *   - name: short label for the decision/finding (derived from heading or task)
+ *   - session: source session ID
+ *   - ts: ISO timestamp
+ *   - what: the core decision or finding (extracted from bold/heading content)
+ *   - why: supporting rationale (extracted from prose context)
+ *   - files: file paths referenced (extracted from backtick paths or [file://...] refs)
+ *   - example: code block preview if present
+ */
+function distillToSkillEntry(content: string, sessionId: string): string | null {
+    const lines = content.split('\n');
+
+    // 1. Extract the primary heading as the entry name
+    const nameMatch = lines.find(l => l.startsWith('## ') || l.startsWith('### '));
+    const name = nameMatch ? nameMatch.replace(/^#{2,3}\s+/, '').trim() : `session-${sessionId.slice(0, 8)}`;
+
+    // 2. Extract decisions: bold key-value pairs and completed checklist items
+    const decisions = lines
+        .filter(l => l.includes('**') || l.includes('- [x]') || l.includes('- ✅'))
+        .map(l => l.replace(/^[-*]\s+/, '').trim())
+        .filter(Boolean)
+        .slice(0, 5);
+
+    if (decisions.length === 0) return null;
+
+    // 3. Extract file references: backtick paths and markdown links
+    const fileRefs: string[] = [];
+    const filePattern = /`([^`]*\.(ts|js|py|go|rs|json|md|yaml|yml|env))`|file:\/\/([^\s)]+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = filePattern.exec(content)) !== null) {
+        const ref = m[1] || m[3];
+        if (ref && !fileRefs.includes(ref)) fileRefs.push(ref);
+    }
+
+    // 4. Extract code example preview (first code block, first 3 lines)
+    const codeBlockMatch = content.match(/```[\w]*\n([\s\S]*?)```/);
+    const example = codeBlockMatch
+        ? '```\n' + codeBlockMatch[1].split('\n').slice(0, 3).join('\n') + '\n```'
+        : null;
+
+    // 5. Compose skill-writer-schema entry
+    const entry = [
+        `\n\n---`,
+        ``,
+        `### ${name}`,
+        ``,
+        `**session:** ${sessionId}  **ts:** ${new Date().toISOString()}`,
+        ``,
+        `**what:**`,
+        decisions.map(d => `- ${d}`).join('\n'),
+        fileRefs.length > 0 ? `\n**files:**\n${fileRefs.map(f => `- \`${f}\``).join('\n')}` : '',
+        example ? `\n**example:**\n${example}` : '',
+    ].filter(l => l !== '').join('\n');
+
+    return entry.length > 100 ? entry : null;
+}
+
+
+/**
+ * Distills LLM responses into structured skill-writer-schema entries and 
+ * automatically saves them as local skills in the workspace root.
+ */
+export async function extractLocalSkill(workspaceRoot: string, sessionId: string, content: string): Promise<void> {
+    const lines = content.split('\n');
+    
+    // 1. Detect if this is a "skill-worthy" output (heuristic: has a substantial heading + decisions/code)
+    const heading = lines.find(l => l.startsWith('## ') || l.startsWith('### '));
+    if (!heading) return;
+
+    const skillName = heading
+        .replace(/^#{2,3}\s+/, '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .slice(0, 50);
+
+    if (skillName.length < 3) return;
+
+    // 2. Extract decisions and scripts
+    const decisions = lines
+        .filter(l => l.includes('**') || l.includes('- [x]') || l.includes('- ✅'))
+        .map(l => l.replace(/^[-*]\s+/, '').trim())
+        .slice(0, 10);
+
+    if (decisions.length < 2) return; // Not substantive enough for a standalone skill
+
+    const skillDir = path.join(workspaceRoot, LOCAL_SKILLS_DIR, skillName);
+    const scriptsDir = path.join(skillDir, 'scripts');
+
+    try {
+        await fs.mkdir(scriptsDir, { recursive: true });
+
+        // 3. Extract and save scripts from code blocks
+        // Pattern: ```lang [path/to/script] ... ```
+        const codeBlockRegex = /```(\w+)(?:\s+([^\n`]+))?\n([\s\S]*?)```/g;
+        let match;
+        const scriptPaths: string[] = [];
+        
+        while ((match = codeBlockRegex.exec(content)) !== null) {
+            const lang = match[1];
+            const meta = match[2]?.trim();
+            const code = match[3];
+
+            // If it's a shell/python/node block and looks like a script
+            if (['bash', 'sh', 'python', 'javascript', 'typescript'].includes(lang)) {
+                let scriptName = meta || `script-${scriptPaths.length + 1}.${lang === 'bash' || lang === 'sh' ? 'sh' : lang === 'python' ? 'py' : 'js'}`;
+                // Sanitize script name if it came from meta
+                scriptName = path.basename(scriptName); 
+                
+                const scriptPath = path.join(scriptsDir, scriptName);
+                await fs.writeFile(scriptPath, code, 'utf-8');
+                if (lang === 'bash' || lang === 'sh') {
+                    await fs.chmod(scriptPath, 0o755); // Make executable
+                }
+                scriptPaths.push(scriptName);
+            }
+        }
+
+        // 4. Generate SKILL.md
+        const skillMd = [
+            `---`,
+            `name: ${skillName}`,
+            `description: Auto-generated skill from session ${sessionId}`,
+            `risk: local`,
+            `source: agentic-middleware`,
+            `---`,
+            ``,
+            `# ${heading.replace(/^#{2,3}\s+/, '')}`,
+            ``,
+            `## Summary`,
+            decisions.map(d => `- ${d}`).join('\n'),
+            ``,
+            scriptPaths.length > 0 ? `## Scripts\n${scriptPaths.map(s => `- [${s}](./scripts/${s})`).join('\n')}` : '',
+            ``,
+            `## Original Context`,
+            `**Session:** ${sessionId}`,
+            `**Date:** ${new Date().toISOString()}`,
+        ].join('\n');
+
+        await fs.writeFile(path.join(skillDir, 'SKILL.md'), skillMd, 'utf-8');
+    } catch (err) {
+        console.error(`[AgenticMiddleware] Failed to extract local skill: ${err}`);
+    }
+}
+
+/**
+ * Append-only Knowledge Persistence: Distills LLM responses into structured
+ * skill-writer-schema entries so knowledge.md grows as a reusable knowledge base
+ * rather than a raw session log dump.
  */
 async function appendKnowledge(projectDir: string, sessionId: string, content: string): Promise<void> {
-    const knowledgePath = path.join(projectDir, 'knowledge.md');
-    const timestamp = new Date().toISOString();
-    // Skill-writer schema format: each entry is a self-contained knowledge chunk
-    const entry =
-        `\n\n---\n\n` +
-        `## Session: ${sessionId} — ${timestamp}\n\n` +
-        `${content.slice(0, 2000)}\n`;
+    const entry = distillToSkillEntry(content, sessionId);
+    if (!entry) return;
+
     try {
-        await fs.appendFile(knowledgePath, entry, 'utf-8');
+        await fs.appendFile(path.join(projectDir, KNOWLEDGE_FILE), entry, 'utf-8');
     } catch {
         // non-fatal
     }
 }
+
+
 
 /**
  * Async Project Setup: Ensures session artifacts exist at the stable HOME_DIR path.
@@ -120,13 +267,11 @@ async function appendKnowledge(projectDir: string, sessionId: string, content: s
  * of where the MCP server process is launched from.
  */
 async function ensureProjectFiles(sessionId: string): Promise<string> {
-    const projectDir = path.join(HOME_DIR, sessionId);
+    const projectDir = path.join(PROJECTS_DIR, sessionId);
     await fs.mkdir(projectDir, { recursive: true });
 
     const files: Record<string, string> = {
-        'plan.md': '# Plan\n\n<!-- Auto-generated by Agentic Middleware -->\n',
-        'tasks.md': '# Tasks\n\n<!-- Auto-generated by Agentic Middleware -->\n',
-        'knowledge.md': '# Knowledge\n\n<!-- Auto-generated by Agentic Middleware -->\n',
+        [KNOWLEDGE_FILE]: '# Knowledge\n\n<!-- Internal MCP session distillation -->\n',
     };
 
     for (const [name, content] of Object.entries(files)) {
@@ -294,7 +439,7 @@ export class AgenticMiddleware implements Middleware {
             }
         } catch { }
 
-        // 3. Extract Terms
+        // 3. Extract Terms & Rank Files via WorkspaceWalker
         const terms = new Set<string>();
         codeBlocks.forEach(block => {
             block.split(/\W+/).filter(t => t.length > 5).forEach(t => terms.add(t));
@@ -308,20 +453,15 @@ export class AgenticMiddleware implements Middleware {
         const finalTerms = Array.from(terms).slice(0, 5);
         if (finalTerms.length === 0) return [];
 
-        // 4. Task Sensitivity: Detect if theoretical/documentation focused
+        // Task Sensitivity: Detect if theoretical/documentation focused
         const isTheoretical = /\b(doc|documentation|guide|explain|theory|writeup|summary|overview)\b/i.test(query);
 
-        // 5. Build rg glob flags
-        const exclusions = envType === 'node'
-            ? ['package-lock.json', 'node_modules/*', 'dist/*', '.next/*']
-            : envType === 'python' ? ['.venv/*', '__pycache__/*', '*.pyc'] : [];
+        // RANK CANDIDATES BEFORE SEARCHING
+        const candidates = await WorkspaceWalker.findRelevantFiles(workspaceRoot, Array.from(terms), 30);
+        if (candidates.length === 0) return [];
 
-        let globFlags = exclusions.map(e => `-g "!${e}"`).join(' ');
-        if (isTheoretical) {
-            globFlags += ' -g "*.md" -g "*.txt" -g "*.pdf"';
-        } else {
-            globFlags += ' -g "*.{ts,js,py,rs,go,java,c,cpp,h}"';
-        }
+        // 5. Build rg glob flags - focus ONLY on top candidates
+        const globFlags = candidates.map(c => `-g "${path.relative(workspaceRoot, c)}"`).join(' ');
 
         // 6. Graceful Tool Detection: rg preferred, grep as fallback
         let tool: 'rg' | 'grep' | 'none' = 'none';
@@ -409,7 +549,7 @@ export class AgenticMiddleware implements Middleware {
         }
 
         const projectDir = await ensureProjectFiles(sessionId);
-        const q = getQueues(sessionId);
+        const q = await getOrLoadState(sessionId);
 
         // Prepend system prompt with user context if available
         const userMessage = context.request.messages.find(m => m.role === 'user');
@@ -480,8 +620,7 @@ export class AgenticMiddleware implements Middleware {
             q.nowQueue.push(...limitedSteps);
         }
 
-        persistQueuesDebounced(sessionId, projectDir);
-        persistPlanDebounced(sessionId, projectDir);
+        persistStateDebounced(sessionId, projectDir);
 
         // Execute the pipeline
         await next();
@@ -504,8 +643,8 @@ export class AgenticMiddleware implements Middleware {
                 logResearchValidation(sessionId, responseContent, 'post-execution-response-grounding-check');
             }
 
-            // Store a snapshot for observability (cloned to avoid post-shift mutation in traces)
-            context['agenticQueues'] = JSON.parse(JSON.stringify(getQueues(sessionId)));
+            // Store a snapshot for observability
+            context['agenticQueues'] = JSON.parse(JSON.stringify(queues.get(sessionId)));
 
             // v1.0.5: Automatically update workspace memory with progress if success
             if (verifyResult === 'PASS' && wsHash) {
@@ -519,6 +658,11 @@ export class AgenticMiddleware implements Middleware {
                     await memoryManager.storeToolOutput('agentic_progress', { key: progressKey, ws: wsHash }, progressData);
                     // Append to knowledge.md using append-only strategy (skill-writer schema)
                     await appendKnowledge(projectDir, sessionId, responseContent);
+                    
+                    // v1.0.6: Automatically extract and save local skills to workspace root
+                    if (context.workspaceRoot) {
+                        await extractLocalSkill(context.workspaceRoot, sessionId, responseContent);
+                    }
                 } catch {
                     // ignore memory store failures in middleware
                 }
@@ -529,11 +673,10 @@ export class AgenticMiddleware implements Middleware {
             q.nowQueue.shift();
         }
 
-        // Store a snapshot for observability (captured AFTER shift to show remaining momentum)
-        context['agenticQueues'] = JSON.parse(JSON.stringify(getQueues(sessionId)));
+        // Store a snapshot for observability
+        context['agenticQueues'] = JSON.parse(JSON.stringify(queues.get(sessionId)));
 
-        persistQueuesDebounced(sessionId, projectDir);
-        persistPlanDebounced(sessionId, projectDir);
+        persistStateDebounced(sessionId, projectDir);
         console.error(`[agentic-middleware] ${Date.now() - startMs}ms session=${sessionId}`);
     }
 }

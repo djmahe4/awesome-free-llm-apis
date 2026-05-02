@@ -193,7 +193,7 @@ describe('Agentic Intelligence & Middleware', () => {
             // queues.json is written twice (pre/post execution) - check for either
             const writeCalls = vi.mocked(fsp.writeFile).mock.calls;
             const queuesCall = writeCalls.find((call: any[]) => 
-                typeof call[0] === 'string' && call[0].includes('queues.json')
+                typeof call[0] === 'string' && call[0].includes('state.json')
             );
             expect(queuesCall).toBeDefined();
             expect(queuesCall![1]).toContain('Step'); // Contains decomposed steps

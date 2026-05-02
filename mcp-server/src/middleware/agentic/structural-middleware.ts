@@ -1,6 +1,12 @@
 import { Middleware, PipelineContext, NextFunction } from '../../pipeline/index.js';
-import * as path from 'path';
+import path from 'path';
 import fs from 'fs-extra';
+import { 
+    PROJECTS_DIR, 
+    STATE_FILE, 
+    KNOWLEDGE_FILE,
+    SESSION_STATE_HEADER 
+} from './constants.js';
 import { extractMdContext } from '../../utils/md-extract.js';
 
 export class StructuralMarkdownMiddleware implements Middleware {
@@ -33,7 +39,7 @@ export class StructuralMarkdownMiddleware implements Middleware {
             const fullMemory = await this.readFullSessionMemory(sessionId);
             console.error(`[memory-read] ${Date.now() - memStart}ms session=${sessionId}`);
 
-            const contextHeader = `# TASK CONTEXT\n# FULL MEMORY STATE (session ${sessionId})\n${fullMemory}\n\n# RESPONSE FORMAT\nReply only in clean Markdown. For any code or file changes use exactly this block:\n\`\`\`file:relative/path/from/session/root.ts\n// FULL file content here (never partial diffs)\n\`\`\``;
+            const contextHeader = `${SESSION_STATE_HEADER}\n# INTERNAL DIAGNOSTICS (session ${sessionId})\n${fullMemory}\n\n# RESPONSE FORMAT\nReply only in clean Markdown. For any code or file changes use exactly this block:\n\`\`\`file:relative/path/from/session/root.ts\n// FULL file content here (never partial diffs)\n\`\`\``;
 
             // v1.0.4 Robustness: Handle all valid message content formats (string, array, or object)
             if (typeof userMsg.content === 'string') {
@@ -63,83 +69,37 @@ export class StructuralMarkdownMiddleware implements Middleware {
     }
 
     private async readFullSessionMemory(sessionId: string): Promise<string> {
-        // v1.0.4 Security: Final path sanitization check
-        const projectsBase = path.join(process.cwd(), 'data', 'projects');
-        const projectDir = path.resolve(projectsBase, sessionId);
+        const projectDir = path.join(PROJECTS_DIR, sessionId);
 
-        // Ensure the resolved path is actually within the projects directory
-        if (!projectDir.startsWith(projectsBase)) {
-            console.error(`[structural-middleware] Blocked traversal attempt for sessionId: ${sessionId}`);
-            return 'Security Error: Access denied.';
-        }
-
-
-        // v1.0.4 Optimization: Parallelize all session file I/O
-        const [planRes, queuesRes, tasksRes, knowledgeRes] = await Promise.all([
-            fs.pathExists(path.join(projectDir, 'plan.md')).then(exists => exists ? fs.readFile(path.join(projectDir, 'plan.md'), 'utf-8') : null),
-            fs.pathExists(path.join(projectDir, 'queues.json')).then(exists => exists ? fs.readFile(path.join(projectDir, 'queues.json'), 'utf-8') : null),
-            fs.pathExists(path.join(projectDir, 'tasks.md')).then(exists => exists ? fs.readFile(path.join(projectDir, 'tasks.md'), 'utf-8') : null),
-            fs.pathExists(path.join(projectDir, 'knowledge.md')).then(exists => exists ? fs.readFile(path.join(projectDir, 'knowledge.md'), 'utf-8') : null),
+        const [stateRes, knowledgeRes] = await Promise.all([
+            fs.pathExists(path.join(projectDir, STATE_FILE)).then(exists => exists ? fs.readFile(path.join(projectDir, STATE_FILE), 'utf-8') : null),
+            fs.pathExists(path.join(projectDir, KNOWLEDGE_FILE)).then(exists => exists ? fs.readFile(path.join(projectDir, KNOWLEDGE_FILE), 'utf-8') : null),
         ]);
 
         const sections: string[] = [];
 
-        // v1.0.4 Hardening: Only add sections if they have substantive content
-        // (beyond just echoing the section title or metadata).
-        const isSubstantive = (text: string) => {
-            const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-            if (lines.length === 0) return false;
-
-            // If any line is a list item, code block, or prose (no # or [META: or <!--)
-            if (lines.some(l => !l.startsWith('#') && !l.startsWith('[META:') && !l.startsWith('<!--'))) return true;
-
-            // If all we have are headings/meta, check if there are multiple headings
-            // (e.g. # MISSION PLAN followed by # Phase 1 is substantive)
-            const contentLines = lines.filter(l => !l.startsWith('[META:') && !l.startsWith('<!--'));
-            return contentLines.length > 1;
-        };
-
-        // 1. MISSION PLAN
-        if (planRes) {
-            const extracted = await extractMdContext(planRes, 1500);
-            if (extracted && isSubstantive(extracted)) {
-                sections.push(`## MISSION PLAN\n${extracted}`);
-                console.error(`[structural-middleware] Loaded plan.md (extracted ${extracted.length}b)`);
-            }
-        }
-
-        // 2. TASK QUEUE
-        if (queuesRes) {
+        // 1. INTERNAL QUEUE STATE
+        if (stateRes) {
             try {
-                const queues = JSON.parse(queuesRes);
+                const state = JSON.parse(stateRes);
                 const queueBlock = [
-                    queues.nowQueue?.length ? `**Now:**      ${queues.nowQueue.join(', ')}` : null,
-                    queues.nextQueue?.length ? `**Next:**     ${queues.nextQueue.join(', ')}` : null,
-                    queues.blockedQueue?.length ? `**Blocked:**  ${queues.blockedQueue.join(', ')}` : null,
-                    queues.improveQueue?.length ? `**Improve:**  ${queues.improveQueue.join(', ')}` : null,
+                    state.nowQueue?.length ? `**Current:**   ${state.nowQueue.join(', ')}` : null,
+                    state.nextQueue?.length ? `**Upcoming:**  ${state.nextQueue.join(', ')}` : null,
+                    state.blockedQueue?.length ? `**Blocked:**   ${state.blockedQueue.join(', ')}` : null,
                 ].filter(Boolean).join('\n');
                 if (queueBlock) {
-                    sections.push(`## TASK QUEUE\n${queueBlock}`);
-                    console.error(`[structural-middleware] Loaded queues.json (now=${queues.nowQueue?.length ?? 0} tasks)`);
+                    sections.push(`### QUEUE DIAGNOSTICS\n${queueBlock}`);
                 }
             } catch (err) {
-                console.error(`[structural-middleware] Failed to parse queues.json: ${err}`);
+                console.error(`[structural-middleware] Failed to parse state.json: ${err}`);
             }
         }
 
-        // 3. ACTIVE TASKS
-        if (tasksRes) {
-            const extracted = await extractMdContext(tasksRes, 1500);
-            if (extracted && isSubstantive(extracted)) {
-                sections.push(`## ACTIVE TASKS\n${extracted}`);
-            }
-        }
-
-        // 4. SESSION KNOWLEDGE
+        // 2. DISTILLED KNOWLEDGE
         if (knowledgeRes) {
-            const extracted = await extractMdContext(knowledgeRes, 1500);
-            if (extracted && isSubstantive(extracted)) {
-                sections.push(`## SESSION KNOWLEDGE\n${extracted}`);
+            const extracted = await extractMdContext(knowledgeRes, 2000);
+            if (extracted && extracted.length > 50) {
+                sections.push(`### SESSION DISTILLATION\n${extracted}`);
             }
         }
 
