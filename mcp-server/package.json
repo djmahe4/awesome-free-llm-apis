@@ -19,12 +19,14 @@
     "dashboard": "tsx --env-file=.env src/server.ts --sse"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "cohere-ai": "^7.21.0",
     "cors": "^2.8.6",
     "express": "^4.21.2",
     "fs-extra": "^11.3.4",
     "helmet": "^8.1.0",
+    "ignore": "^7.0.5",
     "js-tiktoken": "^1.0.21",
     "lru-cache": "^11.0.0",
     "node-fetch": "^3.3.2",
@@ -32,6 +34,7 @@
     "remark": "^15.0.1",
     "remark-parse": "^11.0.0",
     "unist-util-visit": "^5.1.0",
+    "vectra": "^0.14.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

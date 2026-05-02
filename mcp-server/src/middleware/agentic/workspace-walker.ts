@@ -1,6 +1,12 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { EXCLUDE_DIRS, EXCLUDE_EXTENSIONS } from './constants.js';
+import ignore from 'ignore';
+import { 
+    EXCLUDE_DIRS, 
+    EXCLUDE_EXTENSIONS,
+    MAX_DEPTH,
+    MAX_FILES_SCANNED
+} from './constants.js';
 
 export interface FileCandidate {
     path: string;
@@ -8,16 +14,33 @@ export interface FileCandidate {
 }
 
 export class WorkspaceWalker {
+    private static filesScanned = 0;
+
     /**
      * Recursively find and rank files based on keyword relevance
      */
     static async findRelevantFiles(
         rootPath: string,
         keywords: string[],
-        limit: number = 30
+        limit: number = 30,
+        overrideIgnores: boolean = false
     ): Promise<string[]> {
         const candidates: FileCandidate[] = [];
-        await this.walk(rootPath, keywords, candidates);
+        this.filesScanned = 0;
+
+        const ig = ignore().add(EXCLUDE_DIRS);
+        
+        if (!overrideIgnores) {
+            try {
+                const gitignorePath = path.join(rootPath, '.gitignore');
+                const gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+                ig.add(gitignoreContent);
+            } catch {
+                // No .gitignore, proceed with defaults
+            }
+        }
+
+        await this.walk(rootPath, rootPath, keywords, candidates, ig, 0, overrideIgnores);
 
         // Sort by score (descending) and return top paths
         return candidates
@@ -27,21 +50,37 @@ export class WorkspaceWalker {
     }
 
     private static async walk(
-        dir: string,
+        root: string,
+        currentDir: string,
         keywords: string[],
-        candidates: FileCandidate[]
+        candidates: FileCandidate[],
+        ig: any,
+        depth: number,
+        overrideIgnores: boolean
     ): Promise<void> {
+        if (depth > MAX_DEPTH || this.filesScanned >= MAX_FILES_SCANNED) return;
+
         try {
-            const entries = await fs.readdir(dir, { withFileTypes: true });
+            const entries = await fs.readdir(currentDir, { withFileTypes: true });
 
             for (const entry of entries) {
-                const fullPath = path.join(dir, entry.name);
+                if (this.filesScanned >= MAX_FILES_SCANNED) break;
+
+                const fullPath = path.join(currentDir, entry.name);
+                const relativePath = path.relative(root, fullPath);
+
+                // Skip if ignored (unless overridden)
+                if (!overrideIgnores && ig.ignores(relativePath)) {
+                    continue;
+                }
 
                 if (entry.isDirectory()) {
-                    if (EXCLUDE_DIRS.includes(entry.name)) continue;
-                    await this.walk(fullPath, keywords, candidates);
+                    await this.walk(root, fullPath, keywords, candidates, ig, depth + 1, overrideIgnores);
                 } else if (entry.isFile()) {
+                    this.filesScanned++;
                     const ext = path.extname(entry.name).toLowerCase();
+                    
+                    // Simple extension filter (still useful to prune binaries quickly)
                     if (EXCLUDE_EXTENSIONS.includes(ext)) continue;
 
                     const score = this.calculateScore(entry.name, ext, keywords);
@@ -60,7 +99,7 @@ export class WorkspaceWalker {
         const nameLower = filename.toLowerCase();
 
         // 1. Extension boost (prioritize source code)
-        const codeExtensions = ['.ts', '.js', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.h'];
+        const codeExtensions = ['.ts', '.js', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.md'];
         if (codeExtensions.includes(ext)) score += 5;
 
         // 2. Keyword matches in filename

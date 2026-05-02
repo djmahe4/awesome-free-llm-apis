@@ -41,3 +41,7 @@ export const EXCLUDE_EXTENSIONS = [
 // Local workspace artifacts
 export const LOCAL_SKILLS_DIR = path.join('.free-llm-mcp', 'skills');
 
+// Performance boundaries for WorkspaceWalker
+export const MAX_DEPTH = 5;
+export const MAX_FILES_SCANNED = 5000;
+

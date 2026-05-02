@@ -12,6 +12,7 @@ import { manageMemory } from '../tools/manage-memory.js';
 import { storeMemory } from '../tools/store-memory.js';
 import { getTokenStats } from '../tools/get-token-stats.js';
 import { validateProvider } from '../tools/validate-provider.js';
+import { indexWorkspace } from '../tools/index-workspace.js';
 
 export async function createMCPServer(): Promise<Server> {
   const server = new Server(
@@ -324,6 +325,37 @@ export async function createMCPServer(): Promise<Server> {
         },
       },
       {
+        name: 'store_workspace_skill',
+        description: [
+          'Explicitly harvest structured knowledge and scripts into the workspace.',
+          'Use this to persist complex research or multi-step implementations as a reusable skill.',
+          '',
+          'FOLLOWS @skill-writer schema:',
+          '- name: lowercase-hyphenated name of the skill',
+          '- description: one-sentence description of the skill and when to trigger it',
+          '- what: list of key decisions, findings, or implementation details',
+          '- why: supporting rationale or background context',
+          '- files: files modified or referenced',
+          '- example: code snippet or example usage',
+          '- scripts: map of script filename to code content',
+          '- workspace_root: absolute path to the workspace root'
+        ].join('\n'),
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Lowercase-hyphenated name of the skill' },
+            description: { type: 'string', description: 'One-sentence description of the skill and when to trigger it' },
+            what: { type: 'array', items: { type: 'string' }, description: 'List of key decisions, findings, or implementation details' },
+            why: { type: 'string', description: 'Supporting rationale or background context' },
+            files: { type: 'array', items: { type: 'string' }, description: 'Files modified or referenced' },
+            example: { type: 'string', description: 'Code snippet or example usage' },
+            script_instructions: { type: 'object', additionalProperties: { type: 'string' }, description: 'Map of script filename to an instruction detailing what the script should do. The server will use an internal LLM to intelligently generate the script code.' },
+            workspace_root: { type: 'string', description: 'Absolute path to the workspace root' },
+          },
+          required: ['name', 'description', 'what', 'workspace_root'],
+        },
+      },
+      {
         name: 'store_memory',
         description: [
           'Store manual context or persistent thoughts in long-term memory.',
@@ -348,6 +380,34 @@ export async function createMCPServer(): Promise<Server> {
             workspace_root: { type: 'string', description: 'Absolute path to workspace root (e.g. "/home/user/my-project")' },
           },
           required: ['key', 'content'],
+        },
+      },
+      {
+        name: 'index_workspace',
+        description: [
+          'Proactively index all relevant files in the workspace into the persistent vector database.',
+          '',
+          'USER STORY: Update the semantic memory of the project so that future queries can find',
+          'relevant code snippets even if you haven\'t manually stored them yet.',
+          '',
+          'WHEN TO USE: After significant code changes, when starting a new session, or when',
+          'semantic search results seem outdated.',
+          '',
+          'INPUTS:',
+          '  workspace_root — Absolute path to the workspace root to index.',
+          '  force          — If true, wipes the existing index and rebuilds from scratch (self-healing).',
+          '',
+          'OUTPUTS: { totalFiles, indexedFiles, skippedFiles, errors }',
+          '',
+          'Note: Uses hash-based tracking to only index changed files, making it fast for subsequent runs.',
+        ].join('\n'),
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            workspace_root: { type: 'string', description: 'Absolute path to workspace root (e.g. "/home/user/my-project")' },
+            force: { type: 'boolean', description: 'Force rebuild of the index (wipes existing)' },
+          },
+          required: ['workspace_root'],
         },
       },
     ],
@@ -412,6 +472,15 @@ export async function createMCPServer(): Promise<Server> {
         };
       }
 
+      if (name === 'store_workspace_skill') {
+        const { storeWorkspaceSkill } = await import('../tools/store-workspace-skill.js');
+        const input = args as any;
+        const result = await storeWorkspaceSkill(input);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
       if (name === 'store_memory') {
         const input = args as unknown as Parameters<typeof storeMemory>[0];
         const result = await storeMemory(input);
@@ -430,6 +499,14 @@ export async function createMCPServer(): Promise<Server> {
       if (name === 'validate_provider') {
         const { providerId } = args as { providerId: string };
         const result = await validateProvider(providerId);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      if (name === 'index_workspace') {
+        const input = args as any;
+        const result = await indexWorkspace(input);
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         };

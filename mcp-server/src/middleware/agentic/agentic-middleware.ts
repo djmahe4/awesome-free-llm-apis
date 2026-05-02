@@ -17,11 +17,10 @@ import {
     PROJECTS_DIR, 
     STATE_FILE, 
     KNOWLEDGE_FILE,
-    EXCLUDE_DIRS,
-    EXCLUDE_EXTENSIONS,
     LOCAL_SKILLS_DIR
 } from './constants.js';
 import { WorkspaceWalker } from './workspace-walker.js';
+import { ContextGatherer } from './context-gatherer.js';
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
@@ -156,92 +155,6 @@ function distillToSkillEntry(content: string, sessionId: string): string | null 
 }
 
 
-/**
- * Distills LLM responses into structured skill-writer-schema entries and 
- * automatically saves them as local skills in the workspace root.
- */
-export async function extractLocalSkill(workspaceRoot: string, sessionId: string, content: string): Promise<void> {
-    const lines = content.split('\n');
-    
-    // 1. Detect if this is a "skill-worthy" output (heuristic: has a substantial heading + decisions/code)
-    const heading = lines.find(l => l.startsWith('## ') || l.startsWith('### '));
-    if (!heading) return;
-
-    const skillName = heading
-        .replace(/^#{2,3}\s+/, '')
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .slice(0, 50);
-
-    if (skillName.length < 3) return;
-
-    // 2. Extract decisions and scripts
-    const decisions = lines
-        .filter(l => l.includes('**') || l.includes('- [x]') || l.includes('- ✅'))
-        .map(l => l.replace(/^[-*]\s+/, '').trim())
-        .slice(0, 10);
-
-    if (decisions.length < 2) return; // Not substantive enough for a standalone skill
-
-    const skillDir = path.join(workspaceRoot, LOCAL_SKILLS_DIR, skillName);
-    const scriptsDir = path.join(skillDir, 'scripts');
-
-    try {
-        await fs.mkdir(scriptsDir, { recursive: true });
-
-        // 3. Extract and save scripts from code blocks
-        // Pattern: ```lang [path/to/script] ... ```
-        const codeBlockRegex = /```(\w+)(?:\s+([^\n`]+))?\n([\s\S]*?)```/g;
-        let match;
-        const scriptPaths: string[] = [];
-        
-        while ((match = codeBlockRegex.exec(content)) !== null) {
-            const lang = match[1];
-            const meta = match[2]?.trim();
-            const code = match[3];
-
-            // If it's a shell/python/node block and looks like a script
-            if (['bash', 'sh', 'python', 'javascript', 'typescript'].includes(lang)) {
-                let scriptName = meta || `script-${scriptPaths.length + 1}.${lang === 'bash' || lang === 'sh' ? 'sh' : lang === 'python' ? 'py' : 'js'}`;
-                // Sanitize script name if it came from meta
-                scriptName = path.basename(scriptName); 
-                
-                const scriptPath = path.join(scriptsDir, scriptName);
-                await fs.writeFile(scriptPath, code, 'utf-8');
-                if (lang === 'bash' || lang === 'sh') {
-                    await fs.chmod(scriptPath, 0o755); // Make executable
-                }
-                scriptPaths.push(scriptName);
-            }
-        }
-
-        // 4. Generate SKILL.md
-        const skillMd = [
-            `---`,
-            `name: ${skillName}`,
-            `description: Auto-generated skill from session ${sessionId}`,
-            `risk: local`,
-            `source: agentic-middleware`,
-            `---`,
-            ``,
-            `# ${heading.replace(/^#{2,3}\s+/, '')}`,
-            ``,
-            `## Summary`,
-            decisions.map(d => `- ${d}`).join('\n'),
-            ``,
-            scriptPaths.length > 0 ? `## Scripts\n${scriptPaths.map(s => `- [${s}](./scripts/${s})`).join('\n')}` : '',
-            ``,
-            `## Original Context`,
-            `**Session:** ${sessionId}`,
-            `**Date:** ${new Date().toISOString()}`,
-        ].join('\n');
-
-        await fs.writeFile(path.join(skillDir, 'SKILL.md'), skillMd, 'utf-8');
-    } catch (err) {
-        console.error(`[AgenticMiddleware] Failed to extract local skill: ${err}`);
-    }
-}
 
 /**
  * Append-only Knowledge Persistence: Distills LLM responses into structured
@@ -407,112 +320,6 @@ export class AgenticMiddleware implements Middleware {
         return steps;
     }
 
-    /**
-     * Proactive Grep Context: Gathers accurate context for memory from the workspace.
-     *
-     * v1.0.5 changes:
-     *  - Parallelized via Promise.all: all terms searched concurrently instead of sequentially.
-     *    This cuts worst-case latency from N×timeout to 1×timeout.
-     *  - Added ripgrep (rg) support with robust fallback to POSIX grep.
-     *  - grep fallback uses proper --include / --exclude-dir flags (not rg's -g syntax).
-     */
-    public async gatherGrepContext(workspaceRoot: string, query?: string): Promise<string[]> {
-        if (!query || query.length < 5) return [];
-
-        // 1. Code Extraction: Parse backtick blocks for high-precision terms
-        const codeBlocks: string[] = [];
-        const codeRegex = /```[\s\S]*?```/g;
-        let m;
-        while ((m = codeRegex.exec(query)) !== null) {
-            codeBlocks.push(m[0].replace(/```[\w]*\n?|```/g, '').trim());
-        }
-
-        // 2. Identify Environment
-        let envType: 'node' | 'python' | 'generic' = 'generic';
-        try {
-            const hasPkgJson = await fs.access(path.join(workspaceRoot, 'package.json')).then(() => true).catch(() => false);
-            if (hasPkgJson) {
-                envType = 'node';
-            } else {
-                const hasReqs = await fs.access(path.join(workspaceRoot, 'requirements.txt')).then(() => true).catch(() => false);
-                if (hasReqs) envType = 'python';
-            }
-        } catch { }
-
-        // 3. Extract Terms & Rank Files via WorkspaceWalker
-        const terms = new Set<string>();
-        codeBlocks.forEach(block => {
-            block.split(/\W+/).filter(t => t.length > 5).forEach(t => terms.add(t));
-        });
-
-        const broadKeywords = ['architecture', 'review', 'implementation', 'system', 'senior', 'software', 'project'];
-        query.split(/\W+/)
-            .filter(t => t.length > 4 && !broadKeywords.includes(t.toLowerCase()))
-            .forEach(t => terms.add(t));
-
-        const finalTerms = Array.from(terms).slice(0, 5);
-        if (finalTerms.length === 0) return [];
-
-        // Task Sensitivity: Detect if theoretical/documentation focused
-        const isTheoretical = /\b(doc|documentation|guide|explain|theory|writeup|summary|overview)\b/i.test(query);
-
-        // RANK CANDIDATES BEFORE SEARCHING
-        const candidates = await WorkspaceWalker.findRelevantFiles(workspaceRoot, Array.from(terms), 30);
-        if (candidates.length === 0) return [];
-
-        // 5. Build rg glob flags - focus ONLY on top candidates
-        const globFlags = candidates.map(c => `-g "${path.relative(workspaceRoot, c)}"`).join(' ');
-
-        // 6. Graceful Tool Detection: rg preferred, grep as fallback
-        let tool: 'rg' | 'grep' | 'none' = 'none';
-        try {
-            await execAsync('rg --version');
-            tool = 'rg';
-        } catch {
-            try {
-                await execAsync('grep --version');
-                tool = 'grep';
-            } catch {
-                return []; // Both unavailable
-            }
-        }
-
-        // 7. PARALLELIZED SEARCH — Promise.all replaces sequential for...of
-        //    Each term is an independent task; no shared mutable state.
-        //    This reduces worst-case latency from N * exec_time to 1 * exec_time.
-        const searchTasks = finalTerms.map(async (term): Promise<string[]> => {
-            try {
-                let command: string;
-                if (tool === 'rg') {
-                    // rg respects .gitignore by default; limit to 4 matches per term
-                    command = `rg -m 4 ${globFlags} -n --no-heading "${term}" "${workspaceRoot}"`;
-                } else {
-                    // grep fallback: --include / --exclude-dir flags (not rg's -g syntax)
-                    const patterns = isTheoretical
-                        ? ['*.md', '*.txt', '*.pdf']
-                        : ['*.ts', '*.js', '*.py', '*.rs', '*.go', '*.java', '*.c', '*.cpp', '*.h'];
-                    const includeFlags = patterns.map(p => `--include="${p}"`).join(' ');
-                    const excludeDirs = envType === 'node'
-                        ? ['node_modules', 'dist', '.next']
-                        : envType === 'python' ? ['venv', '.venv', '__pycache__'] : [];
-                    const excludeFlags = excludeDirs.map(d => `--exclude-dir="${d}"`).join(' ');
-                    command = `grep -rEi -m 4 ${includeFlags} ${excludeFlags} "${term}" "${workspaceRoot}" | head -n 4`;
-                }
-
-                const { stdout } = await execAsync(command);
-                if (stdout) {
-                    return stdout.split('\n').filter(Boolean).map(line => `[Context] ${line.trim()}`);
-                }
-            } catch {
-                // grep / rg returns non-zero on no match — not a real error
-            }
-            return [];
-        });
-
-        const nested = await Promise.all(searchTasks);
-        return nested.flat();
-    }
-
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
         const startMs = Date.now();
         // Dual-Mode Trigger: Global Env OR Per-Request Flag
@@ -558,7 +365,10 @@ export class AgenticMiddleware implements Middleware {
         // Proactive Grep Context for Memory: Only on FIRST iteration to save I/O
         let grepResults: string[] = [];
         if (context.workspaceRoot && userContent && iterationCount === 1) {
-            grepResults = await this.gatherGrepContext(context.workspaceRoot, userContent);
+            grepResults = await ContextGatherer.gatherContext({
+                workspaceRoot: context.workspaceRoot,
+                query: userContent
+            });
         }
 
         // Retrieve relevant workspace memory context
@@ -646,25 +456,25 @@ export class AgenticMiddleware implements Middleware {
             // Store a snapshot for observability
             context['agenticQueues'] = JSON.parse(JSON.stringify(queues.get(sessionId)));
 
-            // v1.0.5: Automatically update workspace memory with progress if success
-            if (verifyResult === 'PASS' && wsHash) {
+            // v1.0.6: Automatically capture session progress into memory
+            const wsHash = context.workspaceRoot ? Buffer.from(context.workspaceRoot).toString('base64').slice(0, 8) : null;
+            if (verifyResult !== 'FAIL' && wsHash) {
                 try {
-                    const progressKey = `progress:${sessionId}`;
-                    const progressData = {
+                    const autoMemoryData = {
                         step: q.nowQueue[0] || 'complete',
                         status: verifyResult,
-                        context: responseContent.slice(0, 1000),
+                        content: responseContent.slice(0, 2000), // Larger window for passive retention
+                        ts: new Date().toISOString()
                     };
-                    await memoryManager.storeToolOutput('agentic_progress', { key: progressKey, ws: wsHash }, progressData);
+                    await memoryManager.storeToolOutput('auto_memory', { 
+                        sessionId, 
+                        _ws: wsHash 
+                    }, autoMemoryData);
+
                     // Append to knowledge.md using append-only strategy (skill-writer schema)
                     await appendKnowledge(projectDir, sessionId, responseContent);
-                    
-                    // v1.0.6: Automatically extract and save local skills to workspace root
-                    if (context.workspaceRoot) {
-                        await extractLocalSkill(context.workspaceRoot, sessionId, responseContent);
-                    }
-                } catch {
-                    // ignore memory store failures in middleware
+                } catch (err) {
+                    console.error(`[AgenticMiddleware] Failed to store auto_memory: ${err}`);
                 }
             }
         }

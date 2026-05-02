@@ -1,8 +1,15 @@
-import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
 import { storeMemory } from '../src/tools/store-memory.js';
 import { manageMemory } from '../src/tools/manage-memory.js';
 import { memoryManager } from '../src/memory/index.js';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
+
+// Mock useFreeLLM for store_workspace_skill tests
+vi.mock('../src/tools/use-free-llm.js', () => ({
+    useFreeLLM: vi.fn().mockResolvedValue({
+        choices: [{ message: { content: '```bash\necho "hello from llm"\n```' } }]
+    })
+}));
 
 describe('Memory System Integration', () => {
     const ws = '/tmp/test_ws_vitest';
@@ -116,6 +123,62 @@ describe('Memory System Integration', () => {
 
         expect(res.results).toHaveLength(1);
         expect(res.results[0]).toBe(content);
+
+        // Cleanup
+        rmSync(root, { recursive: true, force: true });
+    });
+
+    it('should generate scripts when using store_workspace_skill', async () => {
+        const { storeWorkspaceSkill } = await import('../src/tools/store-workspace-skill.js');
+        const root = '/tmp/test_ws_skill';
+        if (!existsSync(root)) mkdirSync(root, { recursive: true });
+
+        await storeWorkspaceSkill({
+            name: 'test-skill',
+            description: 'A test skill',
+            what: ['It does things'],
+            workspace_root: root,
+            script_instructions: {
+                'run.sh': 'Generate a script that echoes hello'
+            }
+        });
+
+        // Verify the script was created
+        const { promises: fs } = await import('fs');
+        const path = await import('path');
+        const scriptPath = path.join(root, '.free-llm-mcp', 'skills', 'test-skill', 'scripts', 'run.sh');
+        
+        const exists = existsSync(scriptPath);
+        expect(exists).toBe(true);
+        if (exists) {
+            const content = await fs.readFile(scriptPath, 'utf-8');
+            // Should match the mocked output in vi.mock
+            expect(content).toBe('echo "hello from llm"');
+        }
+
+        // Cleanup
+        rmSync(root, { recursive: true, force: true });
+    });
+
+    it('should retrieve relevant semantic search results using vector memory', async () => {
+        const root = '/tmp/test_ws_vector';
+        if (!existsSync(root)) mkdirSync(root, { recursive: true });
+        const wsHash = Buffer.from(root).toString('base64').slice(0, 8);
+
+        // Store some memories
+        await memoryManager.storeToolOutput('auto_memory', { _ws: wsHash, id: '1' }, "We deployed the frontend to Vercel using Next.js");
+        await memoryManager.storeToolOutput('auto_memory', { _ws: wsHash, id: '2' }, "The backend uses PostgreSQL for relational data storage");
+        
+        // Wait a bit just in case, though it's awaited
+        await new Promise(r => setTimeout(r, 100));
+
+        // Semantic search (query shouldn't match any exact words to test semantics)
+        const semanticRes = await memoryManager.search(wsHash, "react hosting platform");
+        
+        // It should match the Vercel string
+        expect(semanticRes).toBeDefined();
+        const found = semanticRes.find((r: any) => JSON.stringify(r).includes('Vercel'));
+        expect(found).toBeDefined();
 
         // Cleanup
         rmSync(root, { recursive: true, force: true });
