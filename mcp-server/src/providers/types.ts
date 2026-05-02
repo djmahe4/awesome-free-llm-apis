@@ -15,6 +15,7 @@ export interface ChatRequest {
   google_search?: boolean;
   timeoutMs?: number;
   abortSignal?: AbortSignal;
+  sessionId?: string;
 }
 
 export interface ChatResponse {

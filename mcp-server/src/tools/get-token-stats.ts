@@ -1,4 +1,4 @@
-import { sharedRouter } from './use-free-llm.js';
+import { sharedRouter } from '../pipeline/instances.js';
 import { ProviderRegistry } from '../providers/registry.js';
 
 export async function getTokenStats() {

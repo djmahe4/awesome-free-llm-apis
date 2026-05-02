@@ -39,7 +39,8 @@ import crypto from 'crypto';
 import { getTokenStats } from './tools/get-token-stats.js';
 import { listAvailableFreeModels } from './tools/list-models.js';
 import { validateProvider } from './tools/validate-provider.js';
-import { flushSystem, sharedRouter } from './tools/use-free-llm.js';
+import { flushSystem } from './tools/use-free-llm.js';
+import { sharedRouter } from './pipeline/instances.js';
 import { execSync } from 'child_process';
 import fs, { promises as fsp } from 'fs';
 

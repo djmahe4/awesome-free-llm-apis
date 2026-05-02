@@ -485,7 +485,13 @@ export class LLMExecutor {
     async prompt(
         messages: Message[],
         modelOverride: string = 'any',
-        options: { taskType?: string, timeoutMs?: number } = {}
+        options: { 
+            taskType?: string, 
+            timeoutMs?: number,
+            google_search?: boolean,
+            sessionId?: string,
+            agentic?: boolean
+        } = {}
     ): Promise<ChatResponse> {
         const registry = ProviderRegistry.getInstance();
         const providers = registry.getAvailableProviders();
@@ -520,7 +526,10 @@ export class LLMExecutor {
                         const res = await p.chat({
                             model: actualModel,
                             messages,
-                            timeoutMs: options.timeoutMs || 15000
+                            timeoutMs: options.timeoutMs || 15000,
+                            google_search: options.google_search,
+                            sessionId: options.sessionId,
+                            agentic: options.agentic
                         });
                         this.recordProviderSuccess(p.id);
                         return res;

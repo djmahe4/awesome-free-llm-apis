@@ -70,7 +70,7 @@ export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput) {
                         if (Array.isArray(memoryResults) && memoryResults.length > 0) {
                             memoryContext = (memoryResults as any[])
                                 .slice(0, 3)
-                                .map(m => `- ${m.content || JSON.stringify(m)}`)
+                                .map((m: any) => `- ${m.content || JSON.stringify(m)}`)
                                 .join('\n');
                         }
 

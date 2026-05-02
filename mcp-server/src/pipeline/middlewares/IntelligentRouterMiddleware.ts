@@ -232,7 +232,7 @@ export class IntelligentRouterMiddleware implements Middleware {
 ### GROUNDING RULES:
 1. USE ONLY the file paths and project structures explicitly mentioned in the "# FULL MEMORY STATE" or "# TASK CONTEXT" sections above.
 2. DO NOT hallucinate or imagine files, directories, or external libraries that are not in the context.
-3. If the user refers to a project (like 'py2rust') that is NOT in the memory, your subtasks must first be to SEARCH and DISCOVER the structure, NOT to assume it.
+3. If the user refers to a project that is NOT in the memory, your subtasks must first be to SEARCH and DISCOVER the structure, NOT to assume it.
 4. Keep the list concise (max 8 subtasks).
 
 Return ONLY a JSON array of strings, where each string is a clear subtask instruction.
@@ -240,7 +240,15 @@ Request: ${lastMessage}`;
 
         for (const modelId of plannerModels) {
             try {
-                const res = await this.executor.prompt([{ role: 'user', content: planningPrompt }], modelId);
+                const res = await this.executor.prompt(
+                    [{ role: 'user', content: planningPrompt }],
+                    modelId,
+                    {
+                        google_search: context.request.google_search,
+                        sessionId: context.request.sessionId,
+                        agentic: context.request.agentic
+                    }
+                );
                 plannerResponse = res.choices[0].message.content;
                 if (plannerResponse) break;
             } catch (err) {
@@ -285,7 +293,12 @@ Request: ${lastMessage}`;
                 const subtaskRes = await this.executor.prompt(
                     [...context.request.messages.slice(0, -1), { role: 'user', content: taskStr }],
                     'any', // Let executor pick best for type if it can, otherwise defaults to chat
-                    { taskType }
+                    {
+                        taskType,
+                        google_search: context.request.google_search || taskType === TaskType.SemanticSearch,
+                        sessionId: context.sessionId,
+                        agentic: context.request.agentic
+                    }
                 );
                 subtaskResults.push(`### Subtask ${i + 1}: ${taskStr}\n${subtaskRes.choices[0].message.content}`);
             } catch (err) {
@@ -465,12 +478,19 @@ Request: ${lastMessage}`;
             console.debug(`[Router] Auto-classified task as: ${context.taskType}`);
         }
 
+        // Auto-enable research for semantic search tasks
+        if (context.taskType === TaskType.SemanticSearch && !context.request.google_search) {
+            console.debug(`[Router] Enabling google_search for research task`);
+            context.request.google_search = true;
+        }
+
         // Step 2: Task Decomposition for complex inputs
         if (this.isComplex(context.request.messages)) {
             await this.decomposeAndExecute(context);
             if (context.response) return; // Terminal if handled by orchestrator
         }
 
+        // Step 3: Adaptive Routing
         const taskType = context.taskType || TaskType.Chat;
         const requestedModel = context.request.model;
         const tierModels = (requestedModel && requestedModel !== 'any')

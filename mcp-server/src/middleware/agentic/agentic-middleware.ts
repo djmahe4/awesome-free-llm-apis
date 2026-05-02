@@ -3,26 +3,17 @@ import path from 'path';
 import os from 'os';
 import { LRUCache } from 'lru-cache';
 import { debounce } from '../../utils/debounce.js';
-import { getIntelligentSystemPrompt } from './prompts.js';
 import type { Middleware, PipelineContext, NextFunction } from '../../pipeline/middleware.js';
-import { memoryManager } from '../../memory/index.js';
-import { WorkspaceScanner } from '../../cache/workspace.js';
 import { getMessageContent } from '../../utils/MessageUtils.js';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { memoryManager } from '../../memory/index.js';
+import { getIntelligentSystemPrompt } from './prompts.js';
+import { sharedRouter } from '../../pipeline/instances.js';
 
 import { 
     PROJECTS_DIR, 
     STATE_FILE, 
-    KNOWLEDGE_FILE,
-    LOCAL_SKILLS_DIR
+    KNOWLEDGE_FILE
 } from './constants.js';
-import { WorkspaceWalker } from './workspace-walker.js';
-import { ContextGatherer } from './context-gatherer.js';
-
-const workspaceScanner = new WorkspaceScanner(process.cwd());
 
 
 interface QueueState {
@@ -207,38 +198,6 @@ function decomposeGoal(goal: string): string[] {
     return lines.length > 1 ? lines : [goal];
 }
 
-/**
- * Merged signature: accepts both groundingGate (workspace-context anchor) and
- * isSubtask (prompt budget control). Both were present in different branches;
- * the function body already used both so this simply aligns the signature.
- */
-async function prependSystemPrompt(
-    context: PipelineContext,
-    userContent?: string,
-    explicitKeywords?: string[],
-    memoryContext?: string,
-    groundingGate?: string,
-    isSubtask: boolean = false,
-): Promise<void> {
-    const messages = context.request.messages;
-    if (!messages || messages.length === 0) return;
-
-    const dynamicPrompt = await getIntelligentSystemPrompt(userContent, explicitKeywords, memoryContext, isSubtask);
-    // v1.0.4 optimization: Force HIGH-LEVEL STEPS section (max 4 items) to constrain iteration
-    const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **4** high-level steps. Example:\n1. Understand the task\n2. Implement the core change\n3. Validate correctness\n4. Summarize\nDo not list more than 4 steps.`;
-
-    const fullSystemPrompt = `${dynamicPrompt}${highLevelStepsSection}${groundingGate || ''}`;
-    const hasSystem = messages[0].role === 'system';
-
-    if (hasSystem) {
-        messages[0] = {
-            ...messages[0],
-            content: `${fullSystemPrompt}\n\n${messages[0].content}`,
-        };
-    } else {
-        messages.unshift({ role: 'system', content: fullSystemPrompt });
-    }
-}
 
 function getResponseContent(context: PipelineContext): string | undefined {
     const rawContent = context.response?.choices?.[0]?.message?.content;
@@ -329,30 +288,25 @@ export class AgenticMiddleware implements Middleware {
         const sessionId: string | undefined = context.sessionId || (context.request as any)?.sessionId;
 
         const iterationCountKey = `_iteration_${sessionId}`;
-        const iterationCount: number = (context[iterationCountKey] as number | undefined) ?? 0;
+        const iterationCountValue = context[iterationCountKey];
+        const iterationCount: number = typeof iterationCountValue === 'number' ? iterationCountValue : 0;
         context[iterationCountKey] = iterationCount + 1;
 
         if (process.env.ENABLE_AGENTIC_MIDDLEWARE !== 'true' && !isAgenticExplicitlyRequested) {
             await next();
-            console.error(`[agentic-middleware] ${Date.now() - startMs}ms (pass-through)`);
+            return;
+        }
+
+        if (iterationCount > 10) {
+            console.error(`[AgenticMiddleware] Loop protection triggered for session=${sessionId}`);
+            await next();
             return;
         }
 
         if (!sessionId) {
-            console.error('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
+            console.error('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer.');
             await next();
-            console.error(`[agentic-middleware] ${Date.now() - startMs}ms (no-session bypass)`);
             return;
-        }
-
-        // Resolve workspace hash for context lookup and safe pathing
-        let wsHash: string | undefined;
-        if (context.workspaceRoot) {
-            try {
-                wsHash = await workspaceScanner.getWorkspaceHash(context.workspaceRoot);
-            } catch (err) {
-                console.error(`[AgenticMiddleware] Failed to derive workspace hash: ${err}`);
-            }
         }
 
         const projectDir = await ensureProjectFiles(sessionId);
@@ -362,62 +316,19 @@ export class AgenticMiddleware implements Middleware {
         const userMessage = context.request.messages.find(m => m.role === 'user');
         const userContent = userMessage ? String(userMessage.content) : undefined;
 
-        // Proactive Grep Context for Memory: Only on FIRST iteration to save I/O
-        let grepResults: string[] = [];
-        if (context.workspaceRoot && userContent && iterationCount === 1) {
-            grepResults = await ContextGatherer.gatherContext({
-                workspaceRoot: context.workspaceRoot,
-                query: userContent
-            });
-        }
-
-        // Retrieve relevant workspace memory context
-        let memoryContext: string | undefined;
-        if (wsHash) {
-            try {
-                const queryForMemory = userContent + (grepResults.length > 0 ? ' ' + grepResults.join(' ').slice(0, 500) : '');
-                const memoryResults = await memoryManager.search(wsHash, queryForMemory);
-                if (Array.isArray(memoryResults) && memoryResults.length > 0) {
-                    memoryContext = memoryResults
-                        .slice(0, 5)
-                        .map(m => `- ${typeof m === 'string' ? m : JSON.stringify(m)}`)
-                        .join('\n');
-                }
-            } catch (err) {
-                console.error(`[AgenticMiddleware] Memory lookup failed: ${err}`);
-            }
-        }
-
-        const isSubtask = q.nowQueue.length > 1;
-
-        // v1.0.4 Grounding Gate: Implement 'Read-First' check
-        let groundingGate = '';
-        if (context.workspaceRoot) {
-            const readmePath = path.join(context.workspaceRoot, 'README.md');
-            try {
-                // Check for existence of README.md to trigger grounding gate
-                await fs.access(readmePath);
-                groundingGate = `\n\n## 📖 READ-FIRST GATE ACTIVATED\nA README.md or project documentation is detected in the workspace root: ${context.workspaceRoot}.\nYou MUST verify all assertions against the provided context blocks in this prompt before proposing any architecture or implementation. If a file context is missing, mention it as [NOT FOUND] and ask the user to provide it. Do not assume standard patterns apply. Ground your assertions in local file contents.`;
-            } catch {
-                // README not found, check for file:// URIs in user message as secondary trigger
-                if (userContent?.includes('file://')) {
-                    groundingGate = `\n\n## 🔍 SOURCE-SPECIFIC GROUNDING\nYou are being asked to interact with specific file URIs. You MUST verify their contents via tools BEFORE asserting their structure or state.`;
-                }
-            }
-        }
-
-        try {
-            // Pass both groundingGate (workspace anchor) and isSubtask (prompt budget control)
-            await prependSystemPrompt(context, userContent, context.keywords, memoryContext, groundingGate, isSubtask);
-        } catch (err) {
-            console.error(`[AgenticMiddleware] Error prepending system prompt: ${err}`);
-            // Continue without the prepended prompt
-        }
+        // Context and memory are now handled by WorkspaceContextMiddleware
+        // which runs BEFORE AgenticMiddleware in the pipeline.
+        (context as any).isSubtask = q.nowQueue.length > 1;
 
         // Research validation: detect and log if this request involves external knowledge lookup.
         // This provides an explicit audit trail to reduce agent ambiguity and hallucination risk.
         if (userContent && detectResearchIntent(userContent)) {
             logResearchValidation(sessionId, userContent, 'pre-execution-research-detection');
+            // Auto-enable Google Search if research intent is detected in agentic mode
+            if (!context.request.google_search) {
+                context.request.google_search = true;
+                console.error(`[AgenticMiddleware] Research intent detected, auto-enabling google_search for session=${sessionId}`);
+            }
         }
 
 
@@ -432,61 +343,63 @@ export class AgenticMiddleware implements Middleware {
 
         persistStateDebounced(sessionId, projectDir);
 
-        // Execute the pipeline
-        await next();
+        // Execute the pipeline in a loop for each subtask
+        let subtaskIteration = 0;
+        const MAX_SUBTASKS = 5;
 
-        // Verification and queue update
-        const responseContent = getResponseContent(context);
-        if (responseContent) {
-            const verifyResult = verifySelf(responseContent);
+        // If no tasks, at least run once
+        if (q.nowQueue.length === 0) {
+            await next();
+        }
 
-            if (verifyResult.startsWith('FAIL')) {
-                q.improveQueue.push(verifyResult);
-                console.error(`[AgenticMiddleware][VERIFY] session=${sessionId} result="${verifyResult}"`);
-            } else if (verifyResult.startsWith('WARN')) {
-                // Log hallucination warnings as auditable events without blocking the pipeline
-                console.error(`[AgenticMiddleware][HALLUCINATION-WARN] session=${sessionId} result="${verifyResult}"`);
+        while (q.nowQueue.length > 0 && subtaskIteration < MAX_SUBTASKS) {
+            subtaskIteration++;
+            const currentTask = q.nowQueue[0];
+            console.error(`[AgenticMiddleware] Starting subtask ${subtaskIteration}: ${currentTask}`);
+
+            // 1. Inject Intelligent Prompt and Task Instruction
+            try {
+                const subtaskPrompt = await getIntelligentSystemPrompt(currentTask, context.keywords, undefined, true);
+                const taskHeader = `\n\n## CURRENT SUBTASK\nObjective: "${currentTask}"\nFocus ONLY on this part. Once done, summarize results for the next step.`;
+                
+                const messages = context.request.messages;
+                const sysMsg = messages.find(m => m.role === 'system');
+                if (sysMsg) {
+                    sysMsg.content = `${subtaskPrompt}${taskHeader}\n\n${sysMsg.content}`;
+                } else {
+                    messages.unshift({ role: 'system', content: `${subtaskPrompt}${taskHeader}` });
+                }
+            } catch (err) {
+                console.error(`[AgenticMiddleware] Failed to inject subtask prompt: ${err}`);
             }
 
-            // Post-execution research validation: confirm response is grounded
-            if (userContent && detectResearchIntent(userContent)) {
-                logResearchValidation(sessionId, responseContent, 'post-execution-response-grounding-check');
-            }
+            // 2. Direct execution of the router (the next step in the pipeline)
+            await sharedRouter.execute(context, async () => {});
 
-            // Store a snapshot for observability
-            context['agenticQueues'] = JSON.parse(JSON.stringify(queues.get(sessionId)));
+            // 3. Process result
+            const responseContent = getResponseContent(context);
+            if (responseContent) {
+                const verifyResult = verifySelf(responseContent);
 
-            // v1.0.6: Automatically capture session progress into memory
-            const wsHash = context.workspaceRoot ? Buffer.from(context.workspaceRoot).toString('base64').slice(0, 8) : null;
-            if (verifyResult !== 'FAIL' && wsHash) {
-                try {
-                    const autoMemoryData = {
-                        step: q.nowQueue[0] || 'complete',
-                        status: verifyResult,
-                        content: responseContent.slice(0, 2000), // Larger window for passive retention
-                        ts: new Date().toISOString()
-                    };
-                    await memoryManager.storeToolOutput('auto_memory', { 
-                        sessionId, 
-                        _ws: wsHash 
-                    }, autoMemoryData);
+                if (verifyResult.startsWith('FAIL')) {
+                    q.improveQueue.push(verifyResult);
+                }
 
-                    // Append to knowledge.md using append-only strategy (skill-writer schema)
+                // Append assistant response to history for next subtask context
+                context.request.messages.push({ role: 'assistant', content: responseContent });
+                
+                // Store memory and knowledge
+                const wsHash = context.wsHash;
+                if (!verifyResult.startsWith('FAIL') && wsHash) {
                     await appendKnowledge(projectDir, sessionId, responseContent);
-                } catch (err) {
-                    console.error(`[AgenticMiddleware] Failed to store auto_memory: ${err}`);
                 }
             }
-        }
 
-        if (q.nowQueue.length > 0) {
+            // 4. Update queue
             q.nowQueue.shift();
+            persistStateDebounced(sessionId, projectDir);
         }
 
-        // Store a snapshot for observability
-        context['agenticQueues'] = JSON.parse(JSON.stringify(queues.get(sessionId)));
-
-        persistStateDebounced(sessionId, projectDir);
-        console.error(`[agentic-middleware] ${Date.now() - startMs}ms session=${sessionId}`);
+        console.error(`[agentic-middleware] ${Date.now() - startMs}ms session=${sessionId} iterations=${subtaskIteration}`);
     }
 }

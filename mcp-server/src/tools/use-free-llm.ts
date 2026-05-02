@@ -9,6 +9,7 @@ import {
   ResponseCacheMiddleware,
   IntelligentRouterMiddleware,
   AgenticMiddleware,
+  WorkspaceContextMiddleware,
   TaskType,
   type PipelineContext
 } from '../pipeline/index.js';
@@ -30,12 +31,15 @@ export interface UseFreeLLMInput {
   keywords?: string[];
 }
 
-// Singleton instances for shared state across pipeline requests
 const workspaceScanner = new WorkspaceScanner(process.cwd());
-const sharedResponseCache = new ResponseCacheMiddleware();
-export const sharedRouter = new IntelligentRouterMiddleware();
-const agenticMiddleware = new AgenticMiddleware();
-const structuralMarkdownMiddleware = new StructuralMarkdownMiddleware();
+
+import {
+  sharedResponseCache,
+  sharedRouter,
+  agenticMiddleware,
+  workspaceContextMiddleware,
+  structuralMarkdownMiddleware
+} from '../pipeline/instances.js';
 
 /**
  * v1.0.4: Local TF-style summarization for large files (no API calls)
@@ -265,6 +269,7 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
   // 4. IntelligentRouter - Select provider/model and execute (includes token management and LLM execution)
   pipeline.use(structuralMarkdownMiddleware);
   pipeline.use(sharedResponseCache);
+  pipeline.use(workspaceContextMiddleware);
   pipeline.use(agenticMiddleware);
   pipeline.use(sharedRouter);
 

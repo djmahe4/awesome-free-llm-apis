@@ -76,7 +76,7 @@ export class VectorStore {
         const index = await this.getIndex(workspaceHash);
         const queryEmbedding = await this.generateEmbedding(query);
 
-        const results = await index.queryItems(queryEmbedding, query, limit);
+        const results = await index.queryItems(queryEmbedding, '', limit);
 
         return results.map(res => ({
             id: res.item.metadata.id as string,
