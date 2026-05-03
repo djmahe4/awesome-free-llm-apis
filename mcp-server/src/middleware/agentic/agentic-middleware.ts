@@ -14,6 +14,7 @@ import {
     STATE_FILE, 
     KNOWLEDGE_FILE
 } from './constants.js';
+import { ContextGatherer } from './context-gatherer.js';
 
 
 interface QueueState {
@@ -277,6 +278,14 @@ export class AgenticMiddleware implements Middleware {
             return steps.slice(0, 2);
         }
         return steps;
+    }
+
+    /**
+     * Gathers grep-based context from the workspace root based on a query.
+     * Delegates to the ContextGatherer utility.
+     */
+    async gatherGrepContext(workspaceRoot: string, query: string): Promise<string[]> {
+        return ContextGatherer.gatherContext({ workspaceRoot, query });
     }
 
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {

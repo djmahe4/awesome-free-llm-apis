@@ -1,6 +1,6 @@
 {
   "name": "free-llm-mcp-server",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "type": "module",
   "description": "MCP server for free LLM APIs",
   "bin": {
@@ -9,12 +9,12 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "postbuild": "node scripts/postbuild.js",
+    "postbuild": "node scripts/utils/postbuild.js",
     "start": "node dist/src/server.js",
     "dev": "tsx src/server.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "smoke-test": "tsx --env-file=.env scripts/smoke-test.ts",
+    "smoke-test": "tsx --env-file=.env scripts/verification/smoke-test.ts",
     "samples": "tsx --env-file=.env benchmarks/generate-live-samples.ts",
     "dashboard": "tsx --env-file=.env src/server.ts --sse"
   },
