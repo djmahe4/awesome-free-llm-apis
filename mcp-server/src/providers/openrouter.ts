@@ -25,5 +25,6 @@ export class OpenRouterProvider extends BaseProvider {
     { id: 'nvidia/nemotron-nano-12b-v2-vl:free', name: 'Nemotron Nano 12B VL' },
     { id: 'nvidia/nemotron-3-nano-30b-a3b:free', name: 'Nemotron 3 Nano 30B' },
     { id: 'nvidia/nemotron-nano-9b-v2:free', name: 'Nemotron Nano 9B' },
+    { id: 'qwen/qwen3-coder-480b-a35b:free', name: 'Qwen 3 Coder 480B' },
   ];
 }

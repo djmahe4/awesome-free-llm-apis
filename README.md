@@ -32,18 +32,18 @@
 This server includes an orchestration pipeline for routing, token management, and failover:
 
 - **🆕 v1.0.1: FREE-First Routing**: Prioritizes Cloudflare, GitHub Models, and OpenRouter `:free` models before paid options
-- **🆕 v1.0.1: 100% Provider Coverage**: Now routes across **79 models** from **15 providers** (up from 39 models, 10 providers)
 - **🆕 v1.0.1: Fixed Critical Fallback Bug**: Router no longer crashes on multiple provider attempts
 - **🆕 v1.0.4: Structural Memory Middleware**: `StructuralMarkdownMiddleware` injects full `knowledge.md` into every agentic request for complete session context visibility
 - **🆕 v1.0.4: Anti-Over-Iteration**: `AgenticMiddleware` now limits decomposed plans to 4 high-level steps and exits early when confidence > 0.85 or after 3 iterations
 - **🆕 v1.0.4: Stateful Coding Mode**: `code_mode` with `mode:"coding"` writes ` ```file:...``` ` output blocks to `data/projects/{sessionId}/` for persistent session files
 - **🆕 v1.0.4: Global Usage Persistence**: Atomic Read-Merge-Write telemetry that tracks daily and lifetime token/request usage across server restarts and multiple concurrent agents.
+- **🆕 v1.0.5: 100% Provider Coverage**: Now routes across **86 models** from **18 providers** (up from 39 models, 10 providers)
+- **🆕 v1.0.5: Workspace Scanning and Indexing**: `indexWorkspace` tool scans and indexes workspace files for fast context retrieval. 
 - **Task-Based Routing**: Maps coding tasks to QwQ-32B/Qwen Coder and chat to Llama 3.3-70B/GPT-4o
 - **Token Management**: Uses `js-tiktoken` for proactive usage estimation and rate limit prevention
 - **Intelligent Failover**: Automatically cascades through 5-15 models per task if a provider is unavailable
 - **Request Caching**: Persistent caching for repeated identical queries
 - **Dashboard**: Real-time monitoring of usage, provider health, and model availability
-- **Platform Independent**: Uses a `QuickJS` engine compiled to `WebAssembly` for a secure, host-agnostic JavaScript sandbox
 - **Agentic Middleware**: Optional agentic layer with task decomposition, momentum queues, file-first state, and a verification loop (see [`mcp-server/src/middleware/agentic/`](mcp-server/src/middleware/agentic/))
 - **🆕 Agentic Benchmarks**: Specialized performance suite validating **90-95% context compression** and pipeline efficiency (see [**`mcp-server/benchmarks/README.md`**](mcp-server/benchmarks/README.md))
 
@@ -223,7 +223,7 @@ Base URL: `https://api.llm7.io/v1`
 | qwen2.5-coder-32b     | —       | —          | Text (code)      | 30 RPM (120 with token) |
 | + ~24 more models     | Varies  | Varies     | Text             | 30 RPM (120 with token) |
 
-### [ModelScope](https://modelscope.cn/my/myaccesstoken) 🇨🇳
+### [ModelScope](https://modelscope.cn/my/myaccesstoken) 🇨🇳 : Not Supported
 
 Free API-Inference for registered users. Requires Alibaba Cloud account binding + real-name verification. [^6]
 
@@ -293,7 +293,7 @@ Base URL: `https://openrouter.ai/api/v1`
 | mistralai/devstral-2512:free           | 256K    | ~32K       | Text             | 20 RPM, 200 RPD |
 | + ~23 more free models                 | Varies  | Varies     | Text / Image     | 20 RPM, 200 RPD |
 
-### [OVHcloud AI Endpoints](https://endpoints.ai.cloud.ovh.net/) 🇫🇷
+### [OVHcloud AI Endpoints](https://endpoints.ai.cloud.ovh.net/) 🇫🇷 : Not Supported
 
 Free anonymous tier (no API key, no signup): 2 RPM per IP per model. 40+ open-weight models hosted in EU. OpenAI SDK-compatible. [^7]
 
@@ -312,6 +312,18 @@ Base URL: `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1`
 | Qwen3Guard-Gen-8B             | 32K     | ~4K        | Text (safety guard)               | 2 RPM (anonymous) |
 | Qwen3Guard-Gen-0.6B           | 32K     | ~4K        | Text (safety guard)               | 2 RPM (anonymous) |
 | + 30 more models              | Varies  | Varies     | Text, Vision, Code, Image, Speech | 2 RPM (anonymous) |
+
+### [SambaNova](https://sambanova.ai/) 🇺🇸 : Not Supported
+
+Free tier for developers.
+
+Base URL: `https://api.sambanova.ai/v1`
+
+| Model Name | Context | Max Output | Modality | Rate Limit |
+| ------------------- | ------- | ---------- | ------------ | ------------------- |
+| DeepSeek-V3.1 | — | — | Text | 20 RPM, 20 RPD, 200K TPD |
+| Meta-Llama-3.3-70B-Instruct | 131K | 4K | Text | 20 RPM, 20 RPD, 200K TPD |
+| gpt-oss-120b | 131K | 8K | Text | 20 RPM, 20 RPD, 200K TPD |
 
 ### [SiliconFlow](https://cloud.siliconflow.cn/account/ak) 🇨🇳
 

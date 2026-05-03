@@ -36,6 +36,13 @@
 - **REMOVED**: `store_memory` tool. Agents should migrate to `store_workspace_skill` for structured persistence or rely on `index_workspace` for semantic code retrieval.
 - **DOCUMENTATION ONLY**: `code_mode` has been removed from all public documentation to favor cleaner agent interactions, although the underlying sandboxed runtime remains available in the codebase for internal use.
 
+## Next update
+
+- Remove the kluster from providers list
+- Add new 'vision_tool' to make use of free vision models to analyse images.(using `file:///` in `workspace_root` as the image path)
+- Add skill loading and prompt tool to make use of free skill loading agents to dynamically load and integrate the use of 'awesome-antigravity-skills' repo for agentic tasks and integrate it in the middleware without overhead.
+- Add **Privacy-Sensitive Data redaction** for llm calls in middleware to prevent the leaking of sensitive data to third party free providers.(e.g. API Keys,passwords,PII, etc)
+
 ## v1.0.4 – Hardened Resilience + Persistent Memory + structural Fix (April 2026)
 
 **Released:** 2026-04-12 (Updated)
@@ -98,8 +105,7 @@
 ### Next updates
 
 - Remove `code_mode` tool(make it deprecated and retain the code and just comment the integrations) and replace it with `code_review` which uses kluster ai
-- Remove the kluster from providers list
-- Plan to integraate knowlege, plan and tasks in the agentic worklflow atleast one of them.
+- Plan to integrate knowlege, plan and tasks in the agentic worklflow atleast one of them.
 - Add image processeing which utilises free image apis within the `use_free_llm` tool.(using `file:///` in `workspace_root` as the image path)
 
 ---

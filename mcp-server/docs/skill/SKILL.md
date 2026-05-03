@@ -26,7 +26,6 @@ Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-
 
 - **Privacy-Sensitive Data**: When data cannot be sent to third-party free providers (verify specific provider terms of service if unsure).
 - **Hard Real-Time Constraints**: When sub-second response times of paid tiers are strictly required (though Cloudflare/Groq are extremely fast).
-- **Non-Coding Mathematical Logic**: Avoid letting the LLM perform complex math directly; use the `code_mode` tool instead.
 
 ---
 

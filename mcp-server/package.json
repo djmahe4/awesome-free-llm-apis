@@ -16,7 +16,8 @@
     "test:coverage": "vitest run --coverage",
     "smoke-test": "tsx --env-file=.env scripts/verification/smoke-test.ts",
     "samples": "tsx --env-file=.env benchmarks/generate-live-samples.ts",
-    "dashboard": "tsx --env-file=.env src/server.ts --sse"
+    "dashboard": "tsx --env-file=.env src/server.ts --sse",
+    "report": "tsx --env-file=.env scripts/evaluation/model-report.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

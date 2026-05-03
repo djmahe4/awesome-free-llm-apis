@@ -9,7 +9,8 @@ export class SiliconFlowProvider extends BaseProvider {
     rateLimits: RateLimits = { rpm: 1000 };
     models: ProviderModel[] = [
         { id: 'Qwen/Qwen2.5-72B-Instruct', name: 'Qwen 2.5 72B Instruct' },
-        { id: 'Qwen/Qwen2.5-Coder-32B-Instruct', name: 'Qwen 2.5 Coder 32B Instruct' },
+        { id: 'deepseek-ai/deepseek-r1-distill-qwen-32b', name: 'DeepSeek R1 Distill Qwen 32B' },
         { id: 'Qwen/Qwen3-8B', name: 'Qwen 3 8B' },
+        { id: 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B', name: 'DeepSeek R1 0528 Qwen 3 8B' },
     ];
 }

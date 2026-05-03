@@ -13,6 +13,7 @@ import { NvidiaProvider } from './nvidia.js';
 import { OllamaCloudProvider } from './ollama-cloud.js';
 import { OpenRouterProvider } from './openrouter.js';
 import { SiliconFlowProvider } from './siliconflow.js';
+import { KiloCodeProvider } from './kilocode.js';
 import type { Provider, ProviderModel } from './types.js';
 
 export class ProviderRegistry {
@@ -36,6 +37,7 @@ export class ProviderRegistry {
       new OllamaCloudProvider(),
       new OpenRouterProvider(),
       new SiliconFlowProvider(),
+      new KiloCodeProvider()
     ];
     for (const p of allProviders) {
       this.providers.set(p.id, p);
