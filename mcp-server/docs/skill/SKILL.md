@@ -282,8 +282,8 @@ Dynamically activate the agentic loop by passing the `agentic` and `sessionId` p
 
 - **Stabilized Orchestration**: Circular dependencies have been eliminated, ensuring consistent middleware initialization across concurrent agentic sessions.
 - **Semantic Prompt Resolution**: Automatically indexes relevant prompt sections. A **stricter selection threshold (score >= 3)** ensures instructions are mission-critical.
-- **Stateful Project Memory**: Persists task state (`nowQueue`, `improveQueue`) and knowledge base (`knowledge.md`) in `projects/{sessionId}/`.
-- **Automatic Task Decomposition**: Automatically splits complex goals into discrete, trackable steps (capped at 2 for stability).
+- **Stateful Project Memory**: Persists architectural decisions and harvested skills in `.free-llm-mcp/skills/`.
+- **Automatic Task Decomposition**: Automatically splits complex goals into discrete, trackable steps (capped at 4 for stability).
 
 ### ⚡ Reference Steering Protocols
 

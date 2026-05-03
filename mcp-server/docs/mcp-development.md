@@ -159,11 +159,11 @@ The system uses a flexible, Starlette-inspired middleware pipeline to handle LLM
 - **PipelineContext**: A shared object that carries the request, response, and metadata (like estimated tokens or selected provider) through the stack.
 
 ### Default Pipeline Stack
-1.  **ResponseCacheMiddleware**: Checks if a result exists in the persistent workspace-aware cache.
-2.  **AgenticMiddleware (Conditional)**: If triggered, decomposes tasks into sub-problems and prepares the context with intelligent prompts.
-3.  **IntelligentRouterMiddleware**: Maps the task type to a prioritized list of models and handles failover.
-4.  **TokenManagerMiddleware**: Performs local token estimation and synchronizes quotas from API headers.
-5.  **LLMExecutionMiddleware**: Performs the final HTTPS request to the provider.
+1.  **StructuralMarkdownMiddleware**: Resolves `file://` and `artifact://` URIs with security boundary checks.
+2.  **ResponseCacheMiddleware**: Checks if a result exists in the persistent workspace-aware cache.
+3.  **WorkspaceContextMiddleware**: Injects vector-searched memory, grep context, and intelligent system prompts.
+4.  **AgenticMiddleware**: Decomposes tasks into sub-problems and manages the verification loop.
+5.  **IntelligentRouterMiddleware**: Maps task types to model tiers, handles fallback cascades, and manages token telemetry via the `LLMExecutor`.
 
 ---
 

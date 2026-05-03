@@ -131,46 +131,41 @@ Tool Call (use_free_llm)
 PipelineExecutor.execute(request, taskType)
         │
         ▼ ─────────────────────────────────────
-StructuralMarkdownMiddleware  (v1.0.4 — only when request.isAgentic is set)
-  • Reads full knowledge.md for session into memory
-  • **Artifact Awareness**: Detects and inlines `file://` URIs and Markdown links
+StructuralMarkdownMiddleware  (v1.0.5 — Content Resolution)
+  • **URI Resolution**: Detects and inlines `file://`, `artifact://` URIs
+  • **Security Gate**: Rejects paths outside of authorized workspace/artifact roots
   • **Local Summarization**: TF-style zero-latency compression for large files
-  • Injects full memory state + response format instructions into user message
-  • console.error() with Date.now() subtraction for standardized latency logging
         │
         ▼ ─────────────────────────────────────
 ResponseCacheMiddleware
-  • generateKey(request, workspaceHash)
-  • If cache hit → return immediately (no LLM call)
+  • **Deterministic Key**: `generateKey(request, workspaceHash)`
+  • If cache hit → returns immediately (no LLM call)
   • If miss → next()
         │
         ▼ ─────────────────────────────────────
-AgenticMiddleware  (only when agentic:true or ENABLE_AGENTIC_MIDDLEWARE=true)
-  • Requires sessionId (auto-derived from workspace_root if not provided)
-  • detectResearchIntent(userContent) → logs [RESEARCH-VALIDATION] if detected
-  • decomposeGoal(userContent) → limitSubtasks() caps plan to 4 steps (v1.0.4)
-  • prependSystemPrompt(context) → dynamic prompt + HIGH-LEVEL STEPS section (v1.0.4)
-  • next()
-  • verifySelf(response) → logs [VERIFY] on FAIL, pushes to improveQueue
-  • verifySelf() returns PASS or iterationCount >= 3 → early exit, clears nowQueue (v1.0.4)
-  • Persists queue state to projects/{sessionId}/queues.json
+WorkspaceContextMiddleware (v1.0.5 — Context Injection)
+  • **Pre-emptive Indexing**: Triggers background workspace scan for agentic tasks
+  • **Vector Retrieval**: Semantic search across persistent workspace memory
+  • **Grep Grounding**: Extracts TF-IDF relevant snippets from source code
+  • **Intelligent Prompts**: Injects project-specific system instructions
         │
         ▼ ─────────────────────────────────────
-IntelligentRouterMiddleware
-  • Maps task type to model tier (FREE-first: Cloudflare → GitHub → OpenRouter → paid)
-  • Iterates fallback list, calls LLMExecutor.tryProvider()
-  • On success: context.response = response; next() called ONCE
-  • On all-fail: throws "[Router] Exhausted all fallback models"
+AgenticMiddleware (v1.0.5 — Loop Orchestration)
+  • **Search Suppression**: Disables `google_search` for subtasks after turn 0
+  • **Goal Decomposition**: Limits plans to 4 steps to prevent token spirals
+  • **Verification Loop**: Self-correcting feedback for failed assertions
         │
         ▼ ─────────────────────────────────────
-LLMExecutor
-  • Estimates tokens (js-tiktoken)
-  • Checks quota before request
-  • Makes HTTPS request to provider
-  • Updates token tracking from x-ratelimit-* headers + **reactive error interception**
-  • **Bridge**: writes provider's remaining tokens into context.providerRemainingTokens
-  •   → ContextManager.compress() reads this to override static model-window with live quota
-  •   → Providers without headers degrade gracefully (static estimate used as fallback)
+IntelligentRouterMiddleware (v1.0.5 — Routing Logic)
+  • **Gemini-Exclusive Search**: Forces `gemini-2.5-flash` if `google_search: true`
+  • **Fallback Cascade**: Majority-voting classification → tiered model selection
+  • **Greedy Budgeting**: Dynamically allocates time for hedged execution
+        │
+        ▼ ─────────────────────────────────────
+LLMExecutor (v1.0.5 — Execution)
+  • **Telemetry**: Updates RPM/TPM usage from `x-ratelimit-*` headers
+  • **Circuit Breaking**: Cooldown penalties for failing providers
+```
         │
         ▼ ─────────────────────────────────────
 Response returned to agent
