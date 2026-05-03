@@ -1,0 +1,21 @@
+[package]
+name = "rust-sandbox-runner"
+version = "0.1.0"
+edition = "2021"
+description = "MCP code_mode sandbox runner using boa_engine (Rust JS engine)"
+publish = false
+
+[[bin]]
+name = "sandbox-runner"
+path = "src/main.rs"
+
+[dependencies]
+# boa_engine: pure-Rust ECMAScript 2021 interpreter
+boa_engine = "0.19"
+boa_runtime = "0.19"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
