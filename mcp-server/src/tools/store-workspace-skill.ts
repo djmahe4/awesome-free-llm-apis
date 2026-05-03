@@ -18,12 +18,16 @@ export interface StoreWorkspaceSkillInput {
     workspace_root: string;
 }
 
+export type StoreWorkspaceSkillResponse = 
+    | { success: true; message: string; path: string; scripts: string[] }
+    | { success: false; error: string };
+
 /**
  * store_workspace_skill: Explicitly harvests structured knowledge into the workspace.
  * Follows the @skill-writer schema and Agent Skills specification.
  * v1.0.8: Now uses an internal LLM call to intelligently generate scripts based on instructions.
  */
-export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput) {
+export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput): Promise<StoreWorkspaceSkillResponse> {
     const { 
         name, 
         description, 

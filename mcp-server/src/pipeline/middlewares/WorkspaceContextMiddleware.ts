@@ -5,6 +5,7 @@ import { memoryManager } from '../../memory/index.js';
 import { WorkspaceScanner } from '../../cache/workspace.js';
 import { getIntelligentSystemPrompt } from '../../middleware/agentic/prompts.js';
 import { ContextGatherer } from '../../middleware/agentic/context-gatherer.js';
+import { WorkspaceIndexer } from '../../memory/indexer.js';
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
@@ -25,6 +26,19 @@ export class WorkspaceContextMiddleware implements Middleware {
         const sessionId = context.sessionId;
         const userMessage = context.request.messages.find(m => m.role === 'user');
         const userContent = userMessage ? (typeof userMessage.content === 'string' ? userMessage.content : JSON.stringify(userMessage.content)) : '';
+        const isAgentic = context.request.agentic === true;
+
+        // 0. Pre-emptive Memory Update for Agentic Requests
+        if (isAgentic && context.workspaceRoot) {
+            try {
+                console.debug(`[WorkspaceContextMiddleware] Pre-emptive indexing for agentic task in ${context.workspaceRoot}`);
+                const indexer = new WorkspaceIndexer(context.workspaceRoot);
+                // Run indexer with force=false to respect caches but ensure latest files are present
+                await indexer.indexWorkspace(context.workspaceRoot, false);
+            } catch (err) {
+                console.error(`[WorkspaceContextMiddleware] Pre-emptive indexing failed: ${err}`);
+            }
+        }
 
         // 1. Resolve Workspace Hash
         if (context.workspaceRoot && !context.wsHash) {

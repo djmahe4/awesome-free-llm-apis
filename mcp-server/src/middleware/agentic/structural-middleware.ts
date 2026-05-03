@@ -1,4 +1,4 @@
-import { Middleware, PipelineContext, NextFunction } from '../../pipeline/index.js';
+import { Middleware, PipelineContext, NextFunction } from '../../pipeline/middleware.js';
 import path from 'path';
 import fs from 'fs-extra';
 import { 

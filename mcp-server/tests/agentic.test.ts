@@ -5,6 +5,15 @@ import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/
 import type { PipelineContext } from '../src/pipeline/middleware.js';
 import fs, { promises as fsp } from 'fs';
 
+// Mock debounce to be immediate
+vi.mock('../src/utils/debounce.js', () => ({
+    debounce: vi.fn((fn: any) => {
+        const d = (...args: any[]) => fn(...args);
+        d.flush = () => {};
+        return d;
+    })
+}));
+
 // Mock FS module
 vi.mock('fs', () => {
     const mockPromises = {
@@ -21,6 +30,21 @@ vi.mock('fs', () => {
         promises: mockPromises,
     };
 });
+
+// Mock instances to break circular dependency and provide a controlled router
+vi.mock('../src/pipeline/instances.js', () => ({
+    sharedRouter: {
+        execute: vi.fn(async (context, next) => {
+            // Mock a successful response to prevent "No available providers" errors
+            context.response = {
+                id: 'mock-resp',
+                choices: [{ message: { role: 'assistant', content: 'Subtask completed successfully.' } }],
+                usage: { total_tokens: 10, prompt_tokens: 5, completion_tokens: 5 }
+            };
+            await next();
+        })
+    }
+}));
 
 describe('Agentic Intelligence & Middleware', () => {
     const mockPromptData = {
@@ -190,13 +214,12 @@ describe('Agentic Intelligence & Middleware', () => {
             expect(fsp.mkdir).toHaveBeenCalled();
             // Debounced: wait for queues.json write (2000ms debounce + buffer)
             await new Promise(resolve => setTimeout(resolve, 2100));
-            // queues.json is written twice (pre/post execution) - check for either
+            // queues.json is written multiple times - check if ANY call contains the steps
             const writeCalls = vi.mocked(fsp.writeFile).mock.calls;
-            const queuesCall = writeCalls.find((call: any[]) => 
-                typeof call[0] === 'string' && call[0].includes('state.json')
+            const hasSteps = writeCalls.some((call: any[]) => 
+                typeof call[0] === 'string' && call[0].includes('state.json') && call[1].includes('Step')
             );
-            expect(queuesCall).toBeDefined();
-            expect(queuesCall![1]).toContain('Step'); // Contains decomposed steps
+            expect(hasSteps).toBe(true);
         });
 
         it('respects ENABLE_AGENTIC_MIDDLEWARE toggle', async () => {

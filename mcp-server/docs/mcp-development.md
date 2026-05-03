@@ -7,7 +7,6 @@ This guide provides a structured overview of the MCP server architecture and exp
 - [Adding New Providers](#adding-new-providers)
 - [Configuration System](#configuration-system)
 - [Caching Mechanism](#caching-mechanism)
-- [Sandboxed Execution (Code Mode)](#sandboxed-execution-code-mode)
 - [Internal Workflow](#internal-workflow)
 - [Agentic Middleware](#agentic-middleware)
 
@@ -106,71 +105,6 @@ const cachedResponse = cache.get(cacheKey);
 
 ---
 
-## Sandboxed Execution (Code Mode)
-
-The `code_mode` tool executes code using isolated sandbox runtimes with no filesystem or network access.
-
-### Supported Languages
-
-| Language | Sandbox | Notes |
-|----------|---------|-------|
-| `javascript` (default) | QuickJS via `quickjs-emscripten` | Fully sandboxed; no external deps |
-| `python` | Restricted subprocess with safe builtins | Requires Python 3 on PATH and RestrictedPython installed |
-| `go` | Implemented using `goja` | Fully sandboxed; no external deps |
-| `rust` | Implemented using `boa_engine` | Fully sandboxed; no external deps |
-
-### Security Features (all languages)
-- **No filesystem access**: Scripts cannot read or write files
-- **No network access**: Scripts cannot make HTTP requests or open sockets
-- **No process/OS calls**: Scripts cannot spawn processes or access environment beyond `DATA`
-- **Timeouts**: Execution is interrupted if it exceeds `timeoutMs` (default 5000ms)
-- **Output isolation**: Only `stdout` (from `print()` / `console.log()`) is returned to the caller
-
-### JavaScript Executor (QuickJS)
-The `executeJavaScript` function in `src/sandbox/executor.ts` manages:
-1. Initializing a fresh QuickJS context per request
-2. Setting up stdout/stderr capturing via `print()` and `console.log()`
-3. Injecting the `DATA` variable as a string global
-4. Setting a deadline-based interrupt handler for the timeout
-5. Disposing the context after execution (no state leakage between calls)
-
-```typescript
-// JavaScript sandbox globals available to user code:
-// DATA: string  — the input data passed in the `data` parameter
-// print(...args): void  — writes to stdout (same as console.log)
-// console.log(...args): void  — writes to stdout
-// console.error(...args): void  — writes to stderr
-```
-
-### Python Executor
-The `executePython` function in `src/sandbox/executor.ts` manages:
-1. Building a wrapper script that restricts builtins to a safe allowlist
-2. Injecting `DATA` via the `__SANDBOX_DATA__` environment variable
-3. Running the user code via `python3 -c <wrapper>` as a subprocess
-4. Capturing stdout/stderr with a 1MB buffer limit
-5. Handling timeouts via Node.js `execFile` timeout
-
-```python
-# Python sandbox — available built-ins (safe allowlist):
-# DATA: str  — the input data string
-# print(), len(), range(), enumerate(), zip(), map(), filter()
-# sorted(), reversed(), list(), dict(), set(), tuple()
-# str(), int(), float(), bool(), bytes()
-# max(), min(), sum(), abs(), round()
-# json module is importable via __import__('json')
-# datetime module is importable via __import__('datetime')
-```
-
-### Adding a New Language Sandbox
-
-To add support for a new language (e.g., Go via `goja`):
-
-1. Add the language to the `SandboxLanguage` type in `src/sandbox/executor.ts`
-2. Implement an `executeGo(code, data, timeoutMs)` function following the same pattern as `executeJavaScript`
-3. Add a case in the `executeInSandbox` switch statement
-4. Update the `code_mode` tool description in `src/mcp/index.ts` to include the new language in the `language` enum
-5. Update `docs/mcp-development.md` and `docs/skill/SKILL.md` tables
-
 ---
 
 ## Workspace Awareness
@@ -203,21 +137,15 @@ The `manage_memory` tool provides a way to interact with the persistent memory s
 
 ---
 
-## Explicit Memory Injection
+## Workspace Persistence (`store_workspace_skill` & `index_workspace`)
 
-The `store_memory` tool allows agents to deliberately inject facts into the long-term store. This is the primary mechanism for preserving architectural decisions across sessions.
+The system implements a structured persistence layer for capturing agent findings and indexing the workspace.
 
-### Usage Example
-```json
-{
-  "name": "store_memory",
-  "arguments": {
-    "key": "queue_strategy",
-    "content": "Using BullMQ on Redis for high-throughput job isolation.",
-    "workspace_root": "/home/user/project-a"
-  }
-}
-```
+### `store_workspace_skill`
+Explicitly harvest structured knowledge, architectural decisions, and scripts into the workspace. This is the primary mechanism for preserving high-fidelity information across sessions.
+
+### `index_workspace`
+Proactively index all files in the workspace root into the vector database. This ensures semantic search results are always grounded in the latest state of the source code.
 
 ---
 

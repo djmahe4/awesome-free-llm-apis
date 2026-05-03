@@ -45,4 +45,8 @@ export class ResponseCacheMiddleware implements Middleware {
         this.cache.flush();
         memoryManager.flush();
     }
+
+    clear(): void {
+        this.cache.clear();
+    }
 }

@@ -13,7 +13,6 @@ export class IntelligentRouterMiddleware implements Middleware {
     private contextManager: ContextManager;
 
     // Model capability scores (0.0 to 1.0)
-    // Model capability scores (0.0 to 1.0)
     private static readonly modelCapabilities: Record<string, number> = {
         'DeepSeek-R1': 1.0,
         'deepseek-ai/DeepSeek-R1': 1.0,
@@ -220,7 +219,9 @@ export class IntelligentRouterMiddleware implements Middleware {
         console.debug(`[Router] Decomposing complex task...`);
 
         // 1. Pick a Planner model (SiliconFlow V3 or Gemini Flash)
-        const plannerModels = ['deepseek-ai/DeepSeek-V3', 'gemini-2.5-flash', 'llama3.1-8b'];
+        const plannerModels = context.request.google_search
+            ? ['gemini-2.5-flash', 'deepseek-ai/DeepSeek-V3', 'llama3.1-8b']
+            : ['deepseek-ai/DeepSeek-V3', 'gemini-2.5-flash', 'llama3.1-8b'];
         let plannerResponse: string | null = null;
 
         const lastMessage = context.request.messages.length > 0
@@ -295,7 +296,8 @@ Request: ${lastMessage}`;
                     'any', // Let executor pick best for type if it can, otherwise defaults to chat
                     {
                         taskType,
-                        google_search: context.request.google_search || taskType === TaskType.SemanticSearch,
+                        // Only the first iteration inherits search, or if the subtask specifically requires it
+                        google_search: (i === 0 && context.request.google_search) || taskType === TaskType.SemanticSearch,
                         sessionId: context.sessionId,
                         agentic: context.request.agentic
                     }
@@ -498,7 +500,15 @@ Request: ${lastMessage}`;
             : (IntelligentRouterMiddleware.taskRouteMap[taskType] || []);
 
         // Use Set to maintain order but remove duplicates
-        const finalTierModels = [...new Set(tierModels)].filter(Boolean) as string[];
+        let finalTierModels = [...new Set(tierModels)].filter(Boolean) as string[];
+
+        // v1.0.5: Strategic prioritization of Gemini for search tasks
+        if (context.request.google_search) {
+            const geminiModels = finalTierModels.filter(m => m.toLowerCase().includes('gemini'));
+            const otherModels = finalTierModels.filter(m => !m.toLowerCase().includes('gemini'));
+            finalTierModels = [...geminiModels, ...otherModels];
+            console.debug(`[Router] Prioritizing Gemini models for search: ${geminiModels.join(', ')}`);
+        }
 
         const availableProviders = ProviderRegistry.getInstance().getAvailableProviders();
         if (availableProviders.length === 0) {
@@ -718,6 +728,9 @@ Request: ${lastMessage}`;
 
                 const { provider } = scoredProviders[index];
                 index++;
+
+                // Google Search is Gemini-exclusive
+                if (context.request.google_search && provider.id !== 'gemini') continue;
 
                 const stats = this.executor.getProviderStats()[provider.id];
                 if (stats?.circuitOpen) {

@@ -51,7 +51,7 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
 
         // Register a provider that has MOST models from our routing map
         // This allows us to verify if the router picks the TOP suggested model when available
-        const prov = new MockProvider('main-mock', [
+        const prov = new MockProvider('gemini', [
             { id: 'qwen/qwen3-coder:free', name: 'Qwen3 Coder' },
             { id: 'DeepSeek-R1', name: 'DeepSeek R1' },
             { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3' },
@@ -126,7 +126,7 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await verifyRouting(
             'Find information about the latest advancements in quantum computing.',
             TaskType.SemanticSearch,
-            'nvidia/nemotron-3-super-120b-a12b:free'
+            'gemini-2.5-flash'
         );
     });
 

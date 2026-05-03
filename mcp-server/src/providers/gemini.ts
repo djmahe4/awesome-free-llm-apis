@@ -107,7 +107,13 @@ export class GeminiProvider extends BaseProvider {
   async chat(request: ChatRequest): Promise<ChatResponse> {
     this.checkRateLimit();
 
-    const actualModel = request.model || 'gemini-2.5-flash';
+    let actualModel = request.model || 'gemini-2.5-flash';
+    
+    // If google_search is enabled, force usage of a Flash model (efficiency & cost)
+    if (request.google_search) {
+      actualModel = 'gemini-2.5-flash';
+    }
+
     let result;
     try {
       result = await this.runPythonClient({
@@ -170,11 +176,16 @@ export class GeminiProvider extends BaseProvider {
     const pythonPath = this.resolvePythonPath();
     const scriptPath = path.join(__dirname, 'gemini_client.py');
 
+    let actualModel = request.model || 'gemini-2.5-flash';
+    if (request.google_search) {
+      actualModel = 'gemini-2.5-flash';
+    }
+
     const py = spawn(pythonPath, [scriptPath], {
       env: { ...process.env }
     });
     const input = JSON.stringify({
-      model: request.model || 'gemini-2.5-flash',
+      model: actualModel,
       messages: request.messages,
       stream: true,
       temperature: request.temperature,

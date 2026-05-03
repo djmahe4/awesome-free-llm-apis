@@ -3,7 +3,7 @@ import { persistence, PersistentUsage } from './PersistenceManager.js';
 import { getEncoding } from 'js-tiktoken';
 import type { Message, ChatResponse } from '../providers/types.js';
 import { ProviderRegistry } from '../providers/registry.js';
-import type { PipelineContext } from '../pipeline/index.js';
+import type { PipelineContext } from '../pipeline/middleware.js';
 import { getMessageContent } from './MessageUtils.js';
 
 export interface TokenTrackingInfo {
@@ -502,7 +502,9 @@ export class LLMExecutor {
 
         // v1.0.4: Strategic model selection for high-stakes planning/decomposition
         const targetModels = modelOverride === 'any'
-            ? ['deepseek-ai/DeepSeek-V3', 'gemini-2.5-flash', 'llama-3.3-70b-versatile', 'glm-4.7']
+            ? (options.google_search 
+                ? ['gemini-2.5-flash', 'deepseek-ai/DeepSeek-V3', 'llama-3.3-70b-versatile', 'glm-4.7']
+                : ['deepseek-ai/DeepSeek-V3', 'gemini-2.5-flash', 'llama-3.3-70b-versatile', 'glm-4.7'])
             : [modelOverride];
 
         // Pre-calculate scores once for efficiency
@@ -516,6 +518,9 @@ export class LLMExecutor {
         for (const modelId of targetModels) {
             for (const { provider: p, score } of scoredProviders) {
                 if (score < 0) continue;
+
+                // Google Search is a Gemini-exclusive feature in this architecture
+                if (options.google_search && p.id !== 'gemini') continue;
                 
                 if (modelOverride === 'any' || p.models.some((m: any) => m.id === modelId)) {
                     try {

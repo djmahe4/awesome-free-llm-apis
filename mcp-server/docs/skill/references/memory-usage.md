@@ -72,16 +72,23 @@ Track multi-turn objectives without polluting the system prompt:
 }
 ```
 
-### Self-Healing Instruction Pattern
-If a subagent repeatedly fails, rewrite the `memory.json` instructions:
-1. **Detect Failure**: Identify specific error code (e.g., `ERR-REF-01`).
-2. **Search Memory**: Retrieve `subagent/ref-extractor/v1`.
-3. **Refine**: Utilize `use_free_llm` to rewrite `v1.1` with a fix for the error.
-4. **Update**: Store `subagent/ref-extractor/v1.1` and update the active pointer.
+### Structured Skill Harvesting (`store_workspace_skill`)
+Instead of raw strings, capture the full context of a completed feature or research block. This is the preferred way to persist high-fidelity knowledge.
+
+```json
+{
+  "name": "auth-refactor",
+  "description": "JWT to session migration findings",
+  "what": ["Implemented Redis session store", "Disabled JWT middleware"],
+  "why": "JWT was causing overhead in high-traffic scenarios.",
+  "files": ["src/middleware/auth.ts"],
+  "workspace_root": "/project/root"
+}
+```
 
 ---
 
 ## ⚠️ Constraints
 - Memory is localized to `workspace_root`.
 - `clear` is destructive and non-reversible — use only when explicitly requested.
-- **Deduplication Required:** Avoid storing raw LLM outputs longer than 2000 tokens directly; pipe through `code_mode` to summarize first.
+- **Deduplication Required:** Avoid storing raw LLM outputs longer than 2000 tokens directly; summarize findings into structured skills via `store_workspace_skill` first.

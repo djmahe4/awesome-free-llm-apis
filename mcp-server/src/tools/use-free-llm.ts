@@ -6,13 +6,9 @@ import { WorkspaceScanner } from '../cache/workspace.js';
 import type { ChatRequest, ChatResponse } from '../providers/types.js';
 import {
   PipelineExecutor,
-  ResponseCacheMiddleware,
-  IntelligentRouterMiddleware,
-  AgenticMiddleware,
-  WorkspaceContextMiddleware,
   TaskType,
   type PipelineContext
-} from '../pipeline/index.js';
+} from '../pipeline/middleware.js';
 import { StructuralMarkdownMiddleware } from '../middleware/agentic/structural-middleware.js';
 
 export interface UseFreeLLMInput {

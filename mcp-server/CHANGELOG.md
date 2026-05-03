@@ -1,15 +1,40 @@
 # Changelog
 
-## v1.0.5 – Hedged Execution + Latency Optimization (April 2026)
+## v1.0.5 – Hedged Execution, Tool Consolidation + Workspace Persistence (May 2026)
 
-**Released:** 2026-04-12
+**Released:** 2026-05-03
 
 ### 🚀 Highlights
 
+- **Tool Consolidation**: Successfully deprecated and removed the legacy `store_memory` tool in favor of a structured workspace-aware architecture.
+- **Structured Knowledge Harvesting (`store_workspace_skill`)**: Introduced a high-fidelity tool for explicitly capturing research findings, architectural decisions, and multi-step implementation details using the `@skill-writer` schema.
+- **Proactive Workspace Indexing (`index_workspace`)**: Integrated deep semantic indexing of the entire codebase, enabling agents to operate with high-fidelity grounding without manual memory storage of code snippets.
+- **Gemini-Exclusive Search Hardening**: Restricted Google Search capabilities to Gemini-based workflows, ensuring optimal performance and grounding through `gemini-2.5-flash`.
+- **Search Suppression in Agentic Loops**: Implemented logic to disable Google Search for subsequent subtasks in a decomposed chain, preventing redundant lookups and token wastage.
 - **Hedged Execution Strategy (`IntelligentRouterMiddleware`)**: Substantially reduces latency during partial provider outages by racing executing provider requests against a parallel timeout delayed request.
 - **Graceful Execution Abortion**: Requests aborted due to successful parallel resolution automatically close open network sockets using `AbortController` signals to reduce token wastage.
 - **Deep Reasoning Accommodations**: Automatically boosts `max_tokens` limits (up to 8192) and increases hedge delay parameters up to 20 seconds specifically for high-capacity models (DeepSeek-R1, O1, O3, Gemini Pro).
-- **Subtask Pipeline Limiter**: Hardcoded subtask generation limit in `AgenticMiddleware` to 2 segments to avoid deeply orchestrated timeout spirals.
+- **Agentic Pipeline Stabilization & Circular Dependency Resolution**: Successfully decoupled `AgenticMiddleware`, `LLMExecutor`, and tool-specific modules from the main `pipeline/index.js` barrel file. This eliminated runtime `TypeError` crashes and ensured reliable middleware initialization.
+- **Optimized Routing for Semantic Tasks**: Adjusted the `IntelligentRouterMiddleware` to prioritize "lighter" models (e.g., Gemini Flash, Mistral Small) for `SemanticSearch` and `Summarization` tasks, significantly improving response speed for utility operations.
+- **Test Suite Isolation**: Standardized `memoryManager.clear()` and `sharedResponseCache.flush()` in integration tests to ensure deterministic performance and prevent state bleeding across scenarios.
+- **Documentation Overhaul**: Pruned legacy references to `code_mode` and `store_memory` from all public guides (`README.md`, `guide.md`, `SKILL.md`, `mcp-development.md`) to maintain a clean, agent-first interface.
+
+### ✨ New Features
+
+- **`store_workspace_skill` Tool**: Captures `what`, `why`, and `files` involved in a task to build a persistent, reusable skill database.
+- **`index_workspace` Tool**: Manually triggers a vector re-index of the project root to ensure semantic search accuracy.
+- **Type-Safe Tool Responses**: Implemented Discriminated Unions for workspace tool outputs to ensure reliable agent parsing.
+
+### 🔧 Improvements
+
+- **Zero-Config Session IDs**: Refined the deterministic `sessionId` derivation from `workspace_root`, ensuring stable persistence across restarts without manual ID management.
+- **TypeScript Hardening**: Standardized response schemas for all persistent workspace tools.
+- **Public API Cleanup**: Reduced the public tool count to six focused, high-impact utilities.
+
+### ⚠️ Breaking Changes
+
+- **REMOVED**: `store_memory` tool. Agents should migrate to `store_workspace_skill` for structured persistence or rely on `index_workspace` for semantic code retrieval.
+- **DOCUMENTATION ONLY**: `code_mode` has been removed from all public documentation to favor cleaner agent interactions, although the underlying sandboxed runtime remains available in the codebase for internal use.
 
 ## v1.0.4 – Hardened Resilience + Persistent Memory + structural Fix (April 2026)
 

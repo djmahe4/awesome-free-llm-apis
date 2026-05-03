@@ -16,7 +16,6 @@ export interface VectorEntry {
 export class VectorStore {
     private embedder: any = null;
     private modelName = 'Xenova/bge-small-en-v1.5';
-    private indices: Map<string, LocalIndex> = new Map();
     private storageRoot: string;
 
     constructor(storageRoot = './data/vector-indices') {
@@ -30,19 +29,23 @@ export class VectorStore {
         return this.embedder;
     }
 
+    private indexPromises: Map<string, Promise<LocalIndex>> = new Map();
+
     private async getIndex(workspaceHash: string): Promise<LocalIndex> {
-        if (!this.indices.has(workspaceHash)) {
-            const indexPath = path.join(this.storageRoot, workspaceHash);
-            const index = new LocalIndex(indexPath);
+        if (!this.indexPromises.has(workspaceHash)) {
+            this.indexPromises.set(workspaceHash, (async () => {
+                const indexPath = path.join(this.storageRoot, workspaceHash);
+                const index = new LocalIndex(indexPath);
 
-            if (!(await index.isIndexCreated())) {
-                await fs.mkdir(indexPath, { recursive: true });
-                await index.createIndex();
-            }
+                if (!(await index.isIndexCreated())) {
+                    await fs.mkdir(indexPath, { recursive: true });
+                    await index.createIndex();
+                }
 
-            this.indices.set(workspaceHash, index);
+                return index;
+            })());
         }
-        return this.indices.get(workspaceHash)!;
+        return await this.indexPromises.get(workspaceHash)!;
     }
 
     async generateEmbedding(text: string): Promise<number[]> {
@@ -91,7 +94,7 @@ export class VectorStore {
     async deleteIndex(workspaceHash: string): Promise<void> {
         const indexPath = path.join(this.storageRoot, workspaceHash);
         await fs.rm(indexPath, { recursive: true, force: true });
-        this.indices.delete(workspaceHash);
+        this.indexPromises.delete(workspaceHash);
     }
 }
 

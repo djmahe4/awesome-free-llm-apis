@@ -15,5 +15,8 @@ import { StructuralMarkdownMiddleware } from '../middleware/agentic/structural-m
 export const structuralMarkdownMiddleware = new StructuralMarkdownMiddleware();
 export const sharedResponseCache = new ResponseCacheMiddleware();
 export const workspaceContextMiddleware = new WorkspaceContextMiddleware();
-export const agenticMiddleware = new AgenticMiddleware();
+
+// Initializing router first as it has fewer dependencies on agentic logic
 export const sharedRouter = new IntelligentRouterMiddleware();
+// Then initializing agentic middleware which now uses late-bound access to sharedRouter
+export const agenticMiddleware = new AgenticMiddleware();

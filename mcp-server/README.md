@@ -1,6 +1,6 @@
 # free-llm-apis MCP Server
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that exposes **seven focused tools** for interacting with 60+ free LLM providers through a unified, agent-first interface.
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that exposes **six focused tools** for interacting with 60+ free LLM providers through a unified, agent-first interface.
 
 ---
 
@@ -16,19 +16,19 @@ graph TD
         K[SandboxExecutor<br/>src/sandbox/]
     end
 
-    C --> D[StructuralMarkdownMiddleware<br/>src/middleware/agentic/structural-middleware.ts]
-    D -->|Agentic requests: inject full session memory| E[ResponseCacheMiddleware]
+    C --> L[WorkspaceContextMiddleware<br/>src/pipeline/middlewares/WorkspaceContextMiddleware.ts]
+    L --> D[StructuralMarkdownMiddleware<br/>src/middleware/agentic/structural-middleware.ts]
+    D --> E[ResponseCacheMiddleware]
     E -->|Cache Miss| F[AgenticMiddleware]
     F --> G[IntelligentRouterMiddleware]
     G -->|Tier selection + fallback| H[LLMExecutor<br/>Headers + Error Recovery]
     H --> I[(Free LLM Provider)]
 
-    C --> J[MemoryManager<br/>src/memory/]
-    C --> K[SandboxExecutor<br/>src/sandbox/]
+    C --> J
+    C --> K
     
-    D -->|"Pass-through (non-agentic)"| E
     E -->|Cache Hit| A
-    I --> H --> G --> F --> E --> D --> A
+    I --> H --> G --> F --> E --> D --> L --> A
 
     style D fill:#ffd54f,stroke:#f57f17
     style F fill:#ffe082,stroke:#f9a825
@@ -38,21 +38,20 @@ graph TD
     style K fill:#f3e5f5,stroke:#7b1fa2
 ```
 
-### Pipeline Order (v1.0.4)
+### Pipeline Order (v1.0.5)
 
 | Stage | Component | Purpose |
 |-------|-----------|---------|
-| 1 | `StructuralMarkdownMiddleware` | Injects full `knowledge.md` session memory + **Resolves `file://` URIs** (v1.0.4) into agentic requests; enforces structured response format |
-| 2 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed |
-| 3 | `AgenticMiddleware` *(optional)* | Task decomposition (max 2 steps), research validation, system prompt injection, early-exit on confidence > 0.85 or 3 iterations |
-| 4 | `IntelligentRouterMiddleware` | Deterministic keyword-based model-tier selection with **Persistent Health Memory** (v1.0.4); handles fallback cascade with **Adaptive Timeout Floor (12s)** and **Hedged Execution Strategy** (v1.0.5) combining parallel delay-based requests and graceful network abortions. |
-| 5 | `LLMExecutor` | HTTPS request to provider; token tracking via response headers + **centralized circuit-breaking** + **bridge: writes `providerRemainingTokens` into context for ContextManager** |
+| 1 | `WorkspaceContextMiddleware` | Resolves `wsHash`, performs **Pre-emptive Indexing** (v1.0.5), and injects session memory + Grep context into agentic requests. |
+| 2 | `StructuralMarkdownMiddleware` | Inlines `file://` URIs and Markdown links; enforces structured response formats. |
+| 3 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed with explicit `flush()` support. |
+| 4 | `AgenticMiddleware` *(optional)* | Task decomposition (max 2 steps), research validation, and multi-turn state persistence. |
+| 5 | `IntelligentRouterMiddleware` | Task-to-Tier routing with **Lighter Model Priority** (v1.0.5) for search/summary; handles **Hedged Execution** (v1.0.5) and adaptive timeouts. |
+| 6 | `LLMExecutor` | Token estimation, quota tracking, and centralized circuit-breaking with bridged memory feedback. |
 
 ---
 
-## Seven Public Tools
-
-> **Strict rule for agents:** Only these seven tools are part of the public API. Never request additional tools. Prefer internal middleware changes to extend capability.
+> **Strict rule for agents:** Only these six tools are part of the public API. Never request additional tools. Prefer internal middleware changes to extend capability.
 
 | Tool | Purpose | Required Params | Key Optional Params |
 |------|---------|----------------|---------------------|
@@ -60,18 +59,10 @@ graph TD
 | `list_available_free_models` | Enumerate providers and models with metadata | *(none)* | `provider`, `available_only` |
 | `get_token_stats` | Real-time per-provider usage and quota stats | *(none)* | — |
 | `validate_provider` | Health-check and credential validation | `providerId` | — |
-| `code_mode` | Sandboxed script execution; only stdout returned | `code` | `language`, `data`, `timeout_ms` |
 | `manage_memory` | Workspace-scoped memory: search/list/stats/clear | `action` | `workspace_root`, `query`, `limit` |
-| `store_memory` | Explicitly inject persistent context/facts into memory | `key`, `content` | `workspace_root` |
+| `store_workspace_skill` | Explicitly capture structured findings and decisions | `name`, `what`, `why` | `workspace_root`, `files` |
+| `index_workspace` | Proactively index workspace files for semantic search | `workspace_root` | `force` |
 
-#### `code_mode` Sandbox Runtimes
-
-| `language` | Engine | Script Language | External Requirement |
-|------------|--------|----------------|---------------------|
-| `javascript` (default) | QuickJS (`quickjs-emscripten`) | JavaScript | None — in-process |
-| `python` | RestrictedPython | Python | `python3` on PATH; `pip install RestrictedPython` |
-| `go` | goja (pure-Go ECMAScript) | JavaScript | Pre-built binary: `cd scripts/go-sandbox-runner && go build -o sandbox-runner .` |
-| `rust` | boa_engine (pure-Rust ECMAScript) | JavaScript | Pre-built binary: `cd scripts/rust-sandbox-runner && cargo build --release` |
 
 ### Sample Agent Invocations
 
@@ -118,44 +109,6 @@ await client.callTool('use_free_llm', {
 });
 ```
 
-**Process large API response — JavaScript (default, no external deps):**
-```ts
-await client.callTool('code_mode', {
-  language: 'javascript',
-  code: 'const items = JSON.parse(DATA); print(items.map(i => i.name).join("\\n"))',
-  data: largeApiResponse,
-  command: 'Extract item names from API response'
-});
-```
-
-**Process data with Python (requires `python3` + `pip install RestrictedPython`):**
-```ts
-await client.callTool('code_mode', {
-  language: 'python',
-  code: 'import json; items = json.loads(DATA); print(len(items))',
-  data: jsonString
-});
-```
-
-**Process with Go sandbox (requires pre-built binary):**
-```ts
-// Build first: cd scripts/go-sandbox-runner && go build -o sandbox-runner .
-await client.callTool('code_mode', {
-  language: 'go',
-  code: 'var resp = JSON.parse(DATA); print(resp.total)',
-  data: jsonString
-});
-```
-
-**Process with Rust sandbox (requires pre-built binary):**
-```ts
-// Build first: cd scripts/rust-sandbox-runner && cargo build --release
-await client.callTool('code_mode', {
-  language: 'rust',
-  code: 'var resp = JSON.parse(DATA); print(resp.total)',
-  data: jsonString
-});
-```
 
 **Validate a provider before a critical workflow:**
 ```ts
@@ -228,8 +181,7 @@ Response returned to agent
 ### Best Practices for Agent/Copilot Authors
 
 1. **Always call `manage_memory` before wide-context steps** to retrieve relevant prior work.
-2. **Use `code_mode` for any large-data processing** — never dump raw API responses into LLM context.
-3. **For ANY project-scoped task, pass BOTH `agentic: true` AND `workspace_root`** — these two fields unlock memory injection, session persistence, and context enrichment. Passing only one (or neither) produces a context-blind, stateless response.
+2. **For ANY project-scoped task, pass BOTH `agentic: true` AND `workspace_root`** — these two fields unlock memory injection, session persistence, and context enrichment. Passing only one (or neither) produces a context-blind, stateless response.
 4. **Call `validate_provider` or `get_token_stats`** before long-running workflows to confirm quota.
 5. **Research/external-knowledge requests are auto-logged** by `AgenticMiddleware` — check server logs for `[RESEARCH-VALIDATION]` entries.
 6. **Prefer `available_only:true`** with `list_available_free_models` to skip unconfigured providers.
@@ -358,13 +310,7 @@ npm run build
 # Configure providers (copy and fill .env.example)
 cp .env.example .env
 
-# (Optional) Build Go sandbox runner — for language:"go" in code_mode
-cd scripts/go-sandbox-runner && go build -o sandbox-runner . && cd ../..
-
-# (Optional) Build Rust sandbox runner — for language:"rust" in code_mode
-cd scripts/rust-sandbox-runner && cargo build --release && cd ../..
-
-# (Optional) Install Python RestrictedPython — for language:"python" in code_mode
+# (Optional) Install Python RestrictedPython
 pip install RestrictedPython
 ```
 > Follow [setup.md](docs/setup.md) for more details.
@@ -408,7 +354,8 @@ The server features a **hardened long-term memory system** designed for long-run
 - **Persistent Health State**: Provider failures and circuit-breaker cooldowns are saved to disk. The router will "remember" that a provider is rate-limiting even if the server is restarted.
 - **Identity Hashes**: Workspaces are identified by stable, path-based hashes. Your stored facts persist even if you modify your codebase.
 - **Anti-Poisoning**: Strict `fs.existsSync` validation prevents memory pollution from hallucinated paths.
-- **Explicit Injection**: Use `store_memory` to deliberately persist architectural decisions, research findings, or task summaries across sessions.
+- **Explicit Harvesting**: Use `store_workspace_skill` to deliberately persist structured architectural decisions, research findings, or task summaries across sessions.
+- **Proactive Grounding**: Use `index_workspace` to ensure semantic search results are grounded in the current codebase state.
 
 ---
 
@@ -432,14 +379,14 @@ npx tsx scripts/token-factor-smoke-test.ts
 mcp-server/
 ├── src/
 │   ├── mcp/index.ts          # Tool registration and MCP handler
-│   ├── tools/                # Seven public tool implementations
+│   ├── tools/                # Six public tool implementations
 │   │   ├── use-free-llm.ts
 │   │   ├── list-models.ts
 │   │   ├── get-token-stats.ts
 │   │   ├── validate-provider.ts
-│   │   ├── code-mode.ts
 │   │   ├── manage-memory.ts
-│   │   └── store-memory.ts
+│   │   ├── store-workspace-skill.ts
+│   │   └── index-workspace.ts
 │   ├── sandbox/              # Sandboxed code execution (QuickJS, Python)
 │   ├── middleware/           # Pipeline middleware stages
 │   │   └── agentic/          # Task decomposition + research validation

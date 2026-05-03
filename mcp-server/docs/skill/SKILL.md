@@ -43,7 +43,7 @@ Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-
 | Budget / High-Volume | `Qwen/Qwen2.5-7B-Instruct` | `siliconflow` | 1,000 rpm |
 | Latest Frontier | `gemini-3.1-pro-preview` | `gemini` | Highest capability |
 
-> **FREE-First Strategy**: Cloudflare models are now prioritized for fastest, most reliable responses. Router automatically cascades through 79 models across all 15 providers.
+> **v1.0.5 Optimization**: Search and Summarization tasks now prioritize "lighter" models (Gemini Flash, Mistral Small) to maximize speed and reliability.
 
 ---
 
@@ -129,44 +129,6 @@ Enumerate all registered models with availability, rate limits, and provider met
 
 ---
 
-### `code_mode`
-
-Execute sandboxed code against arbitrary data. Only `stdout` is returned — never the raw `DATA` payload. Use this to compress large API responses before passing to an LLM.
-
-```json
-{
-  "language": "javascript",
-  "command": "Sort input numbers",
-  "data": "[5, 2, 8, 1]",
-  "code": "const arr = JSON.parse(DATA); arr.sort((a,b)=>a-b); print(JSON.stringify(arr));"
-}
-```
-
-**Supported Languages:**
-
-| `language` | Sandbox | Notes |
-|------------|---------|-------|
-| `javascript` (default) | QuickJS (quickjs-emscripten) | Fastest; no external deps |
-| `python` | Restricted subprocess | Requires Python 3 + pip install RestrictedPython |
-| `go` | goja | pure-Go ECMAScript; requires pre-built binary |
-| `rust` | boa_engine | pure-Rust ECMAScript; requires pre-built binary |
-
-**Key parameters:**
-
-| Parameter | Required | Default | Notes |
-|-----------|----------|---------|-------|
-| `code` | yes | — | Script source; use `print()` / `console.log()` for output |
-| `language` | no | `javascript` | Sandbox runtime: `javascript` \| `python` |
-| `data` | no | `""` | Injected as `DATA` global variable |
-| `command` | no | — | Human-readable description (logged to memory) |
-| `timeout_ms` | no | `5000` | Max execution time in milliseconds |
-
-**Sandbox Constraints (all languages):** No filesystem, no network, no process/OS calls.
-
-> **Context Compression**: `compressionRatio` = stdout.length / data.length — a ratio < 1 means context savings were achieved. See [code-mode-logic.md](references/code-mode-logic.md) for advanced patterns and benchmarks, and TC-05 in [usages.md](references/usages.md) for execution results.
-
----
-
 ### `manage_memory`
 
 Manage persistent, workspace-aware memory across sessions.
@@ -187,20 +149,35 @@ Manage persistent, workspace-aware memory across sessions.
 
 ---
 
-### `store_memory`
+### `store_workspace_skill`
 
-Store manual context or persistent thoughts into the long-term workspace memory.
+Explicitly harvest structured knowledge and scripts into the workspace. Use this to persist complex research or multi-step implementations as a reusable skill following the `@skill-writer` schema.
 
 ```json
 {
-  "key": "auth_strategy",
-  "content": "We decided to use Redis for caching sessions to improve latency.",
+  "name": "auth-strategy",
+  "description": "Redis-based session management for low-latency auth.",
+  "what": ["Implemented Redis session store", "Configured TTL for 24h"],
+  "why": "We decided to use Redis for caching sessions to improve latency.",
+  "files": ["src/middleware/auth.ts"],
   "workspace_root": "/your/project"
 }
 ```
 
-> **Rule: Always `store_memory` upon task completion.** Explicitly save findings, decisions, or summaries after concluding research or a large task. This ensures instant recall via `manage_memory (search)` in future sessions, preventing knowledge loss.
-> **Documentation:** See [memory-usage.md](references/memory-usage.md) for versioning and schema patterns.
+> **Rule: Always `store_workspace_skill` upon task completion.** Explicitly save structured findings and implementation details. This ensures high-fidelity recall in future sessions.
+> **Documentation:** See [memory-usage.md](references/memory-usage.md) for the full `@skill-writer` schema and versioning.
+
+---
+
+### `index_workspace`
+
+Proactively index all relevant files in the workspace into the persistent vector database for semantic search.
+
+```json
+{ "workspace_root": "/your/project", "force": false }
+```
+
+> **Rule:** Run `index_workspace` after significant code changes or when starting a new project session to ensure semantic search results are grounded in the current source of truth.
 
 ---
 
@@ -239,7 +216,7 @@ The Intelligent Router and Steering Engine utilize specific keywords in the goal
                → empty? → [Seed with first LLM call]  → [Save findings]
 ```
 
-Each iteration builds on the last. Use `code_mode` to compress and deduplicate findings.
+Each iteration builds on the last.
 
 ### Pattern 3: Self-Evolving Instruction Loop
 
@@ -251,10 +228,10 @@ Each iteration builds on the last. Use `code_mode` to compress and deduplicate f
 ### Pattern 4: Terminal Task Completion (The Handshake)
 
 ```
-1. finalize_task  →  Generate final summary/artifact
-2. store_memory   →  Save summary + decisions to "completion/<task_id>"
-3. manage_memory  →  Verify storage success
-4. [DONE]         →  Inform user and exit
+1. finalize_task         →  Generate final summary/artifact
+2. store_workspace_skill →  Save structured summary + decisions as a skill
+3. index_workspace       →  Ground the new state in semantic memory
+4. [DONE]                →  Inform user and exit
 ```
 Always conclude significant work by "checking in" your knowledge to the workspace memory.
 
@@ -264,19 +241,21 @@ Always conclude significant work by "checking in" your knowledge to the workspac
 
 - **DO NOT** use `use_free_llm` for project work without `agentic: true` and `workspace_root`.
 - **DO NOT** start a pipeline without checking memory for prior findings first.
-- **DO NOT** conclude a task or session without saving findings via `store_memory`.
+- **DO NOT** conclude a task or session without saving findings via `store_workspace_skill`.
 - **DO NOT** skip `validate_provider` if a provider fails two consecutive calls.
-- **DO NOT** accumulate raw LLM outputs — compress and deduplicate via `code_mode`.
-- **ALWAYS** version subagent instruction changes with a timestamp key.
+- **ALWAYS** run `index_workspace` when starting a new session to ensure fresh grounding.
 - **ALWAYS** set `fallback: true` for critical or user-facing pipelines.
 - **ALWAYS** pass the correct absolute `workspace_root` for project tasks — the pipeline derives its grounding signals from this path.
 
 ---
 
-## 🛡️ Internal Grounding & Attestation Protocol (v1.0.4)
+## 🛡️ Internal Grounding & Attestation Protocol (v1.0.5)
 
 > [!NOTE]
 > This section describes **pipeline-internal** behavior. These mechanisms are automatically enforced by the server and are **not** responsibilities of the calling agent.
+
+### 🔄 Pre-emptive Memory Indexing
+Triggered automatically for `agentic: true` requests in a valid workspace. The `WorkspaceContextMiddleware` (Stage 1) runs a non-force indexing pass to ensure the LLM's vector search is grounded in the absolute latest state of the project files.
 
 The pipeline injects a **Grounding Protocol** into the system prompt of every LLM it calls. This forces the model to tag its claims:
 - **`[RETRIEVED]`** — fact is directly present in injected context blocks (e.g., resolved `file://` or `artifact://` URIs, session memory).
@@ -293,18 +272,18 @@ Triggered automatically when `workspace_root` contains a `README.md`. The pipeli
 
 ## 🤖 Agentic Middleware v2 (Steering Engine)
 
-The server features a **Context-Aware Steering Engine** that manages stateful task execution via the `use_free_llm` tool. It transforms static documentation into a dynamic, token-efficient prompt pipeline.
+The server features a **Context-Aware Steering Engine** (v1.0.5 Hardened) that manages stateful task execution via the `use_free_llm` tool. It transforms static documentation into a dynamic, token-efficient prompt pipeline.
 
 ### ⚡ AI-First Triggering
 
-Dynamically activate the agentic loop by passing the `agentic` and `sessionId` parameters when calling `use_free_llm`. This is the preferred method for managing complex, multi-turn coding tasks.
+Dynamically activate the agentic loop by passing the `agentic` and `sessionId` parameters when calling `use_free_llm`.
 
 ### 🧠 Intelligent Behaviors
 
-- **Semantic Prompt Resolution**: Automatically indexes relevant prompt sections. A **stricter selection threshold (score >= 3)** ensures instructions are mission-critical, eliminating "context noise."
-- **Granular Reference Extraction**: The steering engine parses massive architectural maps and extracts only relevant project entries. Extracted entries are **capped at 5 per section** to maintain a lean context window.
-- **Stateful Project Memory**: Passing a `sessionId` persists task state (`nowQueue`, `improveQueue`) and project logs (`plan.md`, `tasks.md`, `knowledge.md`) in `projects/{sessionId}/`.
-- **Automatic Task Decomposition**: Automatically splits complex goals into discrete, trackable steps.
+- **Stabilized Orchestration**: Circular dependencies have been eliminated, ensuring consistent middleware initialization across concurrent agentic sessions.
+- **Semantic Prompt Resolution**: Automatically indexes relevant prompt sections. A **stricter selection threshold (score >= 3)** ensures instructions are mission-critical.
+- **Stateful Project Memory**: Persists task state (`nowQueue`, `improveQueue`) and knowledge base (`knowledge.md`) in `projects/{sessionId}/`.
+- **Automatic Task Decomposition**: Automatically splits complex goals into discrete, trackable steps (capped at 2 for stability).
 
 ### ⚡ Reference Steering Protocols
 

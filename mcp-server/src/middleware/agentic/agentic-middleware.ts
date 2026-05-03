@@ -7,7 +7,7 @@ import type { Middleware, PipelineContext, NextFunction } from '../../pipeline/m
 import { getMessageContent } from '../../utils/MessageUtils.js';
 import { memoryManager } from '../../memory/index.js';
 import { getIntelligentSystemPrompt } from './prompts.js';
-import { sharedRouter } from '../../pipeline/instances.js';
+// Removed top-level import of instances.js to break circular dependency
 
 import { 
     PROJECTS_DIR, 
@@ -374,7 +374,9 @@ export class AgenticMiddleware implements Middleware {
             }
 
             // 2. Direct execution of the router (the next step in the pipeline)
-            await sharedRouter.execute(context, async () => {});
+            // Using dynamic import to break circular dependency at runtime
+            const instances = await import('../../pipeline/instances.js');
+            await instances.sharedRouter.execute(context, async () => {});
 
             // 3. Process result
             const responseContent = getResponseContent(context);

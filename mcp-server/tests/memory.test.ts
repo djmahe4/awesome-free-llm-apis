@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
-import { storeMemory } from '../src/tools/store-memory.js';
 import { manageMemory } from '../src/tools/manage-memory.js';
 import { memoryManager } from '../src/memory/index.js';
+import { WorkspaceScanner } from '../src/cache/workspace.js';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 
 // Mock useFreeLLM for store_workspace_skill tests
@@ -14,6 +14,7 @@ vi.mock('../src/tools/use-free-llm.js', () => ({
 describe('Memory System Integration', () => {
     const ws = '/tmp/test_ws_vitest';
     const ws2 = '/tmp/test_ws_vitest_2';
+    const workspaceScanner = new WorkspaceScanner(process.cwd());
 
     beforeAll(() => {
         if (!existsSync(ws)) mkdirSync(ws, { recursive: true });
@@ -30,14 +31,10 @@ describe('Memory System Integration', () => {
         await manageMemory({ action: 'clear', workspace_root: ws });
     });
 
-    it('should store and retrieve manual context via store_memory', async () => {
+    it('should store and retrieve manual context via memoryManager', async () => {
+        const wsHash = await workspaceScanner.getWorkspaceHash(ws);
         // Store
-        const storeRes = await storeMemory({
-            key: 'architectural_decision',
-            content: 'We decided to use Redis for queues.',
-            workspace_root: ws
-        });
-        expect(storeRes.success).toBe(true);
+        await memoryManager.storeToolOutput('manual_memory', { _ws: wsHash, key: 'architectural_decision' }, 'We decided to use Redis for queues.');
 
         // Search
         const searchRes = (await manageMemory({
@@ -51,11 +48,8 @@ describe('Memory System Integration', () => {
     });
 
     it('should correctly handle search query case-insensitivity', async () => {
-        await storeMemory({
-            key: 'CaseTest',
-            content: 'MixedCaseContent',
-            workspace_root: ws
-        });
+        const wsHash = await workspaceScanner.getWorkspaceHash(ws);
+        await memoryManager.storeToolOutput('manual_memory', { _ws: wsHash, key: 'CaseTest' }, 'MixedCaseContent');
 
         const res = (await manageMemory({
             action: 'search',
@@ -71,8 +65,11 @@ describe('Memory System Integration', () => {
         const ws2 = '/tmp/test_ws_vitest_2';
         await manageMemory({ action: 'clear', workspace_root: ws2 });
 
-        await storeMemory({ key: 'k1', content: 'WS1 Content', workspace_root: ws });
-        await storeMemory({ key: 'k2', content: 'WS2 Content', workspace_root: ws2 });
+        const wsHash1 = await workspaceScanner.getWorkspaceHash(ws);
+        const wsHash2 = await workspaceScanner.getWorkspaceHash(ws2);
+
+        await memoryManager.storeToolOutput('manual_memory', { _ws: wsHash1, key: 'k1' }, 'WS1 Content');
+        await memoryManager.storeToolOutput('manual_memory', { _ws: wsHash2, key: 'k2' }, 'WS2 Content');
 
         const res1 = (await manageMemory({ action: 'search', workspace_root: ws })) as { results: string[]; meta: any };
         const res2 = (await manageMemory({ action: 'search', workspace_root: ws2 })) as { results: string[]; meta: any };
@@ -84,16 +81,13 @@ describe('Memory System Integration', () => {
     });
 
     it('should verify the internal key format used stringified JSON _ws', async () => {
-        await storeMemory({
-            key: 'format_test',
-            content: 'content',
-            workspace_root: ws
-        });
+        const wsHash = await workspaceScanner.getWorkspaceHash(ws);
+        await memoryManager.storeToolOutput('manual_memory', { _ws: wsHash, key: 'format_test' }, 'content');
 
         const allKeys = await memoryManager.longTerm.list();
 
-        // Find the key for our store_memory call
-        const storeKey = allKeys.find(k => k.startsWith('tool:store_memory:') && k.includes('format_test'));
+        // Find the key for our storage call
+        const storeKey = allKeys.find(k => k.startsWith('tool:manual_memory:') && k.includes('format_test'));
         expect(storeKey).toBeDefined();
 
         // Check that it contains the stringified workspace hash with double quotes
@@ -105,14 +99,13 @@ describe('Memory System Integration', () => {
         const root = '/tmp/test_ws_sync';
         if (!existsSync(root)) mkdirSync(root, { recursive: true });
 
+        const wsHash = await workspaceScanner.getWorkspaceHash(root);
+        await memoryManager.clear(wsHash);
+        
         const key = 'sync_test';
         const content = 'This must be found immediately!';
 
-        await storeMemory({
-            key,
-            content,
-            workspace_root: root
-        });
+        await memoryManager.storeToolOutput('manual_memory', { _ws: wsHash, key }, content);
 
         // Search immediately (no wait/debounce)
         const res = (await manageMemory({
