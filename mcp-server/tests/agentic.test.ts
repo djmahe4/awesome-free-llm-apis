@@ -1,9 +1,45 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Mock FS module
+vi.mock('node:fs', () => {
+    const mockPromises = {
+        writeFile: vi.fn(),
+        mkdir: vi.fn(),
+        access: vi.fn(),
+        readFile: vi.fn(),
+        stat: vi.fn(async () => ({ mtimeMs: 1000 })),
+    };
+    return {
+        promises: mockPromises,
+        default: {
+            promises: mockPromises,
+        },
+    };
+});
+
+vi.mock('fs', () => {
+    const mockPromises = {
+        writeFile: vi.fn(),
+        mkdir: vi.fn(),
+        access: vi.fn(),
+        readFile: vi.fn(),
+        stat: vi.fn(async () => ({ mtimeMs: 1000 })),
+    };
+    return {
+        promises: mockPromises,
+        default: {
+            promises: mockPromises,
+        },
+    };
+});
+
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
 import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/agentic/prompts.js';
 import type { PipelineContext } from '../src/pipeline/middleware.js';
-import fs, { promises as fsp } from 'fs';
+import { promises as fsp } from 'node:fs';
+import * as fs from 'node:fs';
 
 // Mock debounce to be immediate
 vi.mock('../src/utils/debounce.js', () => ({
@@ -13,23 +49,6 @@ vi.mock('../src/utils/debounce.js', () => ({
         return d;
     })
 }));
-
-// Mock FS module
-vi.mock('fs', () => {
-    const mockPromises = {
-        writeFile: vi.fn(),
-        mkdir: vi.fn(),
-        access: vi.fn(),
-        readFile: vi.fn(),
-        stat: vi.fn(),
-    };
-    return {
-        default: {
-            promises: mockPromises,
-        },
-        promises: mockPromises,
-    };
-});
 
 // Mock instances to break circular dependency and provide a controlled router
 vi.mock('../src/pipeline/instances.js', () => ({
@@ -88,7 +107,7 @@ describe('Agentic Intelligence & Middleware', () => {
         (vi.mocked(fsp.stat) as any).mockImplementation(async () => ({ mtimeMs: Date.now() }));
         (vi.mocked(fsp.readFile) as any).mockImplementation(async (path: string) => {
             if (path.endsWith('prompt.json')) return JSON.stringify(mockPromptData);
-            if (path.endsWith('README.md')) return "Tier 2 Fallback (README)".padEnd(600, '!');
+            if (path.endsWith('README.md')) return "Tier 2 Fallback (README) [Context-aware fallback content for agentic testing]";
             return "";
         });
 
@@ -99,19 +118,19 @@ describe('Agentic Intelligence & Middleware', () => {
 
     describe('getIntelligentSystemPrompt (Async)', () => {
         it('returns only intro + critical section when no context', async () => {
-            const prompt = await getIntelligentSystemPrompt();
+            const prompt = await getIntelligentSystemPrompt({});
             expect(prompt).toContain("Agent Identity Core");
             expect(prompt).toContain("MOMENTUM ENGINE");
             expect(prompt).not.toContain("RELIABILITY MATH");
         });
 
         it('includes relevant section for keyword match', async () => {
-            const prompt = await getIntelligentSystemPrompt("improve reliability");
+            const prompt = await getIntelligentSystemPrompt({ context: "improve reliability" });
             expect(prompt).toContain("RELIABILITY MATH");
         });
 
         it('granularly filters reference maps to only include relevant entries (token optimization)', async () => {
-            const prompt = await getIntelligentSystemPrompt("tell me about temporal specifically");
+            const prompt = await getIntelligentSystemPrompt({ context: "tell me about temporal specifically", keywords: ["temporal"] });
             expect(prompt).toContain("RESEARCH APPENDIX");
             expect(prompt).toContain("Temporal");
             expect(prompt).toContain("Durable execution engine");
@@ -122,14 +141,14 @@ describe('Agentic Intelligence & Middleware', () => {
         });
 
         it('injects REFERENCE_SUGGESTION_PROTOCOL when a reference section matches', async () => {
-            const prompt = await getIntelligentSystemPrompt("search appendix for temporal");
+            const prompt = await getIntelligentSystemPrompt({ context: "search appendix for temporal" });
             expect(prompt).toContain("REFERENCE SUGGESTION PROTOCOL");
             expect(prompt).toContain("Provide the direct URL");
         });
 
         it('boosts reference sections when architectural keywords are used', async () => {
             // "api" keyword is in the booster list but not in the default keywords for research_appendix
-            const prompt = await getIntelligentSystemPrompt("api references");
+            const prompt = await getIntelligentSystemPrompt({ context: "api references" });
             expect(prompt).toContain("RESEARCH APPENDIX");
         });
 
@@ -138,41 +157,40 @@ describe('Agentic Intelligence & Middleware', () => {
                 if (path.endsWith('prompt.json')) throw new Error('Not found');
                 return { mtimeMs: 1000 };
             });
-            const prompt = await getIntelligentSystemPrompt();
+            const prompt = await getIntelligentSystemPrompt({});
             expect(prompt).toContain("Tier 2 Fallback (README)");
         });
 
         it('falls back to Tier 2 if prompt.json is invalid JSON', async () => {
             (vi.mocked(fsp.readFile) as any).mockImplementation(async (path: string) => {
                 if (path.endsWith('prompt.json')) return "INVALID JSON";
-                if (path.endsWith('README.md')) return "Tier 2 Fallback (README)".padEnd(600, '!');
+                if (path.endsWith('README.md')) return "Tier 2 Fallback (README) [Placeholder content for testing fallback logic]";
                 return "";
             });
-            const prompt = await getIntelligentSystemPrompt();
+            const prompt = await getIntelligentSystemPrompt({});
             expect(prompt).toContain("Tier 2 Fallback (README)");
         });
 
-        it('falls back to hardcoded default if all files are missing', async () => {
-            (vi.mocked(fsp.stat) as any).mockImplementation(async (path: string) => {
-                throw new Error('Not found');
+        it('falls back to Tier 3 emergency prompt if Tier 2 README also fails', async () => {
+            (vi.mocked(fsp.readFile) as any).mockImplementation(async (path: string) => {
+                throw new Error("Total failure");
             });
-            (vi.mocked(fsp.access) as any).mockRejectedValue(new Error('Not found'));
-            const prompt = await getIntelligentSystemPrompt();
+            const prompt = await getIntelligentSystemPrompt({});
             expect(prompt).toContain("You are the principal architect");
         });
 
         it('invalidates cache when prompt.json mtime changes', async () => {
             // First call matches default mtime 1000
-            await getIntelligentSystemPrompt();
+            await getIntelligentSystemPrompt({});
             expect(fsp.readFile).toHaveBeenCalledTimes(1);
 
             // Second call with same mtime should use cache
-            await getIntelligentSystemPrompt();
+            await getIntelligentSystemPrompt({});
             expect(fsp.readFile).toHaveBeenCalledTimes(1);
 
             // Update mtime to trigger reload
             (vi.mocked(fsp.stat) as any).mockResolvedValue({ mtimeMs: 2000 });
-            await getIntelligentSystemPrompt();
+            await getIntelligentSystemPrompt({});
             expect(fsp.readFile).toHaveBeenCalledTimes(2);
         });
     });

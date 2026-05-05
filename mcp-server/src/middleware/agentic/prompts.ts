@@ -1,7 +1,6 @@
-import fs from 'fs';
-const fsp = fs.promises;
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { promises as fsp } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** Minimum character length for a raw prompt file to be considered valid. */
 const MIN_PROMPT_LENGTH = 500;
@@ -42,6 +41,8 @@ const GROUNDING_PROTOCOL = `
 - Never infer file content from training data. Ask the user to share the file instead.
 `;
 
+
+
 interface PromptSection {
     id: string;
     title: string;
@@ -67,6 +68,27 @@ export function resetPromptCache(): void {
     lastMtime = 0;
 }
 
+/**
+ * Version-aware Emergency Fallback Prompt.
+ * Used only when the configuration pipeline (prompt.json) is critically broken.
+ */
+const EMERGENCY_PROMPT_V1 = `
+# ⚠️ SYSTEM ALERT: RUNNING IN DEGRADED FALLBACK MODE
+The primary agent configuration (prompt.json) could not be loaded. 
+Reliability and workspace-awareness may be degraded.
+
+## ROLE
+You are the principal architect of a self-improving agentic operating system.
+Your goal is to build, coordinate, and verify work across the full range of computer tasks.
+
+## MANDATORY PROTOCOLS
+1. **Verification-First**: Never mark a task as done without running verification scripts.
+2. **File-Based State**: Maintain tasks.md and plan.md as the source of truth.
+3. **Tool-First**: ALWAYS check memory via \`manage_memory\` before starting project tasks.
+4. **Closed-Loop**: goal -> task graph -> execution -> verification -> memory update.
+`;
+
+
 async function loadPromptData(): Promise<PromptData | null> {
     try {
         const stats = await fsp.stat(JSON_PROMPT);
@@ -77,183 +99,198 @@ async function loadPromptData(): Promise<PromptData | null> {
         }
 
         const raw = await fsp.readFile(JSON_PROMPT, 'utf-8');
-        try {
-            const data = JSON.parse(raw);
-            cachedPromptData = data as PromptData;
-            lastMtime = mtime;
-            return cachedPromptData;
-        } catch (parseErr) {
-            console.error(`[Prompts] Invalid JSON in prompt data: ${parseErr}`);
+        if (raw.length < MIN_PROMPT_LENGTH) {
             return null;
         }
-    } catch (err) {
-        // Only log if it's not a standard file-missing error during tests
-        if (!(err instanceof Error && err.message.includes('ENOENT'))) {
-            console.error(`[Prompts] Error loading prompt data: ${err}`);
-        }
-        cachedPromptData = null;
-        lastMtime = 0;
+
+        const data = JSON.parse(raw);
+        cachedPromptData = data;
+        lastMtime = mtime;
+        return data;
+    } catch (e) {
         return null;
     }
+}
+
+
+function getMinimalIdentity(data: PromptData): string {
+    const firstPara = (data.introduction || "").split('\n\n')[0];
+    return `# ROLE\n${firstPara}\n`;
 }
 
 /**
  * Scoring sections based on keywords and assembles the prompt.
  * If explicitKeywords are provided, fuzzy tokenization of the context is bypassed (Strict Steering).
  */
+export interface PromptOptions {
+    context?: string;
+    keywords?: string[];
+    memory?: string;
+    isSubtask?: boolean;
+}
+
+/**
+ * Assembles a contextually relevant system prompt.
+ * Uses strict keyword steering if provided, otherwise falls back to fuzzy tokenization.
+ */
 export async function getIntelligentSystemPrompt(
-    context?: string,
+    contextOrOptions: string | PromptOptions = "",
     explicitKeywords?: string[],
     memoryContext?: string,
     isSubtask: boolean = false
 ): Promise<string> {
+    let context = "";
+    if (typeof contextOrOptions === 'object') {
+        context = contextOrOptions.context || "";
+        explicitKeywords = contextOrOptions.keywords;
+        memoryContext = contextOrOptions.memory;
+        isSubtask = contextOrOptions.isSubtask || false;
+    } else {
+        context = contextOrOptions;
+    }
+    
+    const contextLower = context.toLowerCase();
     const data = await loadPromptData();
     if (!data) {
-        return await getFallbackPrompt();
+        try {
+            // Tier 2 Fallback: Load raw README if JSON is missing/corrupt
+            const readme = await fsp.readFile(README, 'utf-8');
+            return readme + "\n\n" + GROUNDING_PROTOCOL;
+        } catch (e) {
+            // Tier 3 Fallback: Hardcoded emergency prompt
+            return EMERGENCY_PROMPT_V1;
+        }
     }
 
-    const introduction = data.introduction || "";
+    const introduction = isSubtask ? getMinimalIdentity(data) : (`# ROLE\n${data.introduction || ""}\n`);
     let assembled = introduction;
 
     // Inject Workspace Memory at the very top of the assembled prompt for maximum attention
     if (memoryContext) {
-        assembled += `\n\n## 🧠 WORKSPACE MEMORY\nRelevant prior knowledge for this workspace:\n${memoryContext}\n`;
+        assembled = `## 🧠 WORKSPACE MEMORY\nRelevant prior knowledge for this workspace:\n${memoryContext}\n\n` + assembled;
     }
 
-    if (!context) {
-        const critical = data.sections
-            .filter(s => s.level === 1)
-            .map(s => `\n\n## ${s.title}\n\n${s.content}`)
-            .join("");
-        return `${assembled}${critical}`;
+    if (!context && (!explicitKeywords || explicitKeywords.length === 0)) {
+        const assembled = data.introduction + "\n" + data.sections
+        .filter(s => s.level === 1)
+        .map(s => {
+            const content = s.content.length > 5000 ? s.content.substring(0, 4900) + "\n\n[...SECTION TRUNCATED...]\n" : s.content;
+            return `\n\n## ${s.title}\n\n${content}`;
+        })
+        .join("");
+        
+        return `${assembled}${GROUNDING_PROTOCOL}`;
     }
 
     // Tokenize
-    let tokens: Set<string>;
-    const contextLower = (context || "").toLowerCase();
-
+    const tokens = new Set<string>();
+    const stopwords = new Set(['and', 'the', 'with', 'your', 'from', 'that', 'this', 'for', 'are', 'you', 'was', 'were', 'been', 'have', 'has', 'had']);
+    
     if (explicitKeywords && explicitKeywords.length > 0) {
-        // Strict Steering: Only use provided keywords, bypass fuzzy prompt tokenization
-        tokens = new Set(explicitKeywords.map(k => k.toLowerCase()));
-    } else {
-        // Fuzzy Fallback: Tokenize context
-        const stopwords = new Set(['and', 'the', 'with', 'your', 'from', 'that', 'this', 'for', 'are', 'you', 'was', 'were', 'been', 'have', 'has', 'had']);
-        tokens = new Set(
-            contextLower.split(/\W+/)
-                .filter(t => t.length >= 3 && !stopwords.has(t))
-        );
+        explicitKeywords.forEach(k => tokens.add(k.toLowerCase()));
     }
-    console.error(`[DEBUG] Tokens: ${Array.from(tokens).join(', ')}`);
+    
+    if (contextLower) {
+        contextLower.split(/\W+/).forEach(t => {
+            if (t.length >= 3 && !stopwords.has(t)) tokens.add(t);
+        });
+    }
 
     // Score sections
     const scoredSections = data.sections.map(section => {
         let score = 0;
-
-        // Title match (5 points per word)
-        const titleTokens = section.title.toLowerCase().split(/\W+/);
-        titleTokens.forEach(tt => {
-            if (tokens.has(tt)) score += 5;
-        });
-
-        // Keyword match (Stricter matching for high-precision extraction)
-        section.keywords.forEach(kw => {
-            const lowKw = kw.toLowerCase();
-            if (tokens.has(lowKw)) {
-                score += 3.0; // Higher weight for matching defined keywords
-            } else if (lowKw.length > 4 && contextLower.includes(lowKw)) {
-                score += 1.0;
-            }
-        });
-
-        if (section.level === 1) score += 2.0;
-        if (section.level === 2) score += 1.1; // Ensure single keyword match (3) + level boost (1.1) > threshold (4.0)
-
-        const isReference = section.id === 'research_appendix' ||
-            section.id === 'subsystem_reference_map' ||
-            section.id === 'open_source_architecture_references';
-        if (isReference) {
-            const architecturalKeywords = [
-                'rest', 'api', 'url', 'github', 'appendix', 'reference', 'map',
-                'architecture', 'research', 'review', 'reviewer', 'implementation',
-                'patterns', 'best practices', 'audit', 'python', 'javascript', 'golang', 'rust'
-            ];
-            architecturalKeywords.forEach(ak => {
-                if (tokens.has(ak) || contextLower.includes(ak)) score += 5;
+        let matches: string[] = [];
+        
+        // 1. Explicit Keywords (Highest Priority)
+        if (explicitKeywords) {
+            const titleLower = section.title.toLowerCase();
+            explicitKeywords.forEach(kw => {
+                const kwLower = kw.toLowerCase();
+                if (section.keywords.includes(kwLower)) {
+                    score += 10.0;
+                    matches.push(`explicit:${kw}`);
+                }
+                if (titleLower.includes(kwLower)) {
+                    score += 10.0;
+                    matches.push(`explicit-title:${kw}`);
+                }
             });
         }
 
-        return { ...section, score };
+        // 2. Title relevance: restrict to explicit keywords if provided, else use context tokens
+        const titleMatchSource = (explicitKeywords && explicitKeywords.length > 0) 
+            ? new Set(explicitKeywords.map(k => k.toLowerCase())) 
+            : tokens;
+            
+        if (section.title.toLowerCase().split(/\W+/).some(t => titleMatchSource.has(t))) {
+            score += 5.0;
+        }
+
+        // 3. Keyword Density Normalization: prevent "bloated" sections from matching everything
+        const keywordCount = section.keywords.length;
+        const kwFactor = keywordCount > 25 ? (25 / keywordCount) : 1.0;
+
+        section.keywords.forEach(kw => {
+            const lowKw = kw.toLowerCase();
+            if (tokens.has(lowKw)) {
+                const added = 2.0 * kwFactor;
+                score += added;
+            } else if (lowKw.length > 4 && contextLower.includes(lowKw)) {
+                const added = 0.5 * kwFactor;
+                score += added;
+            }
+        });
+
+        if (section.level === 1) score += 3.0; // Moderate boost for major categories; needs a keyword match for inclusion in dense context
+        if (section.level === 2) score += 1.5;
+
+        const isReference = ['research_appendix', 'subsystem_reference_map', 'open_source_architecture_references'].includes(section.id);
+        if (isReference) {
+            const architecturalKeywords = ['rest', 'api', 'url', 'github', 'architecture', 'patterns', 'audit'];
+            architecturalKeywords.forEach(ak => { if (tokens.has(ak) || contextLower.includes(ak)) score += 5; });
+        }
+
+        const scored = { ...section, score };
+        return scored;
     });
 
+    const minScore = 5.0; // Hardened threshold for high-density synthesis
     const relevant = scoredSections
         .filter(s => {
-            if (s.score < 4) return false;
-            // Suppress broad references in subtasks unless they match VERY strongly
-            const isRef = s.id === 'research_appendix' ||
-                s.id === 'subsystem_reference_map' ||
-                s.id === 'open_source_architecture_references';
-            if (isSubtask && isRef) {
-                return s.score > 20;
-            }
+            if (s.score < minScore) return false;
+            const isRef = ['research_appendix', 'subsystem_reference_map', 'open_source_architecture_references'].includes(s.id);
+            if (isSubtask && isRef) return s.score > 20;
             return true;
         })
         .sort((a, b) => b.score - a.score)
-        .slice(0, isSubtask ? 3 : 7); // Shorter budget for subtasks
+        .slice(0, isSubtask ? 3 : 7);
 
+    // Reserve 1000 chars for introduction and protocols
+    const budgetLimit = (isSubtask ? 8000 : PROMPT_CHAR_BUDGET) - 1000;
     let currentSize = assembled.length;
 
     for (const section of relevant) {
         let content = section.content;
-
-        const isRef = section.id === 'research_appendix' ||
-            section.id === 'subsystem_reference_map' ||
-            section.id === 'open_source_architecture_references';
+        const isRef = ['research_appendix', 'subsystem_reference_map', 'open_source_architecture_references'].includes(section.id);
+        
         if (isRef) {
-            // Split by any list item to separate category headers from links
             const parts = content.split(/\n(?=\s*- )/).map(p => p.trim()).filter(p => p.length > 0);
-
             const scoredEntries: { entry: string, entryScore: number }[] = [];
             let currentCategory = "";
-
-            // Dynamic Thresholding: individual entries must have a stronger match
-            // to survive if the section matches only on broad architectural terms.
-            const minEntryScore = section.score > 12 ? 1.0 : 2.5;
+            // High-score sections (explicitly requested) get full content baseline, except reference maps.
+            const isReferenceMap = section.id.includes('reference') || section.id.includes('appendix');
+            const minEntryScore = (section.score > 20 && !isReferenceMap) ? 0 : (section.score > 12 ? 1.0 : 2.5);
 
             for (const part of parts) {
-                if (part.includes('[')) {
-                    // It's a link - score it with its category context
+                if (part.trim().startsWith('-')) {
                     let entryScore = 0;
-                    const entryLower = part.toLowerCase();
                     const contextText = (currentCategory + " " + part).toLowerCase();
-
-                    // Score based on tokens in the link text AND category context
                     contextText.split(/\W+/).forEach(et => {
-                        if (tokens.has(et)) {
-                            // Give less weight to super common languages in references to avoid broad noise
-                            if (['python', 'rust', 'js', 'javascript', 'ts', 'typescript', 'golang', 'go'].includes(et)) {
-                                entryScore += 0.5;
-                            } else {
-                                entryScore += 2.0;
-                            }
-                        }
+                        if (tokens.has(et)) entryScore += (['python', 'rust', 'javascript', 'typescript', 'go'].includes(et)) ? 0.5 : 2.0;
                     });
-
-                    tokens.forEach(t => {
-                        if (t.length > 3 && contextText.includes(t)) {
-                            const boost = (['python', 'rust', 'javascript', 'typescript', 'golang'].includes(t)) ? 0.1 : 0.5;
-                            entryScore += boost;
-                            if (part.includes('LangGraph')) {
-                                console.error(`[LANGGRAPH-DEBUG] Match Token: ${t} Boost: ${boost} CurrentScore: ${entryScore}`);
-                            }
-                        }
-                    });
-
+                    tokens.forEach(t => { if (t.length > 3 && contextText.includes(t)) entryScore += 0.5; });
                     scoredEntries.push({ entry: part, entryScore });
-                    if (entryScore >= 2.0) {
-                        console.error(`[DEBUG] Entry: ${part.slice(0, 30)}... Score: ${entryScore} contextText: ${contextText.slice(0, 100)}`);
-                    }
                 } else {
-                    // It's a category header - update context for subsequent links
                     currentCategory = part.replace(/^-\s*/, '');
                 }
             }
@@ -261,40 +298,37 @@ export async function getIntelligentSystemPrompt(
             content = scoredEntries
                 .filter(se => se.entryScore >= minEntryScore)
                 .sort((a, b) => b.entryScore - a.entryScore)
-                .slice(0, 15) // Higher diversity budget for categorized links
+                .slice(0, 15)
                 .map(se => se.entry)
                 .join('\n');
         }
 
         if (content.length > 0) {
-            const block = `\n\n## ${section.title}\n\n${content}`;
-            if (currentSize + block.length < PROMPT_CHAR_BUDGET) {
+            const header = `\n\n## ${section.title}\n\n`;
+            const remainingBudget = budgetLimit - currentSize;
+            
+            if (remainingBudget > header.length + 50) {
+                let blockContent = content;
+                const MAX_SECTION_SIZE = isSubtask ? 2000 : 4000;
+                if (blockContent.length > MAX_SECTION_SIZE) {
+                    blockContent = blockContent.substring(0, MAX_SECTION_SIZE) + "\n[...SECTION TRUNCATED...]\n";
+                }
+                
+                if (header.length + blockContent.length > remainingBudget) {
+                    blockContent = blockContent.slice(0, Math.max(0, remainingBudget - header.length - 20)) + "\n[...TRUNCATED...]";
+                }
+                
+                const block = header + blockContent;
                 assembled += block;
                 currentSize += block.length;
             }
         }
     }
 
-    const hasReferences = relevant.some(s =>
-        s.id === 'research_appendix' || s.id === 'subsystem_reference_map'
-    );
-    if (hasReferences) {
+    if (relevant.some(s => ['research_appendix', 'subsystem_reference_map'].includes(s.id))) {
         assembled += `\n\n${REFERENCE_SUGGESTION_PROTOCOL}`;
     }
 
-    // Always inject Grounding Protocol for agentic consistency
     assembled += `\n\n${GROUNDING_PROTOCOL}`;
-
     return assembled;
-}
-
-async function getFallbackPrompt(): Promise<string> {
-    try {
-        await fsp.access(README);
-        const data = await fsp.readFile(README, 'utf-8');
-        if (data.length > MIN_PROMPT_LENGTH) return data;
-    } catch { }
-
-    return `You are the principal architect of a self-improving agent system.
-Use queues (now, next, blocked, improve), verification-first execution, and file-based state.`;
 }

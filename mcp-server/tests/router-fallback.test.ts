@@ -43,7 +43,7 @@ describe('Router Fallback Fix - Multiple next() Calls Bug', () => {
             taskType: TaskType.Coding
         };
         await router.execute(codingContext, async () => { });
-        expect(firstModelAttempted).toBe('qwen/qwen3-coder:free');
+        expect(firstModelAttempted).toBe('qwen/qwen3-coder-480b-a35b:free');
 
         // Reset and test Chat task
         firstModelAttempted = null;
@@ -295,14 +295,14 @@ describe('Router Fallback Fix - Multiple next() Calls Bug', () => {
         });
 
         const context: PipelineContext = {
-            request: { model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'test' }] },
+            request: { model: 'gemini-3.1-flash-lite-preview', messages: [{ role: 'user', content: 'test' }] },
             taskType: TaskType.Chat
         };
 
         await router.execute(context, async () => { });
 
         // First attempted model should be the explicitly requested one
-        expect(attemptedModels[0]).toBe('gemini-2.5-flash');
+        expect(attemptedModels[0]).toBe('gemini-3.1-flash-lite-preview');
     });
 
     it('should handle case when no providers are available', async () => {

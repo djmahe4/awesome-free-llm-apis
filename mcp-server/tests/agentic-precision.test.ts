@@ -6,7 +6,7 @@ describe('Agentic Precision Tests', () => {
         // Context with broad architectural keywords
         const context = "You are a senior software architect reviewing python and rust code.";
 
-        const prompt = await getIntelligentSystemPrompt(context);
+        const prompt = await getIntelligentSystemPrompt({ context });
 
         // It should not contain LangGraph or Phoenix links if they weren't explicitly matched
         const hasLangGraph = prompt.includes('LangGraph');
@@ -25,10 +25,10 @@ describe('Agentic Precision Tests', () => {
         const context = "Implementing enum transformation in python";
 
         // Normal prompt might include some references if keywords match
-        const normalPrompt = await getIntelligentSystemPrompt(context, [], undefined, false);
+        const normalPrompt = await getIntelligentSystemPrompt({ context, isSubtask: false });
 
         // Subtask prompt should be leaner
-        const subtaskPrompt = await getIntelligentSystemPrompt(context, [], undefined, true);
+        const subtaskPrompt = await getIntelligentSystemPrompt({ context, isSubtask: true });
 
         console.log('Normal prompt length:', normalPrompt.length);
         console.log('Subtask prompt length:', subtaskPrompt.length);

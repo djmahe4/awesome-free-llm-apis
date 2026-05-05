@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LLMExecutor } from '../src/utils/LLMExecutor.js';
 
 describe('LLMExecutor - Token Refund', () => {
@@ -56,43 +56,43 @@ describe('LLMExecutor - Provider Circuit Breaker', () => {
     });
 
     it('should track failures but keep circuit closed below threshold', () => {
-        // Verify circuit opens after 3 failures
+        // Threshold is 2
         executor.recordProviderFailure('circuit-test');
-        executor.recordProviderFailure('circuit-test');
-        executor.recordProviderFailure('circuit-test');
+        expect(executor.isProviderCircuitOpen('circuit-test')).toBe(false);
         
-        const stats = executor.getProviderStats();
-        console.log('Stats:', JSON.stringify(stats));
-        console.log('Circuit open:', executor.isProviderCircuitOpen('circuit-test'));
-        
+        executor.recordProviderFailure('circuit-test');
+        // Now it should be open
         expect(executor.isProviderCircuitOpen('circuit-test')).toBe(true);
     });
 
-    it('should open circuit after 3 consecutive failures', () => {
-        executor.recordProviderFailure('test-provider');
+    it('should open circuit after 2 consecutive failures', () => {
         executor.recordProviderFailure('test-provider');
         executor.recordProviderFailure('test-provider');
         
         expect(executor.isProviderCircuitOpen('test-provider')).toBe(true);
         
         const stats = executor.getProviderStats();
-        expect(stats['test-provider'].errors).toBe(3);
+        expect(stats['test-provider'].errors).toBe(2);
         expect(stats['test-provider'].circuitOpen).toBe(true);
         expect(stats['test-provider'].cooldownRemaining).toBeGreaterThan(0);
     });
 
-    it('should reset consecutive failures on success', () => {
+    it('should reset consecutive failures and close circuit on success', () => {
+        // Trigger circuit opening
         executor.recordProviderFailure('test-provider');
         executor.recordProviderFailure('test-provider');
+        expect(executor.isProviderCircuitOpen('test-provider')).toBe(true);
+
+        // Success should reset everything
         executor.recordProviderSuccess('test-provider');
+        expect(executor.isProviderCircuitOpen('test-provider')).toBe(false);
+
+        // Should require 2 MORE failures to open again
         executor.recordProviderFailure('test-provider');
-        
-        // Should not open yet since consecutive failures reset
         expect(executor.isProviderCircuitOpen('test-provider')).toBe(false);
     });
 
     it('should close circuit after cooldown period', async () => {
-        executor.recordProviderFailure('test-provider');
         executor.recordProviderFailure('test-provider');
         executor.recordProviderFailure('test-provider');
         
@@ -106,23 +106,21 @@ describe('LLMExecutor - Provider Circuit Breaker', () => {
     it('should track total errors even after cooldown expires', () => {
         executor.recordProviderFailure('test-provider');
         executor.recordProviderFailure('test-provider');
-        executor.recordProviderFailure('test-provider');
         
-        // Circuit opens with 3 errors
+        // Circuit opens with 2 errors
         expect(executor.isProviderCircuitOpen('test-provider')).toBe(true);
         
         const stats = executor.getProviderStats();
-        expect(stats['test-provider'].errors).toBe(3);
+        expect(stats['test-provider'].errors).toBe(2);
     });
 
     it('should provide provider stats', () => {
-        executor.recordProviderFailure('test-provider');
         executor.recordProviderFailure('test-provider');
         
         const stats = executor.getProviderStats();
         
         expect(stats['test-provider']).toBeDefined();
-        expect(stats['test-provider'].errors).toBe(2);
+        expect(stats['test-provider'].errors).toBe(1);
         expect(stats['test-provider'].circuitOpen).toBe(false);
     });
 

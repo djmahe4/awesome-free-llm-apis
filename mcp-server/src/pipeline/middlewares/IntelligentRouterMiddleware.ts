@@ -19,13 +19,8 @@ export class IntelligentRouterMiddleware implements Middleware {
         'DeepSeek-V3': 0.9,
         'deepseek-ai/DeepSeek-V3': 0.9,
         'deepseek-v3.2': 0.95,
-        'gemini-3.1-pro-preview': 0.95,
-        'gemini-3.1-flash-preview': 0.85,
-        'gemini-3-flash-preview': 0.85, // Alias for older configs
         'gemini-3.1-flash-lite-preview': 0.82,
         'gemini-2.5-pro': 0.9,
-        'gemini-2.5-flash': 0.8,
-        'gemini-2.5-flash-lite': 0.81,
         'command-r-plus-08-2024': 0.9,
         'command-a-03-2025': 0.8,
         'mistral-large-latest': 0.85,
@@ -34,7 +29,7 @@ export class IntelligentRouterMiddleware implements Middleware {
         'qwen/qwen3-coder:free': 0.94,
         'qwen/qwen3-coder-480b-a35b:free': 0.96,
         'qwen/qwen3-next-80b-a3b-instruct:free': 0.89,
-        'google/gemma-3-27b-it': 0.85,
+        'google/gemma-4-26b-a4b-it:free': 0.95,
         'google/gemma-4-31B-it': 0.91,
         'openai/gpt-oss-120b': 0.92,
         'openai/gpt-oss-120b:free': 0.90,
@@ -81,6 +76,13 @@ export class IntelligentRouterMiddleware implements Middleware {
         '@cf/qwen/qwen2.5-coder-32b-instruct': 0.82,
         'deepseek-ai/deepseek-r1-distill-qwen-32b': 0.93,
         'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B': 0.84,
+        'gemma-3-1b-it': 0.75,
+        'gemma-3-4b-it': 0.82,
+        'gemma-3-12b-it': 0.88,
+        'gemma-3-27b-it': 0.92,
+        'gemma-3-2b-it': 0.78,
+        'gemma-4-26b-it': 0.94,
+        'gemma-4-31b-it': 0.95,
     };
 
     constructor(executor?: LLMExecutor) {
@@ -224,10 +226,10 @@ export class IntelligentRouterMiddleware implements Middleware {
     private async decomposeAndExecute(context: PipelineContext): Promise<void> {
         console.debug(`[Router] Decomposing complex task...`);
 
-        // 1. Pick a Planner model (SiliconFlow V3 or Gemini Flash)
+        // 1. Pick a Planner model (SiliconFlow V3, DeepSeek-R1, or Gemini Flash Lite)
         const plannerModels = context.request.google_search
-            ? ['gemini-2.5-flash', 'deepseek-ai/DeepSeek-V3', 'llama3.1-8b']
-            : ['deepseek-ai/DeepSeek-V3', 'gemini-2.5-flash', 'llama3.1-8b'];
+            ? ['gemini-3.1-flash-lite-preview', 'DeepSeek-R1', 'deepseek-ai/DeepSeek-V3', 'qwen/qwen3-coder:free']
+            : ['DeepSeek-R1', 'deepseek-ai/DeepSeek-V3', 'gemini-3.1-flash-lite-preview', 'qwen/qwen3-coder:free', 'llama-3.3-70b-versatile'];
         let plannerResponse: string | null = null;
 
         const lastMessage = context.request.messages.length > 0
@@ -341,7 +343,7 @@ Request: ${lastMessage}`;
             'deepseek-ai/deepseek-r1-distill-qwen-32b',
             'openai/gpt-oss-120b',
             'qwen/qwen3-32b',
-            'google/gemma-3-27b-it:free',
+            'google/gemma-4-26b-a4b-it:free',
             'google/gemma-4-31B-it',
             'DeepSeek-R1',
             'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
@@ -351,14 +353,15 @@ Request: ${lastMessage}`;
             '@cf/qwen/qwq-32b',
             'deepseek-v3.2',
             'gpt-oss-20b',
-            'gemini-3.1-pro-preview',
-            'gemini-2.5-flash',
+            'gemini-3.1-flash-lite-preview',
             'mistral-large-latest',
             'openai/gpt-oss-120b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
             'glm-5.1',
             'glm-5-turbo',
             'z-ai/glm-4.5-air:free',
+            'google/gemma-4-31b-it',
+            'google/gemma-3-27b-it',
             'glm-4.5-air',
             'kilo-auto/free',
         ],
@@ -371,7 +374,7 @@ Request: ${lastMessage}`;
             'qwen-3-235b-a22b-instruct-2507',
             'glm-5.1',
             'qwen/qwen3-coder:free',
-            'google/gemma-3-27b-it:free',
+            'google/gemma-4-26b-a4b-it:free',
             'google/gemma-4-31B-it',
             'nvidia/nemotron-3-super-120b-a12b:free',
         ],
@@ -379,7 +382,7 @@ Request: ${lastMessage}`;
             'llama-3.3-70b-versatile',
             'google/gemma-4-31B-it',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-            'gemini-2.5-flash',
+            'gemini-3.1-flash-lite-preview',
             'glm-4.5-air',
             'ministral-8b-latest',
             'nvidia/nemotron-3-super-120b-a12b:free',
@@ -393,11 +396,6 @@ Request: ${lastMessage}`;
             'GLM-4.6V-Flash',
             'gemini-3.1-flash-lite-preview',
             'mistral-small-latest',
-            '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-            'gemini-3.1-flash-preview',
-            'gemini-3-flash-preview',
-            'mistralai/Mistral-7B-Instruct-v0.3',
-            'gemini-2.5-flash',
             'glm-4.6',
             'glm-4.5-air',
             'nvidia/nemotron-3-nano-30b-a3b:free',
@@ -406,9 +404,8 @@ Request: ${lastMessage}`;
             'google/gemma-4-31B-it',
             'mistral-small-latest',
             'gemini-3.1-flash-lite-preview',
-            'gemini-3.1-flash-preview',
             'llama-3.3-70b-versatile',
-            'gemini-2.5-flash',
+            'gemini-3.1-flash-lite-preview',
             'glm-4.6',
             'glm-4.5-air',
             'nvidia/nemotron-mini-4b-instruct:free',
@@ -421,36 +418,32 @@ Request: ${lastMessage}`;
             'qwen/qwen3-next-80b-a3b-instruct:free',
             'meta-llama/llama-4-scout-17b-16e-instruct',
             'command-r-plus-08-2024',
-            'gemini-3.1-pro-preview',
-            'gemini-2.5-flash',
+            'gemini-3.1-flash-lite-preview',
             'mistral-large-latest',
             'openai/gpt-oss-120b:free',
-            'gemini-2.5-pro',
             'llama-3.3-70b-versatile',
             'glm-4.5-air',
         ],
         [TaskType.Summarization]: [
             'google/gemma-4-31B-it',
             'kimi-k2.5',
-            'gemini-3.1-flash-preview',
             'mistral-small-latest',
             'gemini-3.1-flash-lite-preview',
             'gemini-2.5-flash-lite',
             'meta-llama/Llama-3.3-70B-Instruct',
             'command-a-03-2025',
             'mistralai/mistral-small-3.1-24b:free',
-            'gemini-2.5-flash',
             'glm-4.7',
             'glm-4.5-air',
         ],
         [TaskType.EntityExtraction]: [
             'google/gemma-4-31B-it',
-            'gemini-3.1-pro-preview',
             'arcee-ai/trinity-large-preview:free',
             'llama-3.3-70b-versatile',
-            'gemini-2.5-flash',
+            'gemini-3.1-flash-lite-preview',
             'glm-4.7',
             'glm-4.5-air',
+            'google/gemma-3-27b-it',
         ],
         [TaskType.Chat]: [
             'DeepSeek-R1',
@@ -460,7 +453,7 @@ Request: ${lastMessage}`;
             'Qwen/Qwen3-235B-A22B',
             'qwen-3-235b-a22b-instruct-2507',
             'google/gemma-4-31B-it',
-            'google/gemma-3-27b-it',
+            'google/gemma-4-26b-a4b-it:free',
             'openai/gpt-oss-20b:free',
             'gpt-oss-20b',
             'Llama-3.3-70B-Instruct',
@@ -478,7 +471,8 @@ Request: ${lastMessage}`;
             'nvidia/nemotron-nano-9b-v2:free',
             'openrouter/free',
             'llama-3.1-8b-instant',
-            'gemini-2.5-flash',
+            'gemini-3.1-flash-lite-preview',
+            'google/gemma-3-27b-it',
         ]
     };
 
@@ -516,17 +510,24 @@ Request: ${lastMessage}`;
         // Use Set to maintain order but remove duplicates
         let finalTierModels = [...new Set(tierModels)].filter(Boolean) as string[];
 
-        // v1.0.5: Strategic prioritization of Gemini for search tasks
-        if (context.request.google_search) {
-            const geminiModels = finalTierModels.filter(m => m.toLowerCase().includes('gemini'));
-            const otherModels = finalTierModels.filter(m => !m.toLowerCase().includes('gemini'));
-            finalTierModels = [...geminiModels, ...otherModels];
-            console.debug(`[Router] Prioritizing Gemini models for search: ${geminiModels.join(', ')}`);
-        }
-
         const availableProviders = ProviderRegistry.getInstance().getAvailableProviders();
         if (availableProviders.length === 0) {
             throw new Error('No available providers. Please check your API keys.');
+        }
+
+        if (context.request.google_search) {
+            const geminiModels = finalTierModels.filter(m => m.toLowerCase().includes('gemini'));
+            const otherModels = finalTierModels.filter(m => !m.toLowerCase().includes('gemini'));
+
+            // Only force Gemini if at least one Gemini model is actually available (not cooling down)
+            const geminiAvailable = availableProviders.some(p => p.id === 'gemini' && !this.executor.getProviderStats()['gemini']?.circuitOpen);
+
+            if (geminiAvailable) {
+                finalTierModels = [...geminiModels, ...otherModels];
+                console.debug(`[Router] Prioritizing Gemini models for search: ${geminiModels.join(', ')}`);
+            } else {
+                console.debug(`[Router] Gemini cooling down. Using general fallback for search.`);
+            }
         }
 
         (context as any).providersAttempted = [];
@@ -712,11 +713,21 @@ Request: ${lastMessage}`;
                         baseScore = (capability * 0.6) + (Math.max(0, actualHeadroom) * 0.4);
                     }
 
-                    // 5. Persistence bonus
+                    // 5. Persistence bonus (favors sticking to same session)
                     if (context.providerId && provider.id === context.providerId) baseScore += 1000;
 
+                    // 6. Quota Depletion Hard-Penalty
+                    if (tracking && (tracking.remainingTokens === 0 || tracking.remainingRequests === 0)) {
+                        scoreModifier *= 0.05; // Drop to bottom of stack but keep as absolute last resort
+                    }
+
+                    // 7. Success Momentum (favor providers that are working now)
+                    const lastSuccess = stats?.lastSuccessTime || 0;
+                    const recencyBonus = (Date.now() - lastSuccess) < 300000 ? 1.2 : 1.0; // 20% bonus if succeeded in last 5m
+
                     // Final Score calculation with robustness guards
-                    let finalScore = (baseScore * healthScore * loadFactor * tokenFactor * scoreModifier) - penalty;
+                    let finalScore = (baseScore * healthScore * loadFactor * tokenFactor * scoreModifier * recencyBonus) - penalty;
+
 
                     // NaN/Infinity Guard: Ensure scores are always valid numbers before filtering
                     if (!Number.isFinite(finalScore)) {
@@ -743,8 +754,8 @@ Request: ${lastMessage}`;
                 const { provider } = scoredProviders[index];
                 index++;
 
-                // Google Search is Gemini-exclusive
-                if (context.request.google_search && provider.id !== 'gemini') continue;
+                // Google Search is Gemini-exclusive, but we allow fallback to other providers (stripping search) if needed
+                // if (context.request.google_search && provider.id !== 'gemini') continue;
 
                 const stats = this.executor.getProviderStats()[provider.id];
                 if (stats?.circuitOpen) {
@@ -773,6 +784,17 @@ Request: ${lastMessage}`;
                     model: modelId,
                     abortSignal: globalAbortController.signal
                 };
+
+                // Strip google_search if provider is not Gemini to prevent 400 Bad Request
+                if (provider.id !== 'gemini') {
+                    delete attemptRequest.google_search;
+                }
+
+
+                // Strip google_search if provider is not Gemini to prevent 400 errors
+                // if (attemptRequest.google_search && provider.id !== 'gemini') {
+                //     delete attemptRequest.google_search;
+                // }
 
                 // Boost tokens for reasoning models
                 if (isReasoning) {
@@ -881,7 +903,7 @@ Request: ${lastMessage}`;
         }
 
         // --- Emergency Fallback: Last Resort Deep Truncation ---
-        const emergencyModels = ['gemini-2.5-flash', 'glm-4.5-air', 'llama-3.3-70b-versatile'];
+        const emergencyModels = ['gemini-3.1-flash-lite-preview', 'google/gemma-4-31b-it', 'glm-4.5-air', 'llama-3.3-70b-versatile'];
         const emergencyTruncation = this.contextManager.truncateOldest(context.request.messages, 1500);
         context.request.messages = emergencyTruncation.messages;
         delete context.estimatedTokens;

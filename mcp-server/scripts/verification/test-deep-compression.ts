@@ -18,13 +18,13 @@ async function runTests() {
 
     if (isSimulated) {
         console.error('🚀 RUNNING IN SIMULATION MODE (Mocked Providers)');
-        
+
         // 1. Clear real providers and inject mocks
         (registry as any).providers = new Map();
-        
+
         const mockModels = [
             { id: 'DeepSeek-R1', name: 'DS-R1', contextWindow: 64000 },
-            { id: 'gemini-2.0-flash', name: 'Gemini Flash', contextWindow: 1000000 }
+            { id: 'gemini-2.5-flash', name: 'Gemini Flash', contextWindow: 1000000 }
         ];
 
         // Simulation Wrapper logic (Race emulation)
@@ -49,7 +49,7 @@ async function runTests() {
             getUsageStats: () => ({ requestCountMinute: 0, requestCountDay: 0 }),
             rateLimits: { rpm: 60 },
             consecutiveFailures: 0,
-            recordFailure: () => {},
+            recordFailure: () => { },
             chat: wrapWithTimeout('mock-p1', async () => {
                 await new Promise(resolve => setTimeout(resolve, 100));
                 return {
@@ -77,9 +77,9 @@ async function runTests() {
 
     console.error('\n--- Test 1: Context Pressure (Real API Attempt) ---');
     // Using ~16,000 chars as per evaluate-routing.ts Stress Case
-    const largeText = 'A'.repeat(16000); 
+    const largeText = 'A'.repeat(16000);
     const prompt = 'Repeat after me: Context test. ' + largeText;
-    
+
     const ctx1: PipelineContext = {
         taskType: TaskType.Chat,
         request: {
@@ -119,7 +119,7 @@ async function runTests() {
     };
 
     try {
-        await router.execute(ctx2, async () => {});
+        await router.execute(ctx2, async () => { });
         console.error('✅ Success:', ctx2.providerId, ctx2.request.model);
         if (ctx2.request.messages.some(m => m.content.includes('[...truncated...]'))) {
             console.error('   ✅ Emergency truncation verified.');

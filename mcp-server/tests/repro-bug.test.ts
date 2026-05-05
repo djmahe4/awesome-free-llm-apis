@@ -13,8 +13,8 @@ class MockProvider extends BaseProvider {
     id = 'mock';
     baseURL = 'http://mock';
     envVar = 'MOCK_API_KEY';
-    // Use a model ID that is actually in the router's configuration (e.g., gemini-2.5-flash)
-    models = [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', contextWindow: 32768 }];
+    // Use a model ID that is actually in the router's configuration
+    models = [{ id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite', contextWindow: 32768 }];
     rateLimits = { rpm: 60 };
     constructor() {
         super();

@@ -55,6 +55,7 @@ describe('Agentic Intelligence Audit', () => {
                 id: 'gemini',
                 models: [
                     { id: 'deepseek-ai/DeepSeek-V3' },
+                    { id: 'gemini-3.1-flash-lite-preview' },
                     { id: 'gemini-2.5-flash' },
                     { id: 'llama-3.3-70b-versatile' }
                 ],
@@ -77,10 +78,9 @@ describe('Agentic Intelligence Audit', () => {
             // We can check which model was passed to the chat call
             await executor.prompt([{ role: 'user', content: 'test' }], 'any', { google_search: true });
 
-            // Since gemini-2.5-flash is now first in the targetModels list for google_search
-            // and the provider supports it, it should be tried first.
+            // With the update, gemini-3.1-flash-lite-preview is prioritized for google_search (highest RPD)
             expect(mockProvider.chat).toHaveBeenCalledWith(expect.objectContaining({
-                model: 'gemini-2.5-flash',
+                model: 'gemini-3.1-flash-lite-preview',
                 google_search: true
             }));
         });

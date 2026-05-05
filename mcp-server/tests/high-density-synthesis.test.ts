@@ -28,28 +28,28 @@ describe('High-Density Synthesis for Multi-Agent Workflows', () => {
             {
                 id: "sec_arch",
                 title: "ARCHITECTURE PRINCIPLES",
-                content: "Layered complexity and modular design guidelines.".padEnd(2000, '.'),
+                content: "Layered complexity and modular design guidelines.".padEnd(2000, ' x'),
                 level: 1,
                 keywords: ["arch", "architecture", "modular", "design"]
             },
             {
                 id: "sec_security",
                 title: "SECURITY PROTOCOLS",
-                content: "Threat modeling, credential isolation, and audit trails.".padEnd(2000, '.'),
+                content: "Threat modeling, credential isolation, and audit trails.".padEnd(2000, ' x'),
                 level: 1,
                 keywords: ["security", "auth", "audit", "isolation"]
             },
             {
                 id: "sec_performance",
                 title: "PERFORMANCE OPTIMIZATION",
-                content: "Event-loop guarding and non-blocking I/O patterns.".padEnd(2000, '.'),
+                content: "Event-loop guarding and non-blocking I/O patterns.".padEnd(2000, ' x'),
                 level: 2,
                 keywords: ["performance", "async", "latency", "optimization"]
             },
             {
                 id: "sec_api",
                 title: "API STANDARDS",
-                content: "RESTful principles and JSON-RPC compliance.".padEnd(2000, '.'),
+                content: "RESTful principles and JSON-RPC compliance.".padEnd(2000, ' x'),
                 level: 2,
                 keywords: ["api", "rest", "json", "rpc"]
             },
@@ -86,7 +86,10 @@ describe('High-Density Synthesis for Multi-Agent Workflows', () => {
     it('should prioritize sections based on combinatorial keyword matching', async () => {
         // High-density keywords matching multiple sections
         const keywords = ["arch", "security", "performance"];
-        const prompt = await getIntelligentSystemPrompt("Building a secure modular system with low latency", keywords);
+        const prompt = await getIntelligentSystemPrompt({ 
+            context: "Building a secure modular system with low latency", 
+            keywords 
+        });
 
         expect(prompt).toContain("ARCHITECTURE PRINCIPLES");
         expect(prompt).toContain("SECURITY PROTOCOLS");
@@ -98,7 +101,10 @@ describe('High-Density Synthesis for Multi-Agent Workflows', () => {
         // All 4 sections (2k each) + Reference Map + Intro might fit, 
         // but let's see how close it gets.
         const keywords = ["arch", "security", "performance", "api", "reference"];
-        const prompt = await getIntelligentSystemPrompt("Complex multi-agent task", keywords);
+        const prompt = await getIntelligentSystemPrompt({
+            context: "Complex multi-agent task",
+            keywords
+        });
 
         expect(prompt.length).toBeLessThanOrEqual(PROMPT_CHAR_BUDGET + 500); // 12k budget + small buffer for protocol/intro
         
@@ -109,7 +115,10 @@ describe('High-Density Synthesis for Multi-Agent Workflows', () => {
 
     it('should fragment reference maps to only relevant entries across agents', async () => {
         // This simulates a 'Payment Agent' turn
-        const prompt = await getIntelligentSystemPrompt("Implementing the payment gateway hooks", ["reference", "payment"]);
+        const prompt = await getIntelligentSystemPrompt({
+            context: "Implementing the payment gateway hooks",
+            keywords: ["reference", "payment"]
+        });
 
         expect(prompt).toContain("SUBSYSTEM REFERENCE MAP");
         expect(prompt).toContain("Payment Gateway");
@@ -122,7 +131,11 @@ describe('High-Density Synthesis for Multi-Agent Workflows', () => {
 
     it('should prioritize WORKSPACE MEMORY regardless of density', async () => {
         const memoryContext = "- Memory Entry A: Past decision on performance\n- Memory Entry B: Past auth bug fix";
-        const prompt = await getIntelligentSystemPrompt("Optimizing the system", ["performance"], memoryContext);
+        const prompt = await getIntelligentSystemPrompt({
+            context: "Optimizing the system",
+            keywords: ["performance"],
+            memory: memoryContext
+        });
 
         expect(prompt).toContain("WORKSPACE MEMORY");
         expect(prompt).toContain("Memory Entry A");
@@ -136,11 +149,14 @@ describe('High-Density Synthesis for Multi-Agent Workflows', () => {
 
     it('should switch between Strict and Fuzzy steering combinations', async () => {
         // Fuzzy steering (context only)
-        const fuzzyPrompt = await getIntelligentSystemPrompt("How do I build an api?");
+        const fuzzyPrompt = await getIntelligentSystemPrompt({ context: "How do I build an api?" });
         expect(fuzzyPrompt).toContain("API STANDARDS");
 
         // Strict steering (keywords provided - should ignore 'api' in context if not in keywords)
-        const strictPrompt = await getIntelligentSystemPrompt("How do I build an api?", ["security"]);
+        const strictPrompt = await getIntelligentSystemPrompt({
+            context: "How do I build an api?",
+            keywords: ["security"]
+        });
         expect(strictPrompt).toContain("SECURITY PROTOCOLS");
         expect(strictPrompt).not.toContain("API STANDARDS");
     });
@@ -148,13 +164,19 @@ describe('High-Density Synthesis for Multi-Agent Workflows', () => {
     it('should handle multi-turn subtask synthesis correctly', async () => {
         // Simulate a planner turn where "auth" is identified
         const turn1Keywords = ["arch", "auth"];
-        const prompt1 = await getIntelligentSystemPrompt("Implement login system", turn1Keywords);
+        const prompt1 = await getIntelligentSystemPrompt({
+            context: "Implement login system",
+            keywords: turn1Keywords
+        });
         expect(prompt1).toContain("ARCHITECTURE PRINCIPLES");
         expect(prompt1).toContain("SECURITY PROTOCOLS");
 
         // Simulate a follow-up coder turn where "performance" is now the focus
         const turn2Keywords = ["security", "performance"];
-        const prompt2 = await getIntelligentSystemPrompt("Fix performance of login hashing", turn2Keywords);
+        const prompt2 = await getIntelligentSystemPrompt({
+            context: "Fix performance of login hashing",
+            keywords: turn2Keywords
+        });
         expect(prompt2).toContain("SECURITY PROTOCOLS");
         expect(prompt2).toContain("PERFORMANCE OPTIMIZATION");
         expect(prompt2).not.toContain("ARCHITECTURE PRINCIPLES"); // Should be swapped out if budget/priority shifts

@@ -19,5 +19,4 @@ mcp-server/scripts/sandboxes/go-sandbox-runner/sandbox-runner
 mcp-server/demo-verify.log
 mcp-server/extended_demo_out.log
 mcp-server/out.log
-mcp-server/scratch/test-indexing.ts
-mcp-server/scratch/test-vector.ts
+mcp-server/scratch/

@@ -1,5 +1,6 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+import fs from 'node:fs/promises';
+import fssync from 'node:fs';
+import path from 'node:path';
 import { LOCAL_SKILLS_DIR } from '../middleware/agentic/constants.js';
 import { useFreeLLM } from './use-free-llm.js';
 import { memoryManager } from '../memory/index.js';
@@ -56,7 +57,9 @@ export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput): Prom
     }
 
     try {
-        await fs.mkdir(scriptsDir, { recursive: true });
+        if (!fssync.existsSync(scriptsDir)) {
+            await fs.mkdir(scriptsDir, { recursive: true });
+        }
 
         // 1. Generate scripts via internal LLM if instructions are provided
         if (script_instructions) {
@@ -86,7 +89,12 @@ export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput): Prom
                     }
 
                     // 1b. Build an intelligent system prompt
-                    const baseSystemPrompt = await getIntelligentSystemPrompt(instruction, [], memoryContext, false);
+                    const baseSystemPrompt = await getIntelligentSystemPrompt({
+                        context: instruction,
+                        keywords: [],
+                        memory: memoryContext,
+                        isSubtask: false
+                    });
                     
                     // Inject Grep Context manually into the prompt for grounding
                     const grepContextStr = grepContext.length > 0 

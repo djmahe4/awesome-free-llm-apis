@@ -126,7 +126,7 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await verifyRouting(
             'Find information about the latest advancements in quantum computing.',
             TaskType.SemanticSearch,
-            'gemini-2.5-flash'
+            'nvidia/nemotron-3-super-120b-a12b:free'
         );
     });
 

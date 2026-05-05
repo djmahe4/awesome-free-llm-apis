@@ -76,7 +76,7 @@ describe('Pipeline Orchestration', () => {
         await router.execute(context, next);
 
         // Coding task should pick the best FREE coding model first (Qwen 480B via OpenRouter)
-        expect(context.request.model).toBe('qwen/qwen3-coder:free');
+        expect(context.request.model).toBe('qwen/qwen3-coder-480b-a35b:free');
         expect(context.providerId).toBe('openrouter');
         expect(next).toHaveBeenCalledTimes(1);
     });
@@ -152,14 +152,14 @@ describe('Pipeline Orchestration', () => {
                 object: 'chat.completion',
                 created: Date.now(),
                 model: modelId,
-                choices: [{ 
-                    index: 0, 
-                    message: { 
-                        role: 'assistant', 
+                choices: [{
+                    index: 0,
+                    message: {
+                        role: 'assistant',
                         content: '\n{\n  "result": "ok"\n}\n',
-                        thinking: 'Thinking about the bracket fix' 
-                    } as any, 
-                    finish_reason: 'stop' 
+                        thinking: 'Thinking about the bracket fix'
+                    } as any,
+                    finish_reason: 'stop'
                 }],
             } as ChatResponse;
         });
@@ -170,7 +170,7 @@ describe('Pipeline Orchestration', () => {
         vi.spyOn(registry, 'getProviderForModel').mockReturnValue(geminiProvider);
 
         const router = new IntelligentRouterMiddleware(executor);
-        
+
         const context: PipelineContext = {
             request: { model: 'gemini-exp-1206', messages: [{ role: 'user', content: 'test' }] }
         };
@@ -179,7 +179,7 @@ describe('Pipeline Orchestration', () => {
 
         const res = context.response as any;
         const msg = res.choices[0].message;
-        
+
         // Should have THOUGHTS
         expect(msg.content).toContain('THOUGHTS: Thinking about the bracket fix');
         // Should have the cleaned result (no newline before '{')

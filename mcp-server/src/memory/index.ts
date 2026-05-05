@@ -27,17 +27,26 @@ export class MemoryManager {
     this.shortTerm.set(key, output);
     await this.longTerm.save(key, output);
 
-    // v1.0.5: Vector indexing for semantic search
-    if (['auto_memory', 'store_workspace_skill', 'store_memory'].includes(toolName)) {
+    // v1.0.5: Signal-Based Vector Indexing to prevent memory pollution
+    if (['auto_memory', 'store_workspace_skill', 'store_memory', 'manual_memory'].includes(toolName)) {
       try {
         const content = typeof output === 'string' ? output : JSON.stringify(output);
+
+        // Filter: Only index high-signal content (code, paths, structured decisions)
+        // Manual memory and skill storage are always considered high-signal
+        const isExplicit = ['manual_memory', 'store_workspace_skill'].includes(toolName);
+        const isHighSignal = isExplicit || (/`.*`|\\|\/|## |Decision:|Architecture:|Bug:|FIX:/i.test(content) &&
+          !/verified|functioning correctly|success/i.test(content));
+
+        if (!isHighSignal) return;
+
         const wsHash = input?._ws || input?.ws || (input?.workspace_root ? Buffer.from(input.workspace_root).toString('base64').slice(0, 8) : null);
 
         if (wsHash) {
           const vectorKey = `vector:${wsHash}:${key}`;
           const hash = vectorStore.calculateHash(content);
 
-          // Check if already indexed and unchanged (using longTerm as a cache for hash)
+          // Check if already indexed and unchanged
           const existingHash = await this.longTerm.load(`${vectorKey}:hash`);
           if (existingHash === hash) return;
 
@@ -49,7 +58,6 @@ export class MemoryManager {
             timestamp: Date.now()
           });
 
-          // Store hash only in longTerm to avoid re-indexing
           await this.longTerm.save(`${vectorKey}:hash`, hash);
         }
       } catch (err) {
@@ -66,32 +74,37 @@ export class MemoryManager {
   }
 
   async search(workspaceHash: string, query?: string): Promise<unknown[]> {
-    const allKeys = await this.longTerm.list();
-    const results: unknown[] = [];
-
-    for (const key of allKeys) {
-      if (key.startsWith('vector:')) continue;
-      
-      if (key.includes(`"_ws":"${workspaceHash}"`) || key.includes(`"ws":"${workspaceHash}"`) || key.includes(`_ws:${workspaceHash}`)) {
-        const val = await this.longTerm.load(key);
-        if (!query || JSON.stringify(val).toLowerCase().includes(query.toLowerCase())) {
-          results.push(val);
+    // v1.0.5: Semantic-First Search to eliminate naive duplicate leakage
+    if (!query) {
+      // If no query, return all entries for this workspace (excluding vector keys)
+      const allKeys = await this.longTerm.list();
+      const results: unknown[] = [];
+      for (const key of allKeys) {
+        if (key.startsWith('vector:')) continue;
+        if (key.includes(`"_ws":"${workspaceHash}"`) || key.includes(`"ws":"${workspaceHash}"`) || key.includes(`_ws:${workspaceHash}`)) {
+          results.push(await this.longTerm.load(key));
         }
+      }
+      return results;
+    }
+
+    // 1. Priority: Semantic Search (Precision retrieval)
+    const semanticResults = await this.semanticSearch(workspaceHash, query);
+
+    // 2. Deduplicate by content hash to avoid redundancy
+    const uniqueResults: unknown[] = [];
+    const seenHashes = new Set<string>();
+
+    for (const res of semanticResults) {
+      // Extract hash if it's a VectorEntry or has a contentHash field
+      const hash = (res as any)?.contentHash || (typeof res === 'string' ? vectorStore.calculateHash(res) : null);
+      if (hash && !seenHashes.has(hash)) {
+        seenHashes.add(hash);
+        uniqueResults.push(res);
       }
     }
 
-    // If query exists and results are low, try semantic search
-    if (query && results.length < 3) {
-      const semanticResults = await this.semanticSearch(workspaceHash, query);
-      // Merge and de-dupe
-      for (const res of semanticResults) {
-        if (!results.find(r => JSON.stringify(r) === JSON.stringify(res))) {
-          results.push(res);
-        }
-      }
-    }
-
-    return results;
+    return uniqueResults;
   }
 
   async semanticSearch(workspaceHash: string, query: string): Promise<unknown[]> {

@@ -9,9 +9,9 @@ import { memoryManager } from '../../memory/index.js';
 import { getIntelligentSystemPrompt } from './prompts.js';
 // Removed top-level import of instances.js to break circular dependency
 
-import { 
-    PROJECTS_DIR, 
-    STATE_FILE, 
+import {
+    PROJECTS_DIR,
+    STATE_FILE,
     KNOWLEDGE_FILE
 } from './constants.js';
 import { ContextGatherer } from './context-gatherer.js';
@@ -327,9 +327,37 @@ export class AgenticMiddleware implements Middleware {
 
         // Context and memory are now handled by WorkspaceContextMiddleware
         // which runs BEFORE AgenticMiddleware in the pipeline.
-        (context as any).isSubtask = q.nowQueue.length > 1;
+        (context as any).isSubtask = q.nowQueue.length > 0;
 
-        // Research validation: detect and log if this request involves external knowledge lookup.
+        try {
+            const groundingGate: string = (context as any).groundingGate || '';
+            const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **4** high-level steps.`;
+            const initialPrompt = await getIntelligentSystemPrompt({
+                context: userContent || "",
+                keywords: isAgenticExplicitlyRequested ? ['agentic', 'orchestration'] : [],
+                memory: (context as any).memoryContext,
+                isSubtask: false
+            });
+            const sysMsg = context.request.messages.find(m => m.role === 'system');
+            const fullPrompt = `${initialPrompt}${highLevelStepsSection}${groundingGate}`;
+            if (sysMsg) {
+                sysMsg.content = fullPrompt;
+            } else {
+                // Ensure system message is ALWAYS at index 0
+                context.request.messages.unshift({ role: 'system', content: fullPrompt });
+            }
+        } catch (err) {
+            console.error(`[AgenticMiddleware] Failed to inject initial prompt: ${err}`);
+            // Minimal fallback to ensure role integrity
+            if (!context.request.messages.some(m => m.role === 'system')) {
+                context.request.messages.unshift({ 
+                    role: 'system', 
+                    content: "You are an agentic AI coding assistant. Maintain MOMENTUM ENGINE protocols." 
+                });
+            }
+        }
+
+        // Research validation...
         // This provides an explicit audit trail to reduce agent ambiguity and hallucination risk.
         if (userContent && detectResearchIntent(userContent)) {
             logResearchValidation(sessionId, userContent, 'pre-execution-research-detection');
@@ -368,13 +396,20 @@ export class AgenticMiddleware implements Middleware {
 
             // 1. Inject Intelligent Prompt and Task Instruction
             try {
-                const subtaskPrompt = await getIntelligentSystemPrompt(currentTask, context.keywords, undefined, true);
-                const taskHeader = `\n\n## CURRENT SUBTASK\nObjective: "${currentTask}"\nFocus ONLY on this part. Once done, summarize results for the next step.`;
-                
+                // CLEAR and REFRESH System Prompt to avoid accumulation
+                const subtaskPrompt = await getIntelligentSystemPrompt({
+                    context: currentTask,
+                    keywords: ['mcp', 'memory', 'filesystem'], // Core steering
+                    memory: (context as any).memoryContext,
+                    isSubtask: true
+                });
+                const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${currentTask}\n\nStrictly focus on this subtask using the tools provided.`;
+
                 const messages = context.request.messages;
                 const sysMsg = messages.find(m => m.role === 'system');
                 if (sysMsg) {
-                    sysMsg.content = `${subtaskPrompt}${taskHeader}\n\n${sysMsg.content}`;
+                    // Replace, don't append, to ensure clean state
+                    sysMsg.content = `${subtaskPrompt}${taskHeader}`;
                 } else {
                     messages.unshift({ role: 'system', content: `${subtaskPrompt}${taskHeader}` });
                 }
@@ -385,7 +420,7 @@ export class AgenticMiddleware implements Middleware {
             // 2. Direct execution of the router (the next step in the pipeline)
             // Using dynamic import to break circular dependency at runtime
             const instances = await import('../../pipeline/instances.js');
-            await instances.sharedRouter.execute(context, async () => {});
+            await instances.sharedRouter.execute(context, async () => { });
 
             // 3. Process result
             const responseContent = getResponseContent(context);
@@ -398,7 +433,7 @@ export class AgenticMiddleware implements Middleware {
 
                 // Append assistant response to history for next subtask context
                 context.request.messages.push({ role: 'assistant', content: responseContent });
-                
+
                 // Store memory and knowledge
                 const wsHash = context.wsHash;
                 if (!verifyResult.startsWith('FAIL') && wsHash) {
@@ -410,6 +445,9 @@ export class AgenticMiddleware implements Middleware {
             q.nowQueue.shift();
             persistStateDebounced(sessionId, projectDir);
         }
+
+        // v1.0.5: Critical fix - signal completion to the pipeline
+        await next();
 
         console.error(`[agentic-middleware] ${Date.now() - startMs}ms session=${sessionId} iterations=${subtaskIteration}`);
     }

@@ -133,7 +133,15 @@ export abstract class BaseProvider implements Provider {
     const url = `${this.baseURL}chat/completions`;
 
     // Sanitize request: Remove internal-only fields that strict APIs reject
-    const { agentic, timeoutMs: _timeoutMs, abortSignal: _abort, ...sanitizedRequest } = request as any;
+    const { 
+      agentic, 
+      google_search, 
+      sessionId, 
+      taskType, 
+      timeoutMs: _timeoutMs, 
+      abortSignal: _abort, 
+      ...sanitizedRequest 
+    } = request as any;
 
     // Ensure model is set
     sanitizedRequest.model = sanitizedRequest.model || (this.models.length > 0 ? this.models[0].id : '');
@@ -207,7 +215,13 @@ export abstract class BaseProvider implements Provider {
     const url = `${this.baseURL}chat/completions`;
 
     // Sanitize request: Remove internal-only fields that strict APIs reject
-    const { agentic, ...sanitizedRequest } = request as any;
+    const { 
+      agentic, 
+      google_search, 
+      sessionId, 
+      taskType, 
+      ...sanitizedRequest 
+    } = request as any;
 
     // Ensure model is set
     sanitizedRequest.model = sanitizedRequest.model || (this.models.length > 0 ? this.models[0].id : '');

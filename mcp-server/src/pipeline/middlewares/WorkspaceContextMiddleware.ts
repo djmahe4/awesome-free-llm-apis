@@ -69,10 +69,13 @@ export class WorkspaceContextMiddleware implements Middleware {
                 const queryForMemory = userContent + (grepResults.length > 0 ? ' ' + grepResults.join(' ').slice(0, 500) : '');
                 const memoryResults = await memoryManager.search(context.wsHash, queryForMemory);
                 if (Array.isArray(memoryResults) && memoryResults.length > 0) {
+                    console.debug(`[WorkspaceContext] Found ${memoryResults.length} memory entries for query: "${queryForMemory.slice(0, 50)}..."`);
                     memoryContext = memoryResults
                         .slice(0, 5)
                         .map(m => `- ${typeof m === 'string' ? m : JSON.stringify(m)}`)
                         .join('\n');
+                } else {
+                    console.debug(`[WorkspaceContext] No memory entries found for query: "${queryForMemory.slice(0, 50)}..."`);
                 }
             } catch (err) {
                 console.error(`[WorkspaceContextMiddleware] Memory lookup failed: ${err}`);
@@ -93,25 +96,40 @@ export class WorkspaceContextMiddleware implements Middleware {
             }
         }
 
-        // 5. Inject Intelligent System Prompt
-        try {
-            const isSubtask = (context as any).isSubtask === true;
-            const dynamicPrompt = await getIntelligentSystemPrompt(userContent, context.keywords, memoryContext, isSubtask);
-            
-            // v1.0.4 optimization: Force HIGH-LEVEL STEPS section (max 4 items)
-            const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **4** high-level steps.`;
-            
-            const fullSystemPrompt = `${dynamicPrompt}${highLevelStepsSection}${groundingGate}`;
-            const messages = context.request.messages;
-            const hasSystem = messages[0]?.role === 'system';
+        // 5. Store context for downstream middlewares (e.g., AgenticMiddleware)
+        // Always store memory and grounding gate on context so AgenticMiddleware can consume them.
+        (context as any).memoryContext = memoryContext;
+        (context as any).groundingGate = groundingGate;
 
-            if (hasSystem) {
-                messages[0].content = `${fullSystemPrompt}\n\n${messages[0].content}`;
-            } else {
-                messages.unshift({ role: 'system', content: fullSystemPrompt });
+        // Only inject a system prompt when NOT in agentic mode.
+        // In agentic mode, AgenticMiddleware owns the system prompt to prevent
+        // double-injection which garbles model responses.
+        if (!isAgentic) {
+            try {
+                const isSubtask = (context as any).isSubtask === true;
+                const dynamicPrompt = await getIntelligentSystemPrompt({
+                    context: userContent,
+                    keywords: context.keywords || [],
+                    memory: memoryContext,
+                    isSubtask: isSubtask
+                });
+
+                const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **4** high-level steps.`;
+
+                const fullSystemPrompt = `${dynamicPrompt}${highLevelStepsSection}${groundingGate}`;
+                const messages = context.request.messages;
+                const hasSystem = messages[0]?.role === 'system';
+
+                if (hasSystem) {
+                    messages[0].content = `${fullSystemPrompt}\n\n${messages[0].content}`;
+                } else {
+                    messages.unshift({ role: 'system', content: fullSystemPrompt });
+                }
+            } catch (err) {
+                console.error(`[WorkspaceContextMiddleware] Prompt injection failed: ${err}`);
             }
-        } catch (err) {
-            console.error(`[WorkspaceContextMiddleware] Prompt injection failed: ${err}`);
+        } else {
+            console.error(`[WorkspaceContextMiddleware] Agentic mode: skipping own system prompt injection, delegating to AgenticMiddleware.`);
         }
 
         console.error(`[WorkspaceContextMiddleware] ${Date.now() - startMs}ms context injected for session=${sessionId}`);

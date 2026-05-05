@@ -3,8 +3,10 @@ import { storeWorkspaceSkill } from '../src/tools/store-workspace-skill.js';
 import { useFreeLLM } from '../src/tools/use-free-llm.js';
 import { memoryManager } from '../src/memory/index.js';
 import { ContextGatherer } from '../src/middleware/agentic/context-gatherer.js';
-import { mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import fs from 'node:fs/promises';
+import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
 // Mock dependencies
 vi.mock('../src/tools/use-free-llm.js', () => ({
@@ -31,7 +33,7 @@ vi.mock('../src/cache/workspace.js', () => ({
 }));
 
 describe('storeWorkspaceSkill Scenarios', () => {
-    const root = path.resolve('/tmp/test_ws_scenarios');
+    const root = path.join(os.tmpdir(), 'test_ws_scenarios');
     
     beforeEach(() => {
         if (!existsSync(root)) mkdirSync(root, { recursive: true });
@@ -67,9 +69,9 @@ describe('storeWorkspaceSkill Scenarios', () => {
         const lastCall = (useFreeLLM as any).mock.calls[0][0];
         const systemPrompt = lastCall.messages.find((m: any) => m.role === 'system').content;
 
-        expect(systemPrompt).toContain('WORKSPACE MEMORY');
+        expect(systemPrompt).toContain('🧠 WORKSPACE MEMORY');
         expect(systemPrompt).toContain('Memory snippet 1');
-        expect(systemPrompt).toContain('WORKSPACE CONTEXT');
+        expect(systemPrompt).toContain('🔍 WORKSPACE CONTEXT');
         expect(systemPrompt).toContain('Grep snippet 1');
         expect(systemPrompt).toContain('TASK: SCRIPT GENERATION');
     });
@@ -119,7 +121,7 @@ describe('storeWorkspaceSkill Scenarios', () => {
         
         // Verify file content
         const scriptPath = path.join(root, '.free-llm-mcp', 'skills', 'raw-extract', 'scripts', 'raw.sh');
-        const content = await import('fs').then(fs => fs.promises.readFile(scriptPath, 'utf-8'));
+        const content = await fs.readFile(scriptPath, 'utf-8');
         expect(content).toBe('echo "raw-code-output"');
     });
 
@@ -156,19 +158,20 @@ describe('storeWorkspaceSkill Scenarios', () => {
 
         const result = await storeWorkspaceSkill({
             name: 'truncation-test',
-            description: 'test',
-            what: ['test'],
+            description: 'Test script truncation and extraction',
+            what: ['generating a script'],
             workspace_root: root,
-            script_instructions: {
-                'fix.sh': 'Return truncated'
-            }
+            script_instructions: { 'fix.sh': 'echo "truncated"' }
         });
 
         if (!result.success) throw new Error(result.error);
-        expect(result.success).toBe(true);
+        
+        // Wait a small amount for FS sync on Windows
+        await new Promise(resolve => setTimeout(resolve, 50));
         
         const scriptPath = path.join(root, '.free-llm-mcp', 'skills', 'truncation-test', 'scripts', 'fix.sh');
-        const content = await import('fs').then(fs => fs.promises.readFile(scriptPath, 'utf-8'));
+        const content = await fs.readFile(scriptPath, 'utf-8');
+        expect(result.success).toBe(true);
         expect(content).toContain('```bash'); // Falls back to raw because closing block is missing
     });
 });

@@ -31,26 +31,22 @@ export class LLMExecutor {
     private persistence = persistence;
     private saveStats = debounce(() => this.persistStats(), 2000);
 
-    private static readonly CIRCUIT_THRESHOLD = 3;
-    private static readonly CIRCUIT_COOLDOWN = 30000;
+    private static readonly CIRCUIT_THRESHOLD = 2; // Fail over faster
+    private static readonly CIRCUIT_COOLDOWN = 45000; // Longer cooldown for 429s
 
     private providerCircuits: Map<string, {
         failures: number;
         lastFailure: number;
         cooldownUntil: number;
         totalErrors: number;
+        lastSuccess?: number;
     }> = new Map();
 
     public isProviderCircuitOpen(providerId: string): boolean {
         const cb = this.providerCircuits.get(providerId);
         if (!cb) return false;
 
-        if (Date.now() < cb.cooldownUntil) {
-            return true;
-        }
-
-        this.providerCircuits.delete(providerId);
-        return false;
+        return Date.now() < cb.cooldownUntil;
     }
 
     public recordProviderFailure(providerId: string, status?: number): void {
@@ -76,17 +72,28 @@ export class LLMExecutor {
         const cb = this.providerCircuits.get(providerId);
         if (cb) {
             cb.failures = 0;
+            cb.cooldownUntil = 0; // Immediate reset on success
+            cb.lastSuccess = Date.now();
+        } else {
+            this.providerCircuits.set(providerId, {
+                failures: 0,
+                lastFailure: 0,
+                cooldownUntil: 0,
+                totalErrors: 0,
+                lastSuccess: Date.now()
+            });
         }
     }
 
-    public getProviderStats(): Record<string, { errors: number; circuitOpen: boolean; cooldownRemaining?: number }> {
-        const stats: Record<string, { errors: number; circuitOpen: boolean; cooldownRemaining?: number }> = {};
+    public getProviderStats(): Record<string, { errors: number; circuitOpen: boolean; cooldownRemaining?: number; lastSuccessTime?: number }> {
+        const stats: Record<string, { errors: number; circuitOpen: boolean; cooldownRemaining?: number; lastSuccessTime?: number }> = {};
         const now = Date.now();
         for (const [providerId, cb] of this.providerCircuits) {
             stats[providerId] = {
                 errors: cb.totalErrors,
                 circuitOpen: now < cb.cooldownUntil,
-                cooldownRemaining: now < cb.cooldownUntil ? cb.cooldownUntil - now : 0
+                cooldownRemaining: now < cb.cooldownUntil ? cb.cooldownUntil - now : 0,
+                lastSuccessTime: cb.lastSuccess
             };
         }
         return stats;
@@ -387,11 +394,36 @@ export class LLMExecutor {
         modelId: string,
         timeoutMs?: number
     ): Promise<ChatResponse | null> {
-        // 1. Calculate tokens once per set of messages
+        const whitelist = ['model', 'messages', 'temperature', 'top_p', 'n', 'stream', 'stop', 'max_tokens', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'user', 'response_format'];
+        if (providerId === 'gemini') {
+            whitelist.push('google_search');
+        }
+
+        // Create a strictly sanitized request for this specific attempt
+        const sanitizedRequest: any = {};
+        for (const key of whitelist) {
+            if ((context.request as any)[key] !== undefined) {
+                sanitizedRequest[key] = (context.request as any)[key];
+            }
+        }
+        
+        // Ensure modelId is forced
+        sanitizedRequest.model = modelId;
+
         if (context.estimatedTokens === undefined) {
             const promptTokens = this.calculateTokens(context.request.messages);
             context.estimatedTokens = promptTokens;
         }
+        
+        if (providerId === 'gemini') {
+            sanitizedRequest.messages = sanitizedRequest.messages.map((m: any) => {
+                if (m.role === 'system') {
+                    return { role: 'user', content: `[SYSTEM INSTRUCTION]: ${m.content}` };
+                }
+                return m;
+            });
+        }
+
 
         const totalWithCompletion = context.estimatedTokens + (context.request.max_tokens || 1024);
 
@@ -416,19 +448,16 @@ export class LLMExecutor {
             throw new Error(`[LLMExecutor] Provider ${providerId} not found`);
         }
 
-        // 5. Make the API call
-        const previousModel = context.request.model;
-        const previousTimeout = context.request.timeoutMs;
-        context.request.model = modelId;
-        if (timeoutMs) context.request.timeoutMs = timeoutMs;
-
         let response: ChatResponse | null = null;
         try {
-            response = await provider.chat(context.request);
+            // Use sanitized request
+            const requestWithTimeout = { 
+                ...sanitizedRequest, 
+                timeoutMs,
+                abortSignal: context.request.abortSignal 
+            };
+            response = await provider.chat(requestWithTimeout);
         } catch (err: any) {
-            // Restore previous settings on error
-            context.request.model = previousModel;
-            context.request.timeoutMs = previousTimeout;
             // 6. Handle rate limit errors even without headers (Robust extraction)
             const errorMessage = err.message?.toLowerCase() || '';
             const isRateLimit = err.status === 429 ||
@@ -452,7 +481,6 @@ export class LLMExecutor {
             this.recordProviderFailure(providerId, err.status);
 
             // Still re-throw the error so the router knows to try next provider
-            context.request.model = previousModel;
             throw err;
         }
 
@@ -471,10 +499,6 @@ export class LLMExecutor {
 
         // Record success for circuit breaker
         this.recordProviderSuccess(providerId);
-
-        // Restore previous settings on success
-        context.request.model = previousModel;
-        context.request.timeoutMs = previousTimeout;
 
         return response;
     }
@@ -503,8 +527,8 @@ export class LLMExecutor {
         // v1.0.4: Strategic model selection for high-stakes planning/decomposition
         const targetModels = modelOverride === 'any'
             ? (options.google_search 
-                ? ['gemini-2.5-flash', 'deepseek-ai/DeepSeek-V3', 'llama-3.3-70b-versatile', 'glm-4.7']
-                : ['deepseek-ai/DeepSeek-V3', 'gemini-2.5-flash', 'llama-3.3-70b-versatile', 'glm-4.7'])
+                ? ['gemini-3.1-flash-lite-preview', 'deepseek-ai/DeepSeek-V3', 'nvidia/nemotron-3-super-120b-a12b:free', 'qwen/qwen3-coder:free', 'llama-3.3-70b-versatile', 'glm-4.7']
+                : ['deepseek-ai/DeepSeek-V3', 'nvidia/nemotron-3-super-120b-a12b:free', 'qwen/qwen3-coder:free', 'gemini-3.1-flash-lite-preview', 'llama-3.3-70b-versatile', 'glm-4.7'])
             : [modelOverride];
 
         // Pre-calculate scores once for efficiency

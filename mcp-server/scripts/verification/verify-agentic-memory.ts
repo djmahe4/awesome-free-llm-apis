@@ -1,88 +1,68 @@
 /**
- * @file verify-agentic-memory.ts
- * @description Validates the end-to-end agentic memory pipeline, including vector seeding, recall, and system prompt injection.
- * Usage: tsx scripts/verification/verify-agentic-memory.ts
+ * Verify that getIntelligentSystemPrompt produces a clean, context-aware prompt
+ * for both full and subtask modes. The free LLM only gets workspace context —
+ * NOT tool-usage instructions (the orchestrating agent handles that).
  */
-import { memoryManager } from '../../src/memory/index.js';
-import { AgenticMiddleware } from '../../src/middleware/agentic/agentic-middleware.js';
-import { WorkspaceScanner } from '../../src/cache/workspace.js';
-import path from 'node:path';
-import process from 'node:process';
+import { getIntelligentSystemPrompt } from '../../src/middleware/agentic/prompts.js';
 
-async function main() {
-    console.error('--- Agentic Memory Verification ---');
+async function testAgenticPromptInjection() {
+    console.log('--- Testing Agentic Prompt Assembly ---\n');
 
-    const workspaceRoot = process.cwd();
-    const scanner = new WorkspaceScanner(workspaceRoot);
-    const wsHash = await scanner.getWorkspaceHash(workspaceRoot);
-    console.error(`Workspace Hash: ${wsHash}`);
-
-    const testContent = { 
-        status: 'verified', 
-        message: 'Agentic Memory is functioning correctly',
-        timestamp: new Date().toISOString(),
-        _ws: wsHash 
-    };
-
-    console.error('1. Seeding memory (via memoryManager.longTerm.save)...');
-    // Using a key format that MemoryManager.search expects: _ws:HASH
-    const storageKey = `test:${Date.now()}:_ws:${wsHash}`; 
-    await memoryManager.longTerm.save(storageKey, testContent);
-    // Also store a secondary one with JSON format in key just in case
-    await memoryManager.longTerm.save(`test2:{"ws":"${wsHash}"}`, { note: 'functioning correctly' });
-    
-    console.error('Flushing memory to disk...');
-    await memoryManager.flush();
-
-    console.error('2. Querying memory via Search...');
-    // Use a SIMPLER query that is a guaranteed substring
-    const searchQuery = 'functioning';
-    const searchResults = await memoryManager.search(wsHash, searchQuery);
-    console.error('Search Results Count:', searchResults.length);
-    
-    if (searchResults.length === 0) {
-        console.error('Search debug: checking all keys to diagnose pattern mismatch...');
-        const allKeys = await memoryManager.longTerm.list();
-        console.error('All Keys in Store:', JSON.stringify(allKeys.slice(0, 5), null, 2));
-        throw new Error('Memory search failed to return results. Workspace pattern mismatch?');
-    }
-
-    console.error('Search Results:', JSON.stringify(searchResults, null, 2));
-
-    console.error('3. Testing AgenticMiddleware Prompt Injection...');
-    const middleware = new AgenticMiddleware();
-    // We must ensure the query passed to the middleware matches the seeded content
-    const mockContext: any = {
-        request: {
-            messages: [{ role: 'user', content: 'functioning correctly' }]
-        },
-        sessionId: 'test-session-' + Date.now(),
-        workspaceRoot: workspaceRoot,
-        agentic: true
-    };
-
-    console.error('Executing middleware execute()...');
-    let nextCalled = false;
-    await middleware.execute(mockContext, async () => {
-        nextCalled = true;
-        // Verify that the system prompt was injected
-        const sysPrompt = mockContext.request.messages.find((m: any) => m.role === 'system');
-        if (sysPrompt && sysPrompt.content.includes('## 🧠 WORKSPACE MEMORY')) {
-            console.error('SUCCESS: System prompt contains WORKSPACE MEMORY block.');
-            console.error('Prompt Preview:', sysPrompt.content.slice(0, 500) + '...');
-        } else {
-            console.error('DEBUG: Response Prompt length:', sysPrompt?.content?.length || 0);
-            throw new Error('System prompt MISSING workspace memory injection!');
-        }
+    // 1. Full prompt (non-subtask): should assemble relevant sections from prompt.json
+    console.log('[1/3] Full prompt (non-subtask)...');
+    const fullPrompt = await getIntelligentSystemPrompt({
+        context: 'Explain how the vector memory indexer works',
+        keywords: ['memory', 'vector', 'index'],
+        isSubtask: false
     });
 
-    if (!nextCalled) throw new Error('Middleware failed to call next()');
+    const hasGrounding = fullPrompt.includes('GROUNDING');
+    const hasNoToolProtocol = !fullPrompt.includes('MCP TOOL USAGE PROTOCOL');
+    console.log(`  - Has GROUNDING block: ${hasGrounding}`);
+    console.log(`  - No tool-usage instructions (correct): ${hasNoToolProtocol}`);
+    console.log(`  - Char length: ${fullPrompt.length}\n`);
 
-    console.error('Middleware execution complete.');
-    console.error('PASS: Agentic Memory Pipeline verified.');
+    if (!hasGrounding || !hasNoToolProtocol) {
+        throw new Error('Full prompt failed: unexpected content or missing grounding.');
+    }
+
+    // 2. Subtask prompt: should be minimal identity + relevant sections, no tool protocol
+    console.log('[2/3] Subtask prompt (isSubtask=true)...');
+    const subtaskPrompt = await getIntelligentSystemPrompt({
+        context: 'Fix the memory leak in vector store',
+        keywords: ['memory', 'leak', 'vector'],
+        isSubtask: true
+    });
+
+    const isShorter = subtaskPrompt.length < fullPrompt.length;
+    const subtaskNoToolProtocol = !subtaskPrompt.includes('MCP TOOL USAGE PROTOCOL');
+    console.log(`  - Is shorter than full prompt: ${isShorter}`);
+    console.log(`  - No tool-usage instructions (correct): ${subtaskNoToolProtocol}`);
+    console.log(`  - Char length: ${subtaskPrompt.length}\n`);
+
+    if (!subtaskNoToolProtocol) {
+        throw new Error('Subtask prompt contains tool protocol — should not.');
+    }
+
+    // 3. With memory context: memory block should be prepended
+    console.log('[3/3] Memory injection...');
+    const promptWithMemory = await getIntelligentSystemPrompt({
+        context: 'refactor the router',
+        memory: 'Prior work: router was refactored in PR #42 to use middleware chain.'
+    });
+
+    const hasMemoryBlock = promptWithMemory.includes('WORKSPACE MEMORY');
+    console.log(`  - Has memory block: ${hasMemoryBlock}`);
+    console.log(`  - Char length: ${promptWithMemory.length}\n`);
+
+    if (!hasMemoryBlock) {
+        throw new Error('Memory context was not injected into prompt.');
+    }
+
+    console.log('✅ All checks passed. Free LLM prompts are clean and context-only.');
 }
 
-main().catch(err => {
-    console.error('FAIL:', err);
+testAgenticPromptInjection().catch(err => {
+    console.error('❌ Verification FAILED:', err.message);
     process.exit(1);
 });
