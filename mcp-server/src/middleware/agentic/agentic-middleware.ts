@@ -332,10 +332,12 @@ export class AgenticMiddleware implements Middleware {
         try {
             const groundingGate: string = (context as any).groundingGate || '';
             const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **4** high-level steps.`;
+            const userKeywords = context.keywords || [];
             const initialPrompt = await getIntelligentSystemPrompt({
                 context: userContent || "",
-                keywords: isAgenticExplicitlyRequested ? ['agentic', 'orchestration'] : [],
+                keywords: isAgenticExplicitlyRequested ? ['agentic', 'orchestration', ...userKeywords] : userKeywords,
                 memory: (context as any).memoryContext,
+                workspace: (context as any).grepContext,
                 isSubtask: false
             });
             const sysMsg = context.request.messages.find(m => m.role === 'system');
@@ -397,19 +399,21 @@ export class AgenticMiddleware implements Middleware {
             // 1. Inject Intelligent Prompt and Task Instruction
             try {
                 // CLEAR and REFRESH System Prompt to avoid accumulation
+                const userKeywords = context.keywords || [];
                 const subtaskPrompt = await getIntelligentSystemPrompt({
                     context: currentTask,
-                    keywords: ['mcp', 'memory', 'filesystem'], // Core steering
+                    keywords: [...new Set(['mcp', 'memory', 'filesystem', ...userKeywords])], // Merge core steering with user keywords
                     memory: (context as any).memoryContext,
+                    workspace: (context as any).grepContext,
                     isSubtask: true
                 });
                 const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${currentTask}\n\nStrictly focus on this subtask using the tools provided.`;
 
                 const messages = context.request.messages;
-                const sysMsg = messages.find(m => m.role === 'system');
-                if (sysMsg) {
-                    // Replace, don't append, to ensure clean state
-                    sysMsg.content = `${subtaskPrompt}${taskHeader}`;
+                const sysMsgIdx = messages.findIndex(m => m.role === 'system');
+                if (sysMsgIdx !== -1) {
+                    // Replace existing system message to ensure clean state and prevent accumulation
+                    messages[sysMsgIdx] = { role: 'system', content: `${subtaskPrompt}${taskHeader}` };
                 } else {
                     messages.unshift({ role: 'system', content: `${subtaskPrompt}${taskHeader}` });
                 }

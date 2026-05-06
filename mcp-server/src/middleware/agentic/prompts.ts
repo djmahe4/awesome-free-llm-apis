@@ -126,6 +126,7 @@ export interface PromptOptions {
     context?: string;
     keywords?: string[];
     memory?: string;
+    workspace?: string;
     isSubtask?: boolean;
 }
 
@@ -140,10 +141,12 @@ export async function getIntelligentSystemPrompt(
     isSubtask: boolean = false
 ): Promise<string> {
     let context = "";
+    let workspaceContext: string | undefined;
     if (typeof contextOrOptions === 'object') {
         context = contextOrOptions.context || "";
         explicitKeywords = contextOrOptions.keywords;
         memoryContext = contextOrOptions.memory;
+        workspaceContext = contextOrOptions.workspace;
         isSubtask = contextOrOptions.isSubtask || false;
     } else {
         context = contextOrOptions;
@@ -165,9 +168,14 @@ export async function getIntelligentSystemPrompt(
     const introduction = isSubtask ? getMinimalIdentity(data) : (`# ROLE\n${data.introduction || ""}\n`);
     let assembled = introduction;
 
-    // Inject Workspace Memory at the very top of the assembled prompt for maximum attention
+    // Inject Workspace Memory and File Context at the very top of the assembled prompt
+    if (workspaceContext) {
+        const cappedWorkspace = workspaceContext.length > 5000 ? workspaceContext.slice(0, 5000) + "\n... (truncated)" : workspaceContext;
+        assembled = `## 📂 WORKSPACE CONTEXT\n<workspace_context_isolation_gate>\nRelevant file snippets and directory structures:\n${cappedWorkspace}\n</workspace_context_isolation_gate>\n\n` + assembled;
+    }
     if (memoryContext) {
-        assembled = `## 🧠 WORKSPACE MEMORY\nRelevant prior knowledge for this workspace:\n${memoryContext}\n\n` + assembled;
+        const cappedMemory = memoryContext.length > 2000 ? memoryContext.slice(0, 2000) + "\n... (truncated)" : memoryContext;
+        assembled = `## 🧠 WORKSPACE MEMORY\n<memory_context_isolation_gate>\nRelevant prior knowledge for this workspace:\n${cappedMemory}\n</memory_context_isolation_gate>\n\n` + assembled;
     }
 
     if (!context && (!explicitKeywords || explicitKeywords.length === 0)) {

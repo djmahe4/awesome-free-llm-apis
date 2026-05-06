@@ -41,7 +41,9 @@
 - Remove the kluster from providers list
 - Add new 'vision_tool' to make use of free vision models to analyse images.(using `file:///` in `workspace_root` as the image path)
 - Add skill loading and prompt tool to make use of free skill loading agents to dynamically load and integrate the use of 'awesome-antigravity-skills' repo for agentic tasks and integrate it in the middleware without overhead.
-- Add **Privacy-Sensitive Data redaction** for llm calls in middleware to prevent the leaking of sensitive data to third party free providers.(e.g. API Keys,passwords,PII, etc)
+- Add **Privacy-Sensitive Data redaction** for llm calls in middleware to prevent the leaking of sensitive data to third party free providers.(e.g. API Keys,passwords,PII, etc), partially implementeed by sanitize.ts but needs to be hardened and made more robust.
+- Add mechanism to preserve the context of the conversation in case of a response like `\"read_file\". Let's try that.\n\n```json{\n  \"tool\": \"read_file\",\n  \"args\": {\n    \"path\": \"core/gemini_processor.py\"\n  }}```{\n  \"tool\": \"read_file\",\n  \"args\": {\n    \"path\": \"core/gemini_processor.py\"\n  }}` where the llm is explicitly asking to use a tool, we can preserve the context of the conversation and the intent of the user by not treating it as a normal response and instead directly calling the tool and returning its response to the llm without losing the context of the conversation.
+- Make Skill script generation more robust: currently the generated skill script is enclosed in ````python\n{script}\n``` and is saved under _py instead of .py, we can make it more robust by using a more unique delimiter and also by adding some metadata to the generated script to make it easier to parse and use in the future.
 
 ## v1.0.4 – Hardened Resilience + Persistent Memory + structural Fix (April 2026)
 

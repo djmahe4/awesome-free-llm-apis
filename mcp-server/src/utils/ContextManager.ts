@@ -126,8 +126,35 @@ export class ContextManager {
     ): Promise<ContextCompressionResult> {
         const originalTokens = this.countTokens(messages);
 
-        const systemMsgs = messages.filter(m => m.role === 'system');
+        let systemMsgs = messages.filter(m => m.role === 'system');
         const nonSystemMsgs = messages.filter(m => m.role !== 'system');
+
+        // BUDGETING: System messages should not consume more than 60% of the target window.
+        // This prevents "Context Explosion" where multiple turns of agentic context injection
+        // or massive workspace snippets drown out the actual conversation.
+        const systemBudget = Math.floor(targetTokens * 0.6);
+        let systemTokens = this.countTokens(systemMsgs);
+
+        if (systemTokens > systemBudget) {
+            console.error(`[ContextManager] System messages (${systemTokens} tokens) exceed budget (${systemBudget}). Truncating...`);
+            // Keep the first (usually the primary instructions) and the last (usually the latest context)
+            if (systemMsgs.length > 2) {
+                systemMsgs = [systemMsgs[0], systemMsgs[systemMsgs.length - 1]];
+                systemTokens = this.countTokens(systemMsgs);
+            }
+            
+            // If still over budget, truncate the content of the largest system message
+            if (systemTokens > systemBudget) {
+                systemMsgs = systemMsgs.map(msg => {
+                    const content = getMessageContent(msg);
+                    if (this.countStringTokens(content) > systemBudget / systemMsgs.length) {
+                        const ratio = (systemBudget / systemMsgs.length) / this.countStringTokens(content);
+                        return { ...msg, content: content.slice(0, Math.floor(content.length * ratio * 0.9)) + '\n... (system context truncated to fit budget)' };
+                    }
+                    return msg;
+                });
+            }
+        }
 
         // SAFEGUARD: If messages are astronomically large (>100k tokens), perform extreme Tier 0 truncation first
         // to prevent the summarizer itself from being overwhelmed or hanging.
@@ -138,8 +165,24 @@ export class ContextManager {
 
         // Keep at minimum the last 4 messages (2 exchanges) verbatim
         const KEEP_RECENT = Math.min(4, nonSystemMsgs.length);
-        const recentMsgs = nonSystemMsgs.slice(-KEEP_RECENT);
-        const oldMsgs = nonSystemMsgs.slice(0, -KEEP_RECENT);
+        
+        // PIN THE FIRST MESSAGE: The first user prompt usually contains the core task instructions.
+        // We must never summarize it away in long histories, otherwise the agent will suffer from "task drift".
+        // We only do this if the history is long enough to justify keeping an extra verbatim slot.
+        let pinnedMsg: Message | null = null;
+        let oldMsgs: Message[] = [];
+        let recentMsgs: Message[] = [];
+
+        if (nonSystemMsgs.length > KEEP_RECENT * 2) {
+            pinnedMsg = nonSystemMsgs[0];
+            // The remaining messages are split between "old" (to be summarized) and "recent" (kept verbatim)
+            const unpinnedMsgs = nonSystemMsgs.slice(1);
+            recentMsgs = unpinnedMsgs.slice(-KEEP_RECENT);
+            oldMsgs = unpinnedMsgs.slice(0, -KEEP_RECENT);
+        } else {
+            recentMsgs = nonSystemMsgs.slice(-KEEP_RECENT);
+            oldMsgs = nonSystemMsgs.slice(0, -KEEP_RECENT);
+        }
 
         if (oldMsgs.length === 0) {
             // Can't compress further without dropping recent context — return as-is
@@ -239,7 +282,10 @@ export class ContextManager {
             content: `[Context Summary — earlier conversation]: ${summary}`,
         };
 
-        const compressed: Message[] = [...systemMsgs, summaryMsg, ...recentMsgs];
+        const compressed: Message[] = [...systemMsgs];
+        if (pinnedMsg) compressed.push(pinnedMsg);
+        compressed.push(summaryMsg);
+        compressed.push(...recentMsgs);
         const compressedTokens = this.countTokens(compressed);
 
         return {

@@ -19,10 +19,17 @@ export const SESSION_STATE_HEADER = '## MCP INTERNAL SESSION STATE';
 export const EXCLUDE_DIRS = [
     'node_modules',
     '.git',
+    '.github',
     '.next',
     'dist',
     'build',
     '.gemini',
+    '.venv',
+    'venv',
+    '__pycache__',
+    '.pytest_cache',
+    '.continue',
+    'data/cache',
     'artifacts',
     'out',
     'coverage',
@@ -35,7 +42,8 @@ export const EXCLUDE_EXTENSIONS = [
     '.mp4', '.webm', '.ogg', '.mp3', '.wav',
     '.pdf', '.zip', '.tar.gz', '.rar',
     '.exe', '.dll', '.so', '.dylib',
-    '.map', '.log'
+    '.map', '.log', '.pyc', '.pyo', '.pyd',
+    '.db', '.sqlite'
 ];
 
 // Local workspace artifacts

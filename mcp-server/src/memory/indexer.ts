@@ -4,6 +4,7 @@ import { vectorStore } from './vector.js';
 import { memoryManager } from './index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
 import { WorkspaceWalker } from '../middleware/agentic/workspace-walker.js';
+import { Sanitizer } from '../utils/Sanitizer.js';
 
 export interface IndexingResult {
     totalFiles: number;
@@ -63,9 +64,10 @@ export class WorkspaceIndexer {
                     }
 
                     // 3. Upsert to Vectra
+                    const sanitizedContent = Sanitizer.sanitize(content);
                     await vectorStore.upsert(wsHash, {
                         id: vectorKey,
-                        content: `File: ${relativePath}\n\n${content.slice(0, 5000)}`, // Cap content for indexing
+                        content: `File: ${relativePath}\n\n${sanitizedContent.slice(0, 5000)}`, // Cap content for indexing
                         metadata: { 
                             type: 'file',
                             path: relativePath,

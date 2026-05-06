@@ -1,5 +1,6 @@
 import path from 'path';
 import { promises as fs } from 'fs';
+import os from 'os';
 import type { Middleware, PipelineContext, NextFunction } from '../middleware.js';
 import { memoryManager } from '../../memory/index.js';
 import { WorkspaceScanner } from '../../cache/workspace.js';
@@ -8,6 +9,28 @@ import { ContextGatherer } from '../../middleware/agentic/context-gatherer.js';
 import { WorkspaceIndexer } from '../../memory/indexer.js';
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
+
+/**
+ * Generates a lightweight directory tree up to 2 levels deep to provide structural context.
+ */
+async function getDirectoryTree(dirPath: string, maxDepth = 2, currentDepth = 0): Promise<string> {
+    if (currentDepth > maxDepth) return '';
+    try {
+        const entries = await fs.readdir(dirPath, { withFileTypes: true });
+        let tree = '';
+        const indent = '  '.repeat(currentDepth);
+        for (const entry of entries) {
+            if (['node_modules', '.git', 'dist', 'build', '.next', 'venv', '__pycache__'].includes(entry.name)) continue;
+            tree += `${indent}- ${entry.name}${entry.isDirectory() ? '/' : ''}\n`;
+            if (entry.isDirectory()) {
+                tree += await getDirectoryTree(path.join(dirPath, entry.name), maxDepth, currentDepth + 1);
+            }
+        }
+        return tree;
+    } catch {
+        return '';
+    }
+}
 
 /**
  * WorkspaceContextMiddleware - Handles workspace-aware context injection.
@@ -49,33 +72,61 @@ export class WorkspaceContextMiddleware implements Middleware {
             }
         }
 
-        // 2. Gather Grep Context (TF-IDF style)
+        // 2. Gather Grep Context (TF-IDF style) and Directory Structure
         let grepResults: string[] = [];
+        let dirTree = '';
         if (context.workspaceRoot && userContent) {
             try {
+                dirTree = await getDirectoryTree(context.workspaceRoot);
+                const queryKeywords = context.keywords || [];
                 grepResults = await ContextGatherer.gatherContext({
                     workspaceRoot: context.workspaceRoot,
-                    query: userContent
+                    query: userContent,
+                    keywords: queryKeywords
                 });
             } catch (err) {
-                console.error(`[WorkspaceContextMiddleware] Grep context failed: ${err}`);
+                console.error(`[WorkspaceContextMiddleware] Context gathering failed: ${err}`);
             }
         }
 
-        // 3. Search Vector Memory
+        // 3. Search Vector Memory with Priority Sorting
         let memoryContext: string | undefined;
         if (context.wsHash) {
             try {
                 const queryForMemory = userContent + (grepResults.length > 0 ? ' ' + grepResults.join(' ').slice(0, 500) : '');
                 const memoryResults = await memoryManager.search(context.wsHash, queryForMemory);
+                
                 if (Array.isArray(memoryResults) && memoryResults.length > 0) {
-                    console.debug(`[WorkspaceContext] Found ${memoryResults.length} memory entries for query: "${queryForMemory.slice(0, 50)}..."`);
-                    memoryContext = memoryResults
+                    // Priority function consistent with ContextGatherer
+                    const getPriority = (filePath?: string): number => {
+                        if (!filePath) return 3;
+                        const ext = path.extname(filePath).toLowerCase();
+                        const codeExts = ['.ts', '.py', '.js', '.tsx', '.jsx', '.go', '.rs', '.c', '.cpp', '.h', '.hpp', '.java', '.sh', '.rb', '.php', '.cs', '.swift'];
+                        const configExts = ['.json', '.yml', '.yaml', '.toml', '.env', '.xml', '.ini'];
+                        if (codeExts.includes(ext)) return 1;
+                        if (configExts.includes(ext)) return 2;
+                        return 3;
+                    };
+
+                    // Sort memory results by priority before picking top 5
+                    const prioritizedMemory = [...memoryResults].sort((a, b) => {
+                        const pathA = (a as any).metadata?.path;
+                        const pathB = (b as any).metadata?.path;
+                        const prioA = getPriority(pathA);
+                        const prioB = getPriority(pathB);
+                        if (prioA !== prioB) return prioA - prioB;
+                        return 0; // Maintain relevance order within same priority
+                    });
+
+                    console.debug(`[WorkspaceContext] Found ${memoryResults.length} memory entries, prioritized code first.`);
+                    memoryContext = prioritizedMemory
                         .slice(0, 5)
-                        .map(m => `- ${typeof m === 'string' ? m : JSON.stringify(m)}`)
+                        .map(m => {
+                            const str = typeof m === 'string' ? m : (m as any).content || JSON.stringify(m);
+                            // Cap individual memory entry to 2000 chars
+                            return str.length > 2000 ? `- ${str.slice(0, 2000)}... (truncated)` : `- ${str}`;
+                        })
                         .join('\n');
-                } else {
-                    console.debug(`[WorkspaceContext] No memory entries found for query: "${queryForMemory.slice(0, 50)}..."`);
                 }
             } catch (err) {
                 console.error(`[WorkspaceContextMiddleware] Memory lookup failed: ${err}`);
@@ -100,6 +151,15 @@ export class WorkspaceContextMiddleware implements Middleware {
         // Always store memory and grounding gate on context so AgenticMiddleware can consume them.
         (context as any).memoryContext = memoryContext;
         (context as any).groundingGate = groundingGate;
+        
+        let workspaceContextStr = '';
+        if (dirTree) workspaceContextStr += `\nProject Structure:\n${dirTree}\n`;
+        if (grepResults.length > 0) {
+            const aggregatedGrep = grepResults.join('\n');
+            // Cap total grep context to 5,000 chars to leave room for instructions and memory
+            workspaceContextStr += `\nRelevant File Snippets:\n${aggregatedGrep.length > 5000 ? aggregatedGrep.slice(0, 5000) + '\n... (total results truncated to 5k chars)' : aggregatedGrep}\n`;
+        }
+        (context as any).grepContext = workspaceContextStr || undefined;
 
         // Only inject a system prompt when NOT in agentic mode.
         // In agentic mode, AgenticMiddleware owns the system prompt to prevent
@@ -111,17 +171,29 @@ export class WorkspaceContextMiddleware implements Middleware {
                     context: userContent,
                     keywords: context.keywords || [],
                     memory: memoryContext,
+                    workspace: (context as any).grepContext,
                     isSubtask: isSubtask
                 });
 
                 const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **4** high-level steps.`;
 
-                const fullSystemPrompt = `${dynamicPrompt}${highLevelStepsSection}${groundingGate}`;
+                const CONTEXT_START_MARKER = '<!-- WORKSPACE_CONTEXT_START -->';
+                const CONTEXT_END_MARKER = '<!-- WORKSPACE_CONTEXT_END -->';
+                const fullSystemPrompt = `\n${CONTEXT_START_MARKER}\n${dynamicPrompt}${highLevelStepsSection}${groundingGate}\n${CONTEXT_END_MARKER}\n`;
+                
                 const messages = context.request.messages;
-                const hasSystem = messages[0]?.role === 'system';
+                const sysMsgIdx = messages.findIndex(m => m.role === 'system');
 
-                if (hasSystem) {
-                    messages[0].content = `${fullSystemPrompt}\n\n${messages[0].content}`;
+                if (sysMsgIdx !== -1) {
+                    const currentContent = String(messages[sysMsgIdx].content);
+                    if (currentContent.includes(CONTEXT_START_MARKER)) {
+                        // Replace existing context block
+                        const regex = new RegExp(`${CONTEXT_START_MARKER}[\\s\\S]*?${CONTEXT_END_MARKER}`, 'g');
+                        messages[sysMsgIdx].content = currentContent.replace(regex, fullSystemPrompt);
+                    } else {
+                        // Prepend to existing system message
+                        messages[sysMsgIdx].content = `${fullSystemPrompt}\n${currentContent}`;
+                    }
                 } else {
                     messages.unshift({ role: 'system', content: fullSystemPrompt });
                 }

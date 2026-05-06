@@ -88,6 +88,30 @@ describe('ContextManager', () => {
         expect(result.messages.find(m => m.content === 'First old message')).toBeUndefined();
     });
 
+    it('pins the first user message in long conversations', async () => {
+        const msgs: Message[] = [
+            { role: 'user', content: 'INITIAL TASK: Fix the bug' },
+            { role: 'assistant', content: 'Reply 1' },
+            { role: 'user', content: 'Reply 2' },
+            { role: 'assistant', content: 'Reply 3' },
+            { role: 'user', content: 'Reply 4' },
+            { role: 'assistant', content: 'Reply 5' },
+            { role: 'user', content: 'Reply 6' },
+            { role: 'assistant', content: 'Reply 7' },
+            { role: 'user', content: 'Recent question' },
+            { role: 'assistant', content: 'Recent answer' },
+        ];
+
+        const mockSummarizer = vi.fn().mockResolvedValue('Summary');
+        const targetTokens = 100;
+
+        const result = await cm.slidingWindow(msgs, targetTokens, mockSummarizer);
+
+        // INITIAL TASK should be preserved verbatim due to pinning (> KEEP_RECENT * 2 messages)
+        expect(result.messages.find(m => m.content === 'INITIAL TASK: Fix the bug')).toBeDefined();
+        expect(mockSummarizer).toHaveBeenCalled();
+    });
+
     it('falls back to truncate-oldest when summarizer fails', async () => {
         const msgs: Message[] = Array.from({ length: 10 }, (_, i) => ({
             role: i % 2 === 0 ? 'user' : 'assistant',

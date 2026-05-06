@@ -29,7 +29,9 @@ export class LongTermMemory {
 
   private async persist(): Promise<void> {
     await fs.mkdir(path.dirname(this.storePath), { recursive: true });
-    await fs.writeFile(this.storePath, JSON.stringify(this.data, null, 2), 'utf-8');
+    const tmpPath = `${this.storePath}.tmp`;
+    await fs.writeFile(tmpPath, JSON.stringify(this.data, null, 2), 'utf-8');
+    await fs.rename(tmpPath, this.storePath);
   }
 
   async save(key: string, value: unknown): Promise<void> {

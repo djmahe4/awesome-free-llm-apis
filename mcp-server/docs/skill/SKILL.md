@@ -60,6 +60,12 @@ Perform chat completion with optional fallback and workspace memory.
 - `keywords`: Explicit steering (e.g. `["api", "sql"]`). Bypasses fuzzy matching and forces specific documentation sections.
 - `google_search`: Enable Google Search (Gemini models only).
 
+#### 📁 Advanced Context Steering
+The pipeline automatically injects project structure and file snippets:
+- **Directory Structural Awareness**: A 2-level directory tree is injected to help the LLM understand project layout.
+- **Precision Quoting**: Use `"double quotes"` around technical terms in your prompt (e.g., `"computer_networks"`) to force exact `grep` extraction.
+- **Gitignore Bypass**: If a required directory is gitignored (e.g., `data/`), include the keyword `override` or `gitignored` in your prompt to bypass the restriction safely.
+
 ---
 
 ### `manage_memory`
@@ -113,6 +119,8 @@ For more detailed information on the inner workings or specific use cases, refer
 | **Security** | `auth`, `jwt`, `token` | Prioritizes security protocols |
 | **DevOps** | `git`, `env`, `deploy` | Prioritizes config/CI/CD maps |
 | **Research** | `search`, `knowledge` | Activates deep-search optimization |
+| **Bypass** | `override`, `gitignored` | Bypasses .gitignore for extraction |
+| **Precision** | `"quoted term"` | Forces exact grep token extraction |
 
 ---
 

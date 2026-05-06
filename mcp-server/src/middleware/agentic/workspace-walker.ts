@@ -23,24 +23,33 @@ export class WorkspaceWalker {
         rootPath: string,
         keywords: string[],
         limit: number = 30,
-        overrideIgnores: boolean = false
+        overrideIgnores: boolean = false,
+        isTheoretical: boolean = false
     ): Promise<string[]> {
         const candidates: FileCandidate[] = [];
         this.filesScanned = 0;
 
         const ig = ignore().add(EXCLUDE_DIRS);
-        
+        let gitignoreRoot = rootPath;
+
         if (!overrideIgnores) {
-            try {
-                const gitignorePath = path.join(rootPath, '.gitignore');
-                const gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
-                ig.add(gitignoreContent);
-            } catch {
-                // No .gitignore, proceed with defaults
+            let currentPath = rootPath;
+            for (let i = 0; i < 4; i++) {
+                try {
+                    const gitignorePath = path.join(currentPath, '.gitignore');
+                    const gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+                    ig.add(gitignoreContent);
+                    gitignoreRoot = currentPath;
+                    break;
+                } catch {
+                    const nextPath = path.dirname(currentPath);
+                    if (nextPath === currentPath) break;
+                    currentPath = nextPath;
+                }
             }
         }
 
-        await this.walk(rootPath, rootPath, keywords, candidates, ig, 0, overrideIgnores);
+        await this.walk(rootPath, rootPath, keywords, candidates, ig, 0, overrideIgnores, gitignoreRoot, isTheoretical);
 
         // Sort by score (descending) and return top paths
         return candidates
@@ -56,7 +65,9 @@ export class WorkspaceWalker {
         candidates: FileCandidate[],
         ig: any,
         depth: number,
-        overrideIgnores: boolean
+        overrideIgnores: boolean,
+        gitignoreRoot: string,
+        isTheoretical: boolean
     ): Promise<void> {
         if (depth > MAX_DEPTH || this.filesScanned >= MAX_FILES_SCANNED) return;
 
@@ -67,15 +78,15 @@ export class WorkspaceWalker {
                 if (this.filesScanned >= MAX_FILES_SCANNED) break;
 
                 const fullPath = path.join(currentDir, entry.name);
-                const relativePath = path.relative(root, fullPath);
+                const relativePathToGitignore = path.relative(gitignoreRoot, fullPath);
 
                 // Skip if ignored (unless overridden)
-                if (!overrideIgnores && ig.ignores(relativePath)) {
+                if (!overrideIgnores && ig.ignores(relativePathToGitignore)) {
                     continue;
                 }
 
                 if (entry.isDirectory()) {
-                    await this.walk(root, fullPath, keywords, candidates, ig, depth + 1, overrideIgnores);
+                    await this.walk(root, fullPath, keywords, candidates, ig, depth + 1, overrideIgnores, gitignoreRoot, isTheoretical);
                 } else if (entry.isFile()) {
                     this.filesScanned++;
                     const ext = path.extname(entry.name).toLowerCase();
@@ -83,7 +94,8 @@ export class WorkspaceWalker {
                     // Simple extension filter (still useful to prune binaries quickly)
                     if (EXCLUDE_EXTENSIONS.includes(ext)) continue;
 
-                    const score = this.calculateScore(entry.name, ext, keywords);
+                    const relativePath = path.relative(root, fullPath);
+                    const score = this.calculateScore(entry.name, relativePath, ext, keywords, isTheoretical);
                     if (score > 0) {
                         candidates.push({ path: fullPath, score });
                     }
@@ -94,26 +106,48 @@ export class WorkspaceWalker {
         }
     }
 
-    private static calculateScore(filename: string, ext: string, keywords: string[]): number {
+    private static calculateScore(filename: string, relativePath: string, ext: string, keywords: string[], isTheoretical: boolean): number {
         let score = 0;
         const nameLower = filename.toLowerCase();
+        const pathLower = relativePath.toLowerCase();
 
-        // 1. Extension boost (prioritize source code)
-        const codeExtensions = ['.ts', '.js', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.md'];
-        if (codeExtensions.includes(ext)) score += 5;
+        // 1. Extension boost (prioritize source code or docs based on mode)
+        const codeExtensions = ['.ts', '.js', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.h'];
+        const docExtensions = ['.md', '.txt', '.pdf', '.json', '.yaml', '.yml'];
+        
+        if (isTheoretical) {
+            if (docExtensions.includes(ext)) score += 20;
+            if (codeExtensions.includes(ext)) score += 5;
+        } else {
+            if (codeExtensions.includes(ext)) score += 20;
+            if (docExtensions.includes(ext)) score += 5;
+        }
 
         // 2. Keyword matches in filename
         for (const kw of keywords) {
             const kwLower = kw.toLowerCase();
             if (nameLower.includes(kwLower)) {
-                score += 10;
+                score += 15;
                 // Bonus for exact matches (minus extension)
                 const nameWithoutExt = path.parse(nameLower).name;
-                if (nameWithoutExt === kwLower) score += 20;
+                const normalizedName = nameWithoutExt.replace(/[_-]/g, '').toLowerCase();
+                const normalizedKw = kwLower.replace(/[_-]/g, '').toLowerCase();
+                if (normalizedName === normalizedKw) score += 30;
             }
         }
 
-        // 3. Structural boost
+        // 3. Path-based boosts/penalties
+        // Prioritize core source directories
+        if (pathLower.includes('core') || pathLower.includes('src') || pathLower.includes('app') || pathLower.includes('lib')) {
+            score += 20;
+        }
+        
+        // Penalize noise directories
+        if (pathLower.includes('backup') || pathLower.includes('archive') || pathLower.includes('temp') || pathLower.includes('tmp') || pathLower.includes('mock')) {
+            score -= 50;
+        }
+
+        // 4. Structural boost
         if (nameLower.includes('config') || nameLower.includes('setup') || nameLower.includes('index')) {
             score += 3;
         }

@@ -1,6 +1,7 @@
 import { ShortTermMemory } from './short-term.js';
 import { LongTermMemory } from './long-term.js';
 import { vectorStore, VectorEntry } from './vector.js';
+import { Sanitizer } from '../utils/Sanitizer.js';
 
 export { ShortTermMemory } from './short-term.js';
 export { LongTermMemory } from './long-term.js';
@@ -50,10 +51,13 @@ export class MemoryManager {
           const existingHash = await this.longTerm.load(`${vectorKey}:hash`);
           if (existingHash === hash) return;
 
+          const sanitizedContent = Sanitizer.sanitize(content);
+          const sanitizedMetadata = Sanitizer.sanitizeObject({ tool: toolName, input, ws: wsHash });
+
           await vectorStore.upsert(wsHash, {
             id: key,
-            content,
-            metadata: { tool: toolName, input, ws: wsHash },
+            content: sanitizedContent,
+            metadata: sanitizedMetadata,
             contentHash: hash,
             timestamp: Date.now()
           });
