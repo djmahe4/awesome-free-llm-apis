@@ -175,7 +175,7 @@ export class WorkspaceContextMiddleware implements Middleware {
                     isSubtask: isSubtask
                 });
 
-                const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **4** high-level steps.`;
+                const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **2** high-level steps.`;
 
                 const CONTEXT_START_MARKER = '<!-- WORKSPACE_CONTEXT_START -->';
                 const CONTEXT_END_MARKER = '<!-- WORKSPACE_CONTEXT_END -->';

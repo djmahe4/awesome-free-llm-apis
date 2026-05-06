@@ -331,7 +331,7 @@ export class AgenticMiddleware implements Middleware {
 
         try {
             const groundingGate: string = (context as any).groundingGate || '';
-            const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **4** high-level steps.`;
+            const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **2** high-level steps.`;
             const userKeywords = context.keywords || [];
             const initialPrompt = await getIntelligentSystemPrompt({
                 context: userContent || "",

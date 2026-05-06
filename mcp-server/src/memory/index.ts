@@ -29,7 +29,7 @@ export class MemoryManager {
     await this.longTerm.save(key, output);
 
     // v1.0.5: Signal-Based Vector Indexing to prevent memory pollution
-    if (['auto_memory', 'store_workspace_skill', 'store_memory', 'manual_memory'].includes(toolName)) {
+    if (['auto_memory', 'store_workspace_skill', 'manual_memory'].includes(toolName)) {
       try {
         const content = typeof output === 'string' ? output : JSON.stringify(output);
 

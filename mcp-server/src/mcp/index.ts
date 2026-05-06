@@ -195,7 +195,7 @@ export async function createMCPServer(): Promise<Server> {
           required: ['providerId'],
         },
       },
-      // v1.0.5 Deprecated: Unnecessary feature (DO NOT REMOVE THE CODE )
+      // v1.0.5 Deprecated: Unnecessary feature (DO NOT REMOVE THE CODE COMMENT)
       // {
       //   name: 'code_mode',
       //   description: [
