@@ -1,5 +1,24 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { LLMExecutor } from '../src/utils/LLMExecutor.js';
+
+// Mock persistence to avoid disk I/O and ENOENT errors during tests
+vi.mock('../src/utils/PersistenceManager.js', () => ({
+    persistence: {
+        save: vi.fn().mockResolvedValue(undefined),
+        load: vi.fn().mockResolvedValue({ providers: {} }),
+    }
+}));
+
+beforeEach(() => {
+    // Mock console to prevent Vitest RPC race conditions during teardown
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+});
+
+afterEach(() => {
+    vi.restoreAllMocks();
+});
 
 describe('LLMExecutor - Token Refund', () => {
     let executor: LLMExecutor;

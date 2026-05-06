@@ -299,7 +299,7 @@ export class MyMiddleware implements Middleware {
 ```bash
 # Install and build
 cd mcp-server
-npm install
+npm install --legacy-peer-deps
 npm run build
 
 # Configure providers (copy and fill .env.example)
@@ -308,6 +308,9 @@ cp .env.example .env
 # (Optional) Install Python RestrictedPython
 pip install RestrictedPython
 ```
+> [!IMPORTANT]
+> **Installation Note**: This project requires `npm install --legacy-peer-deps` due to a peer dependency version mismatch between `vectra` and `@huggingface/transformers` v1.0.5.
+
 > Follow [setup.md](docs/setup.md) for more details.
 
 # Run in stdio mode (for Claude Desktop / Cursor)

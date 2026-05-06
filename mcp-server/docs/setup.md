@@ -12,14 +12,14 @@ This guide covers the necessary steps to set up the MCP server and its provider 
 
 ### 1. Node.js Dependencies & Cross-Platform Sync
 
-Install the core server dependencies:
+Install the core server dependencies. **Note:** You must use the `--legacy-peer-deps` flag to resolve a conflict between `vectra` and `transformers` v4.
 
 ```bash
 cd mcp-server
-npm install
+npm install --legacy-peer-deps
 ```
 
-> **Note:** This project uses `quickjs-emscripten`, which requires platform-specific dependencies (like `@emnapi/core` and `@emnapi/runtime`) to be present in the `package-lock.json` for CI/CD runners (like Linux). To ensure these are always included in the lock file regardless of your development OS (Windows/macOS), they are tracked in `devDependencies`. If you see `npm ci` failures in CI, please run `npm install` locally to refresh the lock file.
+> **Note:** This project uses `quickjs-emscripten`, which requires platform-specific dependencies (like `@emnapi/core` and `@emnapi/runtime`) to be present in the `package-lock.json` for CI/CD runners (like Linux). To ensure these are always included in the lock file regardless of your development OS (Windows/macOS), they are tracked in `devDependencies`. If you see `npm ci` failures in CI, please run `npm install --legacy-peer-deps` locally to refresh the lock file.
 
 ### 2. Python Environment (for Gemini)
 
