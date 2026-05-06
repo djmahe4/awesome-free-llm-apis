@@ -3,7 +3,7 @@ import { TaskType } from '../middleware.js';
 import type { Message, ChatResponse } from '../../providers/types.js';
 import type { Middleware, PipelineContext, NextFunction } from '../middleware.js';
 import { ContextManager } from '../../utils/ContextManager.js';
-import { getMessageContent } from '../../utils/MessageUtils.js';
+import { getMessageContent, prependToMessageContent } from '../../utils/MessageUtils.js';
 import { LLMExecutor } from '../../utils/LLMExecutor.js';
 
 export class IntelligentRouterMiddleware implements Middleware {
@@ -905,7 +905,6 @@ Request: ${lastMessage}`;
                     // Concatenate thinking/reasoning if present (as requested: "THOUGHTS: ...")
                     const thoughts = (msg.thinking || msg.reasoning || '').toString().trim();
                     if (thoughts) {
-                        const { prependToMessageContent } = await import('../../utils/MessageUtils.js');
                         prependToMessageContent(msg, `THOUGHTS: ${thoughts}\n\n`);
                         delete msg.thinking;
                         delete msg.reasoning;
@@ -916,6 +915,15 @@ Request: ${lastMessage}`;
                             .replace(/\n+(?=[{\[])/g, '') // Remove \n before { or [
                             .replace(/([}\]])\n+/g, '$1') // Remove \n after } or ]
                             .trim();
+                    } else if (Array.isArray(msg.content)) {
+                        msg.content.forEach((p: any) => {
+                            if (p.text) {
+                                p.text = p.text
+                                    .replace(/\n+(?=[{\[])/g, '')
+                                    .replace(/([}\]])\n+/g, '$1')
+                                    .trim();
+                            }
+                        });
                     }
                 }
 

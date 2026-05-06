@@ -7,6 +7,7 @@ import { WorkspaceScanner } from '../../cache/workspace.js';
 import { getIntelligentSystemPrompt } from '../../middleware/agentic/prompts.js';
 import { ContextGatherer } from '../../middleware/agentic/context-gatherer.js';
 import { WorkspaceIndexer } from '../../memory/indexer.js';
+import { getMessageContent, prependToMessageContent } from '../../utils/MessageUtils.js';
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
@@ -195,14 +196,21 @@ export class WorkspaceContextMiddleware implements Middleware {
                 const sysMsgIdx = messages.findIndex(m => m.role === 'system');
 
                 if (sysMsgIdx !== -1) {
-                    const currentContent = String(messages[sysMsgIdx].content);
+                    const msg = messages[sysMsgIdx];
+                    const currentContent = getMessageContent(msg.content);
                     if (currentContent.includes(CONTEXT_START_MARKER)) {
                         // Replace existing context block
                         const regex = new RegExp(`${CONTEXT_START_MARKER}[\\s\\S]*?${CONTEXT_END_MARKER}`, 'g');
-                        messages[sysMsgIdx].content = currentContent.replace(regex, fullSystemPrompt);
+                        if (typeof msg.content === 'string') {
+                            msg.content = msg.content.replace(regex, fullSystemPrompt);
+                        } else if (Array.isArray(msg.content)) {
+                            msg.content.forEach((p: any) => {
+                                if (p.text) p.text = p.text.replace(regex, fullSystemPrompt);
+                            });
+                        }
                     } else {
                         // Prepend to existing system message
-                        messages[sysMsgIdx].content = `${fullSystemPrompt}\n${currentContent}`;
+                        prependToMessageContent(msg, fullSystemPrompt + '\n');
                     }
                 } else {
                     messages.unshift({ role: 'system', content: fullSystemPrompt });

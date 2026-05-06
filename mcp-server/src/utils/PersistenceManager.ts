@@ -28,6 +28,7 @@ export interface PersistentUsage {
 export class PersistenceManager {
   private filePath: string;
   private isLocal: boolean = false;
+  private lastSavedState: PersistentUsage | null = null;
 
   constructor(customPath?: string) {
     this.filePath = customPath || this.resolvePath();
@@ -89,12 +90,15 @@ export class PersistenceManager {
     try {
       if (await fs.pathExists(this.filePath)) {
         const data = await fs.readJson(this.filePath);
-        return this.handleDailyReset(data);
+        const resetData = this.handleDailyReset(data);
+        this.lastSavedState = JSON.parse(JSON.stringify(resetData));
+        return resetData;
       }
     } catch (e) {
       console.error('Error loading usage stats:', e);
     }
 
+    this.lastSavedState = JSON.parse(JSON.stringify(emptyState));
     return emptyState;
   }
 
@@ -120,13 +124,21 @@ export class PersistenceManager {
   async save(memoryState: PersistentUsage): Promise<void> {
     try {
       await this.ensureStorage();
+      const today = new Date().toISOString().split('T')[0];
 
       // Read current disk state for merging
       let diskState: PersistentUsage;
       try {
         diskState = await fs.readJson(this.filePath);
       } catch (e) {
-        diskState = memoryState;
+        diskState = {
+          lastResetDate: today,
+          dailyTotalRequests: 0,
+          dailyTotalTokens: 0,
+          lifetimeTotalRequests: 0,
+          lifetimeTotalTokens: 0,
+          providers: {}
+        };
       }
 
       const merged = this.merge(diskState, memoryState);
@@ -135,6 +147,9 @@ export class PersistenceManager {
       const tmpPath = `${this.filePath}.tmp`;
       await fs.writeJson(tmpPath, merged, { spaces: 2 });
       await fs.rename(tmpPath, this.filePath);
+
+      // Update baseline for next delta calculation
+      this.lastSavedState = JSON.parse(JSON.stringify(memoryState));
     } catch (e) {
       console.error('Error saving usage stats:', e);
     }
@@ -145,39 +160,56 @@ export class PersistenceManager {
    */
   private merge(disk: PersistentUsage, memory: PersistentUsage): PersistentUsage {
     const today = new Date().toISOString().split('T')[0];
-    
-    // Determine the base state (handle reset if needed)
     const base = disk.lastResetDate === today ? disk : this.handleDailyReset(disk);
     
-    // Merge global totals (additive)
-    // Note: Since both processes might have incremented their locals, 
-    // we should ideally track "deltas", but for simplicity here we favor max
-    // if we assume they are independent counters. 
-    // BETTER: If processes are concurrent, they each see a 'base' and add their session usage.
-    // For this implementation, we assume memory is always the 'current session' state.
+    // Calculate deltas from last saved state
+    const prev = this.lastSavedState || {
+      lastResetDate: today,
+      dailyTotalRequests: 0,
+      dailyTotalTokens: 0,
+      lifetimeTotalRequests: 0,
+      lifetimeTotalTokens: 0,
+      providers: {}
+    };
+
+    // If day changed locally, previous daily stats are irrelevant for delta
+    const prevDailyReq = prev.lastResetDate === today ? prev.dailyTotalRequests : 0;
+    const prevDailyTok = prev.lastResetDate === today ? prev.dailyTotalTokens : 0;
+
+    const deltaDailyReq = Math.max(0, memory.dailyTotalRequests - prevDailyReq);
+    const deltaDailyTok = Math.max(0, memory.dailyTotalTokens - prevDailyTok);
+    const deltaLifetimeReq = Math.max(0, memory.lifetimeTotalRequests - prev.lifetimeTotalRequests);
+    const deltaLifetimeTok = Math.max(0, memory.lifetimeTotalTokens - prev.lifetimeTotalTokens);
     
     const result: PersistentUsage = {
       lastResetDate: today,
-      dailyTotalRequests: Math.max(base.dailyTotalRequests, memory.dailyTotalRequests),
-      dailyTotalTokens: Math.max(base.dailyTotalTokens, memory.dailyTotalTokens),
-      lifetimeTotalRequests: Math.max(base.lifetimeTotalRequests, memory.lifetimeTotalRequests),
-      lifetimeTotalTokens: Math.max(base.lifetimeTotalTokens, memory.lifetimeTotalTokens),
+      dailyTotalRequests: base.dailyTotalRequests + deltaDailyReq,
+      dailyTotalTokens: base.dailyTotalTokens + deltaDailyTok,
+      lifetimeTotalRequests: base.lifetimeTotalRequests + deltaLifetimeReq,
+      lifetimeTotalTokens: base.lifetimeTotalTokens + deltaLifetimeTok,
       providers: { ...base.providers }
     };
 
     // Merge providers
     for (const [id, mProv] of Object.entries(memory.providers)) {
-      const dProv = base.providers[id];
-      if (!dProv || mProv.lastSyncTime > dProv.lastSyncTime) {
-        result.providers[id] = mProv;
-      } else {
-        // Favor higher lifetime counts even if sync time is older (protection against clock skew)
-        result.providers[id] = {
-          ...dProv,
-          localTotalRequests: Math.max(dProv.localTotalRequests, mProv.localTotalRequests),
-          localTotalTokens: Math.max(dProv.localTotalTokens, mProv.localTotalTokens)
-        };
-      }
+      const dProv = base.providers[id] || { lastSyncTime: 0, localTotalRequests: 0, localTotalTokens: 0 };
+      const pProv = prev.providers[id] || { localTotalRequests: 0, localTotalTokens: 0 };
+      
+      const deltaReq = Math.max(0, mProv.localTotalRequests - pProv.localTotalRequests);
+      const deltaTok = Math.max(0, mProv.localTotalTokens - pProv.localTotalTokens);
+
+      result.providers[id] = {
+        ...dProv,
+        lastSyncTime: Math.max(dProv.lastSyncTime || 0, mProv.lastSyncTime || 0),
+        localTotalRequests: (dProv.localTotalRequests || 0) + deltaReq,
+        localTotalTokens: (dProv.localTotalTokens || 0) + deltaTok,
+        remainingRequests: mProv.remainingRequests !== undefined ? mProv.remainingRequests : dProv.remainingRequests,
+        remainingTokens: mProv.remainingTokens !== undefined ? mProv.remainingTokens : dProv.remainingTokens,
+        failures: mProv.failures ?? dProv.failures,
+        lastFailure: mProv.lastFailure ?? dProv.lastFailure,
+        cooldownUntil: mProv.cooldownUntil ?? dProv.cooldownUntil,
+        totalErrors: mProv.totalErrors ?? dProv.totalErrors
+      };
     }
 
     return result;

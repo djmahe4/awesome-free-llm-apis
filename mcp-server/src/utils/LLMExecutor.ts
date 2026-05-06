@@ -4,7 +4,7 @@ import { getEncoding } from 'js-tiktoken';
 import type { Message, ChatResponse } from '../providers/types.js';
 import { ProviderRegistry } from '../providers/registry.js';
 import type { PipelineContext } from '../pipeline/middleware.js';
-import { getMessageContent } from './MessageUtils.js';
+import { getMessageContent, prependToMessageContent } from './MessageUtils.js';
 
 export interface TokenTrackingInfo {
     remainingTokens?: number;
@@ -177,8 +177,8 @@ export class LLMExecutor {
             // Increment totals (PersistenceManager will merge these)
             state.lifetimeTotalRequests += tracker.localTotalRequests || 0;
             state.lifetimeTotalTokens += tracker.localTotalTokens || 0;
-            state.dailyTotalRequests += tracker.localTotalRequests || 0; 
-            state.dailyTotalTokens += tracker.localTotalTokens || 0;
+            state.dailyTotalRequests += tracker.dailyTotalRequests || 0; 
+            state.dailyTotalTokens += tracker.dailyTotalTokens || 0;
         }
 
         await this.persistence.save(state);

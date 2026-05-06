@@ -60,8 +60,8 @@ describe('Persistence Layer Hardening', () => {
         // 4. Verify Merge logic
         const finalState = await fs.readJson(testFile);
         
-        // Global daily counts should favor max (atomic RMW merge)
-        expect(finalState.dailyTotalRequests).toBe(10); // Favored disk's higher count from concurrent process
+        // Global daily counts should be additive (atomic RMW merge using deltas)
+        expect(finalState.dailyTotalRequests).toBe(11); // base(10) + delta(1) = 11
         
         // p1 should be updated (latest sync wins)
         expect(finalState.providers['p1'].localTotalRequests).toBe(2);

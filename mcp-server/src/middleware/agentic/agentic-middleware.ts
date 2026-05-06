@@ -451,7 +451,9 @@ export class AgenticMiddleware implements Middleware {
         }
 
         // v1.0.5: Critical fix - signal completion to the pipeline
-        await next();
+        if (!context.response) {
+            await next();
+        }
 
         console.error(`[agentic-middleware] ${Date.now() - startMs}ms session=${sessionId} iterations=${subtaskIteration}`);
     }
