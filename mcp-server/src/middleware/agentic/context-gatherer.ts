@@ -1,10 +1,31 @@
-import { exec } from 'child_process';
+import { spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { WorkspaceWalker } from './workspace-walker.js';
 import fs from 'fs/promises';
 
-const execAsync = promisify(exec);
+/**
+ * Robust spawn wrapper for cross-platform command execution.
+ */
+function spawnAsync(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+        // Use shell: true only if absolutely necessary, but here we want to avoid it
+        const child = spawn(command, args, { shell: process.platform === 'win32' });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', data => stdout += data.toString());
+        child.stderr.on('data', data => stderr += data.toString());
+        child.on('close', code => {
+            // rg and grep return 1 if no matches found, which we handle as success with empty results
+            if (code === 0 || code === 1) {
+                resolve({ stdout, stderr });
+            } else {
+                reject(new Error(`Command failed with code ${code}: ${stderr}`));
+            }
+        });
+        child.on('error', reject);
+    });
+}
 
 export interface ContextGathererOptions {
     workspaceRoot: string;
@@ -15,12 +36,7 @@ export interface ContextGathererOptions {
 }
 
 export class ContextGatherer {
-    /**
-     * Minimal shell escaping for double-quoted strings in bash/zsh/sh/powershell.
-     */
-    private static shellEscape(str: string): string {
-        return str.replace(/[\\"$`]/g, '\\$&');
-    }
+    // No longer needed with spawn arguments array
 
     /**
      * Proactive Grep/RG context gathering.
@@ -102,7 +118,7 @@ export class ContextGatherer {
         if (finalTerms.length === 0) return [];
 
         // 3. Combine terms into a single regex pattern for efficiency
-        const combinedPattern = finalTerms.map(t => this.shellEscape(t)).join('|');
+        const combinedPattern = finalTerms.join('|');
 
         const isTheoretical = /\b(doc|documentation|guide|explain|theory|writeup|summary|overview)\b/i.test(query);
         const overrideIgnores = /\b(override|all files|gitignored|ignored|data)\b/i.test(query);
@@ -114,11 +130,11 @@ export class ContextGatherer {
         // 5. Tool Detection
         let tool: 'rg' | 'grep' | 'none' = 'none';
         try {
-            await execAsync('rg --version');
+            await spawnAsync('rg', ['--version']);
             tool = 'rg';
         } catch {
             try {
-                await execAsync('grep --version');
+                await spawnAsync('grep', ['--version']);
                 tool = 'grep';
             } catch {
                 return [];
@@ -128,18 +144,23 @@ export class ContextGatherer {
         // 6. Execute Search (Single pass with combined pattern)
         const results: string[] = [];
         try {
-            const candidateArgs = candidates.map(c => `"${this.shellEscape(c.replace(/\\/g, '/'))}"`).join(' ');
-            let command: string;
+            const normalizedCandidates = candidates.map(c => c.replace(/\\/g, '/'));
+            let stdout = '';
             
             // We use a total match limit of 10 per file to prevent bloat
             if (tool === 'rg') {
-                const ignoreFlag = overrideIgnores ? '-u' : '';
-                command = `rg -m 10 -n -i -C 2 --no-heading ${ignoreFlag} -e "(${combinedPattern})" ${candidateArgs}`;
+                const args = ['-m', '10', '-n', '-i', '-C', '2', '--no-heading'];
+                if (overrideIgnores) args.push('-u');
+                args.push('-e', `(${combinedPattern})`);
+                args.push(...normalizedCandidates);
+                
+                const res = await spawnAsync('rg', args);
+                stdout = res.stdout;
             } else {
-                command = `grep -nEi -m 10 -C 2 -E "(${combinedPattern})" ${candidateArgs}`;
+                const args = ['-n', '-E', '-i', '-m', '10', '-C', '2', `(${combinedPattern})`].concat(normalizedCandidates);
+                const res = await spawnAsync('grep', args);
+                stdout = res.stdout;
             }
-
-            const { stdout } = await execAsync(command);
             if (stdout) {
                 const rawMatches = stdout.split('\n').filter(Boolean);
                 

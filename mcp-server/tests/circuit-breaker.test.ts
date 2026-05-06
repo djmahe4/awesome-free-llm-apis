@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { LLMExecutor } from '../src/utils/LLMExecutor.js';
 
 // Mock persistence to avoid disk I/O and ENOENT errors during tests
@@ -9,15 +9,17 @@ vi.mock('../src/utils/PersistenceManager.js', () => ({
     }
 }));
 
-beforeEach(() => {
-    // Mock console to prevent Vitest RPC race conditions during teardown
+// Mock console GLOBALLY for this file to prevent Vitest RPC race conditions during teardown
+// This prevents "EnvironmentTeardownError: Closing rpc while 'onUserConsoleLog' was pending"
+beforeAll(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
 });
 
 afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
 });
 
 describe('LLMExecutor - Token Refund', () => {

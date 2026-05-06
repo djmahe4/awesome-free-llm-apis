@@ -41,9 +41,10 @@ export const EXCLUDE_EXTENSIONS = [
     '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico',
     '.mp4', '.webm', '.ogg', '.mp3', '.wav',
     '.pdf', '.zip', '.tar.gz', '.rar',
-    '.exe', '.dll', '.so', '.dylib',
+    '.exe', '.dll', '.so', '.dylib', '.bin', '.dat',
+    '.woff', '.woff2', '.ttf', '.otf',
     '.map', '.log', '.pyc', '.pyo', '.pyd',
-    '.db', '.sqlite'
+    '.db', '.sqlite', '.obj', '.o', '.a', '.lib'
 ];
 
 // Local workspace artifacts

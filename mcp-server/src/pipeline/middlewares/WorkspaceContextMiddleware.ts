@@ -155,9 +155,19 @@ export class WorkspaceContextMiddleware implements Middleware {
         let workspaceContextStr = '';
         if (dirTree) workspaceContextStr += `\nProject Structure:\n${dirTree}\n`;
         if (grepResults.length > 0) {
-            const aggregatedGrep = grepResults.join('\n');
-            // Cap total grep context to 5,000 chars to leave room for instructions and memory
-            workspaceContextStr += `\nRelevant File Snippets:\n${aggregatedGrep.length > 5000 ? aggregatedGrep.slice(0, 5000) + '\n... (total results truncated to 5k chars)' : aggregatedGrep}\n`;
+            // Priority-aware truncation: grepResults is already sorted (Code -> Config -> Docs).
+            // We accumulate until 5000 chars to ensure code context is preserved over others.
+            let currentLen = 0;
+            const prioritizedSnippets: string[] = [];
+            for (const snippet of grepResults) {
+                if (currentLen + snippet.length > 5000) {
+                    prioritizedSnippets.push(`\n... (context truncated to 5k chars, prioritizing code)`);
+                    break;
+                }
+                prioritizedSnippets.push(snippet);
+                currentLen += snippet.length + 1; // +1 for newline
+            }
+            workspaceContextStr += `\nRelevant File Snippets:\n${prioritizedSnippets.join('\n')}\n`;
         }
         (context as any).grepContext = workspaceContextStr || undefined;
 

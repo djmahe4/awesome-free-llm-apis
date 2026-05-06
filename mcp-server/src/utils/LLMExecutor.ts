@@ -418,7 +418,9 @@ export class LLMExecutor {
         if (providerId === 'gemini') {
             sanitizedRequest.messages = sanitizedRequest.messages.map((m: any) => {
                 if (m.role === 'system') {
-                    return { role: 'user', content: `[SYSTEM INSTRUCTION]: ${m.content}` };
+                    const copy = { ...m, role: 'user' };
+                    prependToMessageContent(copy, `[SYSTEM INSTRUCTION]: `);
+                    return copy;
                 }
                 return m;
             });

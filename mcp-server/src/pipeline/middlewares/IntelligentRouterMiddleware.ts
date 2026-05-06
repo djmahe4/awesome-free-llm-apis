@@ -905,7 +905,8 @@ Request: ${lastMessage}`;
                     // Concatenate thinking/reasoning if present (as requested: "THOUGHTS: ...")
                     const thoughts = (msg.thinking || msg.reasoning || '').toString().trim();
                     if (thoughts) {
-                        msg.content = `THOUGHTS: ${thoughts}\n\n${msg.content || ''}`.trim();
+                        const { prependToMessageContent } = await import('../../utils/MessageUtils.js');
+                        prependToMessageContent(msg, `THOUGHTS: ${thoughts}\n\n`);
                         delete msg.thinking;
                         delete msg.reasoning;
                     }
