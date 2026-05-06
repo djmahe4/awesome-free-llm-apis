@@ -20,7 +20,7 @@ export class IntelligentRouterMiddleware implements Middleware {
         'deepseek-ai/DeepSeek-V3': 0.9,
         'deepseek-v3.2': 0.95,
         'gemini-3.1-flash-lite-preview': 0.82,
-        'gemini-2.5-pro': 0.9,
+        //'gemini-2.5-pro': 0.9,
         'command-r-plus-08-2024': 0.9,
         'command-a-03-2025': 0.8,
         'mistral-large-latest': 0.85,
@@ -83,6 +83,8 @@ export class IntelligentRouterMiddleware implements Middleware {
         'gemma-3-2b-it': 0.78,
         'gemma-4-26b-it': 0.94,
         'gemma-4-31b-it': 0.95,
+        // NVIDIA NIM — 40 RPM, highly capable
+        'Qwen/Qwen3-235B-A22B-nim': 0.93,   // alias used by nvidia provider
     };
 
     constructor(executor?: LLMExecutor) {
@@ -346,6 +348,7 @@ Request: ${lastMessage}`;
             'google/gemma-4-26b-a4b-it:free',
             'google/gemma-4-31B-it',
             'DeepSeek-R1',
+            'Qwen/Qwen3-235B-A22B',      // NVIDIA NIM — 40 RPM, powerful coder
             'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
             'qwen-3-235b-a22b-instruct-2507',
             'codestral-latest',
@@ -360,8 +363,9 @@ Request: ${lastMessage}`;
             'glm-5.1',
             'glm-5-turbo',
             'z-ai/glm-4.5-air:free',
-            'google/gemma-4-31b-it',
             'google/gemma-3-27b-it',
+            'gemma-4-31b-it',                // Gemini Provider - 31B
+            'gemma-4-26b-it',                // Gemini Provider - 26B
             'glm-4.5-air',
             'kilo-auto/free',
         ],
@@ -370,17 +374,26 @@ Request: ${lastMessage}`;
             'deepseek-ai/DeepSeek-R1',
             'deepseek-ai/deepseek-r1-distill-qwen-32b',
             'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
+            'Qwen/Qwen3-235B-A22B',          // NVIDIA NIM — 40 RPM, reasoning powerhouse
             'liquid/lfm2.5-1.2b-thinking:free',
             'qwen-3-235b-a22b-instruct-2507',
             'glm-5.1',
             'qwen/qwen3-coder:free',
             'google/gemma-4-26b-a4b-it:free',
             'google/gemma-4-31B-it',
+            'gemma-4-31b-it',                // Gemini Provider
+            'gemma-4-26b-it',                // Gemini Provider
             'nvidia/nemotron-3-super-120b-a12b:free',
         ],
         [TaskType.Moderation]: [
             'llama-3.3-70b-versatile',
             'google/gemma-4-31B-it',
+            'gemma-4-31b-it',
+            'gemma-3-1b-it',                 // Fast safety/moderation
+            'gemma-3-2b-it',
+            'gemma-3-4b-it',
+            'gemma-3-12b-it',                // Gemini Gemma 12B — lightweight, fast
+            'gemma-3-27b-it',                // Gemini Gemma 27B — better accuracy
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             'gemini-3.1-flash-lite-preview',
             'glm-4.5-air',
@@ -391,7 +404,14 @@ Request: ${lastMessage}`;
         ],
         [TaskType.Classification]: [
             'google/gemma-4-31B-it',
+            'gemma-4-31b-it',
             'llama-3.3-70b-versatile',
+            'gemma-3-1b-it',                 // Tiny, perfect for classification
+            'gemma-3-2b-it',
+            'gemma-3-4b-it',
+            'gemma-3-12b-it',                // Gemini Gemma 12B — ideal for classification
+            'gemma-3-27b-it',                // Gemini Gemma 27B
+            'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, bulk classification
             'ministral-8b-2512',
             'GLM-4.6V-Flash',
             'gemini-3.1-flash-lite-preview',
@@ -402,10 +422,11 @@ Request: ${lastMessage}`;
         ],
         [TaskType.UserIntent]: [
             'google/gemma-4-31B-it',
+            'gemma-4-31b-it',
             'mistral-small-latest',
+            'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, bulk-friendly
             'gemini-3.1-flash-lite-preview',
             'llama-3.3-70b-versatile',
-            'gemini-3.1-flash-lite-preview',
             'glm-4.6',
             'glm-4.5-air',
             'nvidia/nemotron-mini-4b-instruct:free',
@@ -416,6 +437,7 @@ Request: ${lastMessage}`;
             'qwen-3-235b-a22b-instruct-2507',
             'arcee-ai/trinity-large-preview:free',
             'qwen/qwen3-next-80b-a3b-instruct:free',
+            'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, great for bulk search
             'meta-llama/llama-4-scout-17b-16e-instruct',
             'command-r-plus-08-2024',
             'gemini-3.1-flash-lite-preview',
@@ -426,10 +448,14 @@ Request: ${lastMessage}`;
         ],
         [TaskType.Summarization]: [
             'google/gemma-4-31B-it',
+            'gemma-4-31b-it',
             'kimi-k2.5',
             'mistral-small-latest',
             'gemini-3.1-flash-lite-preview',
-            'gemini-2.5-flash-lite',
+            'gemma-3-27b-it',
+            'gemma-4-26b-it',
+            'mistralai/Mistral-7B-Instruct-v0.3', // HuggingFace capacity
+            'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, great for bulk summarization
             'meta-llama/Llama-3.3-70B-Instruct',
             'command-a-03-2025',
             'mistralai/mistral-small-3.1-24b:free',
@@ -438,8 +464,10 @@ Request: ${lastMessage}`;
         ],
         [TaskType.EntityExtraction]: [
             'google/gemma-4-31B-it',
+            'gemma-4-31b-it',
             'arcee-ai/trinity-large-preview:free',
             'llama-3.3-70b-versatile',
+            'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, bulk extraction
             'gemini-3.1-flash-lite-preview',
             'glm-4.7',
             'glm-4.5-air',
