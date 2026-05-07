@@ -38,7 +38,7 @@ python -m venv venv
 
 pip install -U google-genai python-dotenv
 ```
-### 3. Sandbox Requirements (for `code_mode`)
+### 3. Sandbox Requirements (for `code_mode`): IGNORE THIS SECTION
 
 The `code_mode` tool provides isolated script execution. Some runtimes require manual setup:
 
@@ -64,7 +64,8 @@ cargo build --release
 ```
 
 > [!NOTE] 
-> The Node.js executor automatically detects these binaries if they are built in their respective directories. Python execution requires `python3` to be available on your system path with `RestrictedPython` installed in the environment used to run the server.
+> The Node.js executor automatically detects these binaries if they are built in their respective directories. Python execution requires `python3` to be available on your system path with `RestrictedPython` installed in the environment used to run the server.<br>
+> This tool call is deprecated and has been removed. But the underlying code is available in 'scripts/sandboxes' folder.
 
 ## Configuration
 

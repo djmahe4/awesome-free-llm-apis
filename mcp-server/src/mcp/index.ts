@@ -5,7 +5,8 @@ import {
   type CallToolRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import { useFreeLLM } from '../tools/use-free-llm.js';
-import { listAvailableFreeModels } from '../tools/list-models.js';
+// v1.0.5 Deprecated: Unnecessary feature (Remove this comment and import in new update)
+//import { listAvailableFreeModels } from '../tools/list-models.js';
 // v1.0.5 Deprecated: Unnecessary feature (DO NOT REMOVE THE CODE COMMENT)
 //import { runCodeMode } from '../tools/code-mode.js';
 import { manageMemory } from '../tools/manage-memory.js';
@@ -95,41 +96,42 @@ export async function createMCPServer(): Promise<Server> {
           required: ['messages'],
         },
       },
-      {
-        name: 'list_available_free_models',
-        description: [
-          'Enumerate all registered LLM providers and models with rate-limit metadata.',
-          '',
-          'USER STORY: Discover which free models and providers are configured and available',
-          'before sending a request. Use this to select the best model for a task or to check',
-          'which providers have API keys set.',
-          '',
-          'WHEN TO USE: Before calling `use_free_llm` when you want to choose a specific model,',
-          'or to audit which providers are active in the current environment.',
-          '',
-          'INPUTS:',
-          '  provider (optional)      — Filter results to a single provider ID (e.g. "groq").',
-          '  available_only (optional)— If true, only return models whose provider has an API key set.',
-          '',
-          'OUTPUTS: { models: [{providerId, modelId, modelName, rateLimits, available}], summary }',
-          '  Each model entry includes rate limits (rpm, rpd, tpm) and availability flag.',
-          '',
-          'FAILURE STATES:',
-          '  - Empty models array: no providers registered or all filtered out.',
-          '  - available:false entries: provider is registered but API key is not set in environment.',
-          '',
-          'EXAMPLE:',
-          '  { available_only: true }  → lists only models with configured API keys',
-          '  { provider: "groq" }      → lists all Groq models with rate-limit metadata',
-        ].join('\n'),
-        inputSchema: {
-          type: 'object' as const,
-          properties: {
-            provider: { type: 'string', description: 'Filter by provider ID (e.g. "groq", "gemini", "openrouter")' },
-            available_only: { type: 'boolean', description: 'If true, only return models whose provider API key is configured' },
-          },
-        },
-      },
+      // Depriciated (To be removed in future)
+      // {
+      //   name: 'list_available_free_models',
+      //   description: [
+      //     'Enumerate all registered LLM providers and models with rate-limit metadata.',
+      //     '',
+      //     'USER STORY: Discover which free models and providers are configured and available',
+      //     'before sending a request. Use this to select the best model for a task or to check',
+      //     'which providers have API keys set.',
+      //     '',
+      //     'WHEN TO USE: Before calling `use_free_llm` when you want to choose a specific model,',
+      //     'or to audit which providers are active in the current environment.',
+      //     '',
+      //     'INPUTS:',
+      //     '  provider (optional)      — Filter results to a single provider ID (e.g. "groq").',
+      //     '  available_only (optional)— If true, only return models whose provider has an API key set.',
+      //     '',
+      //     'OUTPUTS: { models: [{providerId, modelId, modelName, rateLimits, available}], summary }',
+      //     '  Each model entry includes rate limits (rpm, rpd, tpm) and availability flag.',
+      //     '',
+      //     'FAILURE STATES:',
+      //     '  - Empty models array: no providers registered or all filtered out.',
+      //     '  - available:false entries: provider is registered but API key is not set in environment.',
+      //     '',
+      //     'EXAMPLE:',
+      //     '  { available_only: true }  → lists only models with configured API keys',
+      //     '  { provider: "groq" }      → lists all Groq models with rate-limit metadata',
+      //   ].join('\n'),
+      //   inputSchema: {
+      //     type: 'object' as const,
+      //     properties: {
+      //       provider: { type: 'string', description: 'Filter by provider ID (e.g. "groq", "gemini", "openrouter")' },
+      //       available_only: { type: 'boolean', description: 'If true, only return models whose provider API key is configured' },
+      //     },
+      //   },
+      // },
       {
         name: 'get_token_stats',
         description: [
@@ -174,7 +176,7 @@ export async function createMCPServer(): Promise<Server> {
           '',
           'INPUTS:',
           '  providerId (required) — Provider ID to validate (e.g. "groq", "gemini", "openrouter").',
-          '                          Use `list_available_free_models` to get valid provider IDs.',
+          // '                          Use `list_available_free_models` to get valid provider IDs.',
           '',
           'OUTPUTS: { providerId, status:"healthy"|"degraded"|"unavailable", latencyMs,',
           '           credentialsValid, message }',
@@ -419,13 +421,14 @@ export async function createMCPServer(): Promise<Server> {
         };
       }
 
-      if (name === 'list_available_free_models') {
-        const input = args as Parameters<typeof listAvailableFreeModels>[0];
-        const result = await listAvailableFreeModels(input ?? {});
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-        };
-      }
+      // Depriciated (To be removed in future)
+      // if (name === 'list_available_free_models') {
+      //   const input = args as Parameters<typeof listAvailableFreeModels>[0];
+      //   const result = await listAvailableFreeModels(input ?? {});
+      //   return {
+      //     content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      //   };
+      // }
 
       // v1.0.5 Deprecated: Unnecessary feature (DO NOT REMOVE THE CODE COMMENT)
       // if (name === 'code_mode') {

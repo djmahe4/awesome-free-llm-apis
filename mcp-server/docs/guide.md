@@ -227,19 +227,14 @@ Universal chat interface with automatic fallback cascade through 60+ free models
 > [!IMPORTANT]
 > **PROJECT WORK RULE**: For any task within a project/workspace, you MUST set `"agentic": true` AND provide `"workspace_root"`.
 
-### 2. `list_available_free_models`
-Discover all supported models across all providers with rate-limit metadata.
-- **`available_only: true`** — filters to providers with active API keys configured.
-- **`provider: "groq"`** — filter to a specific provider.
-
-### 3. `manage_memory`
+### 2. `manage_memory`
 Interface for the persistent, workspace-aware memory system.
 
 - **Actions**: `search`, `list`, `stats`, `clear`.
 - **Architecture**: All memory is physically stored centrally in the MCP server's local `data/memory.json`. The `workspace_root` parameter generates a unique cryptographic hash as a **logical namespace** to safely isolate context between projects.
 - **Agent Rule**: Call `manage_memory` with `action: "search"` before wide-context steps to recall relevant prior work.
 
-### 4. `store_workspace_skill` & `index_workspace`
+### 3. `store_workspace_skill` & `index_workspace`
 New standard for structured knowledge harvesting and semantic indexing.
 
 - **`store_workspace_skill`**: Explicitly save structured research, implementation details, and decisions following the `@skill-writer` schema.
@@ -257,7 +252,7 @@ The `prompt.json` engine uses a non-blocking, asynchronous loading strategy with
 - **Asynchronous**: Built entirely on `fs.promises` to keep the event loop free.
 
 
-### 5. `get_token_stats` & `validate_provider`
+### 4. `get_token_stats` & `validate_provider`
 Utility tools for monitoring system health and verifying provider credentials.
 - `get_token_stats`: returns per-provider `{id, name, isAvailable, rateLimits, usage}`.
 - `validate_provider`: runs a live health check on a specific provider ID.

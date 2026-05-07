@@ -3,7 +3,7 @@ name: free-llms
 description: "Orchestrate multiple free LLM providers, manage persistent workspace memory, and utilize keyword-based steering for project-specific reference extraction."
 metadata:
   category: utility
-  triggers: free models, llm cost, fallback, routing, token tracking, workspace memory, context-aware steering, reference extractor, keyword classification, project discovery, gemini, groq, cohere, cloudflare, deepseek, qwen, code mode, compression, sandbox
+  triggers: free models, llm cost, fallback, routing, token tracking, workspace memory, context-aware steering, reference extractor, keyword classification, project discovery, gemini, groq, cohere, cloudflare, deepseek, qwen, compression
 ---
 
 # Free LLM APIs — Usage Guide
@@ -19,7 +19,6 @@ Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-
 - **Cost-Effective Inference**: Use free frontier or mid-tier models instead of paid APIs.
 - **Resilient Workflows**: Automatic fallback ensures completion even during rate limits.
 - **Stateful Context**: Persist findings or decisions across multiple turns/sessions.
-- **Large Context Management**: Sandboxed pre-processing/compression via `code_mode`.
 - **Architectural Steering**: Project-specific documentation or architectural maps guide implementation.
 
 ---
@@ -95,7 +94,6 @@ Proactively index all relevant files in the workspace for semantic search.
 ### Other Utility Tools
 - `get_token_stats`: Check consumption.
 - `validate_provider`: Health check.
-- `list_available_free_models`: See available models.
 
 ---
 
@@ -106,7 +104,6 @@ For more detailed information on the inner workings or specific use cases, refer
 - [**System Architecture**](references/architecture.md): Deep dive into grounding protocols, steering engine mechanics, and advanced agentic patterns.
 - [**Memory Usage Guide**](references/memory-usage.md): Architectural details of the persistent memory system and search optimization.
 - [**Tool Usage Matrix**](references/usages.md): Full test matrix with actual responses, token counts, and latency measurements for all tools.
-- [**Code Mode Logic**](references/code-mode-logic.md): Details on how the sandboxed code execution works for context compression.
 
 ---
 
