@@ -3,15 +3,15 @@
  */
 export class Sanitizer {
     private static readonly SENSITIVE_PATTERNS = [
-        // API Keys and Tokens
-        /(?:api[_-]?key|token|auth[_-]?key|access[_-]?key|secret|password|passwd|pwd|private[_-]?key)(?:\s*[:=]\s*|\s+)(?:['"]?)([a-zA-Z0-9\-._]{8,})(?:['"]?)/gi,
+        // API Keys and Tokens (refined to avoid redacting function calls like os.getenv)
+        /(?:api[_-]?key|token|auth[_-]?key|access[_-]?key|secret|password|passwd|pwd|private[_-]?key)(?:\s*[:=]\s*|\s+)(?:['"]?)([a-zA-Z0-9\-._]{8,})(?![a-zA-Z0-9\-._])(?!\()(?:['"]?)/gi,
         // Generic high-entropy strings that look like keys (e.g. base64 or hex > 32 chars)
         /[a-fA-F0-9]{32,}/g,
         /[a-zA-Z0-9+/]{40,}={0,2}/g,
         // URLs with embedded credentials
         /https?:\/\/[^/:]+:[^/@]+@/g,
-        // Common environment variable patterns
-        /(?:SET|EXPORT)\s+(?:[A-Z_]+)\s*=\s*(?:['"]?)([a-zA-Z0-9\-._]{8,})(?:['"]?)/gi,
+        // Common environment variable patterns (refined to avoid redacting function calls)
+        /(?:SET|EXPORT)\s+(?:[A-Z_]+)\s*=\s*(?:['"]?)([a-zA-Z0-9\-._]{8,})(?![a-zA-Z0-9\-._])(?!\()(?:['"]?)/gi,
     ];
 
     /**
