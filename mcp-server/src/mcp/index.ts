@@ -96,7 +96,7 @@ export async function createMCPServer(): Promise<Server> {
           required: ['messages'],
         },
       },
-      // Depriciated (To be removed in future)
+      // Deprecated (To be removed in future)
       // {
       //   name: 'list_available_free_models',
       //   description: [
@@ -421,7 +421,7 @@ export async function createMCPServer(): Promise<Server> {
         };
       }
 
-      // Depriciated (To be removed in future)
+      // Deprecated (To be removed in future)
       // if (name === 'list_available_free_models') {
       //   const input = args as Parameters<typeof listAvailableFreeModels>[0];
       //   const result = await listAvailableFreeModels(input ?? {});
