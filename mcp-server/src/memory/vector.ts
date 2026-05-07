@@ -1,6 +1,6 @@
 import { pipeline } from '@huggingface/transformers';
 import crypto from 'crypto';
-import { LocalIndex } from 'vectra';
+import { LocalIndex, QueryResult } from 'vectra';
 import path from 'path';
 import fs from 'fs/promises';
 
@@ -63,26 +63,42 @@ export class VectorStore {
         const embedding = entry.embedding || await this.generateEmbedding(entry.content);
 
         // Vectra uses metadata to store the entry details
-        await index.insertItem({
-            vector: embedding,
-            metadata: {
-                id: entry.id,
-                content: entry.content,
-                contentHash: entry.contentHash,
-                timestamp: entry.timestamp,
-                ...entry.metadata
-            }
-        });
+        // v1.0.5: Use upsertItem and endUpdate to ensure persistence
+        await index.beginUpdate();
+        try {
+            await index.upsertItem({
+                id: entry.id, // CRITICAL: Pass ID at top level for vectra to replace existing items
+                vector: embedding,
+                metadata: {
+                    content: entry.content,
+                    contentHash: entry.contentHash,
+                    timestamp: entry.timestamp,
+                    ...entry.metadata
+                }
+            });
+            await index.endUpdate();
+        } catch (error) {
+            index.cancelUpdate();
+            throw error;
+        }
     }
 
     async search(workspaceHash: string, query: string, limit: number = 5): Promise<VectorEntry[]> {
         const index = await this.getIndex(workspaceHash);
         const queryEmbedding = await this.generateEmbedding(query);
 
-        const results = await index.queryItems(queryEmbedding, '', limit);
+        let results: QueryResult<any>[];
+        try {
+            // Try hybrid search first (BM25 + Semantic)
+            // Signature: (vector, query, topK, filter, isBm25)
+            results = await index.queryItems(queryEmbedding, query, limit, undefined, true);
+        } catch (err) {
+            // Fallback to pure semantic search if BM25 fails (e.g. not enough documents for winkBM25S)
+            results = await index.queryItems(queryEmbedding, query, limit, undefined, false);
+        }
 
-        return results.map(res => ({
-            id: res.item.metadata.id as string,
+        return results.map((res: QueryResult<any>) => ({
+            id: res.item.id as string,
             content: res.item.metadata.content as string,
             contentHash: res.item.metadata.contentHash as string,
             timestamp: res.item.metadata.timestamp as number,
