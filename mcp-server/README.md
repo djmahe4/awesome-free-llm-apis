@@ -16,10 +16,10 @@ graph TD
         K[SandboxExecutor<br/>src/sandbox/]
     end
 
-    C --> L[WorkspaceContextMiddleware<br/>src/pipeline/middlewares/WorkspaceContextMiddleware.ts]
-    L --> D[StructuralMarkdownMiddleware<br/>src/middleware/agentic/structural-middleware.ts]
+    C --> D[StructuralMarkdownMiddleware<br/>src/middleware/agentic/structural-middleware.ts]
     D --> E[ResponseCacheMiddleware]
-    E -->|Cache Miss| F[AgenticMiddleware]
+    E -->|Cache Miss| L[WorkspaceContextMiddleware<br/>src/pipeline/middlewares/WorkspaceContextMiddleware.ts]
+    L --> F[AgenticMiddleware]
     F --> G[IntelligentRouterMiddleware]
     G -->|Tier selection + fallback| H[LLMExecutor<br/>Headers + Error Recovery]
     H --> I[(Free LLM Provider)]
@@ -28,7 +28,7 @@ graph TD
     C --> K
     
     E -->|Cache Hit| A
-    I --> H --> G --> F --> E --> D --> L --> A
+    I --> H --> G --> F --> L --> E --> D --> A
 
     style D fill:#ffd54f,stroke:#f57f17
     style F fill:#ffe082,stroke:#f9a825
@@ -42,12 +42,13 @@ graph TD
 
 | Stage | Component | Purpose |
 |-------|-----------|---------|
-| 1 | `WorkspaceContextMiddleware` | Resolves `wsHash`, performs **Pre-emptive Indexing** (v1.0.5), and injects session memory + Grep context into agentic requests. |
-| 2 | `StructuralMarkdownMiddleware` | Inlines `file://` URIs and Markdown links; enforces structured response formats. |
-| 3 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed with explicit `flush()` support. |
-| 4 | `AgenticMiddleware` *(optional)* | Task decomposition (max 2 steps), research validation, and multi-turn state persistence. |
-| 5 | `IntelligentRouterMiddleware` | Task-to-Tier routing with **Lighter Model Priority** (v1.0.5) for search/summary; handles **Hedged Execution** (v1.0.5) and adaptive timeouts. |
-| 6 | `LLMExecutor` | Token estimation, quota tracking, and centralized circuit-breaking with bridged memory feedback. |
+| 0 | `URI Resolver` | Entry-point: Resolves `file://` and `artifact://` URIs; injects hard-stop sentinels for missing files. |
+| 1 | `StructuralMarkdownMiddleware` | Injects full **Session Memory** (queue state + distilled knowledge) and enforces Markdown response formats. |
+| 2 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed to prevent cross-project context leakage. |
+| 3 | `WorkspaceContextMiddleware` | Resolves `wsHash`, performs **Pre-emptive Indexing** (v1.0.5), and injects Grep grounding + vector context. |
+| 4 | `AgenticMiddleware` *(optional)* | Task decomposition (max 2 subtasks), research validation, and multi-turn state persistence. |
+| 5 | `IntelligentRouterMiddleware` | Task-to-Tier routing with **Lighter Model Priority** (v1.0.5) for search/summary; handles hedged execution. |
+| 6 | `LLMExecutor` | HTTPS request; updates RPM/TPM usage from headers; handles **Reactive Drift Correction** and circuit-breaking. |
 
 ---
 
@@ -131,10 +132,15 @@ Tool Call (use_free_llm)
 PipelineExecutor.execute(request, taskType)
         │
         ▼ ─────────────────────────────────────
-StructuralMarkdownMiddleware  (v1.0.5 — Content Resolution)
+URI Resolver  (Entry Point — v1.0.5)
   • **URI Resolution**: Detects and inlines `file://`, `artifact://` URIs
   • **Security Gate**: Rejects paths outside of authorized workspace/artifact roots
-  • **Local Summarization**: TF-style zero-latency compression for large files
+  • **Hard Stop**: Aborts request if critical files are missing to prevent hallucination
+        │
+        ▼ ─────────────────────────────────────
+StructuralMarkdownMiddleware (v1.0.5 — Session Memory)
+  • **Context Injection**: Prepends internal queue diagnostics and session distillation
+  • **Format Enforcer**: Injects strict instructions for `file:path` response blocks
         │
         ▼ ─────────────────────────────────────
 ResponseCacheMiddleware
@@ -143,27 +149,25 @@ ResponseCacheMiddleware
   • If miss → next()
         │
         ▼ ─────────────────────────────────────
-WorkspaceContextMiddleware (v1.0.5 — Context Injection)
+WorkspaceContextMiddleware (v1.0.5 — Source Grounding)
   • **Pre-emptive Indexing**: Triggers background workspace scan for agentic tasks
   • **Vector Retrieval**: Semantic search across persistent workspace memory
   • **Grep Grounding**: Extracts TF-IDF relevant snippets from source code
-  • **Intelligent Prompts**: Injects project-specific system instructions
         │
         ▼ ─────────────────────────────────────
 AgenticMiddleware (v1.0.5 — Loop Orchestration)
-  • **Search Suppression**: Disables `google_search` for subtasks after turn 0
-  • **Goal Decomposition**: Limits plans to 4 steps to prevent token spirals
+  • **Goal Decomposition**: Limits plans to 2 subtasks to prevent token spirals
   • **Verification Loop**: Self-correcting feedback for failed assertions
         │
         ▼ ─────────────────────────────────────
 IntelligentRouterMiddleware (v1.0.5 — Routing Logic)
   • **Gemini-Exclusive Search**: Forces `gemini-2.5-flash` if `google_search: true`
   • **Fallback Cascade**: Majority-voting classification → tiered model selection
-  • **Greedy Budgeting**: Dynamically allocates time for hedged execution
         │
         ▼ ─────────────────────────────────────
 LLMExecutor (v1.0.5 — Execution)
   • **Telemetry**: Updates RPM/TPM usage from `x-ratelimit-*` headers
+  • **Persistence**: Atomic delta-merge strategy for cross-process telemetry accuracy
   • **Circuit Breaking**: Cooldown penalties for failing providers
 ```
         │
