@@ -462,6 +462,7 @@ Request: ${lastMessage}`;
         [TaskType.EntityExtraction]: [
             'google/gemma-4-31b-it:free',
             'gemma-4-31b-it',
+            'google/gemma-4-31B-it',
             'arcee-ai/trinity-large-preview:free',
             'llama-3.3-70b-versatile',
             'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, bulk extraction
