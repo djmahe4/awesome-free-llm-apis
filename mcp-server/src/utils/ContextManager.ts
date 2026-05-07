@@ -1,7 +1,7 @@
 import type { Message } from '../providers/types.js';
 import type { PipelineContext } from '../pipeline/middleware.js';
 import { getMessageContent } from './MessageUtils.js';
-import { getEncoding } from 'js-tiktoken';
+import { getSharedEncoder } from './tiktoken.js';
 
 /**
  * Controls how context overflow is handled.
@@ -28,7 +28,9 @@ export interface ContextCompressionResult {
  * For document-heavy tasks: chunk-mapreduce is orchestrated by the caller.
  */
 export class ContextManager {
-    private encoder = getEncoding('cl100k_base');
+    private get encoder() {
+        return getSharedEncoder();
+    }
 
     /**
      * Count tokens for a message array.

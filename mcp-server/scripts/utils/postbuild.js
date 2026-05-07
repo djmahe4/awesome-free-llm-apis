@@ -26,6 +26,15 @@ for (const { from, to } of copies) {
   console.log(`  copied ${from} → ${to}`);
 }
 
+// Step 1.5: Pre-download embedding models
+try {
+    console.log('Pre-downloading embedding models...');
+    const downloadScript = resolve(root, 'scripts/utils/download-models.js');
+    execSync(`node "${downloadScript}"`, { stdio: 'inherit' });
+} catch (err) {
+    console.warn('Warning: Model download failed. Details:', err.message);
+}
+
 // Step 2: Run Python prompt extraction
 try {
     console.log('Synchronizing system prompt via Python...');

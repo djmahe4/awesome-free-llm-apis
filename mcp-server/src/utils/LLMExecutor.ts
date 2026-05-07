@@ -1,6 +1,6 @@
 import { debounce } from './debounce.js';
 import { persistence, PersistentUsage } from './PersistenceManager.js';
-import { getEncoding } from 'js-tiktoken';
+import { getSharedEncoder } from './tiktoken.js';
 import type { Message, ChatResponse } from '../providers/types.js';
 import { ProviderRegistry } from '../providers/registry.js';
 import type { PipelineContext } from '../pipeline/middleware.js';
@@ -27,7 +27,9 @@ export interface TokenTrackingInfo {
  */
 export class LLMExecutor {
     private tokenTracking: Record<string, TokenTrackingInfo> = {};
-    private encoder = getEncoding('cl100k_base');
+    private get encoder() {
+        return getSharedEncoder();
+    }
     private persistence = persistence;
     private saveStats = debounce(() => this.persistStats(), 2000);
 

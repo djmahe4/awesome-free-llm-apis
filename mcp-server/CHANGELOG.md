@@ -2,7 +2,7 @@
 
 ## v1.0.5 – Hedged Execution, Tool Consolidation + Workspace Persistence (May 2026)
 
-**Released:** 2026-05-03
+**Released:** 2026-05-07 (Updated)
 
 ### 🚀 Highlights
 

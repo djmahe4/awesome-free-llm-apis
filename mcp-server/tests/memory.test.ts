@@ -158,9 +158,9 @@ describe('Memory System Integration', () => {
         if (!existsSync(root)) mkdirSync(root, { recursive: true });
         const wsHash = Buffer.from(root).toString('base64').slice(0, 8);
 
-        // Store some memories
-        await memoryManager.storeToolOutput('auto_memory', { _ws: wsHash, id: '1' }, "We deployed the frontend to Vercel using Next.js");
-        await memoryManager.storeToolOutput('auto_memory', { _ws: wsHash, id: '2' }, "The backend uses PostgreSQL for relational data storage");
+        // Store some memories (include 'Decision:' or slashes to pass the high-signal filter in MemoryManager)
+        await memoryManager.storeToolOutput('auto_memory', { _ws: wsHash, id: '1' }, "Decision: We deployed the frontend to Vercel using Next.js");
+        await memoryManager.storeToolOutput('auto_memory', { _ws: wsHash, id: '2' }, "The backend uses PostgreSQL for relational data storage (db/postgres)");
         
         // Wait a bit just in case, though it's awaited
         await new Promise(r => setTimeout(r, 100));

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-vi.setConfig({ testTimeout: 10000 });
 import {
     PipelineExecutor,
     TaskType,
