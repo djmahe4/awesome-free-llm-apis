@@ -16,6 +16,7 @@ export class OpenRouterProvider extends BaseProvider {
     { id: 'qwen/qwen3-coder:free', name: 'Qwen 3 Coder' },
     { id: 'qwen/qwen3-next-80b-a3b-instruct:free', name: 'Qwen 3 Next 80B' },
     //{ id: 'google/gemma-3-27b-it:free', name: 'Gemma 3 27B' },
+    { id: 'google/gemma-4-31b-it:free', name: 'Gemma 4 31B' },
     { id: 'google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B' },
     { id: 'openai/gpt-oss-120b:free', name: 'GPT-OSS 120B' },
     { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B Instruct' },

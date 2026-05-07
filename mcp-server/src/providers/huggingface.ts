@@ -10,7 +10,8 @@ export class HuggingFaceProvider extends BaseProvider {
   models: ProviderModel[] = [
     { id: 'meta-llama/Llama-3.3-70B-Instruct', name: 'Llama 3.3 70B Instruct' },
     { id: 'google/gemma-3-27b-it', name: 'Gemma 3 27B' },
-    { id: 'google/gemma-4-31B-it', name: 'Gemma 4 31B IT' },
+    { id: 'google/gemma-4-31B-it', name: 'Gemma 4 31B' },
+    { id: 'google/gemma-4-26B-A4B-it', name: 'Gemma 4 26B' },
     { id: 'deepseek-ai/DeepSeek-R1', name: 'DeepSeek R1' },
     { id: 'mistralai/Mistral-7B-Instruct-v0.3', name: 'Mistral 7B v0.3' },
   ];

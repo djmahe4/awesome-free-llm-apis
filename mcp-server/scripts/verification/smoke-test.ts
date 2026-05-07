@@ -30,7 +30,7 @@ async function runSmokeTest() {
         // Preference for gemini-2.5-flash if it exists, otherwise first model
         let model = provider.models[0];
         if (provider.id === 'gemini') {
-            const preferred = provider.models.find(m => m.id === 'gemini-2.5-flash');
+            const preferred = provider.models.find(m => m.id === 'gemini-3.1-flash-lite-preview');
             if (preferred) model = preferred;
         }
 

@@ -16,13 +16,8 @@ export class GeminiProvider extends BaseProvider {
   rateLimits: RateLimits = { rpm: 15, rpd: 1000 };
   models: ProviderModel[] = [
     { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite Preview' },
-    { id: 'gemma-3-1b-it', name: 'Gemma 3 1B' },
-    { id: 'gemma-3-4b-it', name: 'Gemma 3 4B' },
-    { id: 'gemma-3-12b-it', name: 'Gemma 3 12B' },
-    { id: 'gemma-3-27b-it', name: 'Gemma 3 27B' },
-    { id: 'gemma-3-2b-it', name: 'Gemma 3 2B' },
-    { id: 'gemma-4-26b-it', name: 'Gemma 4 26B' },
     { id: 'gemma-4-31b-it', name: 'Gemma 4 31B' },
+    { id: 'gemma-4-26b-a4b-it', name: 'Gemma 4 26B' },
   ];
 
   private cachedPythonPath?: string;
@@ -178,9 +173,9 @@ export class GeminiProvider extends BaseProvider {
     const pythonPath = this.resolvePythonPath();
     const scriptPath = path.join(__dirname, 'gemini_client.py');
 
-    let actualModel = request.model || 'gemini-3.1-flash-lite-preview';
+    let actualModel = request.model || 'gemini-3.1-flash-lite';
     if (request.google_search) {
-      actualModel = 'gemini-3.1-flash-lite-preview';
+      actualModel = 'gemini-3.1-flash-lite';
     }
 
     const py = spawn(pythonPath, [scriptPath], {
