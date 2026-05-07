@@ -1,6 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import * as fs from 'fs';
-import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/agentic/prompts.js';
+
+vi.mock('node:fs', () => {
+    const mockPromises = {
+        writeFile: vi.fn(),
+        mkdir: vi.fn(),
+        access: vi.fn(),
+        readFile: vi.fn(),
+        stat: vi.fn(async () => ({ mtimeMs: 1000 })),
+    };
+    return {
+        promises: mockPromises,
+        default: {
+            promises: mockPromises,
+        },
+    };
+});
 
 vi.mock('fs', () => {
     const mockPromises = {
@@ -8,15 +22,19 @@ vi.mock('fs', () => {
         mkdir: vi.fn(),
         access: vi.fn(),
         readFile: vi.fn(),
-        stat: vi.fn(),
+        stat: vi.fn(async () => ({ mtimeMs: 1000 })),
     };
     return {
+        promises: mockPromises,
         default: {
             promises: mockPromises,
         },
-        promises: mockPromises,
     };
 });
+
+import { promises as fsp } from 'node:fs';
+import * as fs from 'node:fs';
+import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/agentic/prompts.js';
 
 describe('Large Keywords & Budget Hardening', () => {
     beforeEach(() => {
@@ -43,7 +61,7 @@ describe('Large Keywords & Budget Hardening', () => {
 
         // Use a keyword that matches everything plus many specific ones
         const keywords = ['universal', ...Array.from({ length: 20 }, (_, i) => `key${i}`)];
-        const prompt = await getIntelligentSystemPrompt('Some context', keywords);
+        const prompt = await getIntelligentSystemPrompt({ context: 'Some context', keywords });
 
         expect(prompt.length).toBeLessThanOrEqual(PROMPT_CHAR_BUDGET_VAL); // Budget is now 12k
         
@@ -55,19 +73,19 @@ describe('Large Keywords & Budget Hardening', () => {
     it('requires a stricter score (4) for section inclusion', async () => {
         const mockData = {
             metadata: { version: '1.0' },
-            introduction: 'Intro',
+            introduction: 'Intro'.repeat(100),
             sections: [
                 {
                     id: 'low_score',
                     title: 'Low',
-                    content: 'Should not be here',
+                    content: 'Should not be here' + ' extra padding '.repeat(50),
                     level: 2,
                     keywords: ['irrelevant'] // Score would be 0 because 'onlyone' not in keywords? Wait.
                 },
                 {
                     id: 'high_score',
                     title: 'High Match',
-                    content: 'Should be here',
+                    content: 'Should be here' + ' extra padding '.repeat(50),
                     level: 2,
                     keywords: ['match1'] // Score would be 3 (match) + 1.1 (level 2) = 4.1
                 }
@@ -78,7 +96,8 @@ describe('Large Keywords & Budget Hardening', () => {
         (fsp.stat as any).mockResolvedValue({ mtimeMs: Date.now() });
         (fsp.readFile as any).mockResolvedValue(JSON.stringify(mockData));
 
-        const prompt = await getIntelligentSystemPrompt('context', ['match1']);
+        // Score would be 3.0 (keyword) + 1.5 (level 2) = 4.5. minScore is 4.0.
+        const prompt = await getIntelligentSystemPrompt({ context: 'context', keywords: ['match1'] });
 
         expect(prompt).toContain('Should be here');
         expect(prompt).not.toContain('Should not be here');

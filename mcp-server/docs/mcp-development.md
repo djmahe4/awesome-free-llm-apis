@@ -7,7 +7,6 @@ This guide provides a structured overview of the MCP server architecture and exp
 - [Adding New Providers](#adding-new-providers)
 - [Configuration System](#configuration-system)
 - [Caching Mechanism](#caching-mechanism)
-- [Sandboxed Execution (Code Mode)](#sandboxed-execution-code-mode)
 - [Internal Workflow](#internal-workflow)
 - [Agentic Middleware](#agentic-middleware)
 
@@ -106,71 +105,6 @@ const cachedResponse = cache.get(cacheKey);
 
 ---
 
-## Sandboxed Execution (Code Mode)
-
-The `code_mode` tool executes code using isolated sandbox runtimes with no filesystem or network access.
-
-### Supported Languages
-
-| Language | Sandbox | Notes |
-|----------|---------|-------|
-| `javascript` (default) | QuickJS via `quickjs-emscripten` | Fully sandboxed; no external deps |
-| `python` | Restricted subprocess with safe builtins | Requires Python 3 on PATH and RestrictedPython installed |
-| `go` | Implemented using `goja` | Fully sandboxed; no external deps |
-| `rust` | Implemented using `boa_engine` | Fully sandboxed; no external deps |
-
-### Security Features (all languages)
-- **No filesystem access**: Scripts cannot read or write files
-- **No network access**: Scripts cannot make HTTP requests or open sockets
-- **No process/OS calls**: Scripts cannot spawn processes or access environment beyond `DATA`
-- **Timeouts**: Execution is interrupted if it exceeds `timeoutMs` (default 5000ms)
-- **Output isolation**: Only `stdout` (from `print()` / `console.log()`) is returned to the caller
-
-### JavaScript Executor (QuickJS)
-The `executeJavaScript` function in `src/sandbox/executor.ts` manages:
-1. Initializing a fresh QuickJS context per request
-2. Setting up stdout/stderr capturing via `print()` and `console.log()`
-3. Injecting the `DATA` variable as a string global
-4. Setting a deadline-based interrupt handler for the timeout
-5. Disposing the context after execution (no state leakage between calls)
-
-```typescript
-// JavaScript sandbox globals available to user code:
-// DATA: string  — the input data passed in the `data` parameter
-// print(...args): void  — writes to stdout (same as console.log)
-// console.log(...args): void  — writes to stdout
-// console.error(...args): void  — writes to stderr
-```
-
-### Python Executor
-The `executePython` function in `src/sandbox/executor.ts` manages:
-1. Building a wrapper script that restricts builtins to a safe allowlist
-2. Injecting `DATA` via the `__SANDBOX_DATA__` environment variable
-3. Running the user code via `python3 -c <wrapper>` as a subprocess
-4. Capturing stdout/stderr with a 1MB buffer limit
-5. Handling timeouts via Node.js `execFile` timeout
-
-```python
-# Python sandbox — available built-ins (safe allowlist):
-# DATA: str  — the input data string
-# print(), len(), range(), enumerate(), zip(), map(), filter()
-# sorted(), reversed(), list(), dict(), set(), tuple()
-# str(), int(), float(), bool(), bytes()
-# max(), min(), sum(), abs(), round()
-# json module is importable via __import__('json')
-# datetime module is importable via __import__('datetime')
-```
-
-### Adding a New Language Sandbox
-
-To add support for a new language (e.g., Go via `goja`):
-
-1. Add the language to the `SandboxLanguage` type in `src/sandbox/executor.ts`
-2. Implement an `executeGo(code, data, timeoutMs)` function following the same pattern as `executeJavaScript`
-3. Add a case in the `executeInSandbox` switch statement
-4. Update the `code_mode` tool description in `src/mcp/index.ts` to include the new language in the `language` enum
-5. Update `docs/mcp-development.md` and `docs/skill/SKILL.md` tables
-
 ---
 
 ## Workspace Awareness
@@ -203,21 +137,15 @@ The `manage_memory` tool provides a way to interact with the persistent memory s
 
 ---
 
-## Explicit Memory Injection
+## Workspace Persistence (`store_workspace_skill` & `index_workspace`)
 
-The `store_memory` tool allows agents to deliberately inject facts into the long-term store. This is the primary mechanism for preserving architectural decisions across sessions.
+The system implements a structured persistence layer for capturing agent findings and indexing the workspace.
 
-### Usage Example
-```json
-{
-  "name": "store_memory",
-  "arguments": {
-    "key": "queue_strategy",
-    "content": "Using BullMQ on Redis for high-throughput job isolation.",
-    "workspace_root": "/home/user/project-a"
-  }
-}
-```
+### `store_workspace_skill`
+Explicitly harvest structured knowledge, architectural decisions, and scripts into the workspace. This is the primary mechanism for preserving high-fidelity information across sessions.
+
+### `index_workspace`
+Proactively index all files in the workspace root into the vector database. This ensures semantic search results are always grounded in the latest state of the source code.
 
 ---
 
@@ -231,11 +159,11 @@ The system uses a flexible, Starlette-inspired middleware pipeline to handle LLM
 - **PipelineContext**: A shared object that carries the request, response, and metadata (like estimated tokens or selected provider) through the stack.
 
 ### Default Pipeline Stack
-1.  **ResponseCacheMiddleware**: Checks if a result exists in the persistent workspace-aware cache.
-2.  **AgenticMiddleware (Conditional)**: If triggered, decomposes tasks into sub-problems and prepares the context with intelligent prompts.
-3.  **IntelligentRouterMiddleware**: Maps the task type to a prioritized list of models and handles failover.
-4.  **TokenManagerMiddleware**: Performs local token estimation and synchronizes quotas from API headers.
-5.  **LLMExecutionMiddleware**: Performs the final HTTPS request to the provider.
+1.  **StructuralMarkdownMiddleware**: Resolves `file://` and `artifact://` URIs with security boundary checks.
+2.  **ResponseCacheMiddleware**: Checks if a result exists in the persistent workspace-aware cache.
+3.  **WorkspaceContextMiddleware**: Injects vector-searched memory, grep context, and intelligent system prompts.
+4.  **AgenticMiddleware**: Decomposes tasks into sub-problems and manages the verification loop.
+5.  **IntelligentRouterMiddleware**: Maps task types to model tiers, handles fallback cascades, and manages token telemetry via the `LLMExecutor`.
 
 ---
 
@@ -246,8 +174,11 @@ The `AgenticMiddleware` (`src/middleware/agentic/agentic-middleware.ts`) provide
 ### Trigger Logic
 The middleware operates in three modes:
 - **Global**: Enabled via `ENABLE_AGENTIC_MIDDLEWARE=true` in `.env`.
-- **Selective**: Trigged per-request by setting `agentic: true` in the context or request body.
-- **Bypass**: If no `sessionId` is available (either provided by the client or derived from a `workspace_root`, see below), the middleware automatically steps out of the pipeline.
+- **Selective (Mandatory for Project Work)**: Triggered per-request by setting `agentic: true` in the context or request body along with a `workspace_root`.
+- **Bypass**: If no `sessionId` is available (either provided by the client or derived from a `workspace_root`), the middleware automatically steps out of the pipeline.
+
+> [!IMPORTANT]
+> To ensure memory injection and project-specific prompts, agents **MUST** set `agentic: true` and provide `workspace_root` for all tasks related to a repository or project.
 
 ### Foolproof Session ID Derivation
 To provide a zero-config experience, the `useFreeLLM` tool automatically derives a deterministic `sessionId` if a `workspace_root` is provided but an explicit ID is missing.

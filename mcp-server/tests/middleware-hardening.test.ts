@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
+import { StructuralMarkdownMiddleware } from '../src/middleware/agentic/structural-middleware.js';
 import { TokenManagerMiddleware } from '../src/pipeline/middlewares/TokenManagerMiddleware.js';
 import { PipelineContext, TaskType } from '../src/pipeline/middleware.js';
 
@@ -39,5 +40,22 @@ describe('Middleware Hardening - Non-String Content', () => {
 
         // This would traditionally crash due to this.encoder.encode(msg.content)
         await expect(middleware.execute(context, async () => { })).resolves.not.toThrow();
+    });
+
+    it('StructuralMarkdownMiddleware should bypass memory injection if sessionId is missing', async () => {
+        const middleware = new StructuralMarkdownMiddleware();
+        const context: PipelineContext = {
+            request: {
+                agentic: true,
+                messages: [{ role: 'user', content: 'original prompt' }]
+            }
+        } as any;
+
+        const next = vi.fn();
+        await middleware.execute(context, next);
+
+        expect(next).toHaveBeenCalled();
+        // Message content should NOT have been modified with memory injection
+        expect(context.request?.messages![0].content).toBe('original prompt');
     });
 });

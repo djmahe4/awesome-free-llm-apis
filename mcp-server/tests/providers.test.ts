@@ -25,7 +25,7 @@ describe('ProviderRegistry', () => {
 
   it('getProviderForModel finds correct provider', () => {
     const registry = ProviderRegistry.getInstance();
-    const provider = registry.getProviderForModel('gemini-2.5-pro');
+    const provider = registry.getProviderForModel('gemini-3.1-flash-lite-preview');
     expect(provider).toBeDefined();
     expect(provider!.id).toBe('gemini');
   });

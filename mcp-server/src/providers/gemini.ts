@@ -15,18 +15,26 @@ export class GeminiProvider extends BaseProvider {
   envVar = 'GEMINI_API_KEY';
   rateLimits: RateLimits = { rpm: 15, rpd: 1000 };
   models: ProviderModel[] = [
-    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
-    { id: 'gemini-3.1-flash-preview', name: 'Gemini 3.1 Flash Preview' },
-    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
     { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite Preview' },
-    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+    { id: 'gemma-3-1b-it', name: 'Gemma 3 1B' },
+    { id: 'gemma-3-4b-it', name: 'Gemma 3 4B' },
+    { id: 'gemma-3-12b-it', name: 'Gemma 3 12B' },
+    { id: 'gemma-3-27b-it', name: 'Gemma 3 27B' },
+    { id: 'gemma-3-2b-it', name: 'Gemma 3 2B' },
+    { id: 'gemma-4-26b-it', name: 'Gemma 4 26B' },
+    { id: 'gemma-4-31b-it', name: 'Gemma 4 31B' },
   ];
+
+  private cachedPythonPath?: string;
 
   /** Attempt to locate the venv Python interpreter relative to the project root */
   private resolvePythonPath(): string {
-    if (process.env.PYTHON_EXECUTABLE) return process.env.PYTHON_EXECUTABLE;
+    if (this.cachedPythonPath) return this.cachedPythonPath;
+
+    if (process.env.PYTHON_EXECUTABLE) {
+      this.cachedPythonPath = process.env.PYTHON_EXECUTABLE;
+      return this.cachedPythonPath;
+    }
 
     const projectRoot = path.resolve(__dirname, '../../');
     const isWin = process.platform === 'win32';
@@ -39,11 +47,15 @@ export class GeminiProvider extends BaseProvider {
     ];
 
     for (const venvPython of possibleVenvs) {
-      if (existsSync(venvPython)) return venvPython;
+      if (existsSync(venvPython)) {
+        this.cachedPythonPath = venvPython;
+        return venvPython;
+      }
     }
 
     // Fallback to system python
-    return isWin ? 'python' : 'python3';
+    this.cachedPythonPath = isWin ? 'python' : 'python3';
+    return this.cachedPythonPath;
   }
 
   private async runPythonClient(request: any): Promise<any> {
@@ -97,7 +109,13 @@ export class GeminiProvider extends BaseProvider {
   async chat(request: ChatRequest): Promise<ChatResponse> {
     this.checkRateLimit();
 
-    const actualModel = request.model || 'gemini-2.0-flash';
+    let actualModel = request.model || 'gemini-3.1-flash-lite-preview';
+
+    // If google_search is enabled, force usage of a Flash model (efficiency & cost)
+    if (request.google_search) {
+      actualModel = 'gemini-3.1-flash-lite-preview';
+    }
+
     let result;
     try {
       result = await this.runPythonClient({
@@ -160,11 +178,16 @@ export class GeminiProvider extends BaseProvider {
     const pythonPath = this.resolvePythonPath();
     const scriptPath = path.join(__dirname, 'gemini_client.py');
 
+    let actualModel = request.model || 'gemini-3.1-flash-lite-preview';
+    if (request.google_search) {
+      actualModel = 'gemini-3.1-flash-lite-preview';
+    }
+
     const py = spawn(pythonPath, [scriptPath], {
       env: { ...process.env }
     });
     const input = JSON.stringify({
-      model: request.model || 'gemini-2.0-flash',
+      model: actualModel,
       messages: request.messages,
       stream: true,
       temperature: request.temperature,

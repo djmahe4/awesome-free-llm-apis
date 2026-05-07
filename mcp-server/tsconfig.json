@@ -19,7 +19,8 @@
   "include": [
     "src/**/*",
     "tests/**/*",
-    "benchmarks/**/*"
+    "benchmarks/**/*",
+    "scripts/**/*"
   ],
   "exclude": [
     "node_modules",

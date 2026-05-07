@@ -27,9 +27,23 @@ export class LongTermMemory {
     this.loaded = true;
   }
 
+  private persistPromise: Promise<void> | null = null;
+
   private async persist(): Promise<void> {
-    await fs.mkdir(path.dirname(this.storePath), { recursive: true });
-    await fs.writeFile(this.storePath, JSON.stringify(this.data, null, 2), 'utf-8');
+    if (this.persistPromise) return this.persistPromise;
+
+    this.persistPromise = (async () => {
+      try {
+        await fs.mkdir(path.dirname(this.storePath), { recursive: true });
+        const tmpPath = `${this.storePath}.${Date.now()}.${Math.random().toString(36).substring(7)}.tmp`;
+        await fs.writeFile(tmpPath, JSON.stringify(this.data, null, 2), 'utf-8');
+        await fs.rename(tmpPath, this.storePath);
+      } finally {
+        this.persistPromise = null;
+      }
+    })();
+
+    return this.persistPromise;
   }
 
   async save(key: string, value: unknown): Promise<void> {
@@ -49,8 +63,8 @@ export class LongTermMemory {
     this.debouncedPersist();
   }
 
-  flush(): void {
-    this.debouncedPersist.flush();
+  async flush(): Promise<void> {
+    await this.debouncedPersist.flush();
   }
 
   async list(): Promise<string[]> {

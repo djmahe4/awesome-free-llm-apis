@@ -9,92 +9,9 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <!-- Bootstrap Icons -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-  <style>
-    :root {
-      --mcp-primary: #6c63ff;
-      --mcp-secondary: #48c774;
-    }
+  <!-- Custom Styles -->
+  <link href="/style.css" rel="stylesheet">
 
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #0f1117;
-    }
-
-    .navbar-brand {
-      font-weight: 700;
-      background: linear-gradient(135deg, var(--mcp-primary), var(--mcp-secondary));
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      font-size: 1.5rem;
-    }
-
-    .card {
-      border: 1px solid #2e3250;
-      background-color: #1a1d2e;
-      transition: transform 0.2s, border-color 0.2s;
-    }
-
-    .card:hover {
-      border-color: var(--mcp-primary);
-    }
-
-    .stat-value {
-      font-size: 2rem;
-      font-weight: 700;
-      color: var(--mcp-primary);
-    }
-
-    .provider-id {
-      font-family: monospace;
-      font-size: 0.8rem;
-      color: #8892a4;
-    }
-
-    .nav-tabs .nav-link {
-      color: #8892a4;
-      border: none;
-    }
-
-    .nav-tabs .nav-link.active {
-      color: var(--mcp-primary);
-      background: transparent;
-      border-bottom: 2px solid var(--mcp-primary);
-    }
-
-    pre {
-      background-color: #0f1117;
-      padding: 1rem;
-      border-radius: 8px;
-      border: 1px solid #2e3250;
-    }
-
-    .status-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      display: inline-block;
-      margin-right: 5px;
-    }
-
-    .status-online {
-      background-color: var(--mcp-secondary);
-      box-shadow: 0 0 5px var(--mcp-secondary);
-    }
-
-    .status-offline {
-      background-color: #ff4757;
-    }
-
-    .progress {
-      height: 8px;
-      background-color: #2e3250;
-    }
-
-    .progress-bar {
-      background-color: var(--mcp-primary);
-    }
-  </style>
 </head>
 
 <body>
@@ -140,31 +57,31 @@
       <div class="tab-pane fade show active" id="overview" role="tabpanel">
         <div class="row g-4 mb-4">
           <div class="col-md-3">
-            <div class="card p-3 h-100">
-              <div class="text-muted small text-uppercase mb-2">Total Providers</div>
-              <div id="total-providers" class="stat-value">15</div>
-              <div class="small text-muted">Configured in registry</div>
+            <div class="card p-3 h-100 border-primary-subtle">
+              <div class="text-primary small text-uppercase fw-bold mb-2"><i class="bi bi-cpu me-2"></i>Active Providers</div>
+              <div id="active-providers" class="stat-value text-primary">--</div>
+              <div class="small text-muted">Ready for routing</div>
             </div>
           </div>
           <div class="col-md-3">
-            <div class="card p-3 h-100">
-              <div class="text-muted small text-uppercase mb-2">Active Providers</div>
-              <div id="active-providers" class="stat-value text-success">--</div>
-              <div class="small text-muted">With valid API keys</div>
+            <div class="card p-3 h-100 border-warning-subtle">
+              <div class="text-warning small text-uppercase fw-bold mb-2"><i class="bi bi-calendar-check me-2"></i>Today's Requests</div>
+              <div id="global-daily-requests" class="stat-value text-warning">0</div>
+              <div class="small text-muted">System-wide daily total</div>
             </div>
           </div>
           <div class="col-md-3">
-            <div class="card p-3 h-100">
-              <div class="text-muted small text-uppercase mb-2">Total Models</div>
-              <div id="total-models" class="stat-value text-info">45+</div>
-              <div class="small text-muted">Across all tiers</div>
+            <div class="card p-3 h-100 border-info-subtle">
+              <div class="text-info small text-uppercase fw-bold mb-2"><i class="bi bi-lightning-charge me-2"></i>Today's Tokens</div>
+              <div id="global-daily-tokens" class="stat-value text-info">0</div>
+              <div class="small text-muted">Aggregated usage today</div>
             </div>
           </div>
           <div class="col-md-3">
-            <div class="card p-3 h-100">
-              <div class="text-muted small text-uppercase mb-2">Requests Today</div>
-              <div id="total-requests" class="stat-value text-warning">0</div>
-              <div class="small text-muted">Tracked via pipeline</div>
+            <div class="card p-3 h-100 border-success-subtle">
+              <div class="text-success small text-uppercase fw-bold mb-2"><i class="bi bi-infinity me-2"></i>Lifetime Requests</div>
+              <div id="global-lifetime-requests" class="stat-value text-success">0</div>
+              <div class="small text-muted">Total since installation</div>
             </div>
           </div>
         </div>
@@ -242,12 +159,74 @@ npm run dashboard</code></pre>
 
       <!-- Tab 4: Cache & Memory -->
       <div class="tab-pane fade" id="cache" role="tabpanel">
-        <div class="card p-5 text-center bg-dark-subtle border-dashed">
-          <i class="bi bi-hourglass-split display-1 mb-3 text-muted"></i>
-          <h4>Future Advanced Feature</h4>
-          <p class="text-muted mb-0">Coming soon in v1.0.4: Real-time visualization of Short-term memory buffers, </p>
-          <p class="text-muted">cache hit ratios, and workspace context compression stats.</p>
+
+        <!-- Session selector -->
+        <div class="card p-4 mb-4">
+          <h5 class="mb-3"><i class="bi bi-brain me-2 text-warning"></i>Short-Term Memory Buffers</h5>
+          <p class="text-muted small mb-3">
+            Live content of the active session's <code>knowledge.md</code> and momentum queues (now / next / blocked),
+            as written by <code>AgenticMiddleware</code>. Auto-refreshes every 3 seconds when a session is selected.
+          </p>
+          <div class="d-flex gap-2 align-items-center flex-wrap">
+            <label class="text-muted small text-nowrap" for="memory-session-input">Session ID</label>
+            <input id="memory-session-input" type="text" class="form-control form-control-sm font-monospace"
+              placeholder="e.g. ws-abc123 or my-project" />
+            <button id="memory-load-btn" class="btn btn-sm btn-outline-warning">
+              <i class="bi bi-play-fill me-1"></i>Load
+            </button>
+            <select id="memory-session-select" class="form-select form-select-sm">
+              <option value="">— pick active session —</option>
+            </select>
+            <span id="memory-last-updated" class="text-muted small ms-auto"></span>
+          </div>
         </div>
+
+        <!-- Knowledge.md preview -->
+        <div class="row g-3 mb-3">
+          <div class="col-12">
+            <div class="card p-3">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0"><i class="bi bi-journal-text me-2 text-info"></i>knowledge.md
+                  <span class="text-muted small font-monospace" id="memory-session-label"></span>
+                </h6>
+                <button id="memory-refresh-btn" class="btn btn-sm btn-link text-primary p-0 text-decoration-none">
+                  <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                </button>
+              </div>
+              <textarea id="memory-knowledge" class="form-control font-monospace"
+                readonly placeholder="Select a session above to view knowledge.md…"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- Momentum queues -->
+        <div class="row g-3">
+          <div class="col-md-4">
+            <div class="card p-3 h-100">
+              <h6 class="mb-2 text-success"><i class="bi bi-play-circle me-1"></i>Now Queue</h6>
+              <ul id="queue-now" class="list-unstyled mb-0 small text-muted">
+                <li class="text-muted fst-italic">—</li>
+              </ul>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="card p-3 h-100">
+              <h6 class="mb-2 text-info"><i class="bi bi-skip-forward me-1"></i>Next Queue</h6>
+              <ul id="queue-next" class="list-unstyled mb-0 small text-muted">
+                <li class="text-muted fst-italic">—</li>
+              </ul>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="card p-3 h-100">
+              <h6 class="mb-2 text-danger"><i class="bi bi-slash-circle me-1"></i>Blocked Queue</h6>
+              <ul id="queue-blocked" class="list-unstyled mb-0 small text-muted">
+                <li class="text-muted fst-italic">—</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
       </div>
 
     </div>

@@ -8,62 +8,18 @@
 ## Overview of Tools
 
 | Tool | Purpose | Required Params |
-|------|---------|----------------|
-| `list_available_free_models` | Enumerate all registered LLM models and providers | *(none)* |
 | `get_token_stats` | Retrieve real-time usage (tokens/requests) per provider | *(none)* |
 | `validate_provider` | Health-check and credential validation for a provider | `providerId` |
 | `use_free_llm` | Send chat messages to any model with fallback support | `model`, `messages` |
-| `code_mode` | Execute sandboxed code (JS/Python/Go/Rust) against input data | `code` |
 | `manage_memory` | Manage persistent workspace memory (search/list/stats/clear) | `action` |
+| `store_workspace_skill` | Harvest structured knowledge into the workspace | `name`, `description`, `what` |
+| `index_workspace` | Index workspace files for semantic search | `workspace_root` |
 
 > **Agent Rule**: Always invoke `manage_memory` (action: "search") before wide-context actions to retrieve relevant prior context.
 
 ---
 
-## TC-01 — `list_available_free_models`
-
-**Purpose:** Discover available models, rate limits, and provider availability.
-
-### Invocation
-```json
-{
-  "available_only": false
-}
-```
-
-### Result ✅ PASS
-- **62 models** returned across **15 providers**
-- **59 available**, **3 not tested** (all from `github-models` — GPT-4o, Llama 3.3 70B, DeepSeek R1)
-- Each model includes `providerId`, `modelId`, `modelName`, `rateLimits`, and `available` flag
-
-### Providers Found
-
-| Provider | Models | Rate Limits | Status |
-|----------|--------|-------------|--------|
-| Cohere | 3 | 20 rpm / 1,000 req/mo | ✅ Available |
-| Google Gemini | 5 | 15 rpm / 1,000 rpd | ✅ Available |
-| Mistral AI | 3 | 1 rps / 1B tok/mo | ✅ Available |
-| Zhipu AI | 3 | — | ✅ Available |
-| Cerebras | 2 | 30 rpm / 14,400 rpd | ✅ Available |
-| Cloudflare Workers AI | 2 | — | ✅ Available |
-| GitHub Models | 3 | 15 rpm / 150 rpd | ❌ Not Tested |
-| Groq | 3 | 30 rpm / 14,400 rpd | ✅ Available |
-| Hugging Face | 4 | — | ✅ Available |
-| Kluster AI | 3 | — | ✅ Available |
-| LLM7.io | 3 | 30 rpm | ✅ Available |
-| NVIDIA NIM | 3 | 40 rpm | ✅ Available |
-| Ollama Cloud | 3 | — | ✅ Available |
-| OpenRouter | 15 | 20 rpm / 50 rpd | ✅ Available |
-| SiliconFlow | 4 | 1,000 rpm | ✅ Available |
-
-### Notable Models
-- `gemini-3.1-pro-preview` (Gemini), `llama-4-scout-17b-16e-instruct` (Groq)
-- `qwen-3-235b-a22b-instruct-2507` (Cerebras), `moonshotai/kimi-k2-instruct` (Groq)
-- `openai/gpt-oss-120b:free` (OpenRouter), `qwen3-coder-480b-a35b-instruct` (OpenRouter)
-
----
-
-## TC-02 — `get_token_stats`
+## TC-01 — `get_token_stats`
 
 **Purpose:** Monitor per-provider token consumption and request counts.
 
@@ -92,7 +48,7 @@
 
 ---
 
-## TC-03 — `validate_provider`
+## TC-02 — `validate_provider`
 
 **Purpose:** Run a live health check + credential validation for a specific provider.
 
@@ -130,7 +86,7 @@
 
 ---
 
-## TC-04 — `use_free_llm`
+## TC-03 — `use_free_llm`
 
 **Purpose:** Send a chat completion request to any model, with optional fallback.
 
@@ -207,126 +163,18 @@
 |-----------|------|----------|-------------|
 | `model` | string | ✅ | Model ID (e.g. `llama-3.3-70b-versatile`) |
 | `messages` | array | ✅ | Chat messages with `role` and `content` |
+| `agentic` | boolean | ❌* | **Mandatory for project work.** Enable memory injection. |
+| `workspace_root` | string | ❌* | **Mandatory for project work.** Path for context scanning. |
 | `provider` | string | ❌ | Override auto-routing to a specific provider |
 | `max_tokens` | number | ❌ | Max tokens to generate (default: 1024) |
 | `temperature` | number | ❌ | Sampling temperature (default: 0.7) |
 | `top_p` | number | ❌ | Top-p nucleus sampling |
 | `fallback` | boolean | ❌ | Enable fallback to other models on failure |
 | `stream` | boolean | ❌ | Stream response tokens |
-| `workspace_root` | string | ❌ | Workspace path for context scanning |
 
 ---
 
-## TC-05 — `code_mode`
-
-**Purpose:** Execute code in a sandboxed, network-free, filesystem-free runtime against input data. Only stdout is returned to the caller — never the raw DATA payload. Ideal for compressing large API responses before passing to an LLM.
-
-### Supported Languages
-
-| Language | Sandbox | DATA Access | print/output |
-|----------|---------|-------------|--------------|
-| `javascript` (default) | QuickJS (quickjs-emscripten) | `DATA` global string | `print()` or `console.log()` |
-| `python` | Restricted subprocess (Python 3) | `DATA` global string | `print()` |
-| `go` | Restricted subprocess (Go 1.22) | `DATA` global string | `fmt.Println()` |
-| `rust` | Restricted subprocess (Rust 1.70) | `DATA` global string | `println!()` |
-
-### Parameter Reference
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `code` | string | ✅ | — | Script source. Use `print()` / `console.log()` to emit output. |
-| `language` | enum | ❌ | `javascript` | Sandbox runtime: `javascript` \| `python` \| `go` \| `rust` |
-| `data` | string | ❌ | `""` | Raw input injected as `DATA` global variable |
-| `command` | string | ❌ | — | Human-readable description (for logging/memory) |
-| `timeout_ms` | number | ❌ | `5000` | Max execution time in milliseconds |
-
-### Sandbox Constraints (all languages)
-- ❌ No filesystem read/write
-- ❌ No network access
-- ❌ No process/OS calls
-- ✅ `DATA` variable always available
-- ✅ `print()` / `console.log()` captured to stdout
-
-### Test A — Bubble Sort (JavaScript) ✅ PASS
-
-```json
-{
-  "language": "javascript",
-  "command": "Sort a list of numbers using bubble sort",
-  "data": "[5, 2, 8, 1, 9, 3]",
-  "code": "const arr = JSON.parse(DATA); for (let i = 0; i < arr.length; i++) { for (let j = 0; j < arr.length - i - 1; j++) { if (arr[j] > arr[j+1]) { [arr[j], arr[j+1]] = [arr[j+1], arr[j]]; } } } print('Sorted: ' + JSON.stringify(arr));"
-}
-```
-
-**Response:**
-```json
-{
-  "stdout": "Sorted: [1,2,3,5,8,9]",
-  "stderr": "",
-  "success": true,
-  "executionTimeMs": 23,
-  "compressionRatio": 1.1666666666666667
-}
-```
-
-> ✅ **Pass**: Sandbox executes in ~23ms. `print()` global is available. `DATA` is injected as a raw string. Use `JSON.parse(DATA)` for structured data.
-
-### Test B — JSON Field Extraction (JavaScript) ✅ PASS
-
-Extract only names from a large API response array — compresses context dramatically:
-
-```json
-{
-  "language": "javascript",
-  "command": "Extract names from API response",
-  "data": "[{\"id\":1,\"name\":\"Alice\",\"role\":\"admin\"},{\"id\":2,\"name\":\"Bob\",\"role\":\"user\"}]",
-  "code": "const users = JSON.parse(DATA); users.forEach(u => print(u.name));"
-}
-```
-
-**Response:**
-```json
-{
-  "stdout": "Alice\nBob",
-  "stderr": "",
-  "success": true,
-  "executionTimeMs": 12,
-  "compressionRatio": 0.07
-}
-```
-
-> ✅ **93% context compression** — only extracted names enter the LLM context window.
-
-### Test C — Python Count (Python) ✅ PASS (requires Python 3 on PATH)
-
-```json
-{
-  "language": "python",
-  "command": "Count items in JSON array",
-  "data": "[1, 2, 3, 4, 5]",
-  "code": "import json\nitems = json.loads(DATA)\nprint(f'Count: {len(items)}')"
-}
-```
-
-**Response:**
-```json
-{
-  "stdout": "Count: 5",
-  "stderr": "",
-  "success": true,
-  "executionTimeMs": 145
-}
-```
-
-### Key Notes
-- Only `stdout` enters context — never the raw DATA payload
-- `compressionRatio` = stdout.length / data.length (< 1 = context savings)
-- Execution timeout: 5000ms by default (configurable via `timeout_ms`)
-- `language` defaults to `"javascript"` if omitted
-
----
-
-## TC-06 — `manage_memory`
+## TC-04 — `manage_memory`
 
 **Purpose:** Manage persistent workspace-aware memory for context across sessions. Always call this before wide-context actions.
 
@@ -350,7 +198,7 @@ Extract only names from a large API response array — compresses context dramat
 
 **Response:**
 ```json
-[{ "tool": "code_mode", "original": 18, "compressed": 21, "ratio": 1.1666666666666667 }]
+[{ "tool": "manage_memory", "original": 18, "compressed": 21, "ratio": 1.1666666666666667 }]
 ```
 
 > Returns compression stats per cached tool operation. Ratio > 1 for small payloads (overhead); ratio < 1 for large data (savings).
@@ -398,17 +246,18 @@ Extract only names from a large API response array — compresses context dramat
 
 ---
 
-## TC-07 — `store_memory`
+## TC-05 — `store_workspace_skill`
 
-**Purpose:** Manually inject context or persistent findings into long-term workspace memory to avoid context loss across sessions.
+**Purpose:** Harvest structured knowledge and generated scripts into the workspace memory.
 
 ### Invocation
 **User Goal:** "Save the recent architectural decision that we will use Redis for queue management."
 ```json
 {
-  "key": "arch_decision_queues",
-  "content": "Decision: Use Redis for in-memory queues due to required low latency.",
-  "workspace_root": "/home/user/my-project"
+  "name": "redis-queue-setup",
+  "description": "Architectural decision and script for Redis-based queue management.",
+  "what": ["Decision: Use Redis for in-memory queues due to required low latency."],
+  "workspace_root": "/home/kali/Desktop/my-project"
 }
 ```
 
@@ -417,16 +266,39 @@ Extract only names from a large API response array — compresses context dramat
 ```json
 {
   "success": true,
-  "message": "Successfully stored memory for key 'arch_decision_queues' in workspace hash <hash>",
-  "stored_bytes": 63
+  "message": "Successfully stored skill 'redis-queue-setup' in workspace hash <hash>",
+  "path": "/home/kali/Desktop/my-project/.gemini/skills/redis-queue-setup"
 }
 ```
 
-> **Evaluation**: When `manage_memory` (action: `search`) is called later with query "Redis", this manually saved finding is retrieved along with any LLM outputs matching the query.
+---
+
+## TC-06 — `index_workspace`
+
+**Purpose:** Proactively index all relevant files in the workspace for semantic search.
+
+### Invocation
+```json
+{
+  "workspace_root": "/home/kali/Desktop/my-project",
+  "force": false
+}
+```
+
+### Result ✅ PASS
+**Response:**
+```json
+{
+  "totalFiles": 142,
+  "indexedFiles": 142,
+  "skippedFiles": 0,
+  "errors": []
+}
+```
 
 ---
 
-## TC-08 — Agentic Middleware Steering
+## TC-07 — Agentic Middleware Steering
 
 **Purpose:** Verify that architectural keywords trigger reference map inclusion and protocol enforcement.
 
@@ -465,14 +337,14 @@ Extract only names from a large API response array — compresses context dramat
 
 | Capability | Status | Notes |
 |------------|--------|-------|
-| Model enumeration | ✅ Excellent | 62 models, detailed metadata |
 | Token tracking | ✅ Working | Live per-provider usage/rate-limits |
 | Provider health check | ✅ PASSED | Gemini & Groq verified with automated diagnostics |
 | Chat completion (Groq) | ✅ Fast | ~34ms, full usage stats |
 | Chat completion (Cohere) | ✅ Working | Accurate, multi-sentence responses |
 | Chat completion (Gemini) | ✅ Fixed | Successfully handling system prompts & complex coding |
-| Code execution | ✅ Excellent | Sandboxed JS, 23ms, DATA injection works |
 | Memory persistence | ✅ Working | Workspace hashing + compression tracking |
+| Workspace Indexing | ✅ Excellent | Hash-based tracking for incremental indexing |
+| Skill Storage | ✅ Intelligent | Auto-generation of scripts based on instructions |
 | Fallback routing | ✅ Works | `fallback: true` enables cross-provider fallback |
 | System prompt support | ✅ Works | System role messages are accepted |
 | Steering Middleware | ✅ v2 Ready | Keyword-based boosting + Granular Extraction |
@@ -488,4 +360,4 @@ Extract only names from a large API response array — compresses context dramat
 | Deep reasoning | `deepseek-r1` | LLM7.io / Kluster |
 | High-quality summaries | `command-a-03-2025` | Cohere |
 | Budget/high-volume | `Qwen/Qwen2.5-7B-Instruct` | SiliconFlow |
-| Latest frontier (Gemini) | `gemini-2.0-flash` | Gemini |
+| Latest frontier (Gemini) | `gemini-2.5-flash` | Gemini |

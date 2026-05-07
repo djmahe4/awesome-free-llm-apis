@@ -24,8 +24,10 @@ function resolveRunnerPath(...segments: string[]): string {
   // dist/src/sandbox/executor.js → ../../../scripts/...
   // Try going up to find the scripts dir robustly
   const candidates = [
-    path.resolve(__dirname, '..', '..', 'scripts', ...segments),       // src layout
-    path.resolve(__dirname, '..', '..', '..', 'scripts', ...segments), // dist layout
+    path.resolve(__dirname, '..', '..', 'scripts', 'sandboxes', ...segments),       // new layout
+    path.resolve(__dirname, '..', '..', 'scripts', ...segments),                 // old layout (fallback)
+    path.resolve(__dirname, '..', '..', '..', 'scripts', 'sandboxes', ...segments), // dist new layout
+    path.resolve(__dirname, '..', '..', '..', 'scripts', ...segments),             // dist old layout
   ];
   return candidates.find(c => fs.existsSync(c)) || candidates[0];
 }

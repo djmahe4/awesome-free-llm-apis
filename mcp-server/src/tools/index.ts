@@ -6,3 +6,7 @@ export { useFreeLLM } from './use-free-llm.js';
 export type { UseFreeLLMInput } from './use-free-llm.js';
 export { manageMemory } from './manage-memory.js';
 export type { ManageMemoryInput } from './manage-memory.js';
+export { storeWorkspaceSkill } from './store-workspace-skill.js';
+export { indexWorkspace } from './index-workspace.js';
+export { getTokenStats } from './get-token-stats.js';
+export { validateProvider } from './validate-provider.js';

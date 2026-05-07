@@ -5,16 +5,18 @@ import {
   type CallToolRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import { useFreeLLM } from '../tools/use-free-llm.js';
-import { listAvailableFreeModels } from '../tools/list-models.js';
-import { runCodeMode } from '../tools/code-mode.js';
+// v1.0.5 Deprecated: Unnecessary feature (Remove this comment and import in new update)
+//import { listAvailableFreeModels } from '../tools/list-models.js';
+// v1.0.5 Deprecated: Unnecessary feature (DO NOT REMOVE THE CODE COMMENT)
+//import { runCodeMode } from '../tools/code-mode.js';
 import { manageMemory } from '../tools/manage-memory.js';
-import { storeMemory } from '../tools/store-memory.js';
 import { getTokenStats } from '../tools/get-token-stats.js';
 import { validateProvider } from '../tools/validate-provider.js';
+import { indexWorkspace } from '../tools/index-workspace.js';
 
 export async function createMCPServer(): Promise<Server> {
   const server = new Server(
-    { name: 'free-llm-apis', version: '1.0.3' },
+    { name: 'free-llm-apis', version: '1.0.5' },
     { capabilities: { tools: {} } }
   );
 
@@ -32,26 +34,38 @@ export async function createMCPServer(): Promise<Server> {
           'WHEN TO USE: For any natural-language task — summarization, code review, Q&A, translation.',
           'Use explicit keywords to help the router choose the best model and documentation.',
           '',
-          'INPUTS:',
-          '  messages (required)   — Array of {role, content}. Roles: "system" | "user" | "assistant".',
-          '  model (optional)      — Specific model ID. If omitted, the router picks the best for the task.',
-          '  keywords (optional)   — Explicit steering tags (e.g. ["api", "sql"]) to prioritize reference map injection.',
-          '  agentic (optional)    — Enable agentic mode (task decomposition + system prompt injection).',
-          '  sessionId (optional)  — Required for agentic mode. Partitions memory/logs per project.',
-          '  workspace_root (opt) — Workspace path for cache-keying and session derivation.',
-          '  google_search (opt)  — Enable Google search for Gemini models (default false).',
+          '⚠️  PROJECT WORK RULE: When performing ANY task scoped to a project or workspace, you MUST',
+          '  include BOTH `workspace_root` (absolute path) AND `agentic: true`. Omitting these fields',
+          '  disables all memory injection, context enrichment, and session persistence — the response',
+          '  will be blind to all prior work. A bare call with only `messages` is for one-off queries only.',
           '',
-          'OUTPUTS: Assistant response text. Multiple choices are labeled AGENT RESPONSE 1, AGENT RESPONSE 2, etc.',
-          '         Metadata (model, usage, headers) is omitted to keep context lean.',
+          'INPUTS:',
+          '  messages (required)           — Array of {role, content}. Roles: "system" | "user" | "assistant".',
+          '  model (optional)              — Specific model ID. If omitted, the router picks the best for the task.',
+          '  keywords (optional)           — Explicit steering tags (e.g. ["api", "sql"]) to prioritize reference map injection.',
+          '  agentic (optional)            — Enable agentic mode (task decomposition + memory injection).',
+          '                                  Set to true for all project-scoped requests.',
+          '  sessionId (optional)          — Unique session slug (e.g. UUID or "my-project"). Partitions state/logs.',
+          '                                  Auto-derived from workspace_root if omitted.',
+          '  workspace_root (recommended)  — Absolute path to the project root.',
+          '                                  Required to enable memory enrichment, context retrieval,',
+          '                                  and workspace-scoped recall. Always provide for project tasks.',
+          '  google_search (optional)      — Enable Google search for Gemini models (default false).',
+          '',
+          'OUTPUTS: Assistant response text enriched with workspace memory when agentic=true + workspace_root.',
+          '         Multiple choices are labeled AGENT RESPONSE 1, AGENT RESPONSE 2, etc.',
+          '         Metadata (model, usage, id) is stripped to keep context lean.',
           '',
           'FAILURE STATES:',
           '  - "No providers available": all fallback models exhausted. Check `get_token_stats`.',
           '  - "Rate limited": provider quota exceeded. Use another model or try later.',
+          '  - Context-blind response: missing workspace_root or agentic — memory pipeline was bypassed.',
           '',
-          'EXAMPLE:',
-          '  { "messages": [{ "role": "user", "content": "Explain context-aware classification" }], "keywords": ["classify"] }',
+          'EXAMPLE (project task — correct):',
+          '  { "messages": [...], "agentic": true, "workspace_root": "/abs/path/to/project", "keywords": ["python"] }',
           '',
-          'NOTE: Parameter complexity is hidden by default. Use explicit keywords for steering.',
+          'EXAMPLE (one-off query — no memory needed):',
+          '  { "messages": [{ "role": "user", "content": "What is a monoid?" }] }',
         ].join('\n'),
         inputSchema: {
           type: 'object' as const,
@@ -82,41 +96,42 @@ export async function createMCPServer(): Promise<Server> {
           required: ['messages'],
         },
       },
-      {
-        name: 'list_available_free_models',
-        description: [
-          'Enumerate all registered LLM providers and models with rate-limit metadata.',
-          '',
-          'USER STORY: Discover which free models and providers are configured and available',
-          'before sending a request. Use this to select the best model for a task or to check',
-          'which providers have API keys set.',
-          '',
-          'WHEN TO USE: Before calling `use_free_llm` when you want to choose a specific model,',
-          'or to audit which providers are active in the current environment.',
-          '',
-          'INPUTS:',
-          '  provider (optional)      — Filter results to a single provider ID (e.g. "groq").',
-          '  available_only (optional)— If true, only return models whose provider has an API key set.',
-          '',
-          'OUTPUTS: { models: [{providerId, modelId, modelName, rateLimits, available}], summary }',
-          '  Each model entry includes rate limits (rpm, rpd, tpm) and availability flag.',
-          '',
-          'FAILURE STATES:',
-          '  - Empty models array: no providers registered or all filtered out.',
-          '  - available:false entries: provider is registered but API key is not set in environment.',
-          '',
-          'EXAMPLE:',
-          '  { available_only: true }  → lists only models with configured API keys',
-          '  { provider: "groq" }      → lists all Groq models with rate-limit metadata',
-        ].join('\n'),
-        inputSchema: {
-          type: 'object' as const,
-          properties: {
-            provider: { type: 'string', description: 'Filter by provider ID (e.g. "groq", "gemini", "openrouter")' },
-            available_only: { type: 'boolean', description: 'If true, only return models whose provider API key is configured' },
-          },
-        },
-      },
+      // Deprecated (To be removed in future)
+      // {
+      //   name: 'list_available_free_models',
+      //   description: [
+      //     'Enumerate all registered LLM providers and models with rate-limit metadata.',
+      //     '',
+      //     'USER STORY: Discover which free models and providers are configured and available',
+      //     'before sending a request. Use this to select the best model for a task or to check',
+      //     'which providers have API keys set.',
+      //     '',
+      //     'WHEN TO USE: Before calling `use_free_llm` when you want to choose a specific model,',
+      //     'or to audit which providers are active in the current environment.',
+      //     '',
+      //     'INPUTS:',
+      //     '  provider (optional)      — Filter results to a single provider ID (e.g. "groq").',
+      //     '  available_only (optional)— If true, only return models whose provider has an API key set.',
+      //     '',
+      //     'OUTPUTS: { models: [{providerId, modelId, modelName, rateLimits, available}], summary }',
+      //     '  Each model entry includes rate limits (rpm, rpd, tpm) and availability flag.',
+      //     '',
+      //     'FAILURE STATES:',
+      //     '  - Empty models array: no providers registered or all filtered out.',
+      //     '  - available:false entries: provider is registered but API key is not set in environment.',
+      //     '',
+      //     'EXAMPLE:',
+      //     '  { available_only: true }  → lists only models with configured API keys',
+      //     '  { provider: "groq" }      → lists all Groq models with rate-limit metadata',
+      //   ].join('\n'),
+      //   inputSchema: {
+      //     type: 'object' as const,
+      //     properties: {
+      //       provider: { type: 'string', description: 'Filter by provider ID (e.g. "groq", "gemini", "openrouter")' },
+      //       available_only: { type: 'boolean', description: 'If true, only return models whose provider API key is configured' },
+      //     },
+      //   },
+      // },
       {
         name: 'get_token_stats',
         description: [
@@ -161,7 +176,7 @@ export async function createMCPServer(): Promise<Server> {
           '',
           'INPUTS:',
           '  providerId (required) — Provider ID to validate (e.g. "groq", "gemini", "openrouter").',
-          '                          Use `list_available_free_models` to get valid provider IDs.',
+          // '                          Use `list_available_free_models` to get valid provider IDs.',
           '',
           'OUTPUTS: { providerId, status:"healthy"|"degraded"|"unavailable", latencyMs,',
           '           credentialsValid, message }',
@@ -182,75 +197,76 @@ export async function createMCPServer(): Promise<Server> {
           required: ['providerId'],
         },
       },
-      {
-        name: 'code_mode',
-        description: [
-          'Execute code in a sandboxed runtime against input data. Only stdout enters context.',
-          '',
-          'USER STORY: Process large API responses or datasets with a script without flooding',
-          'the LLM context window. Write a filtering/transformation script; only its printed',
-          'output (stdout) is returned — not the raw DATA payload.',
-          '',
-          'WHEN TO USE: When an API response is too large to pass directly to an LLM. Write a',
-          'script to extract only the relevant fields, then pass the compressed output to',
-          '`use_free_llm`. Also use for sandboxed computation, data transformation, or testing',
-          'code snippets in isolation.',
-          '',
-          'INPUTS:',
-          '  code (required)   — Script source. Use print() or console.log() to emit output.',
-          '                      DATA global contains the input string (from `data` param).',
-          '  language          — Sandbox runtime (default: "javascript"):',
-          '                      "javascript" — QuickJS (quickjs-emscripten), in-process',
-          '                      "python"     — RestrictedPython subprocess; requires python3 + pip install RestrictedPython',
-          '                      "go"         — goja (pure-Go ECMAScript); requires pre-built binary',
-          '                                     Build: cd scripts/go-sandbox-runner && go build -o sandbox-runner .',
-          '                      "rust"       — boa_engine (pure-Rust ECMAScript); requires pre-built binary',
-          '                                     Build: cd scripts/rust-sandbox-runner && cargo build --release',
-          '  data              — Raw input string injected as DATA global variable.',
-          '  command           — Human-readable description of what the script does (for logging).',
-          '  timeout_ms        — Max execution time in milliseconds (default 5000).',
-          '',
-          'OUTPUTS: { stdout, stderr, success, error?, executionTimeMs, compressionRatio? }',
-          '  compressionRatio = stdout.length / data.length (< 1 = context savings achieved).',
-          '',
-          'SANDBOX CONSTRAINTS (all languages):',
-          '  - No filesystem access (read or write)',
-          '  - No network access',
-          '  - No process/OS calls',
-          '  - Execution time limited by timeout_ms',
-          '',
-          'FAILURE STATES:',
-          '  - success:false + error:"Execution timed out": increase timeout_ms or simplify script.',
-          '  - success:false + error message: syntax or runtime error in script; check stderr.',
-          '  - Empty stdout: script ran but called no print()/console.log().',
-          '  - Binary not found (go/rust): build the runner first per instructions above.',
-          '',
-          'JAVASCRIPT EXAMPLE:',
-          '  code: "const items = JSON.parse(DATA); print(items.map(i=>i.name).join(\\"\\\\n\\"))"',
-          '  data: \'[{"name":"Alice"},{"name":"Bob"}]\'',
-          '  → stdout: "Alice\\nBob"',
-          '',
-          'PYTHON EXAMPLE:',
-          '  language: "python"',
-          '  code: "import json; items=json.loads(DATA); print(len(items))"',
-          '  data: \'[1,2,3]\'',
-        ].join('\n'),
-        inputSchema: {
-          type: 'object' as const,
-          properties: {
-            code: { type: 'string', description: 'Script source code. Use print() or console.log() to emit output. DATA global contains the input data string.' },
-            language: {
-              type: 'string',
-              enum: ['javascript', 'python', 'go', 'rust'],
-              description: 'Sandbox runtime language (default: "javascript"). Each runs in an isolated, network-free, filesystem-free environment.',
-            },
-            data: { type: 'string', description: 'Input data injected as DATA global variable in the sandbox' },
-            command: { type: 'string', description: 'Human-readable description of what the script does (used for logging and memory)' },
-            timeout_ms: { type: 'number', description: 'Execution timeout in milliseconds (default 5000). Increase for heavy computations.' },
-          },
-          required: ['code'],
-        },
-      },
+      // v1.0.5 Deprecated: Unnecessary feature (DO NOT REMOVE THE CODE COMMENT)
+      // {
+      //   name: 'code_mode',
+      //   description: [
+      //     'Execute code in a sandboxed runtime against input data. Only stdout enters context.',
+      //     '',
+      //     'USER STORY: Process large API responses or datasets with a script without flooding',
+      //     'the LLM context window. Write a filtering/transformation script; only its printed',
+      //     'output (stdout) is returned — not the raw DATA payload.',
+      //     '',
+      //     'WHEN TO USE: When an API response is too large to pass directly to an LLM. Write a',
+      //     'script to extract only the relevant fields, then pass the compressed output to',
+      //     '`use_free_llm`. Also use for sandboxed computation, data transformation, or testing',
+      //     'code snippets in isolation.',
+      //     '',
+      //     'INPUTS:',
+      //     '  code (required)   — Script source. Use print() or console.log() to emit output.',
+      //     '                      DATA global contains the input string (from `data` param).',
+      //     '  language          — Sandbox runtime (default: "javascript"):',
+      //     '                      "javascript" — QuickJS (quickjs-emscripten), in-process',
+      //     '                      "python"     — RestrictedPython subprocess; requires python3 + pip install RestrictedPython',
+      //     '                      "go"         — goja (pure-Go ECMAScript); requires pre-built binary',
+      //     '                                     Build: cd scripts/go-sandbox-runner && go build -o sandbox-runner .',
+      //     '                      "rust"       — boa_engine (pure-Rust ECMAScript); requires pre-built binary',
+      //     '                                     Build: cd scripts/rust-sandbox-runner && cargo build --release',
+      //     '  data              — Raw input string injected as DATA global variable.',
+      //     '  command           — Human-readable description of what the script does (for logging).',
+      //     '  timeout_ms        — Max execution time in milliseconds (default 5000).',
+      //     '',
+      //     'OUTPUTS: { stdout, stderr, success, error?, executionTimeMs, compressionRatio? }',
+      //     '  compressionRatio = stdout.length / data.length (< 1 = context savings achieved).',
+      //     '',
+      //     'SANDBOX CONSTRAINTS (all languages):',
+      //     '  - No filesystem access (read or write)',
+      //     '  - No network access',
+      //     '  - No process/OS calls',
+      //     '  - Execution time limited by timeout_ms',
+      //     '',
+      //     'FAILURE STATES:',
+      //     '  - success:false + error:"Execution timed out": increase timeout_ms or simplify script.',
+      //     '  - success:false + error message: syntax or runtime error in script; check stderr.',
+      //     '  - Empty stdout: script ran but called no print()/console.log().',
+      //     '  - Binary not found (go/rust): build the runner first per instructions above.',
+      //     '',
+      //     'JAVASCRIPT EXAMPLE:',
+      //     '  code: "const items = JSON.parse(DATA); print(items.map(i=>i.name).join(\\"\\\\n\\"))"',
+      //     '  data: \'[{"name":"Alice"},{"name":"Bob"}]\'',
+      //     '  → stdout: "Alice\\nBob"',
+      //     '',
+      //     'PYTHON EXAMPLE:',
+      //     '  language: "python"',
+      //     '  code: "import json; items=json.loads(DATA); print(len(items))"',
+      //     '  data: \'[1,2,3]\'',
+      //   ].join('\n'),
+      //   inputSchema: {
+      //     type: 'object' as const,
+      //     properties: {
+      //       code: { type: 'string', description: 'Script source code. Use print() or console.log() to emit output. DATA global contains the input data string.' },
+      //       language: {
+      //         type: 'string',
+      //         enum: ['javascript', 'python', 'go', 'rust'],
+      //         description: 'Sandbox runtime language (default: "javascript"). Each runs in an isolated, network-free, filesystem-free environment.',
+      //       },
+      //       data: { type: 'string', description: 'Input data injected as DATA global variable in the sandbox' },
+      //       command: { type: 'string', description: 'Human-readable description of what the script does (used for logging and memory)' },
+      //       timeout_ms: { type: 'number', description: 'Execution timeout in milliseconds (default 5000). Increase for heavy computations.' },
+      //     },
+      //     required: ['code'],
+      //   },
+      // },
       {
         name: 'manage_memory',
         description: [
@@ -310,30 +326,62 @@ export async function createMCPServer(): Promise<Server> {
         },
       },
       {
-        name: 'store_memory',
+        name: 'store_workspace_skill',
         description: [
-          'Store manual context or persistent thoughts in long-term memory.',
+          'Explicitly harvest structured knowledge and scripts into the workspace.',
+          'Use this to persist complex research or multi-step implementations as a reusable skill.',
           '',
-          'USER STORY: Save findings, summaries, or context details explicitly to the workspace',
-          'memory so it can be recalled later via `manage_memory` search. This avoids context',
-          'loss between agent sessions.',
+          'FOLLOWS @skill-writer schema:',
+          '- name: lowercase-hyphenated name of the skill',
+          '- description: one-sentence description of the skill and when to trigger it',
+          '- what: list of key decisions, findings, or implementation details',
+          '- why: supporting rationale or background context',
+          '- files: files modified or referenced',
+          '- example: code snippet or example usage',
+          '- scripts: map of script filename to code content',
+          '- workspace_root: absolute path to the workspace root'
+        ].join('\n'),
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Lowercase-hyphenated name of the skill' },
+            description: { type: 'string', description: 'One-sentence description of the skill and when to trigger it' },
+            what: { type: 'array', items: { type: 'string' }, description: 'List of key decisions, findings, or implementation details' },
+            why: { type: 'string', description: 'Supporting rationale or background context' },
+            files: { type: 'array', items: { type: 'string' }, description: 'Files modified or referenced' },
+            example: { type: 'string', description: 'Code snippet or example usage' },
+            script_instructions: { type: 'object', additionalProperties: { type: 'string' }, description: 'Map of script filename to an instruction detailing what the script should do. The server will use an internal LLM to intelligently generate the script code.' },
+            workspace_root: { type: 'string', description: 'Absolute path to the workspace root' },
+          },
+          required: ['name', 'description', 'what', 'workspace_root'],
+        },
+      },
+      {
+        name: 'index_workspace',
+        description: [
+          'Proactively index all relevant files in the workspace into the persistent vector database.',
           '',
-          'WHEN TO USE: After concluding research, finding an architectural decision, or completing',
-          'a subset of a large task when the data must persist for the next agent run.',
+          'USER STORY: Update the semantic memory of the project so that future queries can find',
+          'relevant code snippets even if you haven\'t manually stored them yet.',
+          '',
+          'WHEN TO USE: After significant code changes, when starting a new session, or when',
+          'semantic search results seem outdated.',
           '',
           'INPUTS:',
-          '  key            — A short, descriptive identifier for this context.',
-          '  content        — The details or summary to store.',
-          '  workspace_root — Absolute path to workspace root for isolation.',
+          '  workspace_root — Absolute path to the workspace root to index.',
+          '  force          — If true, wipes the existing index and rebuilds from scratch (self-healing).',
+          '',
+          'OUTPUTS: { totalFiles, indexedFiles, skippedFiles, errors }',
+          '',
+          'Note: Uses hash-based tracking to only index changed files, making it fast for subsequent runs.',
         ].join('\n'),
         inputSchema: {
           type: 'object' as const,
           properties: {
-            key: { type: 'string', description: 'Short identifier for this context, e.g. "auth_strategy"' },
-            content: { type: 'string', description: 'The text or JSON context to store' },
             workspace_root: { type: 'string', description: 'Absolute path to workspace root (e.g. "/home/user/my-project")' },
+            force: { type: 'boolean', description: 'Force rebuild of the index (wipes existing)' },
           },
-          required: ['key', 'content'],
+          required: ['workspace_root'],
         },
       },
     ],
@@ -373,21 +421,23 @@ export async function createMCPServer(): Promise<Server> {
         };
       }
 
-      if (name === 'list_available_free_models') {
-        const input = args as Parameters<typeof listAvailableFreeModels>[0];
-        const result = await listAvailableFreeModels(input ?? {});
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-        };
-      }
+      // Deprecated (To be removed in future)
+      // if (name === 'list_available_free_models') {
+      //   const input = args as Parameters<typeof listAvailableFreeModels>[0];
+      //   const result = await listAvailableFreeModels(input ?? {});
+      //   return {
+      //     content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      //   };
+      // }
 
-      if (name === 'code_mode') {
-        const input = args as unknown as Parameters<typeof runCodeMode>[0];
-        const result = await runCodeMode(input);
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-        };
-      }
+      // v1.0.5 Deprecated: Unnecessary feature (DO NOT REMOVE THE CODE COMMENT)
+      // if (name === 'code_mode') {
+      //   const input = args as unknown as Parameters<typeof runCodeMode>[0];
+      //   const result = await runCodeMode(input);
+      //   return {
+      //     content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      //   };
+      // }
 
       if (name === 'manage_memory') {
         const input = args as unknown as Parameters<typeof manageMemory>[0];
@@ -397,13 +447,15 @@ export async function createMCPServer(): Promise<Server> {
         };
       }
 
-      if (name === 'store_memory') {
-        const input = args as unknown as Parameters<typeof storeMemory>[0];
-        const result = await storeMemory(input);
+      if (name === 'store_workspace_skill') {
+        const { storeWorkspaceSkill } = await import('../tools/store-workspace-skill.js');
+        const input = args as any;
+        const result = await storeWorkspaceSkill(input);
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         };
       }
+
 
       if (name === 'get_token_stats') {
         const result = await getTokenStats();
@@ -415,6 +467,14 @@ export async function createMCPServer(): Promise<Server> {
       if (name === 'validate_provider') {
         const { providerId } = args as { providerId: string };
         const result = await validateProvider(providerId);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      if (name === 'index_workspace') {
+        const input = args as any;
+        const result = await indexWorkspace(input);
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         };

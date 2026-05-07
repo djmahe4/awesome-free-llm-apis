@@ -13,9 +13,7 @@ const workspaceScanner = new WorkspaceScanner(process.cwd());
 
 export async function manageMemory(input: ManageMemoryInput) {
     const { action, workspace_root: workspaceRoot, query, limit = 10 } = input;
-    const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
-    const contextManager = new ContextManager();
-
+    const wsHash = await workspaceScanner.getWorkspaceHash(workspaceRoot);
     switch (action) {
         case 'stats':
             return await memoryManager.getCompressionStats();
@@ -25,6 +23,7 @@ export async function manageMemory(input: ManageMemoryInput) {
             await memoryManager.clear(wsHash);
             return { success: true, message: `Cleared memory for workspace ${wsHash}` };
         case 'search': {
+            const contextManager = new ContextManager();
             const allResults = await memoryManager.search(wsHash, query);
             // Apply hard count limit
             let results = allResults.slice(0, limit);

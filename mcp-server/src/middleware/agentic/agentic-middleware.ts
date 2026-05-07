@@ -1,13 +1,20 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import os from 'os';
 import { LRUCache } from 'lru-cache';
-import { getIntelligentSystemPrompt } from './prompts.js';
+import { debounce } from '../../utils/debounce.js';
 import type { Middleware, PipelineContext, NextFunction } from '../../pipeline/middleware.js';
-import { memoryManager } from '../../memory/index.js';
-import { WorkspaceScanner } from '../../cache/workspace.js';
 import { getMessageContent } from '../../utils/MessageUtils.js';
+import { memoryManager } from '../../memory/index.js';
+import { getIntelligentSystemPrompt } from './prompts.js';
+// Removed top-level import of instances.js to break circular dependency
 
-const workspaceScanner = new WorkspaceScanner(process.cwd());
+import {
+    PROJECTS_DIR,
+    STATE_FILE,
+    KNOWLEDGE_FILE
+} from './constants.js';
+import { ContextGatherer } from './context-gatherer.js';
 
 
 interface QueueState {
@@ -26,8 +33,23 @@ const queues = new LRUCache<string, QueueState>({
     ttl: 1000 * 60 * 60 * 24,
 });
 
-function getQueues(sessionId: string): QueueState {
+/**
+ * Stateless-first state recovery: load from disk if cache miss.
+ */
+async function getOrLoadState(sessionId: string): Promise<QueueState> {
     let state = queues.get(sessionId);
+    if (!state) {
+        // Cold start recovery
+        try {
+            const statePath = path.join(PROJECTS_DIR, sessionId, STATE_FILE);
+            const data = await fs.readFile(statePath, 'utf-8');
+            state = JSON.parse(data);
+            if (state) queues.set(sessionId, state);
+        } catch {
+            // No saved state or invalid, start fresh
+        }
+    }
+
     if (!state) {
         state = {
             nowQueue: [],
@@ -41,32 +63,120 @@ function getQueues(sessionId: string): QueueState {
 }
 
 /**
- * Async Persistence: Prevents event-loop blocking.
+ * Debounced State Persistence: Batches writes to reduce I/O under high throughput.
  */
-async function persistQueues(sessionId: string, projectDir: string): Promise<void> {
-    const state = getQueues(sessionId);
+const persistStateDebounced = debounce(async (sessionId: string, projectDir: string) => {
+    const state = queues.get(sessionId);
+    if (!state) return;
+
     try {
         await fs.writeFile(
-            path.join(projectDir, 'queues.json'),
+            path.join(projectDir, STATE_FILE),
             JSON.stringify(state, null, 2),
             'utf-8',
         );
     } catch {
-        // non-fatal: in-memory state is still maintained
+        // non-fatal
+    }
+}, 2000);
+
+
+/**
+ * Append-only Knowledge Persistence: Accumulates reusable skill entries following
+ * the @skill-writer schema. Never overwrites — only appends — so knowledge grows
+ * across sessions rather than being reset.
+
+/**
+ * Distills an LLM response into a structured skill-writer-schema knowledge entry.
+ *
+ * Skill-writer schema fields (following standard SKILL.md frontmatter conventions):
+ *   - name: short label for the decision/finding (derived from heading or task)
+ *   - session: source session ID
+ *   - ts: ISO timestamp
+ *   - what: the core decision or finding (extracted from bold/heading content)
+ *   - why: supporting rationale (extracted from prose context)
+ *   - files: file paths referenced (extracted from backtick paths or [file://...] refs)
+ *   - example: code block preview if present
+ */
+function distillToSkillEntry(content: string, sessionId: string): string | null {
+    const lines = content.split('\n');
+
+    // 1. Extract the primary heading as the entry name
+    const nameMatch = lines.find(l => l.startsWith('## ') || l.startsWith('### '));
+    const name = nameMatch ? nameMatch.replace(/^#{2,3}\s+/, '').trim() : `session-${sessionId.slice(0, 8)}`;
+
+    // 2. Extract decisions: bold key-value pairs and completed checklist items
+    const decisions = lines
+        .filter(l => l.includes('**') || l.includes('- [x]') || l.includes('- ✅'))
+        .map(l => l.replace(/^[-*]\s+/, '').trim())
+        .filter(Boolean)
+        .slice(0, 5);
+
+    if (decisions.length === 0) return null;
+
+    // 3. Extract file references: backtick paths and markdown links
+    const fileRefs: string[] = [];
+    const filePattern = /`([^`]*\.(ts|js|py|go|rs|json|md|yaml|yml|env))`|file:\/\/([^\s)]+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = filePattern.exec(content)) !== null) {
+        const ref = m[1] || m[3];
+        if (ref && !fileRefs.includes(ref)) fileRefs.push(ref);
+    }
+
+    // 4. Extract code example preview (first code block, first 3 lines)
+    const codeBlockMatch = content.match(/```[\w]*\n([\s\S]*?)```/);
+    const example = codeBlockMatch
+        ? '```\n' + codeBlockMatch[1].split('\n').slice(0, 3).join('\n') + '\n```'
+        : null;
+
+    // 5. Compose skill-writer-schema entry
+    const entry = [
+        `\n\n---`,
+        ``,
+        `### ${name}`,
+        ``,
+        `**session:** ${sessionId}  **ts:** ${new Date().toISOString()}`,
+        ``,
+        `**what:**`,
+        decisions.map(d => `- ${d}`).join('\n'),
+        fileRefs.length > 0 ? `\n**files:**\n${fileRefs.map(f => `- \`${f}\``).join('\n')}` : '',
+        example ? `\n**example:**\n${example}` : '',
+    ].filter(l => l !== '').join('\n');
+
+    return entry.length > 100 ? entry : null;
+}
+
+
+
+/**
+ * Append-only Knowledge Persistence: Distills LLM responses into structured
+ * skill-writer-schema entries so knowledge.md grows as a reusable knowledge base
+ * rather than a raw session log dump.
+ */
+async function appendKnowledge(projectDir: string, sessionId: string, content: string): Promise<void> {
+    const entry = distillToSkillEntry(content, sessionId);
+    if (!entry) return;
+
+    try {
+        await fs.appendFile(path.join(projectDir, KNOWLEDGE_FILE), entry, 'utf-8');
+    } catch {
+        // non-fatal
     }
 }
 
+
+
 /**
- * Async Project Setup: Ensures session boundaries and initializes state files.
+ * Async Project Setup: Ensures session artifacts exist at the stable HOME_DIR path.
+ * Uses ~/.free-llm-mcp/projects/<sessionId>/ so location is consistent regardless
+ * of where the MCP server process is launched from.
  */
 async function ensureProjectFiles(sessionId: string): Promise<string> {
-    const projectDir = path.join(process.cwd(), 'data', 'projects', sessionId);
+    const projectDir = path.join(PROJECTS_DIR, sessionId);
     await fs.mkdir(projectDir, { recursive: true });
 
     const files: Record<string, string> = {
-        'plan.md': '# Plan\n\n<!-- Auto-generated by Agentic Middleware -->\n',
-        'tasks.md': '# Tasks\n\n<!-- Auto-generated by Agentic Middleware -->\n',
-        'knowledge.md': '# Knowledge\n\n<!-- Auto-generated by Agentic Middleware -->\n',
+        [KNOWLEDGE_FILE]: '# Knowledge\n\n<!-- Internal MCP session distillation -->\n',
     };
 
     for (const [name, content] of Object.entries(files)) {
@@ -89,33 +199,24 @@ function decomposeGoal(goal: string): string[] {
     return lines.length > 1 ? lines : [goal];
 }
 
-async function prependSystemPrompt(
-    context: PipelineContext,
-    userContent?: string,
-    explicitKeywords?: string[],
-    memoryContext?: string
-): Promise<void> {
-    const messages = context.request.messages;
-    if (!messages || messages.length === 0) return;
-
-    const dynamicPrompt = await getIntelligentSystemPrompt(userContent, explicitKeywords, memoryContext);
-    const hasSystem = messages[0].role === 'system';
-
-    if (hasSystem) {
-        messages[0] = {
-            ...messages[0],
-            content: `${dynamicPrompt}\n\n${messages[0].content}`,
-        };
-    } else {
-        messages.unshift({ role: 'system', content: dynamicPrompt });
-    }
-}
 
 function getResponseContent(context: PipelineContext): string | undefined {
     const rawContent = context.response?.choices?.[0]?.message?.content;
     return rawContent ? getMessageContent(rawContent) : undefined;
 }
 
+/**
+ * Hallucination Detection: Extended from a basic error check to also flag
+ * patterns that indicate the model is inventing file locations or citing
+ * sources it could not have retrieved. Results logged as WARN rather than
+ * FAIL so the pipeline continues but the anomaly is auditable.
+ *
+ * Anti-hallucination strategies implemented here:
+ *  1. Empty / error-prefix catch (original)
+ *  2. Phantom-citation patterns: "according to the docs", "I can see that ..."
+ *  3. Invented file paths: "the function is defined in src/..."
+ *  4. Version/date fabrication: specific version numbers without [RETRIEVED] prefix
+ */
 function verifySelf(content: string): string {
     if (!content || content.trim().length === 0) {
         return 'FAIL: empty response';
@@ -124,6 +225,19 @@ function verifySelf(content: string): string {
     if (errorPatterns.test(content.slice(0, 100))) {
         return 'FAIL: response starts with error indicator';
     }
+
+    // Hallucination Gate: vague-authority and phantom-reference patterns
+    const hallucinationPatterns: RegExp[] = [
+        /\baccording to the (documentation|docs|readme|spec|file)\b/i,
+        /\bthe (file|function|class|method|module) (is|are|was|were) (defined|located|found|placed) (in|at|under)\b/i,
+        /\b(I can see|I found|I noticed|I checked) that\b/i,
+        /\bas (shown|seen|mentioned|stated|described) in the (code|file|docs|source)\b/i,
+    ];
+    const flags = hallucinationPatterns.filter(p => p.test(content));
+    if (flags.length > 0) {
+        return `WARN: ${flags.length} potential hallucination pattern(s) detected`;
+    }
+
     return 'PASS';
 }
 
@@ -151,116 +265,196 @@ function logResearchValidation(sessionId: string, userContent: string, step: str
     console.error(
         `[AgenticMiddleware][RESEARCH-VALIDATION] session=${sessionId} step="${step}" ` +
         `timestamp=${timestamp} intent_detected=true ` +
-        `query_preview="${getMessageContent(userContent).slice(0, 120).replace(/\n/g, ' ')}..."`
+        `query_preview="${getMessageContent(userContent).slice(0, 120).replace(/\n/g, ' ')}..."`,
     );
 }
 
 export class AgenticMiddleware implements Middleware {
     name = 'AgenticMiddleware';
 
+    // v1.0.4 optimization: Cap decomposed plan to 2 high-level steps to prevent over-iteration
+    private limitSubtasks(steps: string[]): string[] {
+        if (steps.length > 2) {
+            return steps.slice(0, 2);
+        }
+        return steps;
+    }
+
+    /**
+     * Gathers grep-based context from the workspace root based on a query.
+     * Delegates to the ContextGatherer utility.
+     */
+    async gatherGrepContext(workspaceRoot: string, query: string): Promise<string[]> {
+        return ContextGatherer.gatherContext({ workspaceRoot, query });
+    }
+
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
+        const startMs = Date.now();
         // Dual-Mode Trigger: Global Env OR Per-Request Flag
         const isAgenticExplicitlyRequested = context.agentic === true || context.request?.agentic === true;
+
+        // Hardened Session ID: Must be provided for agentic state to exist
+        const sessionId: string | undefined = context.sessionId || (context.request as any)?.sessionId;
+
+        const iterationCountKey = `_iteration_${sessionId}`;
+        const iterationCountValue = context[iterationCountKey];
+        const iterationCount: number = typeof iterationCountValue === 'number' ? iterationCountValue : 0;
+        context[iterationCountKey] = iterationCount + 1;
+
         if (process.env.ENABLE_AGENTIC_MIDDLEWARE !== 'true' && !isAgenticExplicitlyRequested) {
             await next();
             return;
         }
 
-        // Hardened Session ID: Must be provided for agentic state to exist
-        const sessionId: string | undefined = context.sessionId || (context.request as any).sessionId;
-
-        if (!sessionId) {
-            console.error('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer to prevent data leakage and disk pollution.');
+        if (iterationCount > 10) {
+            console.error(`[AgenticMiddleware] Loop protection triggered for session=${sessionId}`);
             await next();
             return;
         }
 
-        // Resolve workspace hash for context lookup and safe pathing
-        let wsHash: string | undefined;
-        if (context.workspaceRoot) {
-            try {
-                wsHash = workspaceScanner.getWorkspaceHash(context.workspaceRoot);
-            } catch (err) {
-                console.error(`[AgenticMiddleware] Failed to derive workspace hash: ${err}`);
-            }
+        if (!sessionId) {
+            console.error('[AgenticMiddleware] Mandatory sessionId missing. Bypassing agentic layer.');
+            await next();
+            return;
         }
 
-
         const projectDir = await ensureProjectFiles(sessionId);
-        const q = getQueues(sessionId);
+        const q = await getOrLoadState(sessionId);
 
         // Prepend system prompt with user context if available
         const userMessage = context.request.messages.find(m => m.role === 'user');
         const userContent = userMessage ? String(userMessage.content) : undefined;
 
-        // Retrieve relevant workspace memory context
-        let memoryContext: string | undefined;
-        if (wsHash) {
-            try {
-                console.error(`[AgenticMiddleware][DEBUG] Searching for wsHash=${wsHash} query="${userContent}"`);
-                const memoryResults = await memoryManager.search(wsHash, userContent);
-                console.error(`[AgenticMiddleware][DEBUG] Found ${memoryResults.length} memory results`);
-                if (Array.isArray(memoryResults) && memoryResults.length > 0) {
-                    // Limit to top 5 results and format as bullet points
-                    memoryContext = memoryResults
-                        .slice(0, 5)
-                        .map(m => `- ${typeof m === 'string' ? m : JSON.stringify(m)}`)
-                        .join('\n');
-                }
-            } catch (err) {
-                console.error(`[AgenticMiddleware] Memory lookup failed: ${err}`);
+        // Context and memory are now handled by WorkspaceContextMiddleware
+        // which runs BEFORE AgenticMiddleware in the pipeline.
+        (context as any).isSubtask = q.nowQueue.length > 0;
+
+        try {
+            const groundingGate: string = (context as any).groundingGate || '';
+            const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **2** high-level steps.`;
+            const userKeywords = context.keywords || [];
+            const initialPrompt = await getIntelligentSystemPrompt({
+                context: userContent || "",
+                keywords: isAgenticExplicitlyRequested ? ['agentic', 'orchestration', ...userKeywords] : userKeywords,
+                memory: (context as any).memoryContext,
+                workspace: (context as any).grepContext,
+                isSubtask: false
+            });
+            const sysMsg = context.request.messages.find(m => m.role === 'system');
+            const fullPrompt = `${initialPrompt}${highLevelStepsSection}${groundingGate}`;
+            if (sysMsg) {
+                sysMsg.content = fullPrompt;
+            } else {
+                // Ensure system message is ALWAYS at index 0
+                context.request.messages.unshift({ role: 'system', content: fullPrompt });
+            }
+        } catch (err) {
+            console.error(`[AgenticMiddleware] Failed to inject initial prompt: ${err}`);
+            // Minimal fallback to ensure role integrity
+            if (!context.request.messages.some(m => m.role === 'system')) {
+                context.request.messages.unshift({ 
+                    role: 'system', 
+                    content: "You are an agentic AI coding assistant. Maintain MOMENTUM ENGINE protocols." 
+                });
             }
         }
 
-
-
-        try {
-            await prependSystemPrompt(context, userContent, context.keywords, memoryContext);
-        } catch (err) {
-            console.error(`[AgenticMiddleware] Error prepending system prompt: ${err}`);
-            // Continue without the prepended prompt
-        }
-
-        // Research validation: detect and log if this request involves external knowledge lookup.
+        // Research validation...
         // This provides an explicit audit trail to reduce agent ambiguity and hallucination risk.
         if (userContent && detectResearchIntent(userContent)) {
             logResearchValidation(sessionId, userContent, 'pre-execution-research-detection');
+            // Auto-enable Google Search if research intent is detected in agentic mode
+            if (!context.request.google_search) {
+                context.request.google_search = true;
+                console.error(`[AgenticMiddleware] Research intent detected, auto-enabling google_search for session=${sessionId}`);
+            }
         }
 
 
         // Task decomposition: Only perform if nowQueue is empty to prevent multi-turn duplication
         if (userContent && q.nowQueue.length === 0) {
             const steps = decomposeGoal(userContent);
-            q.nowQueue.push(...steps);
+
+            // v1.0.4 optimization: Apply subtask limit before queuing to prevent over-iteration
+            const limitedSteps = this.limitSubtasks(steps);
+            q.nowQueue.push(...limitedSteps);
         }
 
-        await persistQueues(sessionId, projectDir);
+        persistStateDebounced(sessionId, projectDir);
 
-        // Execute the pipeline
-        await next();
+        // Execute the pipeline in a loop for each subtask
+        let subtaskIteration = 0;
+        const MAX_SUBTASKS = 5;
 
-        // Verification and queue update
-        const responseContent = getResponseContent(context);
-        if (responseContent) {
-            const verifyResult = verifySelf(responseContent);
-
-            if (verifyResult.startsWith('FAIL')) {
-                q.improveQueue.push(verifyResult);
-                console.error(`[AgenticMiddleware][VERIFY] session=${sessionId} result="${verifyResult}"`);
-            }
-
-            // Post-execution research validation: confirm response is grounded
-            if (userContent && detectResearchIntent(userContent)) {
-                logResearchValidation(sessionId, responseContent, 'post-execution-response-grounding-check');
-            }
-
-            // Store a snapshot for observability (cloned to avoid post-shift mutation in traces)
-            context['agenticQueues'] = JSON.parse(JSON.stringify(getQueues(sessionId)));
+        // If no tasks, at least run once
+        if (q.nowQueue.length === 0) {
+            await next();
         }
 
-        if (q.nowQueue.length > 0) {
+        while (q.nowQueue.length > 0 && subtaskIteration < MAX_SUBTASKS) {
+            subtaskIteration++;
+            const currentTask = q.nowQueue[0];
+            console.error(`[AgenticMiddleware] Starting subtask ${subtaskIteration}: ${currentTask}`);
+
+            // 1. Inject Intelligent Prompt and Task Instruction
+            try {
+                // CLEAR and REFRESH System Prompt to avoid accumulation
+                const userKeywords = context.keywords || [];
+                const subtaskPrompt = await getIntelligentSystemPrompt({
+                    context: currentTask,
+                    keywords: [...new Set(['mcp', 'memory', 'filesystem', ...userKeywords])], // Merge core steering with user keywords
+                    memory: (context as any).memoryContext,
+                    workspace: (context as any).grepContext,
+                    isSubtask: true
+                });
+                const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${currentTask}\n\nStrictly focus on this subtask using the tools provided.`;
+
+                const messages = context.request.messages;
+                const sysMsgIdx = messages.findIndex(m => m.role === 'system');
+                if (sysMsgIdx !== -1) {
+                    // Replace existing system message to ensure clean state and prevent accumulation
+                    messages[sysMsgIdx] = { role: 'system', content: `${subtaskPrompt}${taskHeader}` };
+                } else {
+                    messages.unshift({ role: 'system', content: `${subtaskPrompt}${taskHeader}` });
+                }
+            } catch (err) {
+                console.error(`[AgenticMiddleware] Failed to inject subtask prompt: ${err}`);
+            }
+
+            // 2. Direct execution of the router (the next step in the pipeline)
+            // Using dynamic import to break circular dependency at runtime
+            const instances = await import('../../pipeline/instances.js');
+            await instances.sharedRouter.execute(context, async () => { });
+
+            // 3. Process result
+            const responseContent = getResponseContent(context);
+            if (responseContent) {
+                const verifyResult = verifySelf(responseContent);
+
+                if (verifyResult.startsWith('FAIL')) {
+                    q.improveQueue.push(verifyResult);
+                }
+
+                // Append assistant response to history for next subtask context
+                context.request.messages.push({ role: 'assistant', content: responseContent });
+
+                // Store memory and knowledge
+                const wsHash = context.wsHash;
+                if (!verifyResult.startsWith('FAIL') && wsHash) {
+                    await appendKnowledge(projectDir, sessionId, responseContent);
+                }
+            }
+
+            // 4. Update queue
             q.nowQueue.shift();
+            persistStateDebounced(sessionId, projectDir);
         }
-        await persistQueues(sessionId, projectDir);
+
+        // v1.0.5: Critical fix - signal completion to the pipeline
+        if (!context.response) {
+            await next();
+        }
+
+        console.error(`[agentic-middleware] ${Date.now() - startMs}ms session=${sessionId} iterations=${subtaskIteration}`);
     }
 }

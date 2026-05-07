@@ -84,7 +84,7 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
 
         // Should ONLY have tried prov2 (prov1 rejected due to context window)
         expect(trySpy).toHaveBeenCalledTimes(1);
-        expect(trySpy).toHaveBeenCalledWith(expect.anything(), 'prov2', 'model-a');
+        expect(trySpy).toHaveBeenCalledWith(expect.anything(), 'prov2', 'model-a', expect.any(Number));
     });
 
     it('should rank providers by rate limit headroom', async () => {
@@ -222,7 +222,7 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
         await router.execute(context, async () => { });
 
         // Should HAVE tried small-model (bypassing the 80% upscaling check because it was explicitly requested)
-        expect(trySpy).toHaveBeenCalledWith(expect.anything(), 'smallProv', 'small-model');
+        expect(trySpy).toHaveBeenCalledWith(expect.anything(), 'smallProv', 'small-model', expect.any(Number));
     });
 
     it('should apply penalty score to recently rate-limited providers', async () => {
@@ -236,8 +236,10 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
         registry.registerProvider(prov1);
         registry.registerProvider(prov2);
 
-        // Simulate that prov1 recently had a 429 failure
-        (prov1 as any).recordFailure(429);
+        // Simulate that prov1 recently had multiple 429 failures to trigger circuit breaker
+        executor.recordProviderFailure('prov1', 429);
+        executor.recordProviderFailure('prov1', 429);
+        executor.recordProviderFailure('prov1', 429);
 
         const context: PipelineContext = {
             request: { model: 'm1', messages: [{ role: 'user', content: 'test' }] },

@@ -1,7 +1,7 @@
 import type { Message } from '../providers/types.js';
 import type { PipelineContext } from '../pipeline/middleware.js';
 import { getMessageContent } from './MessageUtils.js';
-import { getEncoding } from 'js-tiktoken';
+import { getSharedEncoder } from './tiktoken.js';
 
 /**
  * Controls how context overflow is handled.
@@ -28,7 +28,9 @@ export interface ContextCompressionResult {
  * For document-heavy tasks: chunk-mapreduce is orchestrated by the caller.
  */
 export class ContextManager {
-    private encoder = getEncoding('cl100k_base');
+    private get encoder() {
+        return getSharedEncoder();
+    }
 
     /**
      * Count tokens for a message array.
@@ -81,13 +83,6 @@ export class ContextManager {
             ? Math.min(targetTokens, context.providerRemainingTokens)
             : targetTokens;
 
-        //if (effectiveTarget !== targetTokens) {
-        // console.log(
-        //     `[ContextManager] Bridge override: using provider-reported ` +
-        //     `remaining=${context.providerRemainingTokens} tokens instead of static target=${targetTokens}`
-        // );
-        //}
-
         const messages = [...context.request.messages];
         const originalTokens = this.countTokens(messages);
 
@@ -133,13 +128,63 @@ export class ContextManager {
     ): Promise<ContextCompressionResult> {
         const originalTokens = this.countTokens(messages);
 
-        const systemMsgs = messages.filter(m => m.role === 'system');
+        let systemMsgs = messages.filter(m => m.role === 'system');
         const nonSystemMsgs = messages.filter(m => m.role !== 'system');
+
+        // BUDGETING: System messages should not consume more than 60% of the target window.
+        // This prevents "Context Explosion" where multiple turns of agentic context injection
+        // or massive workspace snippets drown out the actual conversation.
+        const systemBudget = Math.floor(targetTokens * 0.6);
+        let systemTokens = this.countTokens(systemMsgs);
+
+        if (systemTokens > systemBudget) {
+            console.error(`[ContextManager] System messages (${systemTokens} tokens) exceed budget (${systemBudget}). Truncating...`);
+            // Keep the first (usually the primary instructions) and the last (usually the latest context)
+            if (systemMsgs.length > 2) {
+                systemMsgs = [systemMsgs[0], systemMsgs[systemMsgs.length - 1]];
+                systemTokens = this.countTokens(systemMsgs);
+            }
+            
+            // If still over budget, truncate the content of the largest system message
+            if (systemTokens > systemBudget) {
+                systemMsgs = systemMsgs.map(msg => {
+                    const content = getMessageContent(msg);
+                    if (this.countStringTokens(content) > systemBudget / systemMsgs.length) {
+                        const ratio = (systemBudget / systemMsgs.length) / this.countStringTokens(content);
+                        return { ...msg, content: content.slice(0, Math.floor(content.length * ratio * 0.9)) + '\n... (system context truncated to fit budget)' };
+                    }
+                    return msg;
+                });
+            }
+        }
+
+        // SAFEGUARD: If messages are astronomically large (>100k tokens), perform extreme Tier 0 truncation first
+        // to prevent the summarizer itself from being overwhelmed or hanging.
+        if (originalTokens > 100000) {
+            const preProcessed = this.heuristicCompress(messages, 50000); // Reduce to 50k first
+            return this.slidingWindow(preProcessed, targetTokens, summarizer);
+        }
 
         // Keep at minimum the last 4 messages (2 exchanges) verbatim
         const KEEP_RECENT = Math.min(4, nonSystemMsgs.length);
-        const recentMsgs = nonSystemMsgs.slice(-KEEP_RECENT);
-        const oldMsgs = nonSystemMsgs.slice(0, -KEEP_RECENT);
+        
+        // PIN THE FIRST MESSAGE: The first user prompt usually contains the core task instructions.
+        // We must never summarize it away in long histories, otherwise the agent will suffer from "task drift".
+        // We only do this if the history is long enough to justify keeping an extra verbatim slot.
+        let pinnedMsg: Message | null = null;
+        let oldMsgs: Message[] = [];
+        let recentMsgs: Message[] = [];
+
+        if (nonSystemMsgs.length > KEEP_RECENT * 2) {
+            pinnedMsg = nonSystemMsgs[0];
+            // The remaining messages are split between "old" (to be summarized) and "recent" (kept verbatim)
+            const unpinnedMsgs = nonSystemMsgs.slice(1);
+            recentMsgs = unpinnedMsgs.slice(-KEEP_RECENT);
+            oldMsgs = unpinnedMsgs.slice(0, -KEEP_RECENT);
+        } else {
+            recentMsgs = nonSystemMsgs.slice(-KEEP_RECENT);
+            oldMsgs = nonSystemMsgs.slice(0, -KEEP_RECENT);
+        }
 
         if (oldMsgs.length === 0) {
             // Can't compress further without dropping recent context — return as-is
@@ -161,25 +206,54 @@ export class ContextManager {
         let summary: string;
         try {
             if (historyTextTokens > MAX_SUMMARY_CONTEXT) {
-                // Output too massive for a single API call, we must chunk the summary itself
-                const words = historyText.split(/\s+/);
+                console.error(`[ContextManager] History too large (${historyTextTokens} tokens), chunking...`);
+                
+                // Robust chunking: split by word if possible, but hard-split by total tokens if words are too long
                 const chunks: string[] = [];
-                let currentChunk: string[] = [];
-                let currentTokens = 0;
-
+                let currentChunkText = '';
+                let currentChunkTokens = 0;
+                
+                const words = historyText.split(/\s+/);
                 for (const word of words) {
                     const wordTokens = this.countStringTokens(word + ' ');
-                    if (currentTokens + wordTokens > MAX_SUMMARY_CONTEXT && currentChunk.length > 0) {
-                        chunks.push(currentChunk.join(' '));
-                        currentChunk = [];
-                        currentTokens = 0;
+                    
+                    if (wordTokens > MAX_SUMMARY_CONTEXT) {
+                        // Edge case: a single word is larger than the entire context limit!
+                        // Flush current chunk if any
+                        if (currentChunkText) {
+                            chunks.push(currentChunkText.trim());
+                            currentChunkText = '';
+                            currentChunkTokens = 0;
+                        }
+                        
+                        // Slice the massive word
+                        let wordRemaining = word;
+                        while (wordRemaining.length > 0) {
+                            const sliceChars = MAX_SUMMARY_CONTEXT * 2; 
+                            const slice = wordRemaining.slice(0, sliceChars);
+                            chunks.push(slice);
+                            wordRemaining = wordRemaining.slice(sliceChars);
+                        }
+                        continue;
                     }
-                    currentChunk.push(word);
-                    currentTokens += wordTokens;
-                }
-                if (currentChunk.length > 0) chunks.push(currentChunk.join(' '));
 
-                console.error(`[ContextManager] historyText is massive (${historyTextTokens} tokens), chunking into ${chunks.length} parts for safe summarization...`);
+                    if (currentChunkTokens + wordTokens > MAX_SUMMARY_CONTEXT && currentChunkText) {
+                        chunks.push(currentChunkText.trim());
+                        currentChunkText = '';
+                        currentChunkTokens = 0;
+                    }
+                    
+                    currentChunkText += word + ' ';
+                    currentChunkTokens += wordTokens;
+                }
+                
+                if (currentChunkText) chunks.push(currentChunkText.trim());
+
+                const MAX_CHUNKS = 5;
+                if (chunks.length > MAX_CHUNKS) {
+                    console.error(`[ContextManager] Too many chunks (${chunks.length}), falling back to truncation...`);
+                    throw new Error('Too many chunks for summarization');
+                }
 
                 const chunkSummaries = await Promise.allSettled(
                     chunks.map(chunk => summarizer(`Summarize this segment of conversation concisely:\n\n${chunk}`))
@@ -195,6 +269,7 @@ export class ContextManager {
                     `Merge these sequential conversation summaries into one dense summary. Preserve facts/context:\n\n${successfulSummaries.join('\n---\n')}`
                 );
             } else {
+                console.error(`[ContextManager] Requesting single summary for ${historyTextTokens} tokens...`);
                 summary = await summarizer(
                     `Summarize the following conversation history concisely, preserving all key facts, decisions, and context. Be dense — output only the summary, no preamble:\n\n${historyText}`
                 );
@@ -209,7 +284,10 @@ export class ContextManager {
             content: `[Context Summary — earlier conversation]: ${summary}`,
         };
 
-        const compressed: Message[] = [...systemMsgs, summaryMsg, ...recentMsgs];
+        const compressed: Message[] = [...systemMsgs];
+        if (pinnedMsg) compressed.push(pinnedMsg);
+        compressed.push(summaryMsg);
+        compressed.push(...recentMsgs);
         const compressedTokens = this.countTokens(compressed);
 
         return {
@@ -228,26 +306,52 @@ export class ContextManager {
         const systemMsgs = messages.filter(m => m.role === 'system');
         const nonSystemMsgs = messages.filter(m => m.role !== 'system');
 
-        // Always keep the last 2 messages (1 exchange) entirely
+        // Heuristic: If we are WAY over budget (> 2x), be extremely aggressive
+        const totalTokens = this.countTokens(messages);
+        const isWayOver = totalTokens > targetTokens * 2;
+
+        // Always keep the last 2 messages (1 exchange) entirely, UNLESS they are massive blobs
         const KEEP_RECENT = Math.min(2, nonSystemMsgs.length);
         const recentMsgs = nonSystemMsgs.slice(-KEEP_RECENT);
         const oldMsgs = nonSystemMsgs.slice(0, -KEEP_RECENT);
 
-        const compressedOld = oldMsgs.map(msg => {
-            const content = getMessageContent(msg);
+        const processMessage = (msg: Message): Message => {
+            let content = getMessageContent(msg);
+            
+            // Emergency pre-truncation for massive unstructured text (> 15k chars)
+            if (content.length > 15000) {
+                content = content.substring(0, 5000) + ' [...truncated...] ' + content.substring(content.length - 1000);
+            }
+
             // Keep code-heavy messages or short ones intact
             if (content.includes('```') || content.length < 500) {
-                return msg;
+                return { ...msg, content };
             }
 
             // Extract first and last sentences of long prose
             const sentences = content.split(/[.!?]\s+/);
-            if (sentences.length <= 3) return msg;
+            if (sentences.length <= 3) return { ...msg, content };
+
+            if (isWayOver) {
+                // Extremely aggressive: keep only first sentence and last sentence
+                const compressedContent = `${sentences[0]}. ... [stripped ${sentences.length - 2} sentences] ... ${sentences[sentences.length - 1]}.`;
+                return { ...msg, content: compressedContent };
+            }
+
             const compressedContent = `${sentences[0]}. ${sentences[1]}. ... [summarized] ... ${sentences[sentences.length - 1]}.`;
             return { ...msg, content: compressedContent };
+        };
+
+        const compressedOld = oldMsgs.map(processMessage);
+        const processedRecent = recentMsgs.map(msg => {
+            // Only aggressively truncate recent if it's really the ONLY message and it's huge
+            if (nonSystemMsgs.length === 1 && getMessageContent(msg).length > 20000) {
+                return processMessage(msg);
+            }
+            return msg;
         });
 
-        return [...systemMsgs, ...compressedOld, ...recentMsgs];
+        return [...systemMsgs, ...compressedOld, ...processedRecent];
     }
 
     /**
@@ -276,18 +380,13 @@ export class ContextManager {
 
             if (remainingBudget > 50) {
                 const content = getMessageContent(lastMsg);
-                // High-performance truncation: Estimate chars from tokens (avg ~4 chars per token)
-                // Use a safe factor (3 chars per token) to avoid over-truncation
+                // High-performance truncation
                 const approxChars = remainingBudget * 3;
                 let truncatedContent = content.slice(-approxChars);
 
-                // Refine with small word-by-word steps if still too big
-                // or add back words if we have room. For emergency, we just want to BE UNDER budget.
-                // We'll perform one more Tiktoken check and adjust if needed.
                 let currentTokens = this.countStringTokens(truncatedContent);
 
                 if (currentTokens > remainingBudget) {
-                    // Still too big? Hard slice by tokens/chars ratio
                     const ratio = remainingBudget / currentTokens;
                     truncatedContent = truncatedContent.slice(-Math.floor(truncatedContent.length * ratio * 0.9));
                 }
@@ -297,7 +396,6 @@ export class ContextManager {
                     content: `[...truncated...] ${truncatedContent.trim()}`
                 };
             } else {
-                // Budget too small for meaningful content
                 nonSystemMsgs[nonSystemMsgs.length - 1] = {
                     ...lastMsg,
                     content: `[...truncated for emergencyFallback...]`
@@ -317,14 +415,6 @@ export class ContextManager {
     /**
      * Chunk MapReduce Strategy:
      * For large single-message inputs (documents, long code).
-     *
-     * Split the last user message into overlapping chunks, process each with
-     * a task prompt, then reduce all chunk results into a final answer.
-     *
-     * @param context        - Original pipeline context
-     * @param chunkTokenSize - Max tokens per chunk (leave room for prompt overhead)
-     * @param executor       - Async fn to process a single chunk
-     * @param reducer        - Async fn to merge all chunk results into a final answer
      */
     async chunkMapReduce(
         context: PipelineContext,
@@ -339,7 +429,6 @@ export class ContextManager {
             throw new Error('[ContextManager] No user message found to chunk');
         }
 
-        // Split by words to avoid breaking tokens mid-way
         const lastUserContent = getMessageContent(lastUserMsg);
         const words = lastUserContent.split(/\s+/);
         const chunks: string[] = [];
@@ -350,7 +439,6 @@ export class ContextManager {
             const wordTokens = this.countStringTokens(word + ' ');
             if (currentTokens + wordTokens > chunkTokenSize && currentChunk.length > 0) {
                 chunks.push(currentChunk.join(' '));
-                // Overlap: keep last 50 words for context continuity
                 currentChunk = currentChunk.slice(-50);
                 currentTokens = this.countStringTokens(currentChunk.join(' '));
             }
@@ -360,13 +448,11 @@ export class ContextManager {
         if (currentChunk.length > 0) chunks.push(currentChunk.join(' '));
 
         if (chunks.length === 1) {
-            // No actual chunking needed
             return executor(context);
         }
 
         console.error(`[ContextManager] MapReduce: splitting into ${chunks.length} chunks`);
 
-        // Map: process each chunk independently
         const chunkResults = await Promise.allSettled(
             chunks.map((chunk, i) => {
                 const chunkContext: PipelineContext = {
@@ -377,7 +463,7 @@ export class ContextManager {
                             ...messages.filter(m => m.role === 'system'),
                             {
                                 role: 'user',
-                                content: `[Part ${i + 1}/${chunks.length}] ${lastUserContent.split(chunk)[0] ? 'Continuing from previous section. ' : ''}Process this section:\n\n${chunk}`,
+                                content: `[Part ${i + 1}/${chunks.length}] Process this section:\n\n${chunk}`,
                             },
                         ],
                     },
@@ -394,7 +480,6 @@ export class ContextManager {
             throw new Error('[ContextManager] All chunks failed during MapReduce');
         }
 
-        // Reduce: merge all partial results
         return reducer(successfulResults, context);
     }
 }

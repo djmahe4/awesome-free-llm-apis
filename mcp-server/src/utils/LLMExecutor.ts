@@ -1,8 +1,10 @@
-import { getEncoding } from 'js-tiktoken';
+import { debounce } from './debounce.js';
+import { persistence, PersistentUsage } from './PersistenceManager.js';
+import { getSharedEncoder } from './tiktoken.js';
+import type { Message, ChatResponse } from '../providers/types.js';
 import { ProviderRegistry } from '../providers/registry.js';
 import type { PipelineContext } from '../pipeline/middleware.js';
-import type { ChatResponse, Message } from '../providers/types.js';
-import { getMessageContent } from './MessageUtils.js';
+import { getMessageContent, prependToMessageContent } from './MessageUtils.js';
 
 export interface TokenTrackingInfo {
     remainingTokens?: number;
@@ -10,6 +12,10 @@ export interface TokenTrackingInfo {
     remainingRequests?: number;
     requestsRefreshTime?: number;
     lastSuccessTime?: number;
+    localTotalRequests?: number;
+    localTotalTokens?: number;
+    dailyTotalRequests?: number;
+    dailyTotalTokens?: number;
 }
 
 /**
@@ -21,7 +27,164 @@ export interface TokenTrackingInfo {
  */
 export class LLMExecutor {
     private tokenTracking: Record<string, TokenTrackingInfo> = {};
-    private encoder = getEncoding('cl100k_base');
+    private get encoder() {
+        return getSharedEncoder();
+    }
+    private persistence = persistence;
+    private saveStats = debounce(() => this.persistStats(), 2000);
+
+    private static readonly CIRCUIT_THRESHOLD = 2; // Fail over faster
+    private static readonly CIRCUIT_COOLDOWN = 45000; // Longer cooldown for 429s
+
+    private providerCircuits: Map<string, {
+        failures: number;
+        lastFailure: number;
+        cooldownUntil: number;
+        totalErrors: number;
+        lastSuccess?: number;
+    }> = new Map();
+
+    public isProviderCircuitOpen(providerId: string): boolean {
+        const cb = this.providerCircuits.get(providerId);
+        if (!cb) return false;
+
+        return Date.now() < cb.cooldownUntil;
+    }
+
+    public recordProviderFailure(providerId: string, status?: number): void {
+        let cb = this.providerCircuits.get(providerId);
+        if (!cb) {
+            cb = { failures: 0, lastFailure: 0, cooldownUntil: 0, totalErrors: 0 };
+            this.providerCircuits.set(providerId, cb);
+        }
+
+        cb.failures++;
+        cb.lastFailure = Date.now();
+        cb.totalErrors++;
+
+        if (cb.failures >= LLMExecutor.CIRCUIT_THRESHOLD) {
+            // Adaptive cooldown: 15s for rate limits (429), 60s for server errors (500)
+            const waitTime = status === 429 ? 15000 : 60000;
+            cb.cooldownUntil = Date.now() + waitTime;
+            console.error(`[LLMExecutor] Circuit OPEN for ${providerId} (status ${status}) after ${cb.failures} failures. Cooling down ${waitTime / 1000}s.`);
+        }
+    }
+
+    public recordProviderSuccess(providerId: string): void {
+        const cb = this.providerCircuits.get(providerId);
+        if (cb) {
+            cb.failures = 0;
+            cb.cooldownUntil = 0; // Immediate reset on success
+            cb.lastSuccess = Date.now();
+        } else {
+            this.providerCircuits.set(providerId, {
+                failures: 0,
+                lastFailure: 0,
+                cooldownUntil: 0,
+                totalErrors: 0,
+                lastSuccess: Date.now()
+            });
+        }
+    }
+
+    public getProviderStats(): Record<string, { errors: number; circuitOpen: boolean; cooldownRemaining?: number; lastSuccessTime?: number }> {
+        const stats: Record<string, { errors: number; circuitOpen: boolean; cooldownRemaining?: number; lastSuccessTime?: number }> = {};
+        const now = Date.now();
+        for (const [providerId, cb] of this.providerCircuits) {
+            stats[providerId] = {
+                errors: cb.totalErrors,
+                circuitOpen: now < cb.cooldownUntil,
+                cooldownRemaining: now < cb.cooldownUntil ? cb.cooldownUntil - now : 0,
+                lastSuccessTime: cb.lastSuccess
+            };
+        }
+        return stats;
+    }
+
+    public refundTokens(providerId: string, tokens: number): void {
+        const tracker = this.tokenTracking[providerId];
+        if (!tracker) return;
+
+        tracker.localTotalRequests = Math.max(0, (tracker.localTotalRequests || 0) - 1);
+        tracker.localTotalTokens = Math.max(0, (tracker.localTotalTokens || 0) - tokens);
+        tracker.dailyTotalRequests = Math.max(0, (tracker.dailyTotalRequests || 0) - 1);
+        tracker.dailyTotalTokens = Math.max(0, (tracker.dailyTotalTokens || 0) - tokens);
+
+        if (tracker.remainingTokens !== undefined) {
+            tracker.remainingTokens = Math.min(tracker.remainingTokens + tokens, 100000);
+        }
+        if (tracker.remainingRequests !== undefined) {
+            tracker.remainingRequests = Math.min((tracker.remainingRequests || 0) + 1, 100);
+        }
+    }
+
+    /**
+     * Initializes the executor by loading persisted usage stats
+     */
+    async init(): Promise<void> {
+        const stats = await this.persistence.load();
+        
+        // Merge persisted stats into tokenTracking
+        for (const [id, prov] of Object.entries(stats.providers)) {
+            this.tokenTracking[id] = {
+                localTotalRequests: prov.localTotalRequests,
+                localTotalTokens: prov.localTotalTokens,
+                remainingRequests: prov.remainingRequests ?? undefined,
+                remainingTokens: prov.remainingTokens ?? undefined,
+                lastSuccessTime: prov.lastSyncTime
+            };
+
+            // Restore circuit breaker persistence
+            if (prov.cooldownUntil || prov.failures || prov.totalErrors) {
+                this.providerCircuits.set(id, {
+                    failures: prov.failures || 0,
+                    lastFailure: prov.lastFailure || 0,
+                    cooldownUntil: prov.cooldownUntil || 0,
+                    totalErrors: prov.totalErrors || 0
+                });
+            }
+        }
+
+        // Global daily counters are managed via the persistence manager internally
+        // but we can expose them if needed for the dashboard summary.
+    }
+
+    /**
+     * Persists current state to disk
+     */
+    private async persistStats(): Promise<void> {
+        const state: PersistentUsage = {
+            lastResetDate: new Date().toISOString().split('T')[0],
+            dailyTotalRequests: 0, // This is actually managed by merging in PersistenceManager
+            dailyTotalTokens: 0,
+            lifetimeTotalRequests: 0,
+            lifetimeTotalTokens: 0,
+            providers: {}
+        };
+
+        for (const [id, tracker] of Object.entries(this.tokenTracking)) {
+            const cb = this.providerCircuits.get(id);
+            state.providers[id] = {
+                lastSyncTime: tracker.lastSuccessTime || Date.now(),
+                localTotalRequests: tracker.localTotalRequests || 0,
+                localTotalTokens: tracker.localTotalTokens || 0,
+                remainingRequests: tracker.remainingRequests,
+                remainingTokens: tracker.remainingTokens,
+                failures: cb?.failures || 0,
+                lastFailure: cb?.lastFailure || 0,
+                cooldownUntil: cb?.cooldownUntil || 0,
+                totalErrors: cb?.totalErrors || 0
+            };
+            
+            // Increment totals (PersistenceManager will merge these)
+            state.lifetimeTotalRequests += tracker.localTotalRequests || 0;
+            state.lifetimeTotalTokens += tracker.localTotalTokens || 0;
+            state.dailyTotalRequests += tracker.dailyTotalRequests || 0; 
+            state.dailyTotalTokens += tracker.dailyTotalTokens || 0;
+        }
+
+        await this.persistence.save(state);
+    }
 
     /**
      * Calculate estimated tokens for a request
@@ -111,16 +274,33 @@ export class LLMExecutor {
     /**
      * Deduct tokens and requests from provider's tracked quota
      */
-    private deductTokens(providerId: string, tokens: number): void {
-        const tracker = this.tokenTracking[providerId];
-        if (tracker) {
-            if (tracker.remainingTokens !== undefined) {
-                tracker.remainingTokens -= tokens;
-            }
-            if (tracker.remainingRequests !== undefined) {
-                tracker.remainingRequests -= 1;
-            }
+    public deductTokens(providerId: string, tokens: number): void {
+        if (!this.tokenTracking[providerId]) {
+            this.tokenTracking[providerId] = {
+                localTotalRequests: 0,
+                localTotalTokens: 0,
+                dailyTotalRequests: 0,
+                dailyTotalTokens: 0
+            };
         }
+        
+        const tracker = this.tokenTracking[providerId];
+        
+        // Update local and daily totals
+        tracker.localTotalRequests = (tracker.localTotalRequests || 0) + 1;
+        tracker.localTotalTokens = (tracker.localTotalTokens || 0) + tokens;
+        tracker.dailyTotalRequests = (tracker.dailyTotalRequests || 0) + 1;
+        tracker.dailyTotalTokens = (tracker.dailyTotalTokens || 0) + tokens;
+
+        if (tracker.remainingTokens !== undefined) {
+            tracker.remainingTokens -= tokens;
+        }
+        if (tracker.remainingRequests !== undefined) {
+            tracker.remainingRequests -= 1;
+        }
+
+        // Trigger persistence
+        this.saveStats();
     }
 
     /**
@@ -193,6 +373,9 @@ export class LLMExecutor {
                 }
             }
         }
+
+        // Trigger persistence on header update too
+        this.saveStats();
     }
 
     /**
@@ -210,13 +393,41 @@ export class LLMExecutor {
     async tryProvider(
         context: PipelineContext,
         providerId: string,
-        modelId: string
+        modelId: string,
+        timeoutMs?: number
     ): Promise<ChatResponse | null> {
-        // 1. Calculate tokens once per set of messages
+        const whitelist = ['model', 'messages', 'temperature', 'top_p', 'n', 'stream', 'stop', 'max_tokens', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'user', 'response_format'];
+        if (providerId === 'gemini') {
+            whitelist.push('google_search');
+        }
+
+        // Create a strictly sanitized request for this specific attempt
+        const sanitizedRequest: any = {};
+        for (const key of whitelist) {
+            if ((context.request as any)[key] !== undefined) {
+                sanitizedRequest[key] = (context.request as any)[key];
+            }
+        }
+        
+        // Ensure modelId is forced
+        sanitizedRequest.model = modelId;
+
         if (context.estimatedTokens === undefined) {
             const promptTokens = this.calculateTokens(context.request.messages);
             context.estimatedTokens = promptTokens;
         }
+        
+        if (providerId === 'gemini') {
+            sanitizedRequest.messages = sanitizedRequest.messages.map((m: any) => {
+                if (m.role === 'system') {
+                    const copy = { ...m, role: 'user' };
+                    prependToMessageContent(copy, `[SYSTEM INSTRUCTION]: `);
+                    return copy;
+                }
+                return m;
+            });
+        }
+
 
         const totalWithCompletion = context.estimatedTokens + (context.request.max_tokens || 1024);
 
@@ -241,13 +452,15 @@ export class LLMExecutor {
             throw new Error(`[LLMExecutor] Provider ${providerId} not found`);
         }
 
-        // 5. Make the API call
-        const previousModel = context.request.model;
-        context.request.model = modelId;
-
         let response: ChatResponse | null = null;
         try {
-            response = await provider.chat(context.request);
+            // Use sanitized request
+            const requestWithTimeout = { 
+                ...sanitizedRequest, 
+                timeoutMs,
+                abortSignal: context.request.abortSignal 
+            };
+            response = await provider.chat(requestWithTimeout);
         } catch (err: any) {
             // 6. Handle rate limit errors even without headers (Robust extraction)
             const errorMessage = err.message?.toLowerCase() || '';
@@ -259,17 +472,19 @@ export class LLMExecutor {
                 errorMessage.includes('limit reached');
 
             if (isRateLimit) {
-                //console.log(`[LLMExecutor] Detected rate limit for ${providerId} from error: ${err.message}`);
                 this.updateProviderTokenState(providerId, {
                     remainingTokens: 0,
                     remainingRequests: 0,
-                    refreshTime: Date.now() + 60000, // Default 60s cooldown
+                    refreshTime: Date.now() + 60000,
                     requestsRefreshTime: Date.now() + 60000
                 });
+            } else {
+                this.refundTokens(providerId, totalWithCompletion);
             }
 
+            this.recordProviderFailure(providerId, err.status);
+
             // Still re-throw the error so the router knows to try next provider
-            context.request.model = previousModel;
             throw err;
         }
 
@@ -286,6 +501,9 @@ export class LLMExecutor {
             }
         }
 
+        // Record success for circuit breaker
+        this.recordProviderSuccess(providerId);
+
         return response;
     }
 
@@ -295,7 +513,13 @@ export class LLMExecutor {
     async prompt(
         messages: Message[],
         modelOverride: string = 'any',
-        options: { taskType?: string } = {}
+        options: { 
+            taskType?: string, 
+            timeoutMs?: number,
+            google_search?: boolean,
+            sessionId?: string,
+            agentic?: boolean
+        } = {}
     ): Promise<ChatResponse> {
         const registry = ProviderRegistry.getInstance();
         const providers = registry.getAvailableProviders();
@@ -304,21 +528,46 @@ export class LLMExecutor {
             throw new Error('No providers available');
         }
 
-        // Pick matching models
+        // v1.0.4: Strategic model selection for high-stakes planning/decomposition
         const targetModels = modelOverride === 'any'
-            ? ['gemini-2.0-flash', 'llama-3.3-70b-versatile', 'glm-4.7']
+            ? (options.google_search 
+                ? ['gemini-3.1-flash-lite-preview', 'deepseek-ai/DeepSeek-V3', 'nvidia/nemotron-3-super-120b-a12b:free', 'qwen/qwen3-coder:free', 'llama-3.3-70b-versatile', 'glm-4.7']
+                : ['deepseek-ai/DeepSeek-V3', 'nvidia/nemotron-3-super-120b-a12b:free', 'qwen/qwen3-coder:free', 'gemini-3.1-flash-lite-preview', 'llama-3.3-70b-versatile', 'glm-4.7'])
             : [modelOverride];
 
+        // Pre-calculate scores once for efficiency
+        const scoredProviders = providers.map(p => {
+            let score = this.getTokenScore(p.id);
+            if (p.consecutiveFailures > 0) score *= 0.3;
+            if (this.isProviderCircuitOpen(p.id)) score = -1;
+            return { provider: p, score };
+        }).sort((a, b) => b.score - a.score);
+
         for (const modelId of targetModels) {
-            for (const p of providers) {
-                if (modelOverride === 'any' || p.models.some(m => m.id === modelId)) {
+            for (const { provider: p, score } of scoredProviders) {
+                if (score < 0) continue;
+
+                // Google Search is a Gemini-exclusive feature in this architecture
+                if (options.google_search && p.id !== 'gemini') continue;
+                
+                if (modelOverride === 'any' || p.models.some((m: any) => m.id === modelId)) {
                     try {
+                        const actualModel = (modelId === 'any' || !p.models.some((m: any) => m.id === modelId))
+                            ? p.models[0].id 
+                            : modelId;
+
                         const res = await p.chat({
-                            model: modelId === 'any' ? p.models[0].id : modelId,
-                            messages
+                            model: actualModel,
+                            messages,
+                            timeoutMs: options.timeoutMs || 15000,
+                            google_search: options.google_search,
+                            sessionId: options.sessionId,
+                            agentic: options.agentic
                         });
+                        this.recordProviderSuccess(p.id);
                         return res;
-                    } catch (err) {
+                    } catch (err: any) {
+                        this.recordProviderFailure(p.id, err.status);
                         continue;
                     }
                 }
@@ -347,5 +596,6 @@ export class LLMExecutor {
      */
     flush(): void {
         this.tokenTracking = {};
+        this.providerCircuits.clear();
     }
 }

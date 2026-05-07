@@ -8,8 +8,16 @@
 
 external/agent-prompt/prompt.json
 # Rust build artifacts (sandbox runner)
-mcp-server/scripts/rust-sandbox-runner/target/
-mcp-server/scripts/rust-sandbox-runner/Cargo.lock
+mcp-server/scripts/sandboxes/rust-sandbox-runner/target/
+mcp-server/scripts/sandboxes/rust-sandbox-runner/Cargo.lock
 
 # Go build artifact (sandbox runner binary)
-mcp-server/scripts/go-sandbox-runner/sandbox-runner
+mcp-server/scripts/sandboxes/go-sandbox-runner/sandbox-runner
+.claude/
+
+
+mcp-server/demo-verify.log
+mcp-server/extended_demo_out.log
+mcp-server/out.log
+mcp-server/scratch/
+.free-llm-mcp/
