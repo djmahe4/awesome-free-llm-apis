@@ -57,12 +57,12 @@ graph TD
 | Tool | Purpose | Required Params | Key Optional Params |
 |------|---------|----------------|---------------------|
 | `use_free_llm` | Universal chat with deterministic steering; returns ONLY text content | `messages` | `model`, `keywords`, `agentic`, `sessionId`, **`workspace_root`** (recommended for project tasks) |
-| `list_available_free_models` | Enumerate providers and models with metadata | *(none)* | `provider`, `available_only` |
 | `get_token_stats` | Real-time per-provider usage and quota stats | *(none)* | — |
 | `validate_provider` | Health-check and credential validation | `providerId` | — |
 | `manage_memory` | Workspace-scoped memory: search/list/stats/clear | `action` | `workspace_root`, `query`, `limit` |
 | `store_workspace_skill` | Explicitly capture structured findings and decisions | `name`, `what`, `why` | `workspace_root`, `files` |
 | `index_workspace` | Proactively index workspace files for semantic search | `workspace_root` | `force` |
+
 
 
 ### Sample Agent Invocations
@@ -161,7 +161,7 @@ AgenticMiddleware (v1.0.5 — Loop Orchestration)
         │
         ▼ ─────────────────────────────────────
 IntelligentRouterMiddleware (v1.0.5 — Routing Logic)
-  • **Gemini-Exclusive Search**: Forces `gemini-2.5-flash` if `google_search: true`
+  • **Gemini-Exclusive Search**: Forces `gemini-3.1-flash-preview` if `google_search: true`
   • **Fallback Cascade**: Majority-voting classification → tiered model selection
         │
         ▼ ─────────────────────────────────────
@@ -169,7 +169,6 @@ LLMExecutor (v1.0.5 — Execution)
   • **Telemetry**: Updates RPM/TPM usage from `x-ratelimit-*` headers
   • **Persistence**: Atomic delta-merge strategy for cross-process telemetry accuracy
   • **Circuit Breaking**: Cooldown penalties for failing providers
-```
         │
         ▼ ─────────────────────────────────────
 Response returned to agent
@@ -183,7 +182,6 @@ Response returned to agent
 2. **For ANY project-scoped task, pass BOTH `agentic: true` AND `workspace_root`** — these two fields unlock memory injection, session persistence, and context enrichment. Passing only one (or neither) produces a context-blind, stateless response.
 4. **Call `validate_provider` or `get_token_stats`** before long-running workflows to confirm quota.
 5. **Research/external-knowledge requests are auto-logged** by `AgenticMiddleware` — check server logs for `[RESEARCH-VALIDATION]` entries.
-6. **Prefer `available_only:true`** with `list_available_free_models` to skip unconfigured providers.
 
 ---
 
@@ -367,10 +365,10 @@ Maintainers can verify header extraction and router scoring logic using provided
 
 ```bash
 # Verify how specific providers return rate-limit headers (live test)
-npx tsx scripts/verify-header-extraction.ts
+npx tsx scripts/verification/verify-header-extraction.ts
 
 # Verify the router's TokenFactor scoring logic against mock states
-npx tsx scripts/token-factor-smoke-test.ts
+npx tsx scripts/verification/token-factor-smoke-test.ts
 ```
 
 ---
