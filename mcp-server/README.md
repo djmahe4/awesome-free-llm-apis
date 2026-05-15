@@ -404,3 +404,8 @@ mcp-server/
 ├── tests/                    # Vitest test suite
 └── docker-compose.yml        # Container deployment
 ```
+
+## Citations
+
+- [External agent-prompt](https://github.com/fainir/most-capable-agent-system-prompt): 'Fainir'
+- [Free LLM apis](https://github.com/mnfst/awesome-free-llm-apis): 'mnfst'
