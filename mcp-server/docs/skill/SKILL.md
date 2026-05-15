@@ -118,6 +118,7 @@ For more detailed information on the inner workings or specific use cases, refer
 | **Research** | `search`, `knowledge` | Activates deep-search optimization |
 | **Bypass** | `override`, `gitignored` | Bypasses .gitignore for extraction |
 | **Precision** | `"quoted term"` | Forces exact grep token extraction |
+| **File Pinning** | `"filename.ext"` | Pins context to that exact file only — **use when multiple files of the same type exist** |
 
 ---
 
@@ -131,5 +132,28 @@ For more detailed information on the inner workings or specific use cases, refer
 
 ---
 
+## 🚨 Anti-Hallucination: Grounding to a Specific File
+
+When a workspace contains **multiple files of the same type** (e.g., several `.json` workflow files, multiple SQL migration files), the steering engine may pull fragments from all of them and cause hallucination.
+
+**RULE — ALWAYS QUOTE THE EXACT FILENAME when the question is about a specific file:**
+
+```json
+{
+  "messages": [{ "role": "user", "content": "In \"daily-nday-pipeline.import.json\", does the Split in Batches node (typeVersion: 3) have a splitBy parameter?" }],
+  "keywords": ["daily-nday-pipeline.import.json", "splitInBatches"],
+  "agentic": true,
+  "workspace_root": "c:/path/to/project"
+}
+```
+
+- The quoted filename in the `content` triggers exact `grep` extraction from **only that file**.
+- The same filename in `keywords` ensures the steering engine also prioritizes it in semantic search.
+- **NEVER** send generic keywords like `n8n` or `workflow` alone when multiple workflow files exist — always add the exact filename.
+
+> **After resolving any finding, ALWAYS call `store_workspace_skill`** to persist the answer. If you skip this, the next session will re-hallucinate the same question.
+
+---
+
 > [!NOTE]
-> The server handles internal grounding and task decomposition automatically. Focus on providing accurate `workspace_root` paths and using `file:///` URIs in your messages.
+> The server handles internal grounding and task decomposition automatically. Focus on providing accurate `workspace_root` paths, **quoted filenames** for file-specific queries, and using `file:///` URIs in your messages.

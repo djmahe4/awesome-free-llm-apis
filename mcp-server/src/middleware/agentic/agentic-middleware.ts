@@ -171,21 +171,21 @@ async function appendKnowledge(projectDir: string, sessionId: string, content: s
  * Uses ~/.free-llm-mcp/projects/<sessionId>/ so location is consistent regardless
  * of where the MCP server process is launched from.
  */
-async function ensureProjectFiles(sessionId: string): Promise<string> {
+async function ensureProjectFiles(sessionId: string, workspaceRoot?: string): Promise<string> {
     const projectDir = path.join(PROJECTS_DIR, sessionId);
     await fs.mkdir(projectDir, { recursive: true });
 
-    const files: Record<string, string> = {
-        [KNOWLEDGE_FILE]: '# Knowledge\n\n<!-- Internal MCP session distillation -->\n',
-    };
+    // Stamp workspace_root into the knowledge file on first creation.
+    // This prevents cross-project knowledge bleed when a user reuses a custom sessionId.
+    const workspaceStamp = workspaceRoot
+        ? `<!-- workspace: ${workspaceRoot} -->\n`
+        : '<!-- workspace: unknown -->\n';
 
-    for (const [name, content] of Object.entries(files)) {
-        const filePath = path.join(projectDir, name);
-        try {
-            await fs.access(filePath);
-        } catch {
-            await fs.writeFile(filePath, content, 'utf-8');
-        }
+    const knowledgePath = path.join(projectDir, KNOWLEDGE_FILE);
+    try {
+        await fs.access(knowledgePath);
+    } catch {
+        await fs.writeFile(knowledgePath, `# Knowledge\n\n${workspaceStamp}`, 'utf-8');
     }
 
     return projectDir;
@@ -318,7 +318,8 @@ export class AgenticMiddleware implements Middleware {
             return;
         }
 
-        const projectDir = await ensureProjectFiles(sessionId);
+        const workspaceRoot: string | undefined = (context.request as any)?.workspace_root;
+        const projectDir = await ensureProjectFiles(sessionId, workspaceRoot);
         const q = await getOrLoadState(sessionId);
 
         // Prepend system prompt with user context if available

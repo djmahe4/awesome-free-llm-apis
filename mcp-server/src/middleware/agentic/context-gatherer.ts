@@ -9,8 +9,8 @@ import fs from 'fs/promises';
  */
 function spawnAsync(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
-        // Use shell: true only if absolutely necessary, but here we want to avoid it
-        const child = spawn(command, args, { shell: process.platform === 'win32' });
+        // Use shell: false to prevent cmd.exe from misinterpreting regex pipes (|) as command pipes
+        const child = spawn(command, args, { shell: false });
         let stdout = '';
         let stderr = '';
         child.stdout.on('data', data => stdout += data.toString());

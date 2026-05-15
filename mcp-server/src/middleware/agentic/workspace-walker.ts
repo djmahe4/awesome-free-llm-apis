@@ -80,8 +80,10 @@ export class WorkspaceWalker {
                 const fullPath = path.join(currentDir, entry.name);
                 const relativePathToGitignore = path.relative(gitignoreRoot, fullPath);
 
-                // Skip if ignored (unless overridden)
-                if (!overrideIgnores && ig.ignores(relativePathToGitignore)) {
+                // Skip if ignored (unless overridden or the entry name exactly matches a keyword — 
+                // explicit filename pinning always bypasses gitignore)
+                const isPinned = keywords.some(kw => entry.name.toLowerCase() === kw.toLowerCase());
+                if (!overrideIgnores && !isPinned && ig.ignores(relativePathToGitignore)) {
                     continue;
                 }
 
@@ -128,11 +130,17 @@ export class WorkspaceWalker {
             const kwLower = kw.toLowerCase();
             if (nameLower.includes(kwLower)) {
                 score += 15;
-                // Bonus for exact matches (minus extension)
-                const nameWithoutExt = path.parse(nameLower).name;
-                const normalizedName = nameWithoutExt.replace(/[_-]/g, '').toLowerCase();
-                const normalizedKw = kwLower.replace(/[_-]/g, '').toLowerCase();
-                if (normalizedName === normalizedKw) score += 30;
+                // Exact full-filename match (including extension): user explicitly named this file.
+                // Boost strongly so it always wins the candidate race regardless of extension penalty.
+                if (nameLower === kwLower) {
+                    score += 100;
+                } else {
+                    // Partial exact match (keyword matches name minus extension)
+                    const nameWithoutExt = path.parse(nameLower).name;
+                    const normalizedName = nameWithoutExt.replace(/[_-]/g, '').toLowerCase();
+                    const normalizedKw = kwLower.replace(/[_-]/g, '').toLowerCase();
+                    if (normalizedName === normalizedKw) score += 30;
+                }
             }
         }
 

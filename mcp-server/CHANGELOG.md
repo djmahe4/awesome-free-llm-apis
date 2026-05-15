@@ -44,6 +44,12 @@
 - Add **Privacy-Sensitive Data redaction** for llm calls in middleware to prevent the leaking of sensitive data to third party free providers.(e.g. API Keys,passwords,PII, etc), partially implementeed by sanitize.ts but needs to be hardened and made more robust.
 - Add mechanism to preserve the context of the conversation in case of a response like `\"read_file\". Let's try that.\n\n```json{\n  \"tool\": \"read_file\",\n  \"args\": {\n    \"path\": \"core/gemini_processor.py\"\n  }}```{\n  \"tool\": \"read_file\",\n  \"args\": {\n    \"path\": \"core/gemini_processor.py\"\n  }}` where the llm is explicitly asking to use a tool, we can preserve the context of the conversation and the intent of the user by not treating it as a normal response and instead directly calling the tool and returning its response to the llm without losing the context of the conversation.
 - Make Skill script generation more robust: currently the generated skill script is enclosed in ````python\n{script}\n``` and is saved under _py instead of .py, we can make it more robust by using a more unique delimiter and also by adding some metadata to the generated script to make it easier to parse and use in the future.
+- Output to the agent should be in markdown format, not in json format.
+- To be able to implement a line by line cosine similarity matching for very similar files and update memory with how both are different to avoid contextual confusions.
+- Using karpathy's memory.md as the reference for memory management and implementation with memory maps to connect files in a project.
+- Post process 'free_llm_api' tool output to markdown format.
+- Improve the middleware to be more robust and also to handle the edge cases where the llm is not able to generate the response in the desired format.
+- Need a model weighted max_tokens for token calculation based on the model size and not a fixed value.
 
 ## v1.0.4 – Hardened Resilience + Persistent Memory + structural Fix (April 2026)
 

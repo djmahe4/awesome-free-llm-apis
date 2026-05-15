@@ -36,7 +36,8 @@ export class StructuralMarkdownMiddleware implements Middleware {
         const userMsg = context.request.messages?.find(m => m.role === 'user');
         if (userMsg) {
             const memStart = Date.now();
-            const fullMemory = await this.readFullSessionMemory(sessionId);
+            const workspaceRoot = (context.request as any)?.workspace_root as string | undefined;
+            const fullMemory = await this.readFullSessionMemory(sessionId, workspaceRoot);
             console.error(`[memory-read] ${Date.now() - memStart}ms session=${sessionId}`);
 
             const contextHeader = `${SESSION_STATE_HEADER}\n# INTERNAL DIAGNOSTICS (session ${sessionId})\n${fullMemory}\n\n# RESPONSE FORMAT\nReply only in clean Markdown. For any code or file changes use exactly this block:\n\`\`\`file:relative/path/from/session/root.ts\n// FULL file content here (never partial diffs)\n\`\`\``;
@@ -68,7 +69,7 @@ export class StructuralMarkdownMiddleware implements Middleware {
         console.error(`[structural-middleware] ${Date.now() - startMs}ms`);
     }
 
-    private async readFullSessionMemory(sessionId: string): Promise<string> {
+    private async readFullSessionMemory(sessionId: string, workspaceRoot?: string): Promise<string> {
         const projectDir = path.join(PROJECTS_DIR, sessionId);
 
         const [stateRes, knowledgeRes] = await Promise.all([
@@ -95,11 +96,28 @@ export class StructuralMarkdownMiddleware implements Middleware {
             }
         }
 
-        // 2. DISTILLED KNOWLEDGE
+        // 2. DISTILLED KNOWLEDGE — workspace guard prevents cross-project bleed
         if (knowledgeRes) {
-            const extracted = await extractMdContext(knowledgeRes, 2000);
-            if (extracted && extracted.length > 50) {
-                sections.push(`### SESSION DISTILLATION\n${extracted}`);
+            // Extract workspace stamp from the knowledge file header
+            const stampMatch = knowledgeRes.match(/<!--\s*workspace:\s*(.+?)\s*-->/);
+            const stampedWorkspace = stampMatch ? stampMatch[1] : null;
+
+            // Normalize paths for comparison (handle slash differences and casing on Windows)
+            const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase().trim();
+            const workspaceMatch = !workspaceRoot || !stampedWorkspace
+                || normalize(stampedWorkspace) === normalize(workspaceRoot)
+                || stampedWorkspace === 'unknown';
+
+            if (!workspaceMatch) {
+                console.error(
+                    `[structural-middleware] SUPPRESSED stale knowledge.md for session=${sessionId}: ` +
+                    `stamped="${stampedWorkspace}" != current="${workspaceRoot}"`
+                );
+            } else {
+                const extracted = await extractMdContext(knowledgeRes, 2000);
+                if (extracted && extracted.length > 50) {
+                    sections.push(`### SESSION DISTILLATION\n${extracted}`);
+                }
             }
         }
 
