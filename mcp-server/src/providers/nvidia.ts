@@ -8,9 +8,16 @@ export class NvidiaProvider extends BaseProvider {
   envVar = 'NVIDIA_API_KEY';
   rateLimits: RateLimits = { rpm: 40 };
   models: ProviderModel[] = [
-    { id: 'meta/llama-3.3-70b-instruct', name: 'Llama 3.3 70B' },
-    { id: 'mistralai/mistral-large-2-instruct', name: 'Mistral Large 2' },
-    { id: 'Qwen/Qwen3-235B-A22B', name: 'Qwen3 235B' },
+    { id: 'google/gemma-3n-e2b-it', name: 'Gemma 3N E2B' },
+    { id: 'meta/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick 17B' },
+    { id: 'minimaxai/minimax-m2.7', name: 'MiniMax M2.7' },
+    { id: 'stepfun-ai/step-3.5-flash', name: 'Step 3.5 Flash' },
+    { id: 'mistralai/mistral-nemotron', name: 'Mistral Nemotron' },
+    { id: 'qwen/qwen3-coder-480b-a35b-instruct', name: 'Qwen3 Coder 480B' },
+    { id: 'mistralai/mistral-large-3-675b-instruct-2512', name: 'Mistral Large 3' },
+    { id: 'google/gemma-3n-e4b-it', name: 'Gemma 3N E4B' },
     { id: 'nvidia/nemotron-mini-4b-instruct', name: 'Nemotron Mini 4B' },
+    { id: 'bytedance/seed-oss-36b-instruct', name: 'Seed OSS 36B' },
+    { id: 'microsoft/phi-4-multimodal-instruct', name: 'Phi-4 Multimodal' },
   ];
 }
