@@ -120,124 +120,125 @@ export class MemoryManager {
         } catch {
           return m.content;
         }
-
-        compareFilesLineByLineCosine(
-          fileAContent: string,
-          fileBContent: string,
-          threshold: number = 0.82
-        ): {
-          averageSimilarity: number;
-          similarLines: Array<{ lineA: number; lineB: number; similarity: number }>;
-          isSimilar: boolean;
-          summary: string;
-        } {
-          const linesA = fileAContent.split('\n');
-          const linesB = fileBContent.split('\n');
-          const docFreq = new Map<string, number>();
-          const allLines = [...linesA, ...linesB];
-
-          const tokenize = (line: string): string[] =>
-            line.toLowerCase().match(/[a-z0-9_]+/g) || [];
-
-          allLines.forEach((line) => {
-            const terms = tokenize(line);
-            const unique = new Set(terms);
-            unique.forEach((term) => docFreq.set(term, (docFreq.get(term) || 0) + 1));
-          });
-
-          const totalDocs = Math.max(1, allLines.length);
-          const idf = new Map<string, number>();
-          for (const [term, df] of docFreq.entries()) {
-            idf.set(term, Math.log((1 + totalDocs) / (1 + df)) + 1);
-          }
-
-          const vectorize = (tokens: string[]): Map<string, number> => {
-            const tf = new Map<string, number>();
-            for (const t of tokens) tf.set(t, (tf.get(t) || 0) + 1);
-            const vec = new Map<string, number>();
-            for (const [term, count] of tf.entries()) {
-              vec.set(term, count * (idf.get(term) || 1));
-            }
-            return vec;
-          };
-
-          const cosine = (a: Map<string, number>, b: Map<string, number>): number => {
-            let dot = 0;
-            let normA = 0;
-            let normB = 0;
-            for (const val of a.values()) normA += val * val;
-            for (const val of b.values()) normB += val * val;
-            for (const [term, val] of a.entries()) {
-              dot += val * (b.get(term) || 0);
-            }
-            if (normA === 0 || normB === 0) return 0;
-            return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-          };
-
-          const vectorsA = linesA.map((line) => vectorize(tokenize(line)));
-          const vectorsB = linesB.map((line) => vectorize(tokenize(line)));
-          const matches: Array<{ lineA: number; lineB: number; similarity: number }> = [];
-          let simSum = 0;
-          let comparisons = 0;
-
-          for (let i = 0; i < vectorsA.length; i++) {
-            let best = { lineB: -1, similarity: 0 };
-            for (let j = 0; j < vectorsB.length; j++) {
-              const s = cosine(vectorsA[i], vectorsB[j]);
-              comparisons++;
-              simSum += s;
-              if (s > best.similarity) best = { lineB: j, similarity: s };
-            }
-            if (best.similarity >= threshold) {
-              matches.push({ lineA: i + 1, lineB: best.lineB + 1, similarity: Number(best.similarity.toFixed(3)) });
-            }
-          }
-
-          const avg = comparisons > 0 ? simSum / comparisons : 0;
-          const summary = matches.length > 0
-            ? `Detected ${matches.length} highly similar line pairs (threshold ${threshold}).`
-            : `No high-similarity line matches found (threshold ${threshold}).`;
-
-          return {
-            averageSimilarity: Number(avg.toFixed(4)),
-            similarLines: matches,
-            isSimilar: avg >= threshold || matches.length > 0,
-            summary
-          };
-        }
-
-        async updateWorkspaceMemoryForSimilarFiles(
-          workspaceHash: string,
-          filePath: string,
-          previousContent: string,
-          currentContent: string,
-          threshold: number = 0.82
-        ): Promise<void> {
-          const comparison = this.compareFilesLineByLineCosine(previousContent, currentContent, threshold);
-          if (!comparison.isSimilar) return;
-
-          const differentLines = currentContent
-            .split('\n')
-            .map((line, idx) => ({ line, idx }))
-            .filter(({ line, idx }) => line !== (previousContent.split('\n')[idx] || ''))
-            .slice(0, 15)
-            .map(({ line, idx }) => `L${idx + 1}: ${line}`);
-
-          const summary = {
-            type: 'similar-file-diff-summary',
-            path: filePath,
-            averageSimilarity: comparison.averageSimilarity,
-            similarLines: comparison.similarLines.slice(0, 20),
-            diffPreview: differentLines
-          };
-
-          await this.storeToolOutput('auto_memory', { _ws: workspaceHash, path: filePath }, summary);
-        }
       });
     } catch (err) {
       console.error(`[MemoryManager] Semantic search failed: ${err}`);
       return [];
     }
+  }
+
+  compareFilesLineByLineCosine(
+    fileAContent: string,
+    fileBContent: string,
+    threshold: number = 0.82
+  ): {
+    averageSimilarity: number;
+    similarLines: Array<{ lineA: number; lineB: number; similarity: number }>;
+    isSimilar: boolean;
+    summary: string;
+  } {
+    const linesA = fileAContent.split('\n');
+    const linesB = fileBContent.split('\n');
+    const docFreq = new Map<string, number>();
+    const allLines = [...linesA, ...linesB];
+
+    const tokenize = (line: string): string[] =>
+      line.toLowerCase().match(/[a-z0-9_]+/g) || [];
+
+    allLines.forEach((line) => {
+      const terms = tokenize(line);
+      const unique = new Set(terms);
+      unique.forEach((term) => docFreq.set(term, (docFreq.get(term) || 0) + 1));
+    });
+
+    const totalDocs = Math.max(1, allLines.length);
+    const idf = new Map<string, number>();
+    for (const [term, df] of docFreq.entries()) {
+      idf.set(term, Math.log((1 + totalDocs) / (1 + df)) + 1);
+    }
+
+    const vectorize = (tokens: string[]): Map<string, number> => {
+      const tf = new Map<string, number>();
+      for (const t of tokens) tf.set(t, (tf.get(t) || 0) + 1);
+      const vec = new Map<string, number>();
+      for (const [term, count] of tf.entries()) {
+        vec.set(term, count * (idf.get(term) || 1));
+      }
+      return vec;
+    };
+
+    const cosine = (a: Map<string, number>, b: Map<string, number>): number => {
+      let dot = 0;
+      let normA = 0;
+      let normB = 0;
+      for (const val of a.values()) normA += val * val;
+      for (const val of b.values()) normB += val * val;
+      for (const [term, val] of a.entries()) {
+        dot += val * (b.get(term) || 0);
+      }
+      if (normA === 0 || normB === 0) return 0;
+      return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    };
+
+    const vectorsA = linesA.map((line) => vectorize(tokenize(line)));
+    const vectorsB = linesB.map((line) => vectorize(tokenize(line)));
+    const matches: Array<{ lineA: number; lineB: number; similarity: number }> = [];
+    let simSum = 0;
+    let comparisons = 0;
+
+    for (let i = 0; i < vectorsA.length; i++) {
+      let best = { lineB: -1, similarity: 0 };
+      for (let j = 0; j < vectorsB.length; j++) {
+        const s = cosine(vectorsA[i], vectorsB[j]);
+        comparisons++;
+        simSum += s;
+        if (s > best.similarity) best = { lineB: j, similarity: s };
+      }
+      if (best.similarity >= threshold) {
+        matches.push({ lineA: i + 1, lineB: best.lineB + 1, similarity: Number(best.similarity.toFixed(3)) });
+      }
+    }
+
+    const avg = comparisons > 0 ? simSum / comparisons : 0;
+    const summary = matches.length > 0
+      ? `Detected ${matches.length} highly similar line pairs (threshold ${threshold}).`
+      : `No high-similarity line matches found (threshold ${threshold}).`;
+
+    return {
+      averageSimilarity: Number(avg.toFixed(4)),
+      similarLines: matches,
+      isSimilar: avg >= threshold || matches.length > 0,
+      summary
+    };
+  }
+
+  async updateWorkspaceMemoryForSimilarFiles(
+    workspaceHash: string,
+    filePath: string,
+    previousContent: string,
+    currentContent: string,
+    threshold: number = 0.82
+  ): Promise<void> {
+    const comparison = this.compareFilesLineByLineCosine(previousContent, currentContent, threshold);
+    if (!comparison.isSimilar) return;
+
+    const previousLines = previousContent.split('\n');
+    const differentLines = currentContent
+      .split('\n')
+      .map((line, idx) => ({ line, idx }))
+      .filter(({ line, idx }) => line !== (previousLines[idx] || ''))
+      .slice(0, 15)
+      .map(({ line, idx }) => `L${idx + 1}: ${line}`);
+
+    const summary = {
+      type: 'similar-file-diff-summary',
+      path: filePath,
+      averageSimilarity: comparison.averageSimilarity,
+      similarLines: comparison.similarLines.slice(0, 20),
+      diffPreview: differentLines
+    };
+
+    await this.storeToolOutput('auto_memory', { _ws: workspaceHash, path: filePath }, summary);
   }
 
   async storeCompressionStats(original: number, compressed: number, tool: string): Promise<void> {

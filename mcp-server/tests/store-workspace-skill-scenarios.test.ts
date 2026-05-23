@@ -122,7 +122,9 @@ describe('storeWorkspaceSkill Scenarios', () => {
         // Verify file content
         const scriptPath = path.join(root, '.free-llm-mcp', 'skills', 'raw-extract', 'scripts', 'raw.sh');
         const content = await fs.readFile(scriptPath, 'utf-8');
-        expect(content).toBe('echo "raw-code-output"');
+        expect(content).toContain('skill: raw-extract');
+        expect(content).toContain('version: 1.0.6');
+        expect(content).toContain('echo "raw-code-output"');
     });
 
     it('should handle large context injections by joining them (potential overflow check)', async () => {

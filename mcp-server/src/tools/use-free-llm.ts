@@ -20,7 +20,7 @@ import { validateProvider } from './validate-provider.js';
 
 export interface UseFreeLLMInput {
   model?: string;
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: any }>;
   temperature?: number;
   max_tokens?: number;
   top_p?: number;

@@ -145,8 +145,9 @@ describe('Memory System Integration', () => {
         expect(exists).toBe(true);
         if (exists) {
             const content = await fs.readFile(scriptPath, 'utf-8');
-            // Should match the mocked output in vi.mock
-            expect(content).toBe('echo "hello from llm"');
+            expect(content).toContain('skill: test-skill');
+            expect(content).toContain('version: 1.0.6');
+            expect(content).toContain('echo "hello from llm"');
         }
 
         // Cleanup
