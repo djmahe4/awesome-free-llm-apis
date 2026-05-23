@@ -55,6 +55,7 @@ export class WorkspaceIndexer {
                 
                 // Check if already indexed and unchanged (using memoryManager's longTerm cache)
                 const existingHash = await memoryManager.longTerm.load(`${vectorKey}:hash`);
+                const previousContent = await memoryManager.longTerm.load(`${vectorKey}:content`) as string | undefined;
                 if (existingHash === contentHash && !force) {
                     result.skippedFiles++;
                     continue;
@@ -76,6 +77,16 @@ export class WorkspaceIndexer {
 
                 // 4. Update hash cache
                 await memoryManager.longTerm.save(`${vectorKey}:hash`, contentHash);
+                await memoryManager.longTerm.save(`${vectorKey}:content`, content);
+
+                if (previousContent && previousContent !== content) {
+                    await memoryManager.updateWorkspaceMemoryForSimilarFiles(
+                        wsHash,
+                        relativePath,
+                        previousContent,
+                        content
+                    );
+                }
                 result.indexedFiles++;
             } catch (err) {
                 console.error(`[WorkspaceIndexer] Failed to index ${file}: ${err}`);

@@ -12,6 +12,15 @@ export class Sanitizer {
         /https?:\/\/[^/:]+:[^/@]+@/g,
         // Common environment variable patterns (refined to avoid redacting function calls)
         /(?:SET|EXPORT)\s+(?:[A-Z_]+)\s*=\s*(?:['"]?)([a-zA-Z0-9\-._]{8,})(?![a-zA-Z0-9\-._])(?!\()(?:['"]?)/gi,
+        // Email addresses
+        /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+        // Phone numbers (international + domestic)
+        /\b(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{2,4}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{4}\b/g,
+        // Credit cards (13-19 digits with optional separators)
+        /\b(?:\d[ -]*?){13,19}\b/g,
+        // Bearer / JWT style secrets
+        /\bBearer\s+[A-Za-z0-9\-._~+/]+=*\b/gi,
+        /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
     ];
 
     /**

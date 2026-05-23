@@ -1,6 +1,6 @@
 # free-llm-apis MCP Server
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that exposes **six focused tools** for interacting with 60+ free LLM providers through a unified, agent-first interface.
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that exposes focused tools for interacting with 60+ free LLM providers through a unified, agent-first interface.
 
 ---
 
@@ -52,11 +52,14 @@ graph TD
 
 ---
 
-> **Strict rule for agents:** Only these six tools are part of the public API. Never request additional tools. Prefer internal middleware changes to extend capability.
+> **Strict rule for agents:** Use only documented MCP tools. Prefer internal middleware changes to extend capability.
 
 | Tool | Purpose | Required Params | Key Optional Params |
 |------|---------|----------------|---------------------|
 | `use_free_llm` | Universal chat with deterministic steering; returns ONLY text content | `messages` | `model`, `keywords`, `agentic`, `sessionId`, **`workspace_root`** (recommended for project tasks) |
+| `free_llm_api` | Backward-compatible alias for `use_free_llm`; returns Markdown text | `messages` | `model`, `keywords`, `agentic`, `sessionId`, `workspace_root`, `skill` |
+| `vision_tool` | Analyze local images via a vision-capable model routed through `use_free_llm` | `workspace_root`, `image_path` | `prompt`, `model` |
+| `load_skill_prompt` | Dynamically load a skill prompt from the antigravity skills index | `skill` | — |
 | `get_token_stats` | Real-time per-provider usage and quota stats | *(none)* | — |
 | `validate_provider` | Health-check and credential validation | `providerId` | — |
 | `manage_memory` | Workspace-scoped memory: search/list/stats/clear | `action` | `workspace_root`, `query`, `limit` |
@@ -379,7 +382,7 @@ npx tsx scripts/verification/token-factor-smoke-test.ts
 mcp-server/
 ├── src/
 │   ├── mcp/index.ts          # Tool registration and MCP handler
-│   ├── tools/                # Six public tool implementations
+│   ├── tools/                # MCP tool implementations
 │   │   ├── use-free-llm.ts
 │   │   ├── list-models.ts
 │   │   ├── get-token-stats.ts

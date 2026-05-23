@@ -5,6 +5,8 @@ import type { Message, ChatResponse } from '../providers/types.js';
 import { ProviderRegistry } from '../providers/registry.js';
 import type { PipelineContext } from '../pipeline/middleware.js';
 import { getMessageContent, prependToMessageContent } from './MessageUtils.js';
+import { Sanitizer } from './Sanitizer.js';
+import { calculateModelWeightedMaxTokens } from './model-tokens.js';
 
 export interface TokenTrackingInfo {
     remainingTokens?: number;
@@ -408,7 +410,13 @@ export class LLMExecutor {
                 sanitizedRequest[key] = (context.request as any)[key];
             }
         }
-        
+
+        // Privacy hardening: redact sensitive values before outbound provider call.
+        if (sanitizedRequest.messages) {
+            sanitizedRequest.messages = Sanitizer.sanitizeObject(sanitizedRequest.messages);
+        }
+        sanitizedRequest.user = sanitizedRequest.user ? Sanitizer.sanitize(String(sanitizedRequest.user)) : sanitizedRequest.user;
+
         // Ensure modelId is forced
         sanitizedRequest.model = modelId;
 
@@ -429,7 +437,7 @@ export class LLMExecutor {
         }
 
 
-        const totalWithCompletion = context.estimatedTokens + (context.request.max_tokens || 1024);
+        const totalWithCompletion = context.estimatedTokens + (context.request.max_tokens || calculateModelWeightedMaxTokens(modelId));
 
         // 2. Check token limits (Permissive: Log warning but proceed)
         if (!this.hasEnoughTokens(providerId, totalWithCompletion)) {

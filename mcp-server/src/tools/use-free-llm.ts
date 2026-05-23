@@ -10,6 +10,13 @@ import {
   type PipelineContext
 } from '../pipeline/middleware.js';
 import { StructuralMarkdownMiddleware } from '../middleware/agentic/structural-middleware.js';
+import { calculateModelWeightedMaxTokens } from '../utils/model-tokens.js';
+import { toMarkdownResponse } from '../utils/markdown.js';
+import { loadSkillPrompt } from './load-skill-prompt.js';
+import { manageMemory } from './manage-memory.js';
+import { indexWorkspace } from './index-workspace.js';
+import { getTokenStats } from './get-token-stats.js';
+import { validateProvider } from './validate-provider.js';
 
 export interface UseFreeLLMInput {
   model?: string;
@@ -25,6 +32,7 @@ export interface UseFreeLLMInput {
   sessionId?: string;
   taskType?: TaskType | string;
   keywords?: string[];
+  skill?: string;
 }
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
@@ -202,7 +210,7 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     model,
     messages,
     temperature = 0.7,
-    max_tokens = 1024,
+    max_tokens = calculateModelWeightedMaxTokens(model),
     top_p,
     stream = false,
     provider: providerId,
@@ -211,7 +219,24 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     sessionId: inputSessionId,
     workspace_root: workspaceRoot,
     keywords,
+    skill,
   } = input;
+
+  if (skill) {
+    const loadedSkill = await loadSkillPrompt({ skill });
+    if (loadedSkill.success && loadedSkill.prompt) {
+      messages.unshift({
+        role: 'system',
+        content: [
+          `# DYNAMIC SKILL LOADED: ${loadedSkill.skill}`,
+          loadedSkill.description ? `Description: ${loadedSkill.description}` : '',
+          loadedSkill.terminalSetupHint ? `Terminal setup note: ${loadedSkill.terminalSetupHint}` : '',
+          '',
+          loadedSkill.prompt
+        ].filter(Boolean).join('\n')
+      });
+    }
+  }
 
   // v1.0.4 Resolution Pass: Resolve file, artifact, ctx7 references in user messages
   if (agentic) {
@@ -289,10 +314,43 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     keywords
   };
 
-  const finalContext = await pipeline.execute(context);
+  let finalContext = await pipeline.execute(context);
+
+  // Tool-call interception loop: execute parsed local tool calls and continue the conversation.
+  let toolCallDepth = 0;
+  const MAX_TOOL_CALL_DEPTH = 3;
+  while (toolCallDepth < MAX_TOOL_CALL_DEPTH) {
+    const assistantContent = finalContext?.response?.choices?.[0]?.message?.content || '';
+    const parsedCall = tryExtractToolCall(assistantContent);
+    if (!parsedCall) break;
+    toolCallDepth++;
+
+    const toolOutput = await executeServerToolCall(parsedCall, workspaceRoot);
+    context.request.messages.push(
+      { role: 'assistant', content: assistantContent },
+      {
+        role: 'user',
+        content: [
+          `Tool \`${parsedCall.tool}\` was executed server-side.`,
+          'Use this result to continue with the original user intent:',
+          '',
+          '```json',
+          JSON.stringify(toolOutput, null, 2),
+          '```'
+        ].join('\n')
+      }
+    );
+
+    finalContext = await pipeline.execute(context);
+  }
 
   if (!finalContext.response) {
     throw new Error('Pipeline completed but no response was generated.');
+  }
+
+  const finalChoice = finalContext.response?.choices?.[0]?.message;
+  if (finalChoice?.content) {
+    finalChoice.content = toMarkdownResponse(finalChoice.content);
   }
 
   return finalContext.response;
@@ -301,4 +359,66 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
 export function flushSystem(): void {
   sharedResponseCache.flush();
   sharedRouter.flush();
+}
+
+interface ParsedToolCall {
+  tool: string;
+  args: Record<string, any>;
+}
+
+function safeJsonParse(candidate: string): any | null {
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function tryExtractToolCall(content: string): ParsedToolCall | null {
+  const text = (content || '').trim();
+  if (!text) return null;
+
+  const fencedJsonBlocks = [...text.matchAll(/```json\s*([\s\S]*?)```/gi)].map((m) => m[1].trim());
+  for (const block of fencedJsonBlocks) {
+    const parsed = safeJsonParse(block);
+    if (parsed && typeof parsed === 'object' && typeof parsed.tool === 'string') {
+      return { tool: parsed.tool, args: (parsed.args || parsed.arguments || {}) as Record<string, any> };
+    }
+  }
+
+  const inlineJson = text.match(/\{[\s\S]*\}/);
+  if (inlineJson) {
+    const parsed = safeJsonParse(inlineJson[0]);
+    if (parsed && typeof parsed === 'object' && typeof parsed.tool === 'string') {
+      return { tool: parsed.tool, args: (parsed.args || parsed.arguments || {}) as Record<string, any> };
+    }
+  }
+
+  return null;
+}
+
+async function executeServerToolCall(call: ParsedToolCall, workspaceRoot?: string): Promise<any> {
+  const tool = call.tool.trim();
+  const args = call.args || {};
+
+  if (tool === 'read_file') {
+    const rawPath = args.path || args.file_path;
+    if (!rawPath || typeof rawPath !== 'string') {
+      throw new Error('read_file requires `path`.');
+    }
+    const resolved = path.resolve(workspaceRoot || process.cwd(), rawPath);
+    if (workspaceRoot && !resolved.startsWith(path.resolve(workspaceRoot))) {
+      throw new Error('read_file path is outside workspace_root.');
+    }
+    const content = await fs.readFile(resolved, 'utf-8');
+    return { path: resolved, content };
+  }
+
+  if (tool === 'manage_memory') return await manageMemory(args as any);
+  if (tool === 'index_workspace') return await indexWorkspace(args as any);
+  if (tool === 'get_token_stats') return await getTokenStats();
+  if (tool === 'validate_provider') return await validateProvider(args.providerId);
+  if (tool === 'load_skill_prompt') return await loadSkillPrompt({ skill: args.skill });
+
+  throw new Error(`Unsupported tool call: ${tool}`);
 }

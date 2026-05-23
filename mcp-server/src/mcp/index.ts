@@ -5,6 +5,8 @@ import {
   type CallToolRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import { useFreeLLM } from '../tools/use-free-llm.js';
+import { visionTool } from '../tools/vision-tool.js';
+import { loadSkillPrompt } from '../tools/load-skill-prompt.js';
 // v1.0.5 Deprecated: Unnecessary feature (Remove this comment and import in new update)
 //import { listAvailableFreeModels } from '../tools/list-models.js';
 // v1.0.5 Deprecated: Unnecessary feature (DO NOT REMOVE THE CODE COMMENT)
@@ -13,10 +15,11 @@ import { manageMemory } from '../tools/manage-memory.js';
 import { getTokenStats } from '../tools/get-token-stats.js';
 import { validateProvider } from '../tools/validate-provider.js';
 import { indexWorkspace } from '../tools/index-workspace.js';
+import { toMarkdownResponse } from '../utils/markdown.js';
 
 export async function createMCPServer(): Promise<Server> {
   const server = new Server(
-    { name: 'free-llm-apis', version: '1.0.5' },
+    { name: 'free-llm-apis', version: '1.0.6' },
     { capabilities: { tools: {} } }
   );
 
@@ -92,8 +95,61 @@ export async function createMCPServer(): Promise<Server> {
             sessionId: { type: 'string', description: 'Unique session identifier required for agentic mode (e.g. UUID or project slug). Partitions state and logs per project.' },
             workspace_root: { type: 'string', description: 'Workspace path for cache-keying and auto-sessionId derivation' },
             google_search: { type: 'boolean', description: 'Enable Google search for Gemini models (default false)' },
+            skill: { type: 'string', description: 'Optional skill id/name loaded dynamically from remote skill index' },
           },
           required: ['messages'],
+        },
+      },
+      {
+        name: 'free_llm_api',
+        description: 'Backward-compatible alias for use_free_llm. Returns Markdown text.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            messages: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  role: { type: 'string', enum: ['system', 'user', 'assistant'] },
+                  content: { type: 'string' },
+                },
+                required: ['role', 'content'],
+              },
+            },
+            model: { type: 'string' },
+            keywords: { type: 'array', items: { type: 'string' } },
+            agentic: { type: 'boolean' },
+            sessionId: { type: 'string' },
+            workspace_root: { type: 'string' },
+            skill: { type: 'string', description: 'Optional dynamic skill id/name from awesome-antigravity-skills index' },
+          },
+          required: ['messages'],
+        },
+      },
+      {
+        name: 'vision_tool',
+        description: 'Analyze a local image using a vision-capable model via use_free_llm.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            workspace_root: { type: 'string', description: 'Absolute workspace path' },
+            image_path: { type: 'string', description: 'Image URI using file:/// scheme' },
+            prompt: { type: 'string', description: 'Optional analysis prompt' },
+            model: { type: 'string', description: 'Optional vision model id' },
+          },
+          required: ['workspace_root', 'image_path'],
+        },
+      },
+      {
+        name: 'load_skill_prompt',
+        description: 'Load a dynamic skill prompt from the awesome-antigravity-skills index endpoint.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            skill: { type: 'string', description: 'Skill id or name from the remote index' },
+          },
+          required: ['skill'],
         },
       },
       // Deprecated (To be removed in future)
@@ -391,7 +447,7 @@ export async function createMCPServer(): Promise<Server> {
     const { name, arguments: args } = request.params;
 
     try {
-      if (name === 'use_free_llm') {
+      if (name === 'use_free_llm' || name === 'free_llm_api') {
         const input = args as unknown as Parameters<typeof useFreeLLM>[0];
         const result = await useFreeLLM(input);
 
@@ -410,14 +466,22 @@ export async function createMCPServer(): Promise<Server> {
             ? texts[0]  // single response — return as-is, no label overhead
             : texts.map((t, i) => `AGENT RESPONSE ${i + 1}\n\n${t}`).join('\n\n');
 
-        const simplified = {
-          response: responseText,
-          model: result.model,
-          usage: result.usage,
-        };
-
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify(simplified, null, 2) }],
+          content: [{ type: 'text' as const, text: toMarkdownResponse(responseText) }],
+        };
+      }
+
+      if (name === 'vision_tool') {
+        const result = await visionTool(args as any);
+        return {
+          content: [{ type: 'text' as const, text: toMarkdownResponse(result.response) }],
+        };
+      }
+
+      if (name === 'load_skill_prompt') {
+        const result = await loadSkillPrompt(args as any);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         };
       }
 

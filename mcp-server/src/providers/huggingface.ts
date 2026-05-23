@@ -6,7 +6,9 @@ export class HuggingFaceProvider extends BaseProvider {
   id = 'huggingface';
   baseURL = 'https://router.huggingface.co/v1/';
   envVar = 'HF_TOKEN';
-  rateLimits: RateLimits = {};
+  // v1.0.6: Hugging Face is no longer treated as unlimited-free in routing.
+  // Track as credit-based ($0.10 monthly credits) so routers can deprioritize it.
+  rateLimits: RateLimits = { reqPerMonth: 1 };
   models: ProviderModel[] = [
     { id: 'meta-llama/Llama-3.3-70B-Instruct', name: 'Llama 3.3 70B Instruct' },
     { id: 'google/gemma-3-27b-it', name: 'Gemma 3 27B' },

@@ -7,7 +7,6 @@ import { CloudflareProvider } from './cloudflare.js';
 import { GitHubModelsProvider } from './github-models.js';
 import { GroqProvider } from './groq.js';
 import { HuggingFaceProvider } from './huggingface.js';
-import { KlusterProvider } from './kluster.js';
 import { LLM7Provider } from './llm7.js';
 import { NvidiaProvider } from './nvidia.js';
 import { OllamaCloudProvider } from './ollama-cloud.js';
@@ -31,7 +30,6 @@ export class ProviderRegistry {
       new GitHubModelsProvider(),
       new GroqProvider(),
       new HuggingFaceProvider(),
-      new KlusterProvider(),
       new LLM7Provider(),
       new NvidiaProvider(),
       new OllamaCloudProvider(),

@@ -3,6 +3,9 @@ export const config = {
   logLevel: process.env.LOG_LEVEL ?? 'info',
   memoryStorePath: process.env.MEMORY_STORE_PATH ?? './data/memory.json',
   cacheStorePath: process.env.CACHE_STORE_PATH ?? './data/cache.json',
+  pricing: {
+    huggingfaceMonthlyCreditsUsd: 0.10,
+  },
   providers: {
     cohere: process.env.CO_API_KEY,
     gemini: process.env.GEMINI_API_KEY,
@@ -14,7 +17,6 @@ export const config = {
     github: process.env.GITHUB_TOKEN,
     groq: process.env.GROQ_API_KEY,
     huggingface: process.env.HF_TOKEN,
-    kluster: process.env.KLUSTER_API_KEY,
     llm7: process.env.LLM7_API_KEY,
     nvidia: process.env.NVIDIA_API_KEY,
     ollama: process.env.OLLAMA_API_KEY,

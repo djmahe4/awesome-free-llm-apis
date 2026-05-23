@@ -5,6 +5,7 @@ import type { Middleware, PipelineContext, NextFunction } from '../middleware.js
 import { ContextManager } from '../../utils/ContextManager.js';
 import { getMessageContent, prependToMessageContent } from '../../utils/MessageUtils.js';
 import { LLMExecutor } from '../../utils/LLMExecutor.js';
+import { calculateModelWeightedMaxTokens } from '../../utils/model-tokens.js';
 
 export class IntelligentRouterMiddleware implements Middleware {
     name = 'IntelligentRouterMiddleware';
@@ -733,6 +734,9 @@ Request: ${lastMessage}`;
                     if (tracking && tracking.remainingTokens !== undefined && Number.isFinite(tracking.remainingTokens)) {
                         // Proportional to 50k tokens as a "healthy" baseline
                         tokenFactor = Math.min(1.2, Math.max(0.1, tracking.remainingTokens / 50000));
+                        if (provider.id === 'huggingface' && tracking.remainingTokens < 5000) {
+                            console.warn('[Router] Hugging Face credits may be low; prioritizing other free providers.');
+                        }
                     }
 
                     // 4. Metadata-driven refinement
@@ -763,6 +767,11 @@ Request: ${lastMessage}`;
                     // 6. Quota Depletion Hard-Penalty
                     if (tracking && (tracking.remainingTokens === 0 || tracking.remainingRequests === 0)) {
                         scoreModifier *= 0.05; // Drop to bottom of stack but keep as absolute last resort
+                    }
+
+                    // Hugging Face is now credit-based; prefer fully-free providers when possible.
+                    if (provider.id === 'huggingface') {
+                        scoreModifier *= 0.7;
                     }
 
                     // 7. Success Momentum (favor providers that are working now)
@@ -843,6 +852,8 @@ Request: ${lastMessage}`;
                 // Boost tokens for reasoning models
                 if (isReasoning) {
                     attemptRequest.max_tokens = Math.max(attemptRequest.max_tokens || 0, 8192);
+                } else if (!attemptRequest.max_tokens) {
+                    attemptRequest.max_tokens = calculateModelWeightedMaxTokens(modelId);
                 }
 
                 // Temperature pinning: Cap at 0.5 for precision-critical task types.

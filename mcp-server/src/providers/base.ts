@@ -1,5 +1,6 @@
 import fetch from 'node-fetch';
 import type { ChatRequest, ChatResponse, Provider, ProviderModel, RateLimits } from './types.js';
+import { Sanitizer } from '../utils/Sanitizer.js';
 
 export abstract class BaseProvider implements Provider {
   abstract name: string;
@@ -146,6 +147,8 @@ export abstract class BaseProvider implements Provider {
     // Ensure model is set
     sanitizedRequest.model = sanitizedRequest.model || (this.models.length > 0 ? this.models[0].id : '');
 
+    sanitizedRequest.messages = Sanitizer.sanitizeObject(sanitizedRequest.messages);
+
     const controller = new AbortController();
     
     // Wire up external abort signal for Hedged Execution
@@ -171,6 +174,8 @@ export abstract class BaseProvider implements Provider {
 
     const workPromise = (async () => {
       try {
+        sanitizedRequest.messages = Sanitizer.sanitizeObject(sanitizedRequest.messages);
+
         const response = await fetch(url, {
           method: 'POST',
           headers: {

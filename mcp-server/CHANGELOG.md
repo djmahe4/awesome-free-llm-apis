@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.6 – Vision, Skill Loading, Privacy Hardening + Provider/Routing Updates (May 2026)
+
+### 🚀 Highlights
+
+- Removed Kluster provider from runtime registration and environment/config usage.
+- Added `vision_tool` for `file:///` workspace-local image analysis routed through `use_free_llm`.
+- Added dynamic `load_skill_prompt` tool for remote skills index loading and integrated optional skill prompt injection via `use_free_llm.skill`.
+- Hardened outbound privacy redaction for LLM-bound payloads (keys/tokens/emails/phones/cards/JWT/bearer strings).
+- Added tool-call interception in `use_free_llm` to execute recognized tool-call payloads server-side and continue conversation.
+- Hardened skill script generation with explicit delimiters (`@@@SKILL_SCRIPT_START@@@` / `@@@SKILL_SCRIPT_END@@@`), `.py` filename normalization, and metadata headers.
+- Enforced Markdown-formatted output for `use_free_llm` and `free_llm_api`.
+- Added line-by-line cosine similarity (TF-IDF based) in memory manager and workspace-index integration for similar-file diff summaries.
+- Replaced fixed fallback `max_tokens` behavior with model-weighted token sizing utility.
+- Updated Hugging Face routing behavior to treat it as credit-based and deprioritize it versus fully-free alternatives.
+
+---
+
 ## v1.0.5 – Hedged Execution, Tool Consolidation + Workspace Persistence (May 2026)
 
 **Released:** 2026-05-07 (Updated)

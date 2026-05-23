@@ -108,12 +108,10 @@ describe('Pipeline Orchestration', () => {
         await router.execute(ctx2, vi.fn());
         expect(ctx2.providerId).toBe('mistral');
 
-        // Test 3: Kluster fallback routing for Qwen
-        vi.stubEnv('KLUSTER_API_KEY', 'test-kluster-key');
+        // Test 3: Qwen fallback routing should prefer Nvidia path
         let ctx3: PipelineContext = { request: { model: 'Qwen/Qwen3-235B-A22B', messages: [{ role: 'user', content: 'test' }] } };
         await router.execute(ctx3, vi.fn());
-        // Qwen is primarily on Nvidia and Kluster; whichever returns true first
-        expect(['kluster', 'nvidia']).toContain(ctx3.providerId);
+        expect(['nvidia', 'github-models']).toContain(ctx3.providerId);
     });
 
     it('TokenManagerMiddleware estimates tokens and syncs from headers', async () => {
