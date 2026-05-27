@@ -141,17 +141,20 @@ export async function createMCPServer(): Promise<Server> {
           required: ['workspace_root', 'image_path'],
         },
       },
-      {
-        name: 'load_skill_prompt',
-        description: 'Load a dynamic skill prompt from the awesome-antigravity-skills index endpoint.',
-        inputSchema: {
-          type: 'object' as const,
-          properties: {
-            skill: { type: 'string', description: 'Skill id or name from the remote index' },
-          },
-          required: ['skill'],
-        },
-      },
+       {
+         name: 'load_skill_prompt',
+         description: 'Search for or load a dynamic skill prompt from the awesome-antigravity-skills index. Skills are saved locally to the workspace or home directory.',
+         inputSchema: {
+           type: 'object' as const,
+           properties: {
+             type: { type: 'string', enum: ['load', 'search'], description: 'Whether to load a specific skill or search for matching skills.' },
+             name: { type: 'string', description: 'The name or ID of the skill to load (required if type is "load").' },
+             keywords: { type: 'array', items: { type: 'string' }, description: 'Keywords to search for skills (required if type is "search").' },
+             workspaceDir: { type: 'string', description: 'Optional absolute path to a workspace directory for local storage. Defaults to user home directory.' },
+           },
+           required: ['type'],
+         },
+       },
       // Deprecated (To be removed in future)
       // {
       //   name: 'list_available_free_models',
