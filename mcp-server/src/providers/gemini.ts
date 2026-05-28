@@ -15,7 +15,7 @@ export class GeminiProvider extends BaseProvider {
   envVar = 'GEMINI_API_KEY';
   rateLimits: RateLimits = { rpm: 15, rpd: 1000 };
   models: ProviderModel[] = [
-    { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite Preview' },
+    { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite Preview' },
     { id: 'gemma-4-31b-it', name: 'Gemma 4 31B' },
     { id: 'gemma-4-26b-a4b-it', name: 'Gemma 4 26B' },
   ];
@@ -104,11 +104,11 @@ export class GeminiProvider extends BaseProvider {
   async chat(request: ChatRequest): Promise<ChatResponse> {
     this.checkRateLimit();
 
-    let actualModel = request.model || 'gemini-3.1-flash-lite-preview';
+    let actualModel = request.model || 'gemini-3.1-flash-lite';
 
     // If google_search is enabled, force usage of a Flash model (efficiency & cost)
     if (request.google_search) {
-      actualModel = 'gemini-3.1-flash-lite-preview';
+      actualModel = 'gemini-3.1-flash-lite';
     }
 
     let result;

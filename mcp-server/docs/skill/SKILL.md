@@ -92,6 +92,7 @@ Proactively index all relevant files in the workspace for semantic search.
 ---
 
 ### Other Utility Tools
+- `load_skill_prompt`: Dynamically load or search for skill prompts from the antigravity skills index (search returns names and descriptions).
 - `get_token_stats`: Check consumption.
 - `validate_provider`: Health check.
 

@@ -30,7 +30,7 @@ export interface LoadSkillPromptInput {
 
 export interface LoadSkillPromptResult {
   success: boolean;
-  skills?: string[];
+  skills?: { name: string, description: string }[];
   filePath?: string;
   error?: string;
 }
@@ -56,7 +56,7 @@ async function getBaseDir(workspaceDir?: string): Promise<string> {
 }
 
 async function getLocalSkillsIndex(baseDir: string): Promise<SkillIndexEntry[]> {
-  const configDir = path.join(baseDir, '.free-llms-mcp');
+  const configDir = path.join(baseDir, '.free-llm-mcp');
   const indexFile = path.join(configDir, 'skills.json');
 
   try {
@@ -82,7 +82,7 @@ async function refreshSkillsIndex(configDir: string, indexFile: string): Promise
   return index;
 }
 
-async function searchSkills(keywords: string[], baseDir: string): Promise<string[]> {
+async function searchSkills(keywords: string[], baseDir: string): Promise<{ name: string, description: string }[]> {
   const index = await getLocalSkillsIndex(baseDir);
   if (!keywords || keywords.length === 0) return [];
 
@@ -92,12 +92,16 @@ async function searchSkills(keywords: string[], baseDir: string): Promise<string
     keywords.forEach(k => {
       if (target.includes(normalize(k))) score++;
     });
-    return { name: entry.name || entry.id, score };
+    return { 
+      name: entry.name || entry.id || '', 
+      description: entry.description || '', 
+      score 
+    };
   })
   .filter(e => e.score > 0)
   .sort((a, b) => b.score - a.score);
 
-  return scored.slice(0, 10).map(e => e.name || '');
+  return scored.slice(0, 10).map(e => ({ name: e.name, description: e.description }));
 }
 
 async function fetchAllFiles(skillPath: string, accumulator: { path: string, content: string }[] = []): Promise<{ path: string, content: string }[]> {
@@ -140,7 +144,7 @@ export async function loadSkillPrompt(input: LoadSkillPromptInput): Promise<Load
         return { success: true, skills: results };
       }
 
-      const skillDir = path.join(baseDir, '.free-llms-mcp', 'skills', found.id || found.name || name);
+      const skillDir = path.join(baseDir, '.free-llm-mcp', 'skills', found.id || found.name || name);
       await fs.mkdir(skillDir, { recursive: true });
 
       const skillPath = found.path.replace(/^\/+/, '');

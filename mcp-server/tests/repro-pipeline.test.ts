@@ -43,6 +43,7 @@ describe('IntelligentRouterMiddleware Strategic Repro', () => {
             }),
             flush: vi.fn(),
             getTokenState: vi.fn().mockReturnValue({}),
+            getTokenScore: vi.fn().mockReturnValue(1.0),
             isProviderCircuitOpen: vi.fn().mockReturnValue(false),
             getProviderStats: vi.fn().mockReturnValue({}),
             recordProviderSuccess: vi.fn(),

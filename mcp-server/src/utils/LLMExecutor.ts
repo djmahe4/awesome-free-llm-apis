@@ -539,8 +539,8 @@ export class LLMExecutor {
         // v1.0.4: Strategic model selection for high-stakes planning/decomposition
         const targetModels = modelOverride === 'any'
             ? (options.google_search 
-                ? ['gemini-3.1-flash-lite-preview', 'deepseek-ai/DeepSeek-V3', 'nvidia/nemotron-3-super-120b-a12b:free', 'qwen/qwen3-coder:free', 'llama-3.3-70b-versatile', 'glm-4.7']
-                : ['deepseek-ai/DeepSeek-V3', 'nvidia/nemotron-3-super-120b-a12b:free', 'qwen/qwen3-coder:free', 'gemini-3.1-flash-lite-preview', 'llama-3.3-70b-versatile', 'glm-4.7'])
+                ? ['gemini-3.1-flash-lite', 'deepseek-ai/DeepSeek-V3', 'nvidia/nemotron-3-super-120b-a12b:free', 'qwen/qwen3-coder:free', 'llama-3.3-70b-versatile', 'glm-4.7']
+                : ['deepseek-ai/DeepSeek-V3', 'nvidia/nemotron-3-super-120b-a12b:free', 'qwen/qwen3-coder:free', 'gemini-3.1-flash-lite', 'llama-3.3-70b-versatile', 'glm-4.7'])
             : [modelOverride];
 
         // Pre-calculate scores once for efficiency

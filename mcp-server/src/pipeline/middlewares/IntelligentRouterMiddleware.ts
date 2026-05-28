@@ -1,6 +1,6 @@
 import { ProviderRegistry } from '../../providers/registry.js';
 import { TaskType } from '../middleware.js';
-import type { Message, ChatResponse } from '../../providers/types.js';
+import type { Message, ChatResponse, Provider } from '../../providers/types.js';
 import type { Middleware, PipelineContext, NextFunction } from '../middleware.js';
 import { ContextManager } from '../../utils/ContextManager.js';
 import { getMessageContent, prependToMessageContent } from '../../utils/MessageUtils.js';
@@ -64,7 +64,7 @@ export class IntelligentRouterMiddleware implements Middleware {
         'nvidia/nemotron-nano-12b-v2-vl:free': 0.85,
         'mistral-small-latest': 0.82,
         'ministral-8b-2512': 0.82,
-        'gemini-3.1-flash-lite-preview': 0.82,
+        'gemini-3.1-flash-lite': 0.82,
         'stepfun-ai/step-3.5-flash': 0.82,
         'nvidia/nemotron-3-nano-30b-a3b:free': 0.82,
 
@@ -208,16 +208,27 @@ export class IntelligentRouterMiddleware implements Middleware {
         const lastMsg = getMessageContent(messages[messages.length - 1]);
         const lower = lastMsg.toLowerCase();
 
-        // Complex if it has significant numbered steps (ignore short lists), 
-        // multiple distinct questions, or strong sequential signals.
+        // 1. Numbered steps (e.g., "1. Do this, 2. Do that")
         const stepCount = (lastMsg.match(/^\s*\d+[.)]\s/gm) || []).length;
+        
+        // 2. Multiple questions (e.g., "How many...? What is...? When...?")
         const questionCount = (lastMsg.match(/\?/g) || []).length;
-        const hasSequencers = (lower.includes('first') || lower.includes('initial')) &&
-            (lower.includes('then') || lower.includes('secondary')) &&
-            (lower.includes('finally') || lower.includes('lastly'));
+        
+        // 3. Sequential logical markers (relaxed from requiring all three)
+        const hasSequencers = (lower.includes('first') || lower.includes('start') || lower.includes('step')) &&
+            (lower.includes('then') || lower.includes('next') || lower.includes('after') || lower.includes('subtask'));
+
+        // 4. Presence of code blocks (code tasks are inherently complex)
+        const hasCodeBlocks = lastMsg.includes('```');
+
+        // 5. Prompts that are very long (likely contain detailed context or instructions)
         const isLong = lastMsg.length > 2500;
 
-        return stepCount >= 5 || (questionCount >= 3 && isLong) || hasSequencers;
+        return stepCount >= 3 || 
+               (questionCount >= 3 && isLong) || 
+               hasSequencers || 
+               hasCodeBlocks ||
+               (stepCount >= 2 && isLong);
     }
 
     /**
@@ -228,8 +239,8 @@ export class IntelligentRouterMiddleware implements Middleware {
 
         // 1. Pick a Planner model (SiliconFlow V3, DeepSeek-R1, or Gemini Flash Lite)
         const plannerModels = context.request.google_search
-            ? ['gemini-3.1-flash-lite-preview', 'DeepSeek-R1', 'deepseek-ai/DeepSeek-V3', 'qwen/qwen3-coder:free']
-            : ['DeepSeek-R1', 'deepseek-ai/DeepSeek-V3', 'gemini-3.1-flash-lite-preview', 'qwen/qwen3-coder:free', 'llama-3.3-70b-versatile'];
+            ? ['gemini-3.1-flash-lite', 'DeepSeek-R1', 'deepseek-ai/DeepSeek-V3', 'qwen/qwen3-coder:free']
+            : ['DeepSeek-R1', 'deepseek-ai/DeepSeek-V3', 'gemini-3.1-flash-lite', 'qwen/qwen3-coder:free', 'llama-3.3-70b-versatile'];
         let plannerResponse: string | null = null;
 
         const lastMessage = context.request.messages.length > 0
@@ -338,8 +349,8 @@ Request: ${lastMessage}`;
      */
     public static taskRouteMap: Record<TaskType, string[]> = {
         [TaskType.Coding]: [
-            'qwen/qwen3-coder-480b-a35b-instruct',
             'qwen/qwen3-coder-480b-a35b:free',
+            'qwen/qwen3-coder-480b-a35b-instruct',
             'qwen/qwen3-coder:free',
             'deepseek-ai/deepseek-r1-distill-qwen-32b',
             'openai/gpt-oss-120b',
@@ -359,7 +370,7 @@ Request: ${lastMessage}`;
             '@cf/qwen/qwq-32b',
             'deepseek-v3.2',
             'gpt-oss-20b',
-            'gemini-3.1-flash-lite-preview',
+            'gemini-3.1-flash-lite',
             'mistral-large-latest',
             'openai/gpt-oss-120b:free',
             'meta-llama/llama-3.3-70b-instruct:free',
@@ -404,7 +415,7 @@ Request: ${lastMessage}`;
             'google/gemma-3-27b-it',
             'gemma-4-31b-it',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-            'gemini-3.1-flash-lite-preview',
+            'gemini-3.1-flash-lite',
             'glm-4.5-air',
             'ministral-8b-latest',
             'nvidia/nemotron-3-super-120b-a12b:free',
@@ -420,7 +431,7 @@ Request: ${lastMessage}`;
             'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, bulk classification
             'ministral-8b-2512',
             'GLM-4.6V-Flash',
-            'gemini-3.1-flash-lite-preview',
+            'gemini-3.1-flash-lite',
             'mistral-small-latest',
             'glm-4.6',
             'glm-4.5-air',
@@ -434,7 +445,7 @@ Request: ${lastMessage}`;
             'gemma-4-31b-it',
             'mistral-small-latest',
             'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, bulk-friendly
-            'gemini-3.1-flash-lite-preview',
+            'gemini-3.1-flash-lite',
             'llama-3.3-70b-versatile',
             'glm-4.6',
             'glm-4.5-air',
@@ -449,7 +460,7 @@ Request: ${lastMessage}`;
             'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, great for bulk search
             'meta-llama/llama-4-scout-17b-16e-instruct',
             'command-r-plus-08-2024',
-            'gemini-3.1-flash-lite-preview',
+            'gemini-3.1-flash-lite',
             'mistral-large-latest',
             'openai/gpt-oss-120b:free',
             'llama-3.3-70b-versatile',
@@ -462,7 +473,7 @@ Request: ${lastMessage}`;
             'gemma-4-31b-it',
             'kimi-k2.5',
             'mistral-small-latest',
-            'gemini-3.1-flash-lite-preview',
+            'gemini-3.1-flash-lite',
             'gemma-4-26b-a4b-it',
             'mistralai/Mistral-7B-Instruct-v0.3', // HuggingFace capacity
             'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, great for bulk summarization
@@ -479,7 +490,7 @@ Request: ${lastMessage}`;
             'arcee-ai/trinity-large-preview:free',
             'llama-3.3-70b-versatile',
             'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, bulk extraction
-            'gemini-3.1-flash-lite-preview',
+            'gemini-3.1-flash-lite',
             'glm-4.7',
             'glm-4.5-air',
             'gemma-4-26b-a4b-it',
@@ -516,7 +527,7 @@ Request: ${lastMessage}`;
             'nvidia/nemotron-nano-9b-v2:free',
             'openrouter/free',
             'llama-3.1-8b-instant',
-            'gemini-3.1-flash-lite-preview',
+            'gemini-3.1-flash-lite',
             'gemma-4-26b-a4b-it',
         ]
     };
@@ -560,6 +571,12 @@ Request: ${lastMessage}`;
             throw new Error('No available providers. Please check your API keys.');
         }
 
+        // For Chat task (default), we want to be inclusive of all registered models as a final fallback
+        if (taskType === TaskType.Chat && finalTierModels.length < 100) {
+             const allAvailable = availableProviders.flatMap(p => p.models.map(m => m.id));
+             finalTierModels = [...new Set([...finalTierModels, ...allAvailable])];
+        }
+
         if (context.request.google_search) {
             const geminiModels = finalTierModels.filter(m => m.toLowerCase().includes('gemini'));
             const otherModels = finalTierModels.filter(m => !m.toLowerCase().includes('gemini'));
@@ -589,7 +606,9 @@ Request: ${lastMessage}`;
         };
 
         // --- Context Management Strategic Workflow ---
-        const originalTokens = context.estimatedTokens ?? this.executor.calculateTokens(context.request.messages);
+        const originalTokens = context.estimatedTokens ?? 
+                               context.request.estimatedTokens ?? 
+                               this.executor.calculateTokens(context.request.messages);
         context.estimatedTokens = originalTokens;
 
         let estimatedTokens = originalTokens;
@@ -704,224 +723,115 @@ Request: ${lastMessage}`;
             const capability = IntelligentRouterMiddleware.modelCapabilities[modelId] || 0.5;
 
             // Adaptive Headroom: Powerhouses need more space for complex thoughts
-            let requiredHeadroom = 0.1;
+            let requiredHeadroom = 1.1; // Default 10%
             if (isHeavyPrompt) {
-                if (capability >= 0.9) requiredHeadroom = 0.25;
-                else if (capability >= 0.7) requiredHeadroom = 0.15;
+                if (capability >= 0.9) requiredHeadroom = 1.25;
+                else if (capability >= 0.7) requiredHeadroom = 1.15;
             }
+            const requiredCapacity = estimatedTokens * requiredHeadroom;
 
             const scoredProviders = availableProviders
                 .filter(p => p.models.some(m => m.id === modelId))
                 .map(provider => {
-                    const modelMetadata = provider.models.find(m => m.id === modelId);
-
-                    // 1. Base Score from capability
-                    let baseScore = capability;
-
-                    // 2. Health and Weighting
-                    const stats = this.executor.getProviderStats()[provider.id];
-                    const isCoolingDown = stats?.circuitOpen;
-                    const healthScore = stats?.errors > 0 ? 0.3 : 1.0;
-                    const penalty = isCoolingDown ? 0.5 : (stats?.errors > 0 ? Math.min(0.4, stats.errors * 0.1) : 0);
-
-                    const usage = provider.getUsageStats();
-                    const rpmLimit = provider.rateLimits.rpm || 60;
-                    const loadFactor = Math.max(0.1, 1 - (usage.requestCountMinute / rpmLimit));
-
-                    // 3. Token-aware load factor
-                    let tokenFactor = 1.0;
-                    const tracking = this.executor.getTokenState()[provider.id];
-                    if (tracking && tracking.remainingTokens !== undefined && Number.isFinite(tracking.remainingTokens)) {
-                        // Proportional to 50k tokens as a "healthy" baseline
-                        tokenFactor = Math.min(1.2, Math.max(0.1, tracking.remainingTokens / 50000));
-                        if (provider.id === 'huggingface' && tracking.remainingTokens < 5000) {
-                            console.warn('[Router] Hugging Face credits may be low; prioritizing other free providers.');
-                        }
-                    }
-
-                    // 4. Metadata-driven refinement
-                    let scoreModifier = 1.0;
-                    if (modelMetadata && modelMetadata.contextWindow) {
-                        // Add 10% safety margin to estimated tokens to account for tokenizer drift
-                        const bufferedTokens = Math.ceil((estimatedTokens || 1024) * 1.1);
-                        const actualHeadroom = (modelMetadata.contextWindow - bufferedTokens) / modelMetadata.contextWindow;
-
-                        // Hard Block: If truly overloaded, skip immediately
-                        const hardBlockThreshold = modelId === requestedModel ? 0 : 0.05;
-                        if (actualHeadroom < hardBlockThreshold) {
-                            return { provider: provider as any, score: -1 };
-                        }
-
-                        // Penalty for low headroom if NOT the requested model
-                        if (actualHeadroom < requiredHeadroom && modelId !== requestedModel) {
-                            scoreModifier = 0.1;
-                        }
-
-                        // Refine base score with headroom
-                        baseScore = (capability * 0.6) + (Math.max(0, actualHeadroom) * 0.4);
-                    }
-
-                    // 5. Persistence bonus (favors sticking to same session)
-                    if (context.providerId && provider.id === context.providerId) baseScore += 1000;
-
-                    // 6. Quota Depletion Hard-Penalty
-                    if (tracking && (tracking.remainingTokens === 0 || tracking.remainingRequests === 0)) {
-                        scoreModifier *= 0.05; // Drop to bottom of stack but keep as absolute last resort
-                    }
-
-                    // Hugging Face is now credit-based; prefer fully-free providers when possible.
-                    if (provider.id === 'huggingface') {
-                        scoreModifier *= 0.7;
-                    }
-
-                    // 7. Success Momentum (favor providers that are working now)
-                    const lastSuccess = stats?.lastSuccessTime || 0;
-                    const recencyBonus = (Date.now() - lastSuccess) < 300000 ? 1.2 : 1.0; // 20% bonus if succeeded in last 5m
-
-                    // Final Score calculation with robustness guards
-                    let finalScore = (baseScore * healthScore * loadFactor * tokenFactor * scoreModifier * recencyBonus) - penalty;
-
-
-                    // NaN/Infinity Guard: Ensure scores are always valid numbers before filtering
-                    if (!Number.isFinite(finalScore)) {
-                        finalScore = -1; // Default to blocked for safety
-                    }
-
-                    return { provider: provider as any, score: finalScore };
+                    const model = provider.models.find(m => m.id === modelId)!;
+                return {
+                        provider: provider as any,
+                        score: this.calculateProviderScore(provider, modelId, capability, estimatedTokens, isHeavyPrompt, requestedModel, context)
+                    };
                 })
                 .filter(p => p.score > -0.5)
                 .sort((a, b) => b.score - a.score);
+
 
             const triedProviders = new Set<string>();
             let successfulResponse: ChatResponse | null = null;
             let successfulProviderId: string | null = null;
             let lastError: Error | null = null;
+            let primaryError: Error | null = null;
+            const allErrors: string[] = [];
 
-            const globalAbortController = new AbortController();
-            const attemptPromises: Promise<void>[] = [];
-
-            let index = 0;
-            while (index < scoredProviders.length) {
-                if (globalAbortController.signal.aborted) break;
-
-                const { provider } = scoredProviders[index];
-                index++;
-
-                // Google Search is Gemini-exclusive, but we allow fallback to other providers (stripping search) if needed
-                // if (context.request.google_search && provider.id !== 'gemini') continue;
+            // --- Sequential Fallback Loop ---
+            for (const { provider } of scoredProviders) {
+                if (triedProviders.has(provider.id)) continue;
+                triedProviders.add(provider.id);
 
                 const stats = this.executor.getProviderStats()[provider.id];
                 if (stats?.circuitOpen) {
-                    console.error(`[Router][CircuitBreaker] Processing cooling-down provider ${provider.id} because it matched task requirements (Score: penalty -0.5 apply)`);
+                    console.error(`[Router][CircuitBreaker] Processing cooling-down provider ${provider.id} because it matched task requirements`);
                 }
-
-                if (triedProviders.has(provider.id)) continue;
-                triedProviders.add(provider.id);
 
                 const remainingTimeout = getRemainingTimeout();
                 if (remainingTimeout < 2000) continue;
 
-                // Adaptive Timeout Floor
                 const perAttemptTimeout = Math.min(remainingTimeout, Math.max(12000, Math.floor(remainingTimeout / 2)));
 
                 const lowerModel = modelId.toLowerCase();
                 const isReasoning = lowerModel.includes('deepseek') || lowerModel.includes('r1') || lowerModel.includes('o1') || lowerModel.includes('o3') || lowerModel.includes('gemini-pro') || lowerModel.includes('pro-preview');
-                const hedgeDelay = isReasoning ? 20000 : 4000;
 
-                console.error(`[Router][Hedge] Launching ${provider.id}/${modelId} (budget: ${remainingTimeout}ms, attempt timeout: ${perAttemptTimeout}ms, hedge: ${hedgeDelay}ms)`);
+                console.error(`[Router][Sequential] Launching ${provider.id}/${modelId} (budget: ${remainingTimeout}ms, attempt timeout: ${perAttemptTimeout}ms)`);
                 (context as any).providersAttempted.push(`${provider.id}/${modelId}`);
 
-                // Clone request for thread safety
                 const attemptRequest = {
                     ...context.request,
                     model: modelId,
-                    abortSignal: globalAbortController.signal
                 };
 
-                // Strip google_search if provider is not Gemini to prevent 400 Bad Request
                 if (provider.id !== 'gemini') {
                     delete attemptRequest.google_search;
                 }
 
-
-                // Strip google_search if provider is not Gemini to prevent 400 errors
-                // if (attemptRequest.google_search && provider.id !== 'gemini') {
-                //     delete attemptRequest.google_search;
-                // }
-
-                // Boost tokens for reasoning models
                 if (isReasoning) {
                     attemptRequest.max_tokens = Math.max(attemptRequest.max_tokens || 0, 8192);
                 } else if (!attemptRequest.max_tokens) {
                     attemptRequest.max_tokens = calculateModelWeightedMaxTokens(modelId);
                 }
 
-                // Temperature pinning: Cap at 0.5 for precision-critical task types.
-                // Coding, extraction, and classification require factual/structural accuracy —
-                // higher temperatures increase creative drift and hallucination risk.
                 const precisionTasks: string[] = [TaskType.Coding, TaskType.EntityExtraction, TaskType.Classification];
                 if (precisionTasks.includes(taskType)) {
                     attemptRequest.temperature = Math.min(attemptRequest.temperature ?? 0.7, 0.5);
                 }
 
-                const attemptPromise = (async () => {
-                    try {
-                        const tempContext = { ...context, request: attemptRequest };
-                        const response = await this.executor.tryProvider(tempContext, provider.id, modelId, perAttemptTimeout);
+                try {
+                    const tempContext = { ...context, request: attemptRequest };
+                    const response = await this.executor.tryProvider(tempContext, provider.id, modelId, perAttemptTimeout);
 
-                        if (response && !globalAbortController.signal.aborted) {
-                            globalAbortController.abort(); // Cancel other parallel attempts
-                            successfulResponse = response;
-                            successfulProviderId = provider.id;
-                            if (contextCompressed) (context as any).contextCompressed = true;
-                        }
-                    } catch (err: any) {
-                        if (globalAbortController.signal.aborted) return; // Silent suppression of aborted fetch errors
-
-                        lastError = err;
-
-                        const errMsg = err.message?.toLowerCase() || '';
-                        const isContextOverflow =
-                            errMsg.includes('context_length_exceeded') ||
-                            errMsg.includes('too many tokens') ||
-                            errMsg.includes('string is too long') ||
-                            (err.status === 400 && (errMsg.includes('context') || errMsg.includes('token') || errMsg.includes('length')));
-
-                        if (isContextOverflow) {
-                            console.error(`[Router][Overflow] Triggering dynamic compression due to error: ${err.message}`);
-                            try {
-                                const currentTokens = context.estimatedTokens || 4000;
-                                const compResult = await this.contextManager.compress(context, currentTokens * 0.5, sharedSummarizer);
-                                context.request.messages = compResult.messages;
-                                context.estimatedTokens = this.executor.calculateTokens(context.request.messages);
-                                contextCompressed = true;
-                            } catch (compErr) {
-                                console.error(`[Router][Overflow] Compression fallback failed: ${compErr}`);
-                            }
-                        }
-
-                        if (context.providerId && provider.id === context.providerId && !primaryError) {
-                            primaryError = err;
-                        }
-                        allErrors.push(`${provider.id}/${modelId}: ${err.message}`);
-                        // Use centralized executor to record failures to sync with persistent telemetry
-                        this.executor.recordProviderFailure(provider.id, err.status || 500);
+                    if (response) {
+                        successfulResponse = response;
+                        successfulProviderId = provider.id;
+                        if (contextCompressed) (context as any).contextCompressed = true;
+                        break;
                     }
-                })();
+                } catch (err: any) {
+                    lastError = err;
+                    const errMsg = err.message?.toLowerCase() || '';
+                    const isContextOverflow =
+                        errMsg.includes('context_length_exceeded') ||
+                        errMsg.includes('too many tokens') ||
+                        errMsg.includes('string is too long') ||
+                        (err.status === 400 && (errMsg.includes('context') || errMsg.includes('token') || errMsg.includes('length')));
 
-                attemptPromises.push(attemptPromise);
+                    if (isContextOverflow) {
+                        console.error(`[Router][Overflow] Triggering dynamic compression due to error: ${err.message}`);
+                        try {
+                            const currentTokens = context.estimatedTokens || 4000;
+                            const compResult = await this.contextManager.compress(context, currentTokens * 0.5, sharedSummarizer);
+                            context.request.messages = compResult.messages;
+                            context.estimatedTokens = this.executor.calculateTokens(context.request.messages);
+                            contextCompressed = true;
+                        } catch (compErr) {
+                            console.error(`[Router][Overflow] Compression fallback failed: ${compErr}`);
+                        }
+                    }
 
-                if (globalAbortController.signal.aborted) break;
-
-                // Hedged wait: Proceed to the next provider if this one doesn't finish within 'hedgeDelay'
-                const timerPromise = new Promise<void>(resolve => setTimeout(resolve, hedgeDelay));
-                await Promise.race([attemptPromise, timerPromise]);
-
-                if (globalAbortController.signal.aborted) break;
+                    if (context.providerId && provider.id === context.providerId && !primaryError) {
+                        primaryError = err;
+                    }
+                    allErrors.push(`${provider.id}/${modelId}: ${err.message}`);
+                    this.executor.recordProviderFailure(provider.id, err.status || 500);
+                }
             }
 
-            // Sync tail of parallel executions
-            await Promise.all(attemptPromises);
+
 
             if (successfulResponse && successfulProviderId) {
                 const res = successfulResponse as ChatResponse;
@@ -967,7 +877,7 @@ Request: ${lastMessage}`;
         }
 
         // --- Emergency Fallback: Last Resort Deep Truncation ---
-        const emergencyModels = ['gemini-3.1-flash-lite-preview', 'google/gemma-4-31b-it', 'glm-4.5-air', 'llama-3.3-70b-versatile'];
+        const emergencyModels = ['gemini-3.1-flash-lite', 'google/gemma-4-31b-it', 'glm-4.5-air', 'llama-3.3-70b-versatile'];
         const emergencyTruncation = this.contextManager.truncateOldest(context.request.messages, 1500);
         context.request.messages = emergencyTruncation.messages;
         delete context.estimatedTokens;
@@ -998,6 +908,114 @@ Request: ${lastMessage}`;
         throw new Error(this.renderRouterError(taskType, context, mainError, errorSummary));
     }
 
+    private calculateProviderScore(
+        provider: Provider,
+        modelId: string,
+        capability: number,
+        estimatedTokens: number,
+        isHeavyPrompt: boolean,
+        requestedModel: string | undefined,
+        context: PipelineContext
+    ): number {
+        const model = provider.models.find(m => m.id === modelId);
+        const stats = this.executor.getProviderStats()[provider.id];
+        const tracking = this.executor.getTokenState()[provider.id];
+        const now = Date.now();
+
+        // 1. Base Score using capability and headroom
+        let baseScore = capability;
+        if (model?.contextWindow) {
+            const bufferedTokens = Math.ceil(estimatedTokens * 1.1);
+            const actualHeadroom = (model.contextWindow - bufferedTokens) / model.contextWindow;
+
+            // Hard Block: If truly overloaded, skip immediately
+            const hardBlockThreshold = modelId === requestedModel ? 0 : 0.05;
+            if (actualHeadroom < hardBlockThreshold) {
+                return -1;
+            }
+
+            // Refine base score with headroom
+            baseScore = (capability * 0.6) + (Math.max(0, actualHeadroom) * 0.4);
+        }
+
+        // 2. Persistence bonus (favors sticking to same session)
+        if (context.providerId && provider.id === context.providerId) {
+            baseScore += 0.1;
+        }
+
+        // 3. Health Score (Circuit Breaker)
+        const healthScore = stats?.circuitOpen ? 0.1 : 1.0;
+        const penalty = stats?.circuitOpen ? 0.4 : 0;
+
+        // 4. Token-aware load factor
+        let tokenFactor = 1.0;
+        if (tracking) {
+            if (tracking.remainingTokens !== undefined && Number.isFinite(tracking.remainingTokens)) {
+                const safetyBuffer = Math.max(1, estimatedTokens * 5);
+                const loadFactor = tracking.remainingTokens / safetyBuffer;
+                // Higher is better. Distinguish between 'good' and 'great' headroom.
+                tokenFactor = Math.min(2.0, loadFactor > 1 ? 1.0 + Math.log10(loadFactor) * 0.2 : loadFactor);
+
+                if (provider.id === 'huggingface' && tracking.remainingTokens < 5000) {
+                    console.warn('[Router] Hugging Face credits may be low; prioritizing other free providers.');
+                }
+            }
+        }
+
+        // 5. Score Modifier (Headroom & Quota & HF preference)
+        let scoreModifier = 1.0;
+        if (model?.contextWindow) {
+            const bufferedTokens = Math.ceil(estimatedTokens * 1.1);
+            const actualHeadroom = (model.contextWindow - bufferedTokens) / model.contextWindow;
+
+            // Required headroom based on capability
+            let requiredHeadroom = 1.1; 
+            if (isHeavyPrompt) {
+                if (capability >= 0.9) requiredHeadroom = 1.25;
+                else if (capability >= 0.7) requiredHeadroom = 1.15;
+            }
+
+            // Penalty for low headroom if NOT the requested model
+            if (actualHeadroom < (requiredHeadroom - 1.0) && modelId !== requestedModel) {
+                scoreModifier = 0.1;
+            }
+        }
+
+        // Quota Depletion Hard-Penalty
+        if (tracking && (tracking.remainingTokens === 0 || tracking.remainingRequests === 0)) {
+            scoreModifier *= 0.05;
+        }
+
+        // Hugging Face preference
+        if (provider.id === 'huggingface') {
+            scoreModifier *= 0.7;
+        }
+
+        // 6. Success Momentum (favor providers that are working now)
+        const lastSuccess = stats?.lastSuccessTime || 0;
+        const recencyBonus = (now - lastSuccess) < 300000 ? 1.2 : 1.0;
+
+        // 7. Preference for requested model
+        let modelBonus = 0;
+        if (requestedModel && modelId === requestedModel) {
+            modelBonus = 0.3;
+        }
+
+        // Final Score calculation
+        // Using tokenFactor as loadFactor as per user snippet context
+        let finalScore = (baseScore * healthScore * tokenFactor * scoreModifier * recencyBonus) - penalty + modelBonus;
+
+        // NaN/Infinity Guard: Ensure scores are always valid numbers before filtering
+        if (!Number.isFinite(finalScore)) {
+            return -1;
+        }
+
+        return finalScore;
+    }
+
+    /**
+     * Renders a human-readable error message for routing failures.
+     */
     private renderRouterError(taskType: string, context: PipelineContext, mainError: Error | null, errorSummary: string): string {
         const primary = context.providerId || 'auto';
         const failMessage = mainError?.message || 'No available providers';

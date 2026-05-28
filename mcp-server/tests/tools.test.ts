@@ -66,7 +66,7 @@ describe('code_mode', () => {
 
 describe('use_free_llm input validation', () => {
   it('throws when no provider available for model', async () => {
-    (ProviderRegistry as unknown as { instance: undefined }).instance = undefined;
+    vi.spyOn(ProviderRegistry.getInstance(), 'getAvailableProviders').mockReturnValue([]);
     await expect(
       useFreeLLM({
         model: 'nonexistent-model',
