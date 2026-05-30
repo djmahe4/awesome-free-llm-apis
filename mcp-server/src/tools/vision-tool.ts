@@ -1,7 +1,14 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { useFreeLLM } from './use-free-llm.js';
 import { toMarkdownResponse } from '../utils/markdown.js';
+import { PipelineExecutor, TaskType, type PipelineContext } from '../pipeline/middleware.js';
+import { 
+  getStructuralMarkdownMiddleware, 
+  getSharedResponseCache, 
+  getWorkspaceContextMiddleware, 
+  getAgenticMiddleware, 
+  getSharedImageRouter 
+} from '../pipeline/instances.js';
 
 export interface VisionToolInput {
   workspace_root: string;
@@ -11,7 +18,7 @@ export interface VisionToolInput {
 }
 
 export async function visionTool(input: VisionToolInput): Promise<{ response: string; model: string }> {
-  const { workspace_root, image_path, prompt, model = 'gemini-2.5-flash' } = input;
+  const { workspace_root, image_path, prompt, model = 'gemini-3.1-flash-lite' } = input;
 
   if (!workspace_root || !image_path) {
     throw new Error('vision_tool requires both workspace_root and image_path.');
@@ -35,24 +42,40 @@ export async function visionTool(input: VisionToolInput): Promise<{ response: st
 
   const userPrompt = prompt || 'Analyze this image and provide a concise technical markdown report.';
 
-  const response = await useFreeLLM({
-    model,
-    workspace_root,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: userPrompt },
-          { type: 'image_url', image_url: { url: image_path } }
-        ]
-      }
-    ]
-  });
+  // Build a dedicated vision pipeline utilizing the ImageRouterMiddleware
+  const pipeline = new PipelineExecutor();
+  pipeline.use(getStructuralMarkdownMiddleware());
+  pipeline.use(getSharedResponseCache());
+  pipeline.use(getWorkspaceContextMiddleware());
+  pipeline.use(getAgenticMiddleware());
+  pipeline.use(getSharedImageRouter());
 
-  const content = response?.choices?.[0]?.message?.content || '';
+  const context: PipelineContext = {
+    request: {
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: userPrompt },
+            { type: 'image_url', image_url: { url: image_path } }
+          ]
+        }
+      ]
+    },
+    taskType: TaskType.Vision,
+    workspaceRoot: workspace_root
+  };
+
+  const finalContext = await pipeline.execute(context);
+  
+  if (!finalContext.response) {
+    throw new Error('Pipeline completed but no response was generated.');
+  }
+
+  const content = finalContext.response?.choices?.[0]?.message?.content || '';
   return {
     response: toMarkdownResponse(typeof content === 'string' ? content : JSON.stringify(content, null, 2)),
-    model: response.model || model
+    model: finalContext.response.model || model
   };
 }
-

@@ -14,4 +14,8 @@ export class LLM7Provider extends BaseProvider {
     { id: 'ministral-8b-2512', name: 'Ministral 8B 2512' },
     { id: 'GLM-4.6V-Flash', name: 'GLM-4.6V Flash' },
   ];
+
+  visionModels: ProviderModel[] = [
+    { id: 'GLM-4.6V-Flash', name: 'GLM-4.6V Flash (Vision)' },
+  ];
 }

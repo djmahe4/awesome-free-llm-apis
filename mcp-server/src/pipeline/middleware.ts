@@ -29,6 +29,7 @@ export enum TaskType {
     Summarization = 'summarization',
     EntityExtraction = 'extraction',
     Chat = 'chat',
+    Vision = 'vision',
 }
 
 export type NextFunction = () => Promise<void>;

@@ -1,4 +1,4 @@
-import { IntelligentRouterMiddleware } from './middlewares/IntelligentRouterMiddleware.js';
+import { IntelligentRouterMiddleware, ImageRouterMiddleware } from './middlewares/IntelligentRouterMiddleware.js';
 import { AgenticMiddleware } from '../middleware/agentic/agentic-middleware.js';
 import { WorkspaceContextMiddleware } from './middlewares/WorkspaceContextMiddleware.js';
 import { ResponseCacheMiddleware } from './middlewares/ResponseCacheMiddleware.js';
@@ -17,6 +17,7 @@ let _structuralMarkdownMiddleware: StructuralMarkdownMiddleware | null = null;
 let _sharedResponseCache: ResponseCacheMiddleware | null = null;
 let _workspaceContextMiddleware: WorkspaceContextMiddleware | null = null;
 let _sharedRouter: IntelligentRouterMiddleware | null = null;
+let _sharedImageRouter: ImageRouterMiddleware | null = null;
 let _agenticMiddleware: AgenticMiddleware | null = null;
 
 /**
@@ -60,6 +61,16 @@ export function getSharedRouter(): IntelligentRouterMiddleware {
 }
 
 /**
+ * Gets the singleton instance of ImageRouterMiddleware.
+ */
+export function getSharedImageRouter(): ImageRouterMiddleware {
+    if (!_sharedImageRouter) {
+        _sharedImageRouter = new ImageRouterMiddleware();
+    }
+    return _sharedImageRouter;
+}
+
+/**
  * Gets the singleton instance of AgenticMiddleware.
  */
 export function getAgenticMiddleware(): AgenticMiddleware {
@@ -75,5 +86,6 @@ export const structuralMarkdownMiddleware = getStructuralMarkdownMiddleware();
 export const sharedResponseCache = getSharedResponseCache();
 export const workspaceContextMiddleware = getWorkspaceContextMiddleware();
 export const sharedRouter = getSharedRouter();
+export const sharedImageRouter = getSharedImageRouter();
 export const agenticMiddleware = getAgenticMiddleware();
 

@@ -6,6 +6,8 @@ import { ContextManager } from '../../utils/ContextManager.js';
 import { getMessageContent, prependToMessageContent } from '../../utils/MessageUtils.js';
 import { LLMExecutor } from '../../utils/LLMExecutor.js';
 import { calculateModelWeightedMaxTokens } from '../../utils/model-tokens.js';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 export class IntelligentRouterMiddleware implements Middleware {
     name = 'IntelligentRouterMiddleware';
@@ -529,6 +531,22 @@ Request: ${lastMessage}`;
             'llama-3.1-8b-instant',
             'gemini-3.1-flash-lite',
             'gemma-4-26b-a4b-it',
+        ],
+        [TaskType.Vision]: [
+            // Ranked by capability score — these mirror the top entries in imageModelCapabilities
+            'nvidia/nemotron-nano-12b-v2-vl:free',       // OpenRouter
+            'nvidia/nemotron-nano-2-vl',                  // NVIDIA NIM
+            'gemma-4-31b-it',                             // Google Gemini
+            'gemma-4-26b-a4b-it',                         // Google Gemini
+            'gemini-3.1-flash-lite',                      // Google Gemini
+            'meta-llama/llama-4-maverick:free',           // OpenRouter
+            'meta-llama/llama-4-scout:free',              // OpenRouter
+            'meta/llama-3.2-90b-vision-instruct',         // NVIDIA NIM
+            '@cf/meta/llama-4-scout-17b-16e-instruct',    // Cloudflare
+            '@cf/google/gemma-4-26b-a4b-it',              // Cloudflare
+            'GLM-4.6V-Flash',                             // LLM7
+            'THUDM/GLM-4.1V-9B-Thinking',                // SiliconFlow
+            'google/gemma-4-31b-it:free',                 // OpenRouter fallback
         ]
     };
 
@@ -1027,3 +1045,222 @@ Request: ${lastMessage}`;
             `Recent errors: ${errorSummary}`;
     }
 }
+
+export class ImageRouterMiddleware implements Middleware {
+    name = 'ImageRouterMiddleware';
+    private executor: LLMExecutor;
+
+    public static readonly imageModelCapabilities: Record<string, number> = {
+        // Gemini
+        'gemini-3.1-flash-lite': 0.85,
+        'gemma-4-31b-it': 0.90,
+        'gemma-4-26b-a4b-it': 0.88,
+
+        // SiliconFlow
+        'THUDM/GLM-4.1V-9B-Thinking': 0.88,
+        'deepseek-ai/DeepSeek-OCR': 0.80,
+
+        // Cloudflare
+        '@cf/meta/llama-4-scout-17b-16e-instruct': 0.88,
+        '@cf/google/gemma-3-12b-it': 0.82,
+        '@cf/google/gemma-4-26b-a4b-it': 0.88,
+        '@cf/moonshotai/kimi-k2.6': 0.88,
+        '@cf/mistralai/mistral-small-3.1-24b-instruct': 0.85,
+        '@cf/meta/llama-3.2-11b-vision-instruct': 0.75,
+
+        // NVIDIA (phi-4-multimodal-instruct currently DEGRADED — prefer nemotron-nano-2-vl)
+        'nvidia/nemotron-nano-2-vl': 0.88,
+        'meta/llama-3.2-90b-vision-instruct': 0.86,
+        'meta/llama-3.2-11b-vision-instruct': 0.80,
+        'nvidia/cosmos-reason2-8b': 0.78,
+        'google/paligemma': 0.70,
+        'microsoft/phi-4-multimodal-instruct': 0.50,
+
+        // OpenRouter (prefer nemotron VL model — gemma-4-31b hits Google AI Studio rate limits on free tier)
+        'nvidia/nemotron-nano-12b-v2-vl:free': 0.90,
+        'meta-llama/llama-4-maverick:free': 0.88,
+        'meta-llama/llama-4-scout:free': 0.87,
+        'google/gemma-4-31b-it:free': 0.82,
+        'google/gemma-4-26b-a4b-it:free': 0.80,
+        'openrouter/free': 0.75,
+
+        // Kilo Code (kilo-auto/free explicitly returns 404 for image input — no supported vision model yet)
+
+        // LLM7
+        'GLM-4.6V-Flash': 0.85,
+        'gemini-2.5-flash-lite': 0.85,
+        'gpt-4o-mini': 0.85
+    };
+
+    constructor(executor?: LLMExecutor) {
+        this.executor = executor || new LLMExecutor();
+    }
+
+    private async processImageMessages(messages: any[]): Promise<any[]> {
+        if (!messages || !Array.isArray(messages)) return messages;
+
+        const processed: any[] = [];
+        for (const msg of messages) {
+            if (Array.isArray(msg.content)) {
+                const newContent: any[] = [];
+                for (const item of msg.content) {
+                    if (item && typeof item === 'object' && item.type === 'image_url' && item.image_url?.url) {
+                        const imgUrl = item.image_url.url;
+                        if (imgUrl.startsWith('file:///')) {
+                            let decodedPath = decodeURIComponent(imgUrl.replace(/^file:\/\//, ''));
+                            if (process.platform === 'win32' && decodedPath.startsWith('/') && /^\/[A-Za-z]:/.test(decodedPath)) {
+                                decodedPath = decodedPath.substring(1);
+                            }
+                            const imageFsPath = path.resolve(decodedPath);
+                            
+                            try {
+                                const buffer = await fs.readFile(imageFsPath);
+                                const ext = path.extname(imageFsPath).toLowerCase().replace('.', '');
+                                const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+                                const base64Data = buffer.toString('base64');
+                                newContent.push({
+                                    type: 'image_url',
+                                    image_url: {
+                                        url: `data:${mimeType};base64,${base64Data}`
+                                    }
+                                });
+                            } catch (err: any) {
+                                console.error(`[ImageRouterMiddleware] Error reading local image file ${imageFsPath}:`, err.message);
+                                newContent.push(item);
+                            }
+                        } else {
+                            newContent.push(item);
+                        }
+                    } else {
+                        newContent.push(item);
+                    }
+                }
+                processed.push({ ...msg, content: newContent });
+            } else {
+                processed.push(msg);
+            }
+        }
+        return processed;
+    }
+
+    private hasImageContent(messages: any[]): boolean {
+        if (!messages || !Array.isArray(messages)) return false;
+        for (const msg of messages) {
+            if (Array.isArray(msg.content)) {
+                for (const item of msg.content) {
+                    if (item && typeof item === 'object' && (item.type === 'image_url' || item.image_url)) {
+                        return true;
+                    }
+                }
+            } else if (typeof msg.content === 'string') {
+                if (msg.content.includes('data:image/') || msg.content.includes('file:///')) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    async execute(context: PipelineContext, next: NextFunction): Promise<void> {
+        // Only intercept if there's image content in the messages
+        if (!this.hasImageContent(context.request.messages)) {
+            return await next();
+        }
+
+        console.debug('[ImageRouter] Intercepted vision request. Selecting vision models...');
+
+        // Dynamic base64 image path resolution before forwarding to LLM execution
+        context.request.messages = await this.processImageMessages(context.request.messages);
+
+        // Standalone testing mode: resolve paths but skip routing overrides to allow direct targeting of individual models
+        if (context.bypassImageRouter) {
+            console.debug('[ImageRouter] Bypassing routing fallback selection because bypassImageRouter is active.');
+            return await next();
+        }
+
+        const requestedModel = context.request.model;
+        const availableProviders = ProviderRegistry.getInstance().getAvailableProviders();
+
+        // Build candidate models from each provider's declared visionModels list
+        const visionModelSet = new Set<string>();
+        for (const provider of availableProviders) {
+            if (provider.visionModels && provider.visionModels.length > 0) {
+                for (const vm of provider.visionModels) {
+                    visionModelSet.add(vm.id);
+                }
+            }
+        }
+        let candidateModels = Array.from(visionModelSet);
+
+        // Prioritize requested model if it's a known vision model
+        if (requestedModel && requestedModel !== 'any') {
+            if (candidateModels.includes(requestedModel)) {
+                candidateModels = [requestedModel, ...candidateModels.filter(m => m !== requestedModel)];
+            } else {
+                candidateModels = [requestedModel, ...candidateModels];
+            }
+        }
+
+        // Sort candidates based on capability score descending
+        candidateModels.sort((a, b) => {
+            const scoreA = ImageRouterMiddleware.imageModelCapabilities[a] || 0.5;
+            const scoreB = ImageRouterMiddleware.imageModelCapabilities[b] || 0.5;
+            return scoreB - scoreA;
+        });
+
+        if (availableProviders.length === 0) {
+            throw new Error('No available providers for vision routing.');
+        }
+
+        const startTime = Date.now();
+        const totalBudget = context.request.timeoutMs || 60000;
+        const getRemainingTimeout = () => {
+            const elapsed = Date.now() - startTime;
+            return Math.max(0, totalBudget - elapsed);
+        };
+
+        let lastError: Error | null = null;
+        const triedModels: string[] = [];
+
+        for (const modelId of candidateModels) {
+            // Find providers that declare this model in their visionModels list
+            const providersWithModel = availableProviders.filter(p =>
+                (p.visionModels && p.visionModels.some(m => m.id === modelId)) ||
+                p.models.some(m => m.id === modelId)
+            );
+
+            if (providersWithModel.length === 0) {
+                continue;
+            }
+
+            triedModels.push(modelId);
+            for (const provider of providersWithModel) {
+                try {
+                    const remainingTimeout = getRemainingTimeout();
+                    if (remainingTimeout <= 1000) {
+                        throw new Error('Timeout budget exhausted during vision fallback execution.');
+                    }
+
+                    console.debug(`[ImageRouter] Attempting vision model "${modelId}" on provider "${provider.name}"...`);
+
+                    const res = await this.executor.tryProvider(
+                        context,
+                        provider.id,
+                        modelId,
+                        remainingTimeout
+                    );
+
+                    console.debug(`[ImageRouter] Successfully executed vision task using "${modelId}" via "${provider.name}".`);
+                    context.response = res;
+                    return; // Successful routing!
+                } catch (err: any) {
+                    console.error(`[ImageRouter] Model "${modelId}" on "${provider.name}" failed: ${err.message}`);
+                    lastError = err;
+                }
+            }
+        }
+
+        throw new Error(`[ImageRouter] Failed to execute vision request on any available vision model. Tried models: ${triedModels.join(', ')}. Last error: ${lastError?.message}`);
+    }
+}
+

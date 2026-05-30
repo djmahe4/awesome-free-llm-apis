@@ -1,4 +1,6 @@
 import fetch from 'node-fetch';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import type { ChatRequest, ChatResponse, Provider, ProviderModel, RateLimits } from './types.js';
 import { Sanitizer } from '../utils/Sanitizer.js';
 
@@ -7,6 +9,8 @@ export abstract class BaseProvider implements Provider {
   abstract id: string;
   abstract baseURL: string;
   abstract models: ProviderModel[];
+  /** Vision-capable models. Override in providers that support multimodal input. */
+  visionModels: ProviderModel[] = [];
   abstract rateLimits: RateLimits;
   abstract envVar: string;
 
@@ -147,6 +151,7 @@ export abstract class BaseProvider implements Provider {
     // Ensure model is set
     sanitizedRequest.model = sanitizedRequest.model || (this.models.length > 0 ? this.models[0].id : '');
 
+    sanitizedRequest.messages = await this.processImageMessages(sanitizedRequest.messages);
     sanitizedRequest.messages = Sanitizer.sanitizeObject(sanitizedRequest.messages);
 
     const controller = new AbortController();
@@ -231,6 +236,8 @@ export abstract class BaseProvider implements Provider {
     // Ensure model is set
     sanitizedRequest.model = sanitizedRequest.model || (this.models.length > 0 ? this.models[0].id : '');
 
+    sanitizedRequest.messages = await this.processImageMessages(sanitizedRequest.messages);
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -270,5 +277,52 @@ export abstract class BaseProvider implements Provider {
         }
       }
     }
+  }
+
+  protected async processImageMessages(messages: Message[]): Promise<Message[]> {
+    if (!messages || !Array.isArray(messages)) return messages;
+
+    const processed: Message[] = [];
+    for (const msg of messages) {
+      if (Array.isArray(msg.content)) {
+        const newContent: any[] = [];
+        for (const item of msg.content) {
+          if (item && typeof item === 'object' && item.type === 'image_url' && item.image_url?.url) {
+            const imgUrl = item.image_url.url;
+            if (imgUrl.startsWith('file:///')) {
+              let decodedPath = decodeURIComponent(imgUrl.replace(/^file:\/\//, ''));
+              if (process.platform === 'win32' && decodedPath.startsWith('/') && /^\/[A-Za-z]:/.test(decodedPath)) {
+                decodedPath = decodedPath.substring(1);
+              }
+              const imageFsPath = path.resolve(decodedPath);
+              
+              try {
+                const buffer = await fs.readFile(imageFsPath);
+                const ext = path.extname(imageFsPath).toLowerCase().replace('.', '');
+                const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+                const base64Data = buffer.toString('base64');
+                newContent.push({
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:${mimeType};base64,${base64Data}`
+                  }
+                });
+              } catch (err: any) {
+                console.error(`[BaseProvider] Error reading local image file ${imageFsPath}:`, err);
+                newContent.push(item);
+              }
+            } else {
+              newContent.push(item);
+            }
+          } else {
+            newContent.push(item);
+          }
+        }
+        processed.push({ ...msg, content: newContent });
+      } else {
+        processed.push(msg);
+      }
+    }
+    return processed;
   }
 }

@@ -20,6 +20,12 @@ export class GeminiProvider extends BaseProvider {
     { id: 'gemma-4-26b-a4b-it', name: 'Gemma 4 26B' },
   ];
 
+  visionModels: ProviderModel[] = [
+    { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite (Vision)' },
+    { id: 'gemma-4-31b-it', name: 'Gemma 4 31B (Vision)' },
+    { id: 'gemma-4-26b-a4b-it', name: 'Gemma 4 26B (Vision)' },
+  ];
+
   private cachedPythonPath?: string;
 
   /** Attempt to locate the venv Python interpreter relative to the project root */

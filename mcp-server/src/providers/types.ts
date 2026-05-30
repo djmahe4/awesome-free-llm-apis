@@ -55,6 +55,8 @@ export interface Provider {
   id: string;
   baseURL: string;
   models: ProviderModel[];
+  /** Vision-capable models for this provider. Separate from text models. */
+  visionModels: ProviderModel[];
   rateLimits: RateLimits;
   envVar: string;
   consecutiveFailures: number;

@@ -13,4 +13,9 @@ export class SiliconFlowProvider extends BaseProvider {
         { id: 'Qwen/Qwen3-8B', name: 'Qwen 3 8B' },
         { id: 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B', name: 'DeepSeek R1 0528 Qwen 3 8B' },
     ];
+
+    visionModels: ProviderModel[] = [
+        { id: 'THUDM/GLM-4.1V-9B-Thinking', name: 'GLM-4.1V 9B Thinking (Vision)' },
+        { id: 'deepseek-ai/DeepSeek-OCR', name: 'DeepSeek OCR (Vision)' },
+    ];
 }

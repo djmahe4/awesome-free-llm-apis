@@ -139,11 +139,15 @@ async function updateProviderFile(providerId: string, scrapedModels: ScrapedMode
 
   // Combine and deduplicate
   const combinedMap = new Map<string, ScrapedModel>();
+  const trustScraped = scrapedModels.length > 0;
 
-  // 1. Add all existing models that pass our free filters
+  // 1. Add existing models that are required or if we don't trust the scraped catalog (fallback)
   for (const m of existingModels) {
-    if (isFreeModel(providerId, m.id) && (providerId !== 'nvidia' || !isInvalidNvidiaModel(m.id))) {
-      combinedMap.set(m.id, { id: m.id, name: formatModelName(m.id, m.name) });
+    const isRequired = requiredRouterModels.has(m.id);
+    if (!trustScraped || isRequired) {
+      if (isFreeModel(providerId, m.id) && (providerId !== 'nvidia' || !isInvalidNvidiaModel(m.id))) {
+        combinedMap.set(m.id, { id: m.id, name: formatModelName(m.id, m.name) });
+      }
     }
   }
 
@@ -152,6 +156,7 @@ async function updateProviderFile(providerId: string, scrapedModels: ScrapedMode
     if (isFreeModel(providerId, m.id) && (providerId !== 'nvidia' || !isInvalidNvidiaModel(m.id))) {
       if (m.deprecated) {
         console.log(`[Scraper] Model ${m.id} is marked Deprecated by provider.`);
+        continue; // Skip writing deprecated model to provider file
       }
       const cleanName = formatModelName(m.id, m.name);
       combinedMap.set(m.id, { id: m.id, name: cleanName });
