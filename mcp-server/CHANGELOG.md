@@ -60,11 +60,11 @@
 
 ## Next update
 
-- Remove the kluster from providers list
-- create  a ci workflow to automatically audit the providers for any depreciations and also to check if the models are still available and if not then we can replace them with the latest ones.
-- Add new 'vision_tool' to make use of free vision models to analyse images.(using `file:///` in `workspace_root` as the image path)
+- Remove the kluster from providers list(done)
+- create  a ci workflow to automatically audit the providers for any depreciations and also to check if the models are still available and if not then we can replace them with the latest ones.(done)
+- Add new 'vision_tool' to make use of free vision models to analyse images.(using `file:///` in `workspace_root` as the image path,Done)
 - Add skill loading and prompt tool to make use of free skill loading agents to dynamically load and integrate the use of 'awesome-antigravity-skills' repo for agentic tasks and integrate it in the middleware without overhead.
-- Add **Privacy-Sensitive Data redaction** for llm calls in middleware to prevent the leaking of sensitive data to third party free providers.(e.g. API Keys,passwords,PII, etc), partially implementeed by sanitize.ts but needs to be hardened and made more robust.
+- Add **Privacy-Sensitive Data redaction** for llm calls in middleware to prevent the leaking of sensitive data to third party free providers.(e.g. API Keys,passwords,PII, etc), partially implementeed by sanitize.ts but needs to be hardened and made more robust.(Done)
 - Add mechanism to preserve the context of the conversation in case of a response like `\"read_file\". Let's try that.\n\n```json{\n  \"tool\": \"read_file\",\n  \"args\": {\n    \"path\": \"core/gemini_processor.py\"\n  }}```{\n  \"tool\": \"read_file\",\n  \"args\": {\n    \"path\": \"core/gemini_processor.py\"\n  }}` where the llm is explicitly asking to use a tool, we can preserve the context of the conversation and the intent of the user by not treating it as a normal response and instead directly calling the tool and returning its response to the llm without losing the context of the conversation.(Not implemented as of now but we can add a mechanism in the middleware to detect such responses and handle them accordingly by directly calling the tool and returning its response to the llm without losing the context of the conversation.)
 - Make Skill script generation more robust: currently the generated skill script is enclosed in ````python\n{script}\n``` and is saved under _py instead of .py, we can make it more robust by using a more unique delimiter and also by adding some metadata to the generated script to make it easier to parse and use in the future.
 - `load_skill_prompt` tool to dynamically load the skill prompt from the 'awesome-antigravity-skills' repo  and also to integrate it in the middleware without overhead by adding a mechanism to cache the loaded skill prompts and also to update the cached skill prompts if there are any changes in the 'awesome-antigravity-skills' repo.

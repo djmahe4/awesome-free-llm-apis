@@ -26,18 +26,18 @@ export type StoreWorkspaceSkillResponse =
 const SKILL_SCRIPT_START = '@@@SKILL_SCRIPT_START@@@';
 const SKILL_SCRIPT_END = '@@@SKILL_SCRIPT_END@@@';
 
-function normalizeScriptFilename(filename: string): string {
+export function normalizeScriptFilename(filename: string): string {
     const base = path.basename(filename.trim());
     if (base.endsWith('_py')) {
         return `${base.slice(0, -3)}.py`;
     }
     if (!path.extname(base)) {
-        return `${base}.py`;
+        return base;
     }
     return base;
 }
 
-function addScriptMetadataHeader(content: string, skillName: string, version: string, filename: string): string {
+export function addScriptMetadataHeader(content: string, skillName: string, version: string, filename: string): string {
     const ext = path.extname(filename).toLowerCase();
     const commentPrefix = ['.py', '.sh', '.yaml', '.yml', '.toml'].includes(ext) ? '#' : '//';
     const timestamp = new Date().toISOString();
