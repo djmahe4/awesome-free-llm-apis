@@ -223,7 +223,7 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
   } = input;
 
   if (skill) {
-    const loadedSkill = await loadSkillPrompt({ skill });
+    const loadedSkill = await loadSkillPrompt({ skill, type: 'load' });
     if (loadedSkill.success && loadedSkill.prompt) {
       messages.unshift({
         role: 'system',
@@ -418,7 +418,7 @@ async function executeServerToolCall(call: ParsedToolCall, workspaceRoot?: strin
   if (tool === 'index_workspace') return await indexWorkspace(args as any);
   if (tool === 'get_token_stats') return await getTokenStats();
   if (tool === 'validate_provider') return await validateProvider(args.providerId);
-  if (tool === 'load_skill_prompt') return await loadSkillPrompt({ skill: args.skill });
+  if (tool === 'load_skill_prompt') return await loadSkillPrompt({ skill: args.skill, type: 'load' });
 
   throw new Error(`Unsupported tool call: ${tool}`);
 }

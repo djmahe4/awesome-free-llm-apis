@@ -1,7 +1,7 @@
 import fetch from 'node-fetch';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { ChatRequest, ChatResponse, Provider, ProviderModel, RateLimits } from './types.js';
+import type { ChatRequest, ChatResponse, Message, Provider, ProviderModel, RateLimits } from './types.js';
 import { Sanitizer } from '../utils/Sanitizer.js';
 
 export abstract class BaseProvider implements Provider {

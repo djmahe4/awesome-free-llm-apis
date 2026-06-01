@@ -149,7 +149,16 @@ export class IntelligentRouterMiddleware implements Middleware {
      * Automatically classifies the task type based on explicit keywords or prompt content.
      */
     private autoClassify(messages: Message[], explicitKeywords?: string[]): TaskType {
-        // 1. Prioritize Explicit Keywords (Majority Voting)
+        // 1. Check for Vision task (images)
+        for (const msg of messages) {
+            if (Array.isArray(msg.content)) {
+                if (msg.content.some(item => item && typeof item === 'object' && item.type === 'image_url')) {
+                    return TaskType.Vision;
+                }
+            }
+        }
+
+        // 2. Prioritize Explicit Keywords (Majority Voting)
         if (explicitKeywords && explicitKeywords.length > 0) {
             const counts: Record<string, number> = {};
             for (const kw of explicitKeywords) {
@@ -169,7 +178,7 @@ export class IntelligentRouterMiddleware implements Middleware {
             }
         }
 
-        // 2. Fallback to Message Content Analysis
+        // 3. Fallback to Message Content Analysis
         const lastMsg = getMessageContent(messages[messages.length - 1]).toLowerCase();
 
         // Specific Tasks First
@@ -557,9 +566,10 @@ Request: ${lastMessage}`;
         }
 
         // Step 1: Independent Thinking - Analysis & Classification
-        if (!context.taskType) {
-            context.taskType = this.autoClassify(context.request.messages, context.keywords);
-            console.debug(`[Router] Auto-classified task as: ${context.taskType}`);
+        const inferredType = this.autoClassify(context.request.messages, context.keywords);
+        if (inferredType === TaskType.Vision || !context.taskType) {
+            context.taskType = inferredType;
+            console.debug(`[Router] task type set to: ${context.taskType}`);
         }
 
         // Auto-enable research for semantic search tasks
@@ -625,8 +635,8 @@ Request: ${lastMessage}`;
 
         // --- Context Management Strategic Workflow ---
         const originalTokens = context.estimatedTokens ?? 
-                               context.request.estimatedTokens ?? 
-                               this.executor.calculateTokens(context.request.messages);
+                       (context.request as any).estimatedTokens ?? 
+                       this.executor.calculateTokens(context.request.messages);
         context.estimatedTokens = originalTokens;
 
         let estimatedTokens = originalTokens;
@@ -909,7 +919,7 @@ Request: ${lastMessage}`;
                     const res = await this.executor.tryProvider(context, p.id, modelId);
                     if (res) {
                         (context as any).contextCompressed = true;
-                        context.response = res;
+context.response = res ?? undefined;
                         context.providerId = p.id;
                         await next();
                         return;
@@ -1100,31 +1110,21 @@ export class ImageRouterMiddleware implements Middleware {
 
         const processed: any[] = [];
         for (const msg of messages) {
-            if (Array.isArray(msg.content)) {
+            if (typeof msg.content === 'string') {
+                processed.push(await this.processStringContent(msg.content, msg));
+            } else if (Array.isArray(msg.content)) {
                 const newContent: any[] = [];
                 for (const item of msg.content) {
                     if (item && typeof item === 'object' && item.type === 'image_url' && item.image_url?.url) {
                         const imgUrl = item.image_url.url;
                         if (imgUrl.startsWith('file:///')) {
-                            let decodedPath = decodeURIComponent(imgUrl.replace(/^file:\/\//, ''));
-                            if (process.platform === 'win32' && decodedPath.startsWith('/') && /^\/[A-Za-z]:/.test(decodedPath)) {
-                                decodedPath = decodedPath.substring(1);
-                            }
-                            const imageFsPath = path.resolve(decodedPath);
-                            
-                            try {
-                                const buffer = await fs.readFile(imageFsPath);
-                                const ext = path.extname(imageFsPath).toLowerCase().replace('.', '');
-                                const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-                                const base64Data = buffer.toString('base64');
+                            const base64Url = await this.convertFileUrlToBase64(imgUrl);
+                            if (base64Url) {
                                 newContent.push({
                                     type: 'image_url',
-                                    image_url: {
-                                        url: `data:${mimeType};base64,${base64Data}`
-                                    }
+                                    image_url: { url: base64Url }
                                 });
-                            } catch (err: any) {
-                                console.error(`[ImageRouterMiddleware] Error reading local image file ${imageFsPath}:`, err.message);
+                            } else {
                                 newContent.push(item);
                             }
                         } else {
@@ -1140,6 +1140,71 @@ export class ImageRouterMiddleware implements Middleware {
             }
         }
         return processed;
+    }
+
+    private async processStringContent(content: string, msg: any): Promise<any> {
+        const fileRegex = /file:\/\/\/\S+/g;
+        const matches = [...content.matchAll(fileRegex)];
+
+        if (matches.length === 0) {
+            return msg;
+        }
+
+        const newContent: any[] = [];
+        let lastIndex = 0;
+
+        for (const match of matches) {
+            const [fullMatch, fileUrl] = match;
+            const matchIndex = match.index!;
+
+            if (matchIndex > lastIndex) {
+                newContent.push({ type: 'text', text: content.substring(lastIndex, matchIndex) });
+            }
+
+            const base64Url = await this.convertFileUrlToBase64(fileUrl);
+            if (base64Url) {
+                newContent.push({
+                    type: 'image_url',
+                    image_url: { url: base64Url }
+                });
+            } else {
+                newContent.push({ type: 'text', text: fullMatch });
+            }
+
+            lastIndex = matchIndex + fullMatch.length;
+        }
+
+        if (lastIndex < content.length) {
+            newContent.push({ type: 'text', text: content.substring(lastIndex) });
+        }
+
+        return { ...msg, content: newContent };
+    }
+
+    private async convertFileUrlToBase64(imgUrl: string): Promise<string | null> {
+        let decodedPath = decodeURIComponent(imgUrl.replace(/^file:\/\//, ''));
+        if (process.platform === 'win32' && decodedPath.startsWith('/') && /^\/[A-Za-z]:/.test(decodedPath)) {
+            decodedPath = decodedPath.substring(1);
+        }
+        const imageFsPath = path.resolve(decodedPath);
+
+        try {
+            const buffer = await fs.readFile(imageFsPath);
+            const ext = path.extname(imageFsPath).toLowerCase().replace('.', '');
+            const ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif'];
+
+            if (!ALLOWED_EXTENSIONS.includes(ext)) {
+                console.warn(`[ImageRouterMiddleware] Unsupported image extension: .${ext}`);
+                return null;
+            }
+
+            const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+            const base64Data = buffer.toString('base64');
+            return `data:${mimeType};base64,${base64Data}`;
+        } catch (err: any) {
+            console.error(`[ImageRouterMiddleware] Error reading local image file ${imageFsPath}:`, err.message);
+            return null;
+        }
     }
 
     private hasImageContent(messages: any[]): boolean {
@@ -1249,9 +1314,9 @@ export class ImageRouterMiddleware implements Middleware {
                         remainingTimeout
                     );
 
-                    console.debug(`[ImageRouter] Successfully executed vision task using "${modelId}" via "${provider.name}".`);
-                    context.response = res;
-                    return; // Successful routing!
+                     console.debug(`[ImageRouter] Successfully executed vision task using "${modelId}" via "${provider.name}".`);
+                     context.response = res ?? undefined;
+                     return; // Successful routing!
                 } catch (err: any) {
                     console.error(`[ImageRouter] Model "${modelId}" on "${provider.name}" failed: ${err.message}`);
                     lastError = err;

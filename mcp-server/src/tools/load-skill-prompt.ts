@@ -25,6 +25,7 @@ export interface LoadSkillPromptInput {
   type: 'load' | 'search';
   keywords?: string[];
   name?: string;
+  skill?: string;
   workspaceDir?: string;
 }
 
@@ -33,6 +34,10 @@ export interface LoadSkillPromptResult {
   skills?: { name: string, description: string }[];
   filePath?: string;
   error?: string;
+  skill?: string;
+  description?: string;
+  terminalSetupHint?: string;
+  prompt?: string;
 }
 
 function normalize(value: string): string {
@@ -144,22 +149,30 @@ export async function loadSkillPrompt(input: LoadSkillPromptInput): Promise<Load
         return { success: true, skills: results };
       }
 
-      const skillDir = path.join(baseDir, '.free-llm-mcp', 'skills', found.id || found.name || name);
-      await fs.mkdir(skillDir, { recursive: true });
+       const skillDir = path.join(baseDir, '.free-llm-mcp', 'skills', found.id || found.name || name);
+       await fs.mkdir(skillDir, { recursive: true });
 
-      const skillPath = found.path.replace(/^\/+/, '');
-      const files = await fetchAllFiles(skillPath);
+       const skillPath = found.path.replace(/^\/+/, '');
+       const files = await fetchAllFiles(skillPath);
 
-      for (const file of files) {
-        const relativePath = file.path.replace(`${skillPath}/`, '');
-        const fullPath = path.join(skillDir, relativePath);
-        await fs.mkdir(path.dirname(fullPath), { recursive: true });
-        await fs.writeFile(fullPath, file.content);
-      }
+       for (const file of files) {
+         const relativePath = file.path.replace(`${skillPath}/`, '');
+         const fullPath = path.join(skillDir, relativePath);
+         await fs.mkdir(path.dirname(fullPath), { recursive: true });
+         await fs.writeFile(fullPath, file.content);
+       }
 
-      const skillMdPath = path.join(skillDir, 'SKILL.md');
-      return { success: true, filePath: skillMdPath };
-    }
+       const skillMdPath = path.join(skillDir, 'SKILL.md');
+       const skillMdContent = await fs.readFile(skillMdPath, 'utf-8');
+
+       return { 
+         success: true, 
+         filePath: skillMdPath,
+         skill: found.name || found.id || name,
+         description: found.description || '',
+         prompt: skillMdContent
+       };
+     }
 
     return { success: false, error: 'Invalid type. Use "load" or "search".' };
   } catch (error: any) {
