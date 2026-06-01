@@ -100,33 +100,33 @@ export async function createMCPServer(): Promise<Server> {
           required: ['messages'],
         },
       },
-      {
-        name: 'free_llm_api',
-        description: 'Backward-compatible alias for use_free_llm. Returns Markdown text.',
-        inputSchema: {
-          type: 'object' as const,
-          properties: {
-            messages: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  role: { type: 'string', enum: ['system', 'user', 'assistant'] },
-                  content: { type: 'string' },
-                },
-                required: ['role', 'content'],
-              },
-            },
-            model: { type: 'string' },
-            keywords: { type: 'array', items: { type: 'string' } },
-            agentic: { type: 'boolean' },
-            sessionId: { type: 'string' },
-            workspace_root: { type: 'string' },
-            skill: { type: 'string', description: 'Optional dynamic skill id/name from awesome-antigravity-skills index' },
-          },
-          required: ['messages'],
-        },
-      },
+      // {
+      //   name: 'free_llm_api',
+      //   description: 'Backward-compatible alias for use_free_llm. Returns Markdown text.',
+      //   inputSchema: {
+      //     type: 'object' as const,
+      //     properties: {
+      //       messages: {
+      //         type: 'array',
+      //         items: {
+      //           type: 'object',
+      //           properties: {
+      //             role: { type: 'string', enum: ['system', 'user', 'assistant'] },
+      //             content: { type: 'string' },
+      //           },
+      //           required: ['role', 'content'],
+      //         },
+      //       },
+      //       model: { type: 'string' },
+      //       keywords: { type: 'array', items: { type: 'string' } },
+      //       agentic: { type: 'boolean' },
+      //       sessionId: { type: 'string' },
+      //       workspace_root: { type: 'string' },
+      //       skill: { type: 'string', description: 'Optional dynamic skill id/name from awesome-antigravity-skills index' },
+      //     },
+      //     required: ['messages'],
+      //   },
+      // },
       {
         name: 'vision_tool',
         description: 'Analyze a local image using a vision-capable model via use_free_llm.',

@@ -41,8 +41,8 @@ async function setupMocks() {
     (registry as any).providers = new Map(); // Clear real ones
 
     const mockModels = [
-        { id: 'gemini-2.5-flash', name: 'Gemini Flash', contextWindow: 1000000 },
-        { id: 'claude-3-haiku', name: 'Haiku', contextWindow: 200000 }
+        { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite', contextWindow: 1000000 },
+        { id: 'gemma-4-26b-a4b-it', name: 'Gemma 4 26B', contextWindow: 1000000 }
     ];
 
     ['mock-p1', 'mock-p2'].forEach(id => {

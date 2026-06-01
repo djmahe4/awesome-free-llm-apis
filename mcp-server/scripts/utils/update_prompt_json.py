@@ -71,12 +71,23 @@ def parse_sections(prompt_text):
 
 def generate_keywords(title, content):
     """
-    Simple keyword extraction for matching.
+    Improved keyword extraction for matching.
     """
-    # Use title words and some common terms from content
-    words = re.findall(r'\b\w{4,}\b', (title + " " + content).lower())
-    # Filer out common stop words if needed, but for now just unique set
-    return sorted(list(set(words)))
+    stop_words = {
+        "about", "after", "again", "against", "also", "among", "been", "before", 
+        "being", "below", "between", "both", "could", "does", "doing", "down", "during", "each", 
+        "even", "ever", "from", "have", "having", "here", "into", "just", "more", "most", "only", 
+        "over", "some", "such", "than", "that", "them", "then", "there", "these", "they", "this", 
+        "those", "through", "very", "were", "what", "when", "where", "which", "while", "with", "would",
+        "work", "edit", "make", "use", "will", "should", "many"
+    }
+    title_words = set(re.findall(r'\b\w{4,}\b', title.lower()))
+    content_words = re.findall(r'\b\w{4,}\b', content.lower())
+    
+    filtered_title_words = [w for w in title_words if w not in stop_words]
+    filtered_content_words = [w for w in content_words if w not in stop_words]
+    
+    return sorted(list(set(filtered_title_words).union(set(filtered_content_words))))
 
 def main():
     # Use environment variable or derive relative path from script location.
@@ -87,7 +98,7 @@ def main():
     # Check local external/ (if mcp-server is standalone)
     local_external = os.path.abspath(os.path.join(script_dir, '../external/agent-prompt'))
     # Check repo-root external/ (normal monorepo case)
-    root_external = os.path.abspath(os.path.join(script_dir, '../../external/agent-prompt'))
+    root_external = os.path.abspath(os.path.join(script_dir, '../../../external/agent-prompt'))
 
     candidate_dirs = [env_base_dir] if env_base_dir else [local_external, root_external]
     candidate_dirs = [d for d in candidate_dirs if d]
