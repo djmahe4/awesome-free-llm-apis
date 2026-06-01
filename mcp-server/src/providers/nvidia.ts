@@ -22,7 +22,7 @@ export class NvidiaProvider extends BaseProvider {
   ];
 
   visionModels: ProviderModel[] = [
-    { id: 'nvidia/nemotron-nano-2-vl', name: 'Nemotron Nano 2 VL (Vision)' },
+    { id: 'microsoft/phi-4-multimodal-instruct', name: 'Phi-4 Multimodal (Vision)' },
     { id: 'meta/llama-3.2-90b-vision-instruct', name: 'Llama 3.2 90B Vision' },
     { id: 'meta/llama-3.2-11b-vision-instruct', name: 'Llama 3.2 11B Vision' },
     { id: 'google/paligemma', name: 'PaliGemma (Vision)' },

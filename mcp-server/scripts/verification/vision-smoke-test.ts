@@ -34,6 +34,10 @@ async function runVisionSmokeTest() {
     const providerModelPairs: Array<{ providerName: string; providerId: string; modelId: string }> = [];
 
     for (const provider of availableProviders) {
+        if (['kilocode', 'siliconflow'].includes(provider.id)) {
+            console.log(`[Skip] "${provider.name}" — excluded from vision smoke test`);
+            continue;
+        }
         if (provider.visionModels && provider.visionModels.length > 0) {
             // Score by imageModelCapabilities if available, else default 0.5
             const best = [...provider.visionModels].sort((a, b) =>

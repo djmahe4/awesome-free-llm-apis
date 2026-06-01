@@ -38,6 +38,7 @@ The [`mcp-server`](mcp-server/) directory contains a production-grade MCP server
 - **Universal Chat Pipeline**: Deterministic routing across 60+ providers with automatic failover.
 - **Persistent Workspace Memory**: Long-term memory and skill harvesting rooted to your project workspace.
 - **Structural Grounding**: Automatic injection of directory trees and source code snippets via keyword-steered `grep`.
+- **Vision module**: Integrated image understanding tool call.
 
 > [!TIP]
 > To enable full agentic capabilities in your IDE (Claude Desktop, Cursor, Windsurf), follow the [MCP Setup Guide](mcp-server/README.md#client-configurations).

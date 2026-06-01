@@ -73,7 +73,8 @@
 - Post process 'free_llm_api' tool output to markdown format.
 - Improve the middleware to be more robust and also observe and handle the edge cases where the llm is not able to generate the response inthe desired format.By logging and sending a firebase alert for such cases and also by adding a mechanism to handle such cases gracefully without breaking the flow of the conversation.(Note the firebase db itself is not implemented.It is to be implemented in v1.0.6 update.)
 - Need a model weighted max_tokens for token calculation based on the model size and not a fixed value.(check if model names like 'gemma4-31b-e4b' or something triggers smaller max_tokens, what about timeout values, we can have a dynamic timeout value based on the model size and the task at hand, for example for a deep reasoning task we can have a higher timeout value and for a simple task we can have a lower timeout value.)
-- Merge the parent repo but no new providers. Audit the models to check for depreciations. (Not implemented, replace 'gemini-3.1-flash-lite-preview' with 'gemini-3.1-flash-lite')
+- Merge the parent repo but no new providers. Audit the models to check for depreciations. (DONE)
+- Update the prompt loading mechnism the postbuild job, NORT_STAR sub prompt is often loaded need the keywords to be specific enough to avoid loading the same prompt multiple times and also to avoid loading unnecessary prompts which are not needed for the task at hand. (Not implemented)
 - Using karpathy's memory.md as the reference for memory management and implementation with memory maps to connect files in a project. 
 
 ## v1.0.4 – Hardened Resilience + Persistent Memory + structural Fix (April 2026)

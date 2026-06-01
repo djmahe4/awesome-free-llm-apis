@@ -41,6 +41,7 @@ jobs:
         run: |
           cd mcp-server
           npx tsx scripts/update-models.ts
+          npx tsx scripts/update-models-vision.ts
 
       - name: Create Pull Request for Updates
         env:

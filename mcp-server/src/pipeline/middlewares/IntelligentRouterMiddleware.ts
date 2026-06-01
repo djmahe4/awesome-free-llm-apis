@@ -1068,13 +1068,12 @@ export class ImageRouterMiddleware implements Middleware {
         '@cf/mistralai/mistral-small-3.1-24b-instruct': 0.85,
         '@cf/meta/llama-3.2-11b-vision-instruct': 0.75,
 
-        // NVIDIA (phi-4-multimodal-instruct currently DEGRADED — prefer nemotron-nano-2-vl)
-        'nvidia/nemotron-nano-2-vl': 0.88,
+        // NVIDIA (phi-4-multimodal-instruct is working and preferred)
         'meta/llama-3.2-90b-vision-instruct': 0.86,
         'meta/llama-3.2-11b-vision-instruct': 0.80,
         'nvidia/cosmos-reason2-8b': 0.78,
         'google/paligemma': 0.70,
-        'microsoft/phi-4-multimodal-instruct': 0.50,
+        'microsoft/phi-4-multimodal-instruct': 0.85,
 
         // OpenRouter (prefer nemotron VL model — gemma-4-31b hits Google AI Studio rate limits on free tier)
         'nvidia/nemotron-nano-12b-v2-vl:free': 0.90,
