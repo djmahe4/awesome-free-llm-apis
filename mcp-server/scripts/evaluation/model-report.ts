@@ -4,7 +4,7 @@
  * Usage: tsx scripts/evaluation/model-report.ts
  */
 import { ProviderRegistry } from '../../src/providers/registry.js';
-import { IntelligentRouterMiddleware } from '../../src/pipeline/middlewares/IntelligentRouterMiddleware.js';
+import { IntelligentRouterMiddleware, ImageRouterMiddleware } from '../../src/pipeline/middlewares/IntelligentRouterMiddleware.js';
 import { TaskType } from '../../src/pipeline/middleware.js';
 
 /**
@@ -20,8 +20,9 @@ async function run() {
     const providerModelMap: Record<string, string[]> = {};
 
     allProviders.forEach(p => {
-        providerModelMap[p.id] = p.models.map(m => m.id);
+        providerModelMap[p.id] = [...p.models, ...p.visionModels].map(m => m.id);
         p.models.forEach(m => registeredModels.add(m.id));
+        p.visionModels.forEach(m => registeredModels.add(m.id));
     });
 
     console.error('\n=================================================');
@@ -37,6 +38,12 @@ async function run() {
             if (!modelToTasks[m]) modelToTasks[m] = [];
             modelToTasks[m].push(task);
         });
+    }
+
+    for (const modelId of Object.keys(ImageRouterMiddleware.imageModelCapabilities)) {
+        routerModels.add(modelId);
+        if (!modelToTasks[modelId]) modelToTasks[modelId] = [];
+        modelToTasks[modelId].push('IMAGE_ROUTING');
     }
 
     console.error('--- 1. ORPHANED MODELS ---');
@@ -55,7 +62,7 @@ async function run() {
     const missing = [...registeredModels].filter(m => !routerModels.has(m));
     if (missing.length > 0) {
         missing.forEach(m => {
-            const provider = allProviders.find(p => p.models.some(pm => pm.id === m));
+            const provider = allProviders.find(p => p.models.some(pm => pm.id === m) || p.visionModels.some(vm => vm.id === m));
             console.error(`  [ ] ${m.padEnd(40)} (Provider: ${provider?.id})`);
         });
     } else {

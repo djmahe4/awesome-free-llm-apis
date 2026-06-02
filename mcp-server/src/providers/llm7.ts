@@ -17,5 +17,7 @@ export class LLM7Provider extends BaseProvider {
 
   visionModels: ProviderModel[] = [
     { id: 'GLM-4.6V-Flash', name: 'GLM-4.6V Flash (Vision)' },
+    { id: 'devstral-small-2:24b', name: 'DevStral Small 2 (Vision)' },
+    { id: 'mistral-small-2506', name: 'Mistral Small 2506 (Vision)' },
   ];
 }

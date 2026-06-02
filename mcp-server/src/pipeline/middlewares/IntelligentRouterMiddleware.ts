@@ -25,13 +25,13 @@ export class IntelligentRouterMiddleware implements Middleware {
         'gemma-4-31b-it': 0.95,
         'google/gemma-4-31B-it': 0.95,
         'google/gemma-4-31b-it:free': 0.95,
+        'zai-glm-4.7': 0.95,
         'gemma-4-26b-a4b-it': 0.94,
         'google/gemma-4-26B-A4B-it': 0.94,
         'google/gemma-4-26b-a4b-it:free': 0.94,
+        'gpt-oss-120b': 0.94,
         'qwen/qwen3-coder-480b-a35b:free': 0.96,
         'qwen/qwen3-coder-480b-a35b-instruct': 0.96,
-        'qwen-3-235b-a22b-instruct-2507': 0.92,
-        'Qwen/Qwen3-235B-A22B': 0.92,
         'Qwen/Qwen3-235B-A22B-nim': 0.92,
         'DeepSeek-V3': 0.92,
         'deepseek-ai/DeepSeek-V3': 0.92,
@@ -46,7 +46,6 @@ export class IntelligentRouterMiddleware implements Middleware {
         // A-Tier (0.81 - 0.89)
         'qwen/qwen3-32b': 0.88,
         'meta-llama/llama-4-scout-17b-16e-instruct': 0.88,
-        'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8': 0.88,
         'meta/llama-4-maverick-17b-128e-instruct': 0.88,
         'microsoft/phi-4-multimodal-instruct': 0.88,
         'mistralai/mistral-nemotron': 0.88,
@@ -366,16 +365,15 @@ Request: ${lastMessage}`;
             'deepseek-ai/deepseek-r1-distill-qwen-32b',
             'openai/gpt-oss-120b',
             'qwen/qwen3-32b',
+            'zai-glm-4.7',
             'google/gemma-4-26b-a4b-it:free',
             'google/gemma-4-31b-it:free',
             'google/gemma-4-31B-it',
             'google/gemma-4-26B-A4B-it',
+            'gpt-oss-120b',
             'DeepSeek-R1',
-            'Qwen/Qwen3-235B-A22B',      // NVIDIA NIM — 40 RPM, powerful coder
-            'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
             'meta/llama-4-maverick-17b-128e-instruct',
             'mistralai/mistral-large-3-675b-instruct-2512',
-            'qwen-3-235b-a22b-instruct-2507',
             'codestral-latest',
             '@cf/qwen/qwen2.5-coder-32b-instruct',
             '@cf/qwen/qwq-32b',
@@ -402,9 +400,8 @@ Request: ${lastMessage}`;
             'deepseek-ai/DeepSeek-R1',
             'deepseek-ai/deepseek-r1-distill-qwen-32b',
             'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
-            'Qwen/Qwen3-235B-A22B',          // NVIDIA NIM — 40 RPM, reasoning powerhouse
+            'zai-glm-4.7',
             'liquid/lfm2.5-1.2b-thinking:free',
-            'qwen-3-235b-a22b-instruct-2507',
             'glm-5.1',
             'qwen/qwen3-coder:free',
             'google/gemma-4-26b-a4b-it:free',
@@ -413,6 +410,7 @@ Request: ${lastMessage}`;
             'gemma-4-31b-it',                // Gemini Provider
             'gemma-4-26b-a4b-it',            // Gemini Provider
             'google/gemma-4-26B-A4B-it',
+            'gpt-oss-120b',
             'nvidia/nemotron-3-super-120b-a12b:free',
             'mistralai/mistral-nemotron',
             'microsoft/phi-4-multimodal-instruct',
@@ -431,7 +429,6 @@ Request: ${lastMessage}`;
             'ministral-8b-latest',
             'nvidia/nemotron-3-super-120b-a12b:free',
             'glm-4.6',
-            'llama3.1-8b',
         ],
         [TaskType.Classification]: [
             'google/gemma-4-31b-it:free',
@@ -465,7 +462,6 @@ Request: ${lastMessage}`;
         ],
         [TaskType.SemanticSearch]: [
             'nvidia/nemotron-3-super-120b-a12b:free',
-            'qwen-3-235b-a22b-instruct-2507',
             'arcee-ai/trinity-large-preview:free',
             'qwen/qwen3-next-80b-a3b-instruct:free',
             'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, great for bulk search
@@ -482,6 +478,7 @@ Request: ${lastMessage}`;
             'google/gemma-4-31B-it',
             'google/gemma-3-27b-it',
             'gemma-4-31b-it',
+            'gpt-oss-120b',
             'kimi-k2.5',
             'mistral-small-latest',
             'gemini-3.1-flash-lite',
@@ -495,6 +492,7 @@ Request: ${lastMessage}`;
             'glm-4.5-air',
         ],
         [TaskType.EntityExtraction]: [
+            'gpt-oss-120b',
             'google/gemma-4-31b-it:free',
             'gemma-4-31b-it',
             'google/gemma-4-31B-it',
@@ -512,8 +510,6 @@ Request: ${lastMessage}`;
             'deepseek-ai/DeepSeek-R1',
             'nvidia/nemotron-3-super-120b-a12b:free',
             'qwen3.5',
-            'Qwen/Qwen3-235B-A22B',
-            'qwen-3-235b-a22b-instruct-2507',
             'google/gemma-4-31b-it:free',
             'google/gemma-4-26b-a4b-it:free',
             'openai/gpt-oss-20b:free',
@@ -544,7 +540,6 @@ Request: ${lastMessage}`;
         [TaskType.Vision]: [
             // Ranked by capability score — these mirror the top entries in imageModelCapabilities
             'nvidia/nemotron-nano-12b-v2-vl:free',       // OpenRouter
-            'nvidia/nemotron-nano-2-vl',                  // NVIDIA NIM
             'gemma-4-31b-it',                             // Google Gemini
             'gemma-4-26b-a4b-it',                         // Google Gemini
             'gemini-3.1-flash-lite',                      // Google Gemini
@@ -1081,7 +1076,6 @@ export class ImageRouterMiddleware implements Middleware {
         // NVIDIA (phi-4-multimodal-instruct is working and preferred)
         'meta/llama-3.2-90b-vision-instruct': 0.86,
         'meta/llama-3.2-11b-vision-instruct': 0.80,
-        'nvidia/cosmos-reason2-8b': 0.78,
         'google/paligemma': 0.70,
         'microsoft/phi-4-multimodal-instruct': 0.85,
 
@@ -1096,9 +1090,9 @@ export class ImageRouterMiddleware implements Middleware {
         // Kilo Code (kilo-auto/free explicitly returns 404 for image input — no supported vision model yet)
 
         // LLM7
-        'GLM-4.6V-Flash': 0.85,
-        'gemini-2.5-flash-lite': 0.85,
-        'gpt-4o-mini': 0.85
+        'GLM-4.6V-Flash': 0.90,
+        'devstral-small-2:24b': 0.75,
+        'mistral-small-2506': 0.88
     };
 
     constructor(executor?: LLMExecutor) {
