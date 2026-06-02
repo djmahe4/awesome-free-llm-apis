@@ -3,6 +3,7 @@ import fetch from 'node-fetch';
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { CapabilityExtractor } from '../src/utils/capability-extractor.js';
 
 // Utility for paths since we are in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -172,9 +173,16 @@ async function updateProviderFile(providerId: string, scrapedVisionModels: Scrap
 
   const finalModels = Array.from(combinedMap.values());
 
-  // Generate the TypeScript object array representation
+  // Generate the TypeScript object array representation with strictly { id, name, capabilities, score }
   const arrayString = finalModels.map(m => {
-    return `    { id: '${m.id}', name: '${m.name}' },`;
+    const text = `${m.name} ${m.id}`;
+    const caps = CapabilityExtractor.extractCapabilities(text, []);
+    const score = CapabilityExtractor.calculateScore(caps);
+    
+    const capsStr = caps.length > 0 ? `capabilities: [${caps.map(c => `'${c}'`).join(', ')}],` : '';
+    const scoreStr = score > 0 ? `score: ${score},` : '';
+    
+    return `    { id: '${m.id}', name: '${m.name}', ${capsStr}${scoreStr} }`;
   }).join('\n');
 
   // Replace in file

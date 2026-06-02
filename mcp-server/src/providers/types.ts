@@ -48,6 +48,8 @@ export interface ProviderModel {
   id: string;
   name: string;
   contextWindow?: number;
+  capabilities?: string[];
+  score?: number;
 }
 
 export interface Provider {
