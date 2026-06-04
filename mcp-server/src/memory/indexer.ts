@@ -6,6 +6,8 @@ import { WorkspaceScanner } from '../cache/workspace.js';
 import { WorkspaceWalker } from '../middleware/agentic/workspace-walker.js';
 import { Sanitizer } from '../utils/Sanitizer.js';
 
+import { DiffScanner } from '../middleware/agentic/diff-scanner.js';
+
 export interface IndexingResult {
     totalFiles: number;
     indexedFiles: number;
@@ -40,23 +42,49 @@ export class WorkspaceIndexer {
 
         const result: IndexingResult = { totalFiles: 0, indexedFiles: 0, skippedFiles: 0, errors: 0 };
 
-        // 1. Get all relevant files
+        // 1. Scan changed files via DiffScanner
+        let targetFiles: string[] = [];
+        try {
+            const diffScan = await DiffScanner.scan(workspaceRoot);
+            if (diffScan && diffScan.hasGit && diffScan.changedFiles) {
+                targetFiles = diffScan.changedFiles.map(f => path.resolve(workspaceRoot, f));
+            }
+        } catch (err) {
+            console.error(`[WorkspaceIndexer] Git scanner failure:`, err);
+        }
+
         const files = await WorkspaceWalker.findRelevantFiles(workspaceRoot, [], 1000);
         result.totalFiles = files.length;
 
+        // If incremental git scan succeeded and not forced, only process changed files
+        const filesToProcess = (targetFiles.length > 0 && !force)
+            ? files.filter(f => targetFiles.includes(path.resolve(f)))
+            : files;
+
         // 2. Process files sequentially to avoid race conditions in Vectra/Memory
-        for (const file of files) {
+        for (const file of filesToProcess) {
             try {
                 const relativePath = path.relative(workspaceRoot, file);
+                const vectorKey = `file:${wsHash}:${relativePath}`;
+                
+                // Get file stats to compare cheaper mtime before reading full file contents
+                const stats = await fs.stat(file);
+                const cacheKeyMtime = `${vectorKey}:mtime`;
+                const cachedMtime = await memoryManager.longTerm.load(cacheKeyMtime);
+
+                if (cachedMtime === stats.mtimeMs && !force) {
+                    result.skippedFiles++;
+                    continue;
+                }
+
                 const content = await fs.readFile(file, 'utf-8');
                 const contentHash = vectorStore.calculateHash(content);
 
-                const vectorKey = `file:${wsHash}:${relativePath}`;
-                
-                // Check if already indexed and unchanged (using memoryManager's longTerm cache)
+                // Double check via hash cache if mtime checks weren't initialized
                 const existingHash = await memoryManager.longTerm.load(`${vectorKey}:hash`);
                 const previousContent = await memoryManager.longTerm.load(`${vectorKey}:content`) as string | undefined;
                 if (existingHash === contentHash && !force) {
+                    await memoryManager.longTerm.save(cacheKeyMtime, stats.mtimeMs);
                     result.skippedFiles++;
                     continue;
                 }
@@ -78,6 +106,7 @@ export class WorkspaceIndexer {
                 // 4. Update hash cache
                 await memoryManager.longTerm.save(`${vectorKey}:hash`, contentHash);
                 await memoryManager.longTerm.save(`${vectorKey}:content`, content);
+                await memoryManager.longTerm.save(`${vectorKey}:mtime`, stats.mtimeMs);
 
                 if (previousContent && previousContent !== content) {
                     await memoryManager.updateWorkspaceMemoryForSimilarFiles(

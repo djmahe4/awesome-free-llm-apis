@@ -23,6 +23,39 @@ export class MemoryManager {
     this.longTerm = new LongTermMemory(storePath);
   }
 
+  createMemoryEntry(content: string, confidence: number = 0.5) {
+    return {
+      content,
+      confidence,
+      sourceCount: 1,
+      lastConfirmedAt: Date.now(),
+      createdAt: Date.now()
+    };
+  }
+
+  confirmMemoryEntry(entry: any) {
+    const nextConfidence = Math.min(1.0, entry.confidence + 0.15);
+    return {
+      ...entry,
+      confidence: Math.round(nextConfidence * 100) / 100,
+      sourceCount: entry.sourceCount + 1,
+      lastConfirmedAt: Date.now()
+    };
+  }
+
+  calculateDecayedConfidence(entry: any, daysSince: number) {
+    return entry.confidence * Math.exp(-daysSince / 30);
+  }
+
+  detectAndLinkSupersession(oldEntry: any, newContent: string) {
+    // Generate a unique ID for simulation/linking
+    const newEntryId = 'entry-' + Math.random().toString(36).substring(7);
+    return {
+      ...oldEntry,
+      supersededBy: newEntryId
+    };
+  }
+
   async storeToolOutput(toolName: string, input: any, output: any): Promise<void> {
     const key = `tool:${toolName}:${JSON.stringify(input)}`;
     this.shortTerm.set(key, output);
