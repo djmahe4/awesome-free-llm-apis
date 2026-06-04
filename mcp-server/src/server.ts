@@ -43,6 +43,8 @@ import { flushSystem } from './tools/use-free-llm.js';
 import { sharedRouter } from './pipeline/instances.js';
 import { execSync } from 'child_process';
 import fs, { promises as fsp } from 'fs';
+import { persistence } from './utils/PersistenceManager.js';
+import { initFirebase, syncStats, getLeaderboard } from './utils/firebase.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -139,12 +141,52 @@ async function validateSandboxDependencies() {
   }
 }
 
+async function initTelemetry() {
+  try {
+    const state = await persistence.load();
+    
+    // Ensure userId is established (authenticate anonymously)
+    if (!state.userId) {
+      const uid = await initFirebase();
+      state.userId = uid;
+      state.username = state.username || `anonymous-${uid.substring(0, 6)}`;
+      await persistence.save(state);
+    } else {
+      // Restore connection/session
+      await initFirebase();
+    }
+    
+    // Check if session has expired or is not set
+    const now = Date.now();
+    if (!state.sessionToken || !state.sessionExpiresAt || now >= state.sessionExpiresAt) {
+      state.sessionToken = crypto.randomBytes(32).toString('hex');
+      state.sessionExpiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
+      await persistence.save(state);
+    }
+    
+    // Sync if more than 24 hours have passed since lastSyncTime
+    const hoursSinceSync = (now - (state.lastSyncTime || 0)) / (1000 * 60 * 60);
+    if (hoursSinceSync >= 24 && !state.optOutTelemetry) {
+      const success = await syncStats(state.userId, state);
+      if (success) {
+        state.lastSyncTime = now;
+        await persistence.save(state);
+      }
+    }
+  } catch (err) {
+    console.error('[Telemetry] Failed to initialize telemetry:', err);
+  }
+}
+
 async function main() {
   try {
     await validateSandboxDependencies();
     
     // Initialize persistent tracking
     await sharedRouter.init();
+    
+    // Initialize telemetry / session manager
+    await initTelemetry();
     
     const isSse = process.argv.includes('--sse');
     if (isSse) {
@@ -196,6 +238,62 @@ async function main() {
         }
         return true;
       }
+
+      app.get('/api/user-config', async (req, res) => {
+        try {
+          const state = await persistence.load();
+          res.json({
+            userId: state.userId,
+            username: state.username,
+            optOutTelemetry: !!state.optOutTelemetry,
+            lastSyncTime: state.lastSyncTime
+          });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      app.post('/api/user-config', async (req, res) => {
+        try {
+          const { username, optOutTelemetry } = req.body;
+          
+          if (username !== undefined) {
+            if (typeof username !== 'string' || username.length < 3 || username.length > 20 || !/^[a-zA-Z0-9_-]+$/.test(username)) {
+              res.status(400).json({ error: 'Username must be 3-20 alphanumeric characters, underscores or hyphens' });
+              return;
+            }
+          }
+          
+          const state = await persistence.load();
+          if (username !== undefined) {
+            state.username = username;
+          }
+          if (optOutTelemetry !== undefined) {
+            state.optOutTelemetry = !!optOutTelemetry;
+          }
+          
+          await persistence.save(state);
+          
+          // Sync immediately to Firestore if telemetry is not opted out
+          if (state.userId && !state.optOutTelemetry) {
+            await syncStats(state.userId, state);
+          }
+          
+          res.json({ success: true, username: state.username, optOutTelemetry: state.optOutTelemetry });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      app.get('/api/leaderboard', async (req, res) => {
+        try {
+          const state = await persistence.load();
+          const list = await getLeaderboard(state.userId);
+          res.json(list);
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
 
       app.get('/api/token-stats', async (req, res) => {
         try {
