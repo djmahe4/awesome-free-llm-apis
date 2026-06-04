@@ -10,7 +10,7 @@ import { LRUCache } from 'lru-cache';
 /**
  * Robust spawn wrapper for cross-platform command execution.
  */
-function spawnAsync(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+function spawnAsync(command: string, args: string[], timeoutMs = 10000): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
         // Use shell: false to prevent cmd.exe from misinterpreting regex pipes (|) as command pipes
         const child = spawn(command, args, { shell: false });
@@ -19,8 +19,8 @@ function spawnAsync(command: string, args: string[]): Promise<{ stdout: string; 
         
         const timeout = setTimeout(() => {
             child.kill();
-            reject(new Error(`Command '${command}' timed out after 5000ms`));
-        }, 5000);
+            reject(new Error(`Command '${command}' timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
 
         child.stdout.on('data', data => stdout += data.toString());
         child.stderr.on('data', data => stderr += data.toString());
@@ -198,11 +198,11 @@ export class ContextGatherer {
                 args.push('-e', `(${combinedPattern})`);
                 args.push(...normalizedCandidates);
                 
-                const res = await spawnAsync('rg', args);
+                const res = await spawnAsync('rg', args, 15000);
                 stdout = res.stdout;
             } else if (tool === 'grep') {
                 const args = ['-n', '-E', '-i', '-m', '10', '-C', '2', `(${combinedPattern})`].concat(normalizedCandidates);
-                const res = await spawnAsync('grep', args);
+                const res = await spawnAsync('grep', args, 15000);
                 stdout = res.stdout;
             } else if (tool === 'powershell') {
                 // Windows PowerShell Get-Content fallback - only run if pattern is safe (alphanumeric, pipes, underscores, hyphens)
@@ -214,8 +214,8 @@ export class ContextGatherer {
                             const res = await spawnAsync('powershell', [
                                 '-NoProfile',
                                 '-Command',
-                                `Get-Content -Path "${cleanPath}" | Select-String -Pattern "${cleanPattern}" | ForEach-Object { "$($_.Filename || '${cleanPath}'):$($_.LineNumber):$($_.Line)" }`
-                            ]);
+                                `Get-Content -Path "${cleanPath}" | Select-String -Pattern "${cleanPattern}" -Context 2 | ForEach-Object { $lineNum = $_.LineNumber; $preCount = $_.Context.PreContext.Count; for ($i = 0; $i -lt $preCount; $i++) { "${cleanPath}:$($lineNum - $preCount + $i):$($_.Context.PreContext[$i])" }; "${cleanPath}:$lineNum:$($_.Line)"; for ($i = 0; $i -lt $_.Context.PostContext.Count; $i++) { "${cleanPath}:$($lineNum + 1 + $i):$($_.Context.PostContext[$i])" } }`
+                            ], 15000);
                             if (res.stdout) {
                                 stdout += res.stdout + '\n';
                             }

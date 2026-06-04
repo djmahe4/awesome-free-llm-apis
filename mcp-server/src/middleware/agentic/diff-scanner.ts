@@ -20,8 +20,8 @@ function spawnAsync(command: string, args: string[], cwd?: string): Promise<{ st
     
     const timeout = setTimeout(() => {
       child.kill();
-      reject(new Error(`Command '${command}' timed out after 5000ms`));
-    }, 5000);
+      reject(new Error(`Command '${command}' timed out after 10000ms`));
+    }, 10000);
 
     child.stdout?.on('data', data => stdout += data.toString());
     child.stderr?.on('data', data => stderr += data.toString());
