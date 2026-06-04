@@ -24,7 +24,8 @@ export class WorkspaceWalker {
         keywords: string[],
         limit: number = 30,
         overrideIgnores: boolean = false,
-        isTheoretical: boolean = false
+        isTheoretical: boolean = false,
+        priorityFiles?: string[]
     ): Promise<string[]> {
         const candidates: FileCandidate[] = [];
         this.filesScanned = 0;
@@ -49,7 +50,7 @@ export class WorkspaceWalker {
             }
         }
 
-        await this.walk(rootPath, rootPath, keywords, candidates, ig, 0, overrideIgnores, gitignoreRoot, isTheoretical);
+        await this.walk(rootPath, rootPath, keywords, candidates, ig, 0, overrideIgnores, gitignoreRoot, isTheoretical, priorityFiles);
 
         // Sort by score (descending) and return top paths
         return candidates
@@ -67,7 +68,8 @@ export class WorkspaceWalker {
         depth: number,
         overrideIgnores: boolean,
         gitignoreRoot: string,
-        isTheoretical: boolean
+        isTheoretical: boolean,
+        priorityFiles?: string[]
     ): Promise<void> {
         if (depth > MAX_DEPTH || this.filesScanned >= MAX_FILES_SCANNED) return;
 
@@ -88,7 +90,7 @@ export class WorkspaceWalker {
                 }
 
                 if (entry.isDirectory()) {
-                    await this.walk(root, fullPath, keywords, candidates, ig, depth + 1, overrideIgnores, gitignoreRoot, isTheoretical);
+                    await this.walk(root, fullPath, keywords, candidates, ig, depth + 1, overrideIgnores, gitignoreRoot, isTheoretical, priorityFiles);
                 } else if (entry.isFile()) {
                     this.filesScanned++;
                     const ext = path.extname(entry.name).toLowerCase();
@@ -97,7 +99,16 @@ export class WorkspaceWalker {
                     if (EXCLUDE_EXTENSIONS.includes(ext)) continue;
 
                     const relativePath = path.relative(root, fullPath);
-                    const score = this.calculateScore(entry.name, relativePath, ext, keywords, isTheoretical);
+                    let score = this.calculateScore(entry.name, relativePath, ext, keywords, isTheoretical);
+                    
+                    const isPriority = priorityFiles?.some(pf => {
+                        const resolvedPf = path.isAbsolute(pf) ? pf : path.resolve(root, pf);
+                        return resolvedPf === fullPath;
+                    });
+                    if (isPriority) {
+                        score += 200;
+                    }
+
                     if (score > 0) {
                         candidates.push({ path: fullPath, score });
                     }

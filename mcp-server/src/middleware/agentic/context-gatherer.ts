@@ -3,6 +3,9 @@ import { promisify } from 'util';
 import path from 'path';
 import { WorkspaceWalker } from './workspace-walker.js';
 import fs from 'fs/promises';
+import { DiffScanner } from './diff-scanner.js';
+import crypto from 'crypto';
+import { LRUCache } from 'lru-cache';
 
 /**
  * Robust spawn wrapper for cross-platform command execution.
@@ -13,9 +16,16 @@ function spawnAsync(command: string, args: string[]): Promise<{ stdout: string; 
         const child = spawn(command, args, { shell: false });
         let stdout = '';
         let stderr = '';
+        
+        const timeout = setTimeout(() => {
+            child.kill();
+            reject(new Error(`Command '${command}' timed out after 5000ms`));
+        }, 5000);
+
         child.stdout.on('data', data => stdout += data.toString());
         child.stderr.on('data', data => stderr += data.toString());
         child.on('close', code => {
+            clearTimeout(timeout);
             // rg and grep return 1 if no matches found, which we handle as success with empty results
             if (code === 0 || code === 1) {
                 resolve({ stdout, stderr });
@@ -23,9 +33,23 @@ function spawnAsync(command: string, args: string[]): Promise<{ stdout: string; 
                 reject(new Error(`Command failed with code ${code}: ${stderr}`));
             }
         });
-        child.on('error', reject);
+        child.on('error', err => {
+            clearTimeout(timeout);
+            reject(err);
+        });
     });
 }
+
+interface CacheEntry {
+    results: string[];
+    timestamp: number;
+    branch: string;
+}
+
+const contextCache = new LRUCache<string, CacheEntry>({
+    max: 500,
+    ttl: 1000 * 60 * 30, // 30 minutes
+});
 
 export interface ContextGathererOptions {
     workspaceRoot: string;
@@ -45,7 +69,23 @@ export class ContextGatherer {
     static async gatherContext(options: ContextGathererOptions): Promise<string[]> {
         const { workspaceRoot, query, limit = 5 } = options;
 
-        // 1. Detect Environment
+        // MD5 of workspace root to create unique key
+        const wsHash = crypto.createHash('md5').update(workspaceRoot).digest('hex');
+        
+        // 1. Scan Git Diff (Background/non-blocking or quick cache)
+        const scanResult = await DiffScanner.scan(workspaceRoot);
+        const branch = scanResult.hasGit ? scanResult.currentBranch : 'main';
+        const priorityFiles = scanResult.hasGit ? scanResult.changedFiles : [];
+
+        // Check cache
+        const queryHash = crypto.createHash('md5').update(query).digest('hex');
+        const cacheKey = `${wsHash}:${branch}:${queryHash}`;
+        const cached = contextCache.get(cacheKey);
+        if (cached && cached.branch === branch) {
+            return cached.results;
+        }
+
+        // 2. Detect Environment
         let envType: 'node' | 'python' | 'general' = options.envType || 'general';
         if (envType === 'general') {
             try {
@@ -58,30 +98,30 @@ export class ContextGatherer {
             } catch { }
         }
 
-        // 2. Keyword Extraction
+        // 3. Keyword Extraction
         const terms = new Set<string>();
         
-        // 2.0. Add explicit keywords if provided
+        // 3.0. Add explicit keywords if provided
         if (options.keywords) {
             options.keywords.forEach(kw => {
                 if (kw.length > 2) terms.add(kw);
             });
         }
 
-        // 2a. Extract explicitly quoted terms
+        // 3a. Extract explicitly quoted terms
         const quotes = query.match(/["']([^"']+)["']/g) || [];
         quotes.forEach(q => {
             const term = q.replace(/["']/g, '').trim();
             if (term.length > 3) terms.add(term);
         });
 
-        // 2b. Extract code blocks
+        // 3b. Extract code blocks
         const codeBlocks = query.match(/```[\s\S]*?```/g) || [];
         codeBlocks.forEach(block => {
             block.split(/\W+/).filter(t => t.length > 5).forEach(t => terms.add(t));
         });
 
-        // 2c. Extract inline code
+        // 3c. Extract inline code
         const inlineCode = query.match(/`([^`]+)`/g) || [];
         inlineCode.forEach(c => {
             const term = c.replace(/`/g, '').trim();
@@ -91,7 +131,7 @@ export class ContextGatherer {
             if (term.length > 3) terms.add(term);
         });
 
-        // 2d. Fallback heuristics
+        // 3d. Fallback heuristics
         if (terms.size === 0) {
             const baseBroadKeywords = ['architecture', 'review', 'implementation', 'system', 'senior', 'software', 'project', 'please', 'could', 'would', 'where', 'how', 'what', 'why'];
             
@@ -117,18 +157,18 @@ export class ContextGatherer {
         const finalTerms = Array.from(terms).slice(0, 5);
         if (finalTerms.length === 0) return [];
 
-        // 3. Combine terms into a single regex pattern for efficiency
+        // 4. Combine terms into a single regex pattern for efficiency
         const combinedPattern = finalTerms.join('|');
 
         const isTheoretical = /\b(doc|documentation|guide|explain|theory|writeup|summary|overview)\b/i.test(query);
         const overrideIgnores = /\b(override|all files|gitignored|ignored|data)\b/i.test(query);
 
-        // 4. Rank Candidates
-        const candidates = await WorkspaceWalker.findRelevantFiles(workspaceRoot, Array.from(terms), limit, overrideIgnores, isTheoretical);
+        // 5. Rank Candidates with priorityFiles support
+        const candidates = await WorkspaceWalker.findRelevantFiles(workspaceRoot, Array.from(terms), limit, overrideIgnores, isTheoretical, priorityFiles);
         if (candidates.length === 0) return [];
 
-        // 5. Tool Detection
-        let tool: 'rg' | 'grep' | 'none' = 'none';
+        // 6. Tool Detection
+        let tool: 'rg' | 'grep' | 'powershell' | 'none' = 'none';
         try {
             await spawnAsync('rg', ['--version']);
             tool = 'rg';
@@ -137,11 +177,15 @@ export class ContextGatherer {
                 await spawnAsync('grep', ['--version']);
                 tool = 'grep';
             } catch {
-                return [];
+                if (process.platform === 'win32') {
+                    tool = 'powershell';
+                } else {
+                    return [];
+                }
             }
         }
 
-        // 6. Execute Search (Single pass with combined pattern)
+        // 7. Execute Search (Single pass with combined pattern)
         const results: string[] = [];
         try {
             const normalizedCandidates = candidates.map(c => c.replace(/\\/g, '/'));
@@ -156,15 +200,38 @@ export class ContextGatherer {
                 
                 const res = await spawnAsync('rg', args);
                 stdout = res.stdout;
-            } else {
+            } else if (tool === 'grep') {
                 const args = ['-n', '-E', '-i', '-m', '10', '-C', '2', `(${combinedPattern})`].concat(normalizedCandidates);
                 const res = await spawnAsync('grep', args);
                 stdout = res.stdout;
+            } else if (tool === 'powershell') {
+                // Windows PowerShell Get-Content fallback - only run if pattern is safe (alphanumeric, pipes, underscores, hyphens)
+                if (/^[a-zA-Z0-9_\-|]+$/.test(combinedPattern)) {
+                    for (const file of candidates) {
+                        try {
+                            const cleanPattern = combinedPattern;
+                            const cleanPath = file.replace(/"/g, '`"');
+                            const res = await spawnAsync('powershell', [
+                                '-NoProfile',
+                                '-Command',
+                                `Get-Content -Path "${cleanPath}" | Select-String -Pattern "${cleanPattern}" | ForEach-Object { "$($_.Filename || '${cleanPath}'):$($_.LineNumber):$($_.Line)" }`
+                            ]);
+                            if (res.stdout) {
+                                stdout += res.stdout + '\n';
+                            }
+                        } catch {
+                            // ignore file read error
+                        }
+                    }
+                } else {
+                    console.warn('[ContextGatherer] Skipping PowerShell search fallback due to potential injection characters in query.');
+                }
             }
+
             if (stdout) {
                 const rawMatches = stdout.split('\n').filter(Boolean);
                 
-                // 7. Group by File and Deduplicate
+                // 8. Group by File and Deduplicate
                 const grouped = new Map<string, Array<{ line: number; content: string }>>();
                 const { Sanitizer } = await import('../../utils/Sanitizer.js');
 
@@ -200,10 +267,10 @@ export class ContextGatherer {
                     } catch {}
                 }
 
-                // 8. Format final results with Priority Sorting
+                // 9. Format final results with Priority Sorting
                 const getPriority = (filePath: string): number => {
                     const ext = path.extname(filePath).toLowerCase();
-                    const codeExts = ['.ts', '.py', '.js', '.tsx', '.jsx', '.go', '.rs', '.c', '.cpp', '.h', '.hpp', '.java', '.sh', '.rb', '.php', '.cs', '.swift'];
+                    const codeExts = ['.ts', '.py', '.js', '.tsx', '.jsx', '.go', '.rs', '.c', '.cpp', '.h', '.hpp', '.java', '.sh', '.rb', '.php', '.cs', '.swift', '.sol', '.kt', '.dart'];
                     const configExts = ['.json', '.yml', '.yaml', '.toml', '.env', '.xml', '.ini'];
                     if (codeExts.includes(ext)) return 1;
                     if (configExts.includes(ext)) return 2;
@@ -228,6 +295,9 @@ export class ContextGatherer {
         } catch (e: any) {
             // Handle no matches found error (rg/grep exit code 1)
         }
+
+        // Cache results
+        contextCache.set(cacheKey, { results, timestamp: Date.now(), branch });
 
         return results;
     }
