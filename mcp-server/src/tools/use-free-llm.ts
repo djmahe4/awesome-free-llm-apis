@@ -37,6 +37,9 @@ export interface UseFreeLLMInput {
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
+const STOP_WORDS = new Set(['and', 'the', 'with', 'your', 'from', 'that', 'this', 'for', 'are', 'you', 'was', 'were', 'been', 'have', 'has', 'had', 'should', 'would', 'could']);
+
+
 import {
   sharedResponseCache,
   sharedRouter,
@@ -208,7 +211,7 @@ export async function resolveFileRefs(content: string, messages: any[], workspac
 export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> {
   const {
     model,
-    messages,
+    messages: inputMessages,
     temperature = 0.7,
     max_tokens = calculateModelWeightedMaxTokens(model),
     top_p,
@@ -221,6 +224,14 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     keywords,
     skill,
   } = input;
+
+  const promptInput = (input as any).prompt;
+  let messages = inputMessages;
+  if (!messages && typeof promptInput === 'string') {
+    messages = [{ role: 'user', content: promptInput }];
+  } else if (!messages) {
+    messages = [];
+  }
 
   if (skill) {
     const loadedSkill = await loadSkillPrompt({ skill, type: 'load' });
@@ -351,6 +362,42 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
   const finalChoice = finalContext.response?.choices?.[0]?.message;
   if (finalChoice?.content) {
     finalChoice.content = toMarkdownResponse(finalChoice.content);
+
+    // Extract nouns/terms for skill auto-suggestion in agentic mode
+    if (agentic) {
+      const textForNouns = finalChoice.content;
+      // Simple noun/term extraction using word frequencies (excluding common stop words)
+      const words = textForNouns.toLowerCase().match(/\b[a-zA-Z]{3,}\b/g) || [];
+      const freq = new Map<string, number>();
+      for (const w of words) {
+        if (!STOP_WORDS.has(w)) {
+          freq.set(w, (freq.get(w) || 0) + 1);
+        }
+      }
+      const sortedTerms = Array.from(freq.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(entry => entry[0]);
+
+      if (sortedTerms.length > 0) {
+        // Non-blocking fire-and-forget search for matched skills
+        (finalChoice as any)._suggestedPromise = loadSkillPrompt({
+          type: 'search',
+          keywords: sortedTerms,
+          workspaceDir: workspaceRoot
+        }).then(searchResult => {
+          if (searchResult.success && searchResult.skills && searchResult.skills.length > 0) {
+            const suggestedBlock = [
+              '\n\n---',
+              '## 💡 Suggested Skills',
+              ...searchResult.skills.map(s => `- \`${s.name}\` — ${s.description}`),
+              `\nTo load a skill, trigger: \`load_skill_prompt({ skill: "${searchResult.skills[0].name}", type: "load" })\``
+            ].join('\n');
+            finalChoice.content += suggestedBlock;
+          }
+        }).catch(() => {});
+      }
+    }
   }
 
   return finalContext.response;
