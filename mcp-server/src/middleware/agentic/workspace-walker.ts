@@ -76,7 +76,16 @@ export class WorkspaceWalker {
         try {
             const entries = await fs.readdir(currentDir, { withFileTypes: true });
 
-            for (const entry of entries) {
+            // Prioritize walking non-ignored directories first to prevent scan budget starvation
+            const sortedEntries = [...entries].sort((a, b) => {
+                const aIsIgnoredDir = a.isDirectory() && EXCLUDE_DIRS.includes(a.name);
+                const bIsIgnoredDir = b.isDirectory() && EXCLUDE_DIRS.includes(b.name);
+                if (aIsIgnoredDir && !bIsIgnoredDir) return 1;
+                if (!aIsIgnoredDir && bIsIgnoredDir) return -1;
+                return 0;
+            });
+
+            for (const entry of sortedEntries) {
                 if (this.filesScanned >= MAX_FILES_SCANNED) break;
 
                 const fullPath = path.join(currentDir, entry.name);

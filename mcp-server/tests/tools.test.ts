@@ -106,4 +106,39 @@ describe('use_free_llm input validation', () => {
     await useFreeLLM(JSON.parse(JSON.stringify(input)));
     expect(chatSpy).toHaveBeenCalledTimes(1);
   });
+
+  it('appends token-efficient CLI diagnostics for debugger persona', async () => {
+    vi.stubEnv('GROQ_API_KEY', 'test-key-long-enough');
+    (ProviderRegistry as unknown as { instance: undefined }).instance = undefined;
+
+    const mockResponse = {
+      id: 'debug-test-id',
+      object: 'chat.completion',
+      created: Date.now(),
+      model: 'llama-3.3-70b-versatile',
+      choices: [{ index: 0, message: { role: 'assistant' as const, content: 'Base response' }, finish_reason: 'stop' }],
+    };
+
+    const registry = ProviderRegistry.getInstance();
+    const groq = registry.getProvider('groq');
+    if (!groq) return;
+
+    vi.spyOn(groq, 'chat').mockResolvedValue(mockResponse);
+
+    const result = await useFreeLLM({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: 'fix TypeError JSON error in my project' }],
+      workspace_root: process.cwd()
+    });
+
+    const content = result.choices[0].message.content || '';
+    expect(content).toContain('Token-Efficient CLI Diagnostics');
+    
+    // Since query has 'json' and 'error', it should contain JSON tips
+    if (process.platform === 'win32') {
+      expect(content).toContain('ConvertFrom-Json');
+    } else {
+      expect(content).toContain('jq');
+    }
+  });
 });

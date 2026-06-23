@@ -21,7 +21,8 @@ const PERSONA_TAGS: Record<string, string[]> = {
   marketer: ['seo', 'marketing', 'campaign', 'strategy', 'keyword'],
   seo: ['seo', 'marketing', 'campaign', 'strategy', 'keyword'],
   student: ['study', 'explain', 'textbook', 'learning'],
-  planner: ['plan', 'roadmap', 'milestone', 'task', 'phase']
+  planner: ['plan', 'roadmap', 'milestone', 'task', 'phase'],
+  debugger: ['debug', 'error', 'exception', 'stacktrace', 'leak', 'crash', 'issue', 'ts', 'schema', 'venv', 'node_modules', 'variables']
 };
 
 const DECISION_PATTERNS = [

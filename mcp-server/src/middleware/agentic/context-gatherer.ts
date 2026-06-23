@@ -184,8 +184,11 @@ export class ContextGatherer {
         // 4. Combine terms into a single regex pattern for efficiency
         const combinedPattern = finalTerms.join('|');
 
-        const isTheoretical = /\b(doc|documentation|guide|explain|theory|writeup|summary|overview)\b/i.test(query);
-        const overrideIgnores = /\b(override|all files|gitignored|ignored|data)\b/i.test(query);
+        const { detectPersona } = await import('../../utils/persona-detector.js');
+        const persona = detectPersona(query, workspaceRoot);
+
+        const isTheoretical = /\b(doc|documentation|guide|explain|theory|writeup|summary|overview)\b/i.test(query) || persona === 'student' || persona === 'researcher';
+        const overrideIgnores = /\b(override|all files|gitignored|ignored|data)\b/i.test(query) || persona === 'debugger';
 
         // 5. Rank Candidates with priorityFiles support
         const candidates = await WorkspaceWalker.findRelevantFiles(workspaceRoot, Array.from(terms), limit, overrideIgnores, isTheoretical, priorityFiles);
