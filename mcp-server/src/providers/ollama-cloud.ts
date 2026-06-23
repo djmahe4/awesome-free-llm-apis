@@ -32,6 +32,22 @@ export class OllamaCloudProvider extends BaseProvider {
   { id: 'ministral-3:8b', name: 'Ministral 3 (8B)' },
   { id: 'devstral-2:123b', name: 'Devstral 2 (123B)' }
 ];
+visionModels: ProviderModel[] = [
+  { id: 'gemma3:4b', name: 'Gemma 3 (4B Vision)' },
+  { id: 'gemma3:12b', name: 'Gemma 3 (12B Vision)' },
+  { id: 'gemma3:27b', name: 'Gemma 3 (27B Vision)' },
+
+  { id: 'gemma4:31b', name: 'Gemma 4 (31B Vision)' },
+
+  { id: 'ministral-3:3b', name: 'Ministral 3 (3B Vision)' },
+  { id: 'ministral-3:8b', name: 'Ministral 3 (8B Vision)' },
+  { id: 'ministral-3:14b', name: 'Ministral 3 (14B Vision)' },
+
+  { id: 'devstral-small-2:24b', name: 'Devstral Small 2 (Vision)' },
+  { id: 'devstral-2:123b', name: 'Devstral 2 (Vision)' },
+
+  { id: 'glm-4.7', name: 'GLM 4.7 Vision' },
+];
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
     this.checkRateLimit();
