@@ -47,7 +47,7 @@ describe('Memory Lifecycle and Incremental Indexing Tests', () => {
     const indexer = new WorkspaceIndexer(process.cwd());
     const wsHash = 'dummy-ws-hash';
 
-    vi.spyOn(fs, 'readFile').mockResolvedValue('export const a = 1;');
+    vi.spyOn(fs, 'readFile').mockResolvedValue('export const a = 1;' as any);
     const indexSpy = vi.spyOn(indexer, 'indexWorkspace');
 
     await indexer.indexWorkspace(process.cwd());

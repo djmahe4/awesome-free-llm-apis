@@ -36,7 +36,7 @@ const KEYWORDS: Record<Capability, string[]> = {
   'Vision': ['vision', 'image', 'multimodal', 'ocr', 'visual', 'picture'],
 };
 
-const EXCLUSIONS: Record<Capability, string[]> = {
+const EXCLUSIONS: Partial<Record<Capability, string[]>> = {
   'Vision': ['video', 'animation', 'generate', 'text-to-image', 'text-to-video', 'sora', 'runway', 'luma', 'pika'],
 };
 

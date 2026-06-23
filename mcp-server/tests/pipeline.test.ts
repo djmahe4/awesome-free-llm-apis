@@ -175,9 +175,9 @@ describe('Pipeline Orchestration', () => {
         const context: PipelineContext = {
             request: { 
                 model: 'any', 
-                messages: [{ role: 'user', content: 'heavy prompt' }],
-                estimatedTokens: 10000
-            }
+                messages: [{ role: 'user', content: 'heavy prompt' }]
+            },
+            estimatedTokens: 10000
         };
 
         const next = vi.fn();

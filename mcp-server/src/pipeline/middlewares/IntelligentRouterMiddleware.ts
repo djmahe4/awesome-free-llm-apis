@@ -920,10 +920,13 @@ Request: ${lastMessage}`;
                 const remainingTimeout = getRemainingTimeout();
                 if (remainingTimeout < 2000) continue;
 
-                const perAttemptTimeout = Math.min(remainingTimeout, Math.max(12000, Math.floor(remainingTimeout / 2)));
-
                 const lowerModel = modelId.toLowerCase();
                 const isReasoning = lowerModel.includes('deepseek') || lowerModel.includes('r1') || lowerModel.includes('o1') || lowerModel.includes('o3') || lowerModel.includes('gemini-pro') || lowerModel.includes('pro-preview');
+
+                let perAttemptTimeout = Math.min(remainingTimeout, Math.max(12000, Math.floor(remainingTimeout / 2)));
+                if (isReasoning) {
+                    perAttemptTimeout = Math.min(remainingTimeout, Math.max(30000, Math.floor(remainingTimeout * 0.8)));
+                }
 
                 console.error(`[Router][Sequential] Launching ${provider.id}/${modelId} (budget: ${remainingTimeout}ms, attempt timeout: ${perAttemptTimeout}ms)`);
                 (context as any).providersAttempted.push(`${provider.id}/${modelId}`);

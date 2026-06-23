@@ -52,6 +52,29 @@ export class WorkspaceContextMiddleware implements Middleware {
         const userContent = userMessage ? (typeof userMessage.content === 'string' ? userMessage.content : JSON.stringify(userMessage.content)) : '';
         const isAgentic = context.request.agentic === true;
 
+        // Dynamic budget calculation based on model capacity
+        const { getModelContextLimit } = await import('../../utils/model-tokens.js');
+        const model = context.request.model;
+        const contextLimit = getModelContextLimit(model);
+
+        let memorySliceCount = 4;
+        let memoryCharLimit = 1500;
+        let grepCharLimit = 4000;
+
+        if (contextLimit >= 1000000) {
+            memorySliceCount = 10;
+            memoryCharLimit = 4000;
+            grepCharLimit = 15000;
+        } else if (contextLimit >= 128000) {
+            memorySliceCount = 7;
+            memoryCharLimit = 3000;
+            grepCharLimit = 10000;
+        } else if (contextLimit < 32000) {
+            memorySliceCount = 2;
+            memoryCharLimit = 800;
+            grepCharLimit = 1500;
+        }
+
         // 0. Pre-emptive Memory Update for Agentic Requests
         if (isAgentic && context.workspaceRoot) {
             try {
@@ -83,7 +106,8 @@ export class WorkspaceContextMiddleware implements Middleware {
                 grepResults = await ContextGatherer.gatherContext({
                     workspaceRoot: context.workspaceRoot,
                     query: userContent,
-                    keywords: queryKeywords
+                    keywords: queryKeywords,
+                    modelId: model
                 });
             } catch (err) {
                 console.error(`[WorkspaceContextMiddleware] Context gathering failed: ${err}`);
@@ -121,11 +145,10 @@ export class WorkspaceContextMiddleware implements Middleware {
 
                     console.debug(`[WorkspaceContext] Found ${memoryResults.length} memory entries, prioritized code first.`);
                     memoryContext = prioritizedMemory
-                        .slice(0, 5)
+                        .slice(0, memorySliceCount)
                         .map(m => {
                             const str = typeof m === 'string' ? m : (m as any).content || JSON.stringify(m);
-                            // Cap individual memory entry to 2000 chars
-                            return str.length > 2000 ? `- ${str.slice(0, 2000)}... (truncated)` : `- ${str}`;
+                            return str.length > memoryCharLimit ? `- ${str.slice(0, memoryCharLimit)}... (truncated)` : `- ${str}`;
                         })
                         .join('\n');
                 }
@@ -157,12 +180,12 @@ export class WorkspaceContextMiddleware implements Middleware {
         if (dirTree) workspaceContextStr += `\nProject Structure:\n${dirTree}\n`;
         if (grepResults.length > 0) {
             // Priority-aware truncation: grepResults is already sorted (Code -> Config -> Docs).
-            // We accumulate until 5000 chars to ensure code context is preserved over others.
+            // We accumulate until grepCharLimit chars to ensure code context is preserved over others.
             let currentLen = 0;
             const prioritizedSnippets: string[] = [];
             for (const snippet of grepResults) {
-                if (currentLen + snippet.length > 5000) {
-                    prioritizedSnippets.push(`\n... (context truncated to 5k chars, prioritizing code)`);
+                if (currentLen + snippet.length > grepCharLimit) {
+                    prioritizedSnippets.push(`\n... (context truncated to ${Math.round(grepCharLimit / 1000)}k chars, prioritizing code)`);
                     break;
                 }
                 prioritizedSnippets.push(snippet);

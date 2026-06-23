@@ -60,6 +60,7 @@ export interface ContextGathererOptions {
     limit?: number;
     envType?: 'node' | 'python' | 'general';
     sessionId?: string;
+    modelId?: string;
 }
 
 export class ContextGatherer {
@@ -321,7 +322,7 @@ export class ContextGatherer {
         }
 
         if (!isTheoretical) {
-            await enrichWithGraph(workspaceRoot, sortedFiles, query, results);
+            await enrichWithGraph(workspaceRoot, sortedFiles, query, results, options.modelId);
         }
 
         // Cache results
@@ -355,7 +356,8 @@ export async function enrichWithGraph(
     workspaceRoot: string,
     matchedFiles: string[],
     query: string,
-    results: string[]
+    results: string[],
+    modelId?: string
 ): Promise<void> {
     try {
         const graphPath = path.join(workspaceRoot, '.free-llm-mcp', 'repo_graph.json');
@@ -377,16 +379,35 @@ export async function enrichWithGraph(
                 .forEach(n => { if (!graphFiles.includes(n.id)) graphFiles.push(n.id); });
         }
 
-        // 3. Read and inject up to 3 additional files as condensed snippets
+        // 3. Read and inject additional files as condensed snippets
+        const { getModelContextLimit } = await import('../../utils/model-tokens.js');
+        const contextLimit = getModelContextLimit(modelId);
+
+        let maxGraphFiles = 3;
+        let graphFileMaxTokens = 250;
+
+        if (contextLimit >= 1000000) {
+            maxGraphFiles = 5;
+            graphFileMaxTokens = 500;
+        } else if (contextLimit >= 128000) {
+            maxGraphFiles = 4;
+            graphFileMaxTokens = 350;
+        } else if (contextLimit < 32000) {
+            maxGraphFiles = 2;
+            graphFileMaxTokens = 150;
+        }
+
         const injected: string[] = [];
-        for (const relFile of graphFiles.slice(0, 3)) {
+        const { surgicalRead } = await import('../../utils/surgical-read.js');
+        for (const relFile of graphFiles.slice(0, maxGraphFiles)) {
             try {
                 const fullPath = path.resolve(workspaceRoot, relFile);
-                const content = await fs.readFile(fullPath, 'utf-8');
-                const preview = content.split('\n').slice(0, 30).join('\n');
-                injected.push(
-                    `[Graph-Context] --- RELATED FILE: ${relFile} (via dep-graph) ---\n${preview}`
-                );
+                const preview = await surgicalRead(fullPath, query, { maxTokens: graphFileMaxTokens });
+                if (preview) {
+                    injected.push(
+                        `[Graph-Context] --- RELATED FILE: ${relFile} (via dep-graph) ---\n${preview}`
+                    );
+                }
             } catch { /* file may have been deleted or doesn't exist */ }
         }
 
