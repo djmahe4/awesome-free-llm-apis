@@ -8,16 +8,15 @@ export class LLM7Provider extends BaseProvider {
   envVar = 'LLM7_API_KEY';
   rateLimits: RateLimits = { rpm: 30 };
   models: ProviderModel[] = [
-    { id: 'gpt-oss-20b', name: 'GPT-OSS 20B' },
-    { id: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo', name: 'Llama 3.1 8B Turbo' },
-    { id: 'codestral-latest', name: 'Codestral Latest' },
-    { id: 'ministral-8b-2512', name: 'Ministral 8B 2512' },
-    { id: 'GLM-4.6V-Flash', name: 'GLM-4.6V Flash' },
-  ];
+  { id: 'qwen3-235b', name: 'Qwen 3 235B' },
+  { id: 'kimi-k2.6', name: 'Kimi K2.6' },
+  { id: 'codestral-latest', name: 'Codestral Latest' },
+  { id: 'minimax-m2.7', name: 'MiniMax M2.7' },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+];
 
   visionModels: ProviderModel[] = [
-    { id: 'GLM-4.6V-Flash', name: 'GLM-4.6V Flash (Vision)' },
-    { id: 'devstral-small-2:24b', name: 'DevStral Small 2 (Vision)' },
-    { id: 'mistral-small-2506', name: 'Mistral Small 2506 (Vision)' },
-  ];
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini (Vision)' },
+  { id: 'devstral-small-2:24b', name: 'DevStral Small 2 (Vision)' },
+];
 }

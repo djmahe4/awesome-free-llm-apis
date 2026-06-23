@@ -4,7 +4,7 @@ import type { ProviderModel, RateLimits } from './types.js';
 export class GitHubModelsProvider extends BaseProvider {
   name = 'GitHub Models';
   id = 'github-models';
-  baseURL = 'https://models.inference.ai.azure.com/';
+  baseURL = 'https://models.github.ai/inference/chat/completions';
   envVar = 'GITHUB_TOKEN';
   rateLimits: RateLimits = { rpm: 15, rpd: 150 };
   models: ProviderModel[] = [

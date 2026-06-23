@@ -32,15 +32,14 @@ export class IntelligentRouterMiddleware implements Middleware {
         'gpt-oss-120b': 0.94,
         'qwen/qwen3-coder-480b-a35b:free': 0.96,
         'qwen/qwen3-coder-480b-a35b-instruct': 0.96,
-        'Qwen/Qwen3-235B-A22B-nim': 0.92,
+        //'Qwen/Qwen3-235B-A22B-nim': 0.92,
+        'qwen3-235b': 0.92,
         'DeepSeek-V3': 0.92,
         'deepseek-ai/DeepSeek-V3': 0.92,
-        'deepseek-v3.2': 0.92,
         'glm-5.1': 0.90,
         'glm-5-turbo': 0.90,
         'glm-4.7': 0.90,
         'command-r-plus-08-2024': 0.90,
-        'kimi-k2.5': 0.90,
         'gpt-4o': 0.90,
 
         // A-Tier (0.81 - 0.89)
@@ -64,7 +63,7 @@ export class IntelligentRouterMiddleware implements Middleware {
         'bytedance/seed-oss-36b-instruct': 0.85,
         'nvidia/nemotron-nano-12b-v2-vl:free': 0.85,
         'mistral-small-latest': 0.82,
-        'ministral-8b-2512': 0.82,
+        //'ministral-8b-2512': 0.82,
         'gemini-3.1-flash-lite': 0.82,
         'stepfun-ai/step-3.5-flash': 0.82,
         'nvidia/nemotron-3-nano-30b-a3b:free': 0.82,
@@ -73,10 +72,10 @@ export class IntelligentRouterMiddleware implements Middleware {
         'command-a-03-2025': 0.80,
         'c4ai-aya-expanse-32b': 0.80,
         'google/gemma-3n-e4b-it': 0.80,
-        'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo': 0.75,
+        //'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo': 0.75,
         'llama-3.1-8b-instant': 0.75,
         'openai/gpt-oss-20b:free': 0.75,
-        'gpt-oss-20b': 0.75,
+        //'gpt-oss-20b': 0.75,
         'glm-4.5-air': 0.75,
         'z-ai/glm-4.5-air:free': 0.75,
         'google/gemma-3n-e2b-it': 0.80,
@@ -377,8 +376,7 @@ Request: ${lastMessage}`;
             'codestral-latest',
             '@cf/qwen/qwen2.5-coder-32b-instruct',
             '@cf/qwen/qwq-32b',
-            'deepseek-v3.2',
-            'gpt-oss-20b',
+            //'gpt-oss-20b',
             'gemini-3.1-flash-lite',
             'mistral-large-latest',
             'openai/gpt-oss-120b:free',
@@ -394,6 +392,12 @@ Request: ${lastMessage}`;
             'microsoft/phi-4-multimodal-instruct',
             'mistralai/mistral-nemotron',
             'minimaxai/minimax-m2.7',
+            'qwen3-235b',
+            //'Qwen/Qwen3-235B-A22B-nim',
+            'qwen3-coder:480b',
+            'qwen3-coder-next',
+            'devstral-small-2:24b',
+            'devstral-2:123b'
         ],
         [TaskType.Reasoning]: [
             'DeepSeek-R1',
@@ -416,6 +420,9 @@ Request: ${lastMessage}`;
             'microsoft/phi-4-multimodal-instruct',
             'bytedance/seed-oss-36b-instruct',
             'minimaxai/minimax-m2.7',
+            'qwen3-235b',
+            //'Qwen/Qwen3-235B-A22B-nim',
+            'glm-4.7',
         ],
         [TaskType.Moderation]: [
             'llama-3.3-70b-versatile',
@@ -437,8 +444,8 @@ Request: ${lastMessage}`;
             'gemma-4-31b-it',
             'llama-3.3-70b-versatile',
             'Qwen/Qwen2.5-72B-Instruct',    // SiliconFlow — 1000 RPM, bulk classification
-            'ministral-8b-2512',
-            'GLM-4.6V-Flash',
+            //'ministral-8b-2512',
+            //'GLM-4.6V-Flash',
             'gemini-3.1-flash-lite',
             'mistral-small-latest',
             'glm-4.6',
@@ -472,6 +479,10 @@ Request: ${lastMessage}`;
             'openai/gpt-oss-120b:free',
             'llama-3.3-70b-versatile',
             'glm-4.5-air',
+            'qwen3-235b',
+            //'Qwen/Qwen3-235B-A22B-nim',
+            'deepseek-v4-flash',
+            'gemma4:31b',
         ],
         [TaskType.Summarization]: [
             'google/gemma-4-31b-it:free',
@@ -479,7 +490,6 @@ Request: ${lastMessage}`;
             'google/gemma-3-27b-it',
             'gemma-4-31b-it',
             'gpt-oss-120b',
-            'kimi-k2.5',
             'mistral-small-latest',
             'gemini-3.1-flash-lite',
             'gemma-4-26b-a4b-it',
@@ -509,13 +519,12 @@ Request: ${lastMessage}`;
             'DeepSeek-R1',
             'deepseek-ai/DeepSeek-R1',
             'nvidia/nemotron-3-super-120b-a12b:free',
-            'qwen3.5',
             'google/gemma-4-31b-it:free',
             'google/gemma-4-26b-a4b-it:free',
             'openai/gpt-oss-20b:free',
-            'gpt-oss-20b',
+            //'gpt-oss-20b',
             'Llama-3.3-70B-Instruct',
-            'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
+            //'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
             'Qwen/Qwen2.5-72B-Instruct',
             'c4ai-aya-expanse-32b',
             'openai/gpt-oss-120b:free',
@@ -536,6 +545,27 @@ Request: ${lastMessage}`;
             'llama-3.1-8b-instant',
             'gemini-3.1-flash-lite',
             'gemma-4-26b-a4b-it',
+            'qwen3-235b',
+            //'Qwen/Qwen3-235B-A22B-nim',
+            'gpt-oss:20b',
+            'gpt-oss:120b',
+            'nemotron-3-nano:30b',
+            'nemotron-3-super',
+            'nemotron-3-ultra',
+            'kimi-k2.6',
+            'minimax-m2.1',
+            'minimax-m2.5',
+            'minimax-m2.7',
+            'minimax-m3',
+            'ministral-3:3b',
+            'ministral-3:8b',
+            'ministral-3:14b',
+            'gemma3:4b',
+            'gemma3:12b',
+            'gemma3:27b',
+            'gemma4:31b',
+            'deepseek-v4-flash',
+            'rnj-1:8b'
         ],
         [TaskType.Vision]: [
             // Ranked by capability score — these mirror the top entries in imageModelCapabilities
@@ -548,7 +578,9 @@ Request: ${lastMessage}`;
             'meta/llama-3.2-90b-vision-instruct',         // NVIDIA NIM
             '@cf/meta/llama-4-scout-17b-16e-instruct',    // Cloudflare
             '@cf/google/gemma-4-26b-a4b-it',              // Cloudflare
-            'GLM-4.6V-Flash',                             // LLM7
+            //'GLM-4.6V-Flash',
+            'gpt-5.4-mini',
+            'devstral-small-2:24b',
             'THUDM/GLM-4.1V-9B-Thinking',                // SiliconFlow
             'google/gemma-4-31b-it:free',                 // OpenRouter fallback
         ]
@@ -1090,9 +1122,37 @@ export class ImageRouterMiddleware implements Middleware {
         // Kilo Code (kilo-auto/free explicitly returns 404 for image input — no supported vision model yet)
 
         // LLM7
-        'GLM-4.6V-Flash': 0.90,
+        //'GLM-4.6V-Flash': 0.90,
         'devstral-small-2:24b': 0.75,
-        'mistral-small-2506': 0.88
+        'qwen3-235b':0.91,
+        'codestral-latest':0.85,
+        //'mistral-small-2506': 0.88,
+
+        // Ollama Cloud / Hosted Registry
+        'gpt-oss:20b': 0.78,
+        'nemotron-3-ultra': 0.90,
+        'qwen3-coder:480b': 0.88,
+        'minimax-m2.7': 0.87,
+        'ministral-3:14b': 0.84,
+        'gemma3:27b': 0.85,
+        'glm-4.7': 0.88,
+        'qwen3-coder-next': 0.85,
+        'ministral-3:3b': 0.72,
+        'kimi-k2.6': 0.88,
+        'minimax-m2.1': 0.82,
+        'gemma3:4b': 0.75,
+        'gemma3:12b': 0.82,
+        'nemotron-3-super': 0.88,
+        'deepseek-v4-flash': 0.88,
+        'gpt-oss:120b': 0.86,
+        'nemotron-3-nano:30b': 0.80,
+        'gemma4:31b': 0.90,
+        'rnj-1:8b': 0.75,
+        'glm-5.1': 0.91,
+        'minimax-m3': 0.90,
+        'minimax-m2.5': 0.85,
+        'ministral-3:8b': 0.80,
+        'devstral-2:123b': 0.88
     };
 
     constructor(executor?: LLMExecutor) {
