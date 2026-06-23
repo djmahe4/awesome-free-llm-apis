@@ -14,9 +14,32 @@ const root = resolve(__dirname, '../..');
 const copies = [
   { from: 'src/providers/gemini_client.py', to: 'dist/providers/gemini_client.py' },
   { from: 'scripts/utils/update_prompt_json.py', to: 'dist/scripts/update_prompt_json.py' },
+  { from: 'scripts/utils/pdf_screenshot.py', to: 'dist/scripts/pdf_screenshot.py' },
 ];
 
 console.log('Running post-build tasks...');
+
+// Step 1: Ensure Python virtual environment and dependencies exist
+try {
+  console.log('Setting up Python virtual environment...');
+  const venvDir = resolve(root, 'venv');
+  const isWin = process.platform === 'win32';
+  const pythonPath = isWin
+    ? resolve(venvDir, 'Scripts', 'python.exe')
+    : resolve(venvDir, 'bin', 'python');
+
+  if (!existsSync(venvDir)) {
+    console.log('Creating virtual environment...');
+    const sysPython = isWin ? 'python' : 'python3';
+    execSync(`"${sysPython}" -m venv "${venvDir}"`, { stdio: 'inherit' });
+  }
+
+  console.log('Installing/upgrading Python dependencies (pymupdf, google-genai)...');
+  execSync(`"${pythonPath}" -m pip install pymupdf google-genai`, { stdio: 'inherit' });
+  console.log('Python virtual environment setup complete.');
+} catch (err) {
+  console.error('Warning: Python virtual environment setup failed. Details:', err.message);
+}
 
 for (const { from, to } of copies) {
   const src = resolve(root, from);

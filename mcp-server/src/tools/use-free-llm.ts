@@ -1,4 +1,13 @@
 import crypto from 'node:crypto';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+
+const execAsync = promisify(exec);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+import { ProviderRegistry } from '../providers/registry.js';
+import { getMessageContent } from '../utils/MessageUtils.js';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'fs-extra';
@@ -110,12 +119,28 @@ async function findInRecentMessages(filename: string, messages: any[]): Promise<
 /**
  * v1.0.4: Resolves file://, artifact://, ctx7://, and mcp:// references in user messages.
  */
-export async function resolveFileRefs(content: string, messages: any[], workspaceRoot?: string): Promise<string> {
-  const uriRegex = /(?:\[([^\]]+)\]\()?(file|mcp|ctx7|artifact):\/\/([^\s)]+)(?:\))?/gi;
+export async function resolveFileRefs(
+  msgOrContent: any,
+  messages: any[],
+  workspaceRoot?: string
+): Promise<any> {
+  const isStringInput = typeof msgOrContent === 'string';
+  const msg = isStringInput ? { role: 'user', content: msgOrContent } : msgOrContent;
+  
+  let content = '';
+  if (typeof msg.content === 'string') {
+    content = msg.content;
+  } else if (Array.isArray(msg.content)) {
+    const textPart = msg.content.find((p: any) => p.type === 'text');
+    if (textPart) content = textPart.text || '';
+  }
+
+  const uriRegex = /(?:\[([^\]]+)\]\()?(file|mcp|ctx7|artifact|pdf):\/\/([^\s)]+)(?:\))?/gi;
   let newContent = content;
   const matches = [...content.matchAll(uriRegex)];
 
   const wsRoot = (workspaceRoot && workspaceRoot.trim()) ? path.resolve(workspaceRoot) : undefined;
+  const imageAttachments: string[] = [];
 
   for (const match of matches) {
     const fullMatch = match[0];
@@ -187,12 +212,24 @@ export async function resolveFileRefs(content: string, messages: any[], workspac
         newContent = newContent.replace(fullMatch, replacement);
         console.error(`[v1.0.4][resolveRefs] Resolved ${baseName} via ${sourceLabel}`);
       } else {
-        // v1.0.4 Hard Stop: Replace the unresolved URI with a machine-readable sentinel.
-        // This prevents the LLM from seeing a dangling reference and hallucinating its content.
         const baseName = path.basename(absPath);
         const sentinel = `[NOT_FOUND_HARD_STOP: ${baseName} (${fullMatch}) could not be resolved. Provide the correct file:/// path.]`;
         newContent = newContent.replace(fullMatch, sentinel);
         console.error(`[v1.0.4][resolveRefs] UNRESOLVED — injecting sentinel for ${baseName}`);
+      }
+    } else if (protocol === 'pdf') {
+      const res = await resolvePdfRef(uriPath, workspaceRoot);
+      if (res) {
+        resolvedContent = res.resolvedContent;
+        newContent = newContent.replace(fullMatch, `${fullMatch}\n\n${resolvedContent}`);
+        if (res.imageBase64) {
+          imageAttachments.push(res.imageBase64);
+        } else if (res.imagePath) {
+          imageAttachments.push(res.imagePath);
+        }
+      } else {
+        const sentinel = `[NOT_FOUND_HARD_STOP: PDF ${uriPath} could not be resolved.]`;
+        newContent = newContent.replace(fullMatch, sentinel);
       }
     } else if (protocol === 'ctx7') {
       /**
@@ -205,7 +242,191 @@ export async function resolveFileRefs(content: string, messages: any[], workspac
       console.warn(`[v1.0.4][resolveRefs] mcp protocol not yet implemented: ${uriPath}`);
     }
   }
-  return newContent;
+
+  // Update msg.content with text + image attachments if any
+  if (imageAttachments.length > 0) {
+    if (Array.isArray(msg.content)) {
+      const textPart = msg.content.find((p: any) => p.type === 'text');
+      if (textPart) textPart.text = newContent;
+      for (const img of imageAttachments) {
+        msg.content.push({
+          type: 'image_url',
+          image_url: { url: img.startsWith('data:') ? img : `file://${img}` }
+        });
+      }
+    } else {
+      msg.content = [
+        { type: 'text', text: newContent },
+        ...imageAttachments.map(img => ({
+          type: 'image_url',
+          image_url: { url: img.startsWith('data:') ? img : `file://${img}` }
+        }))
+      ];
+    }
+  } else {
+    if (Array.isArray(msg.content)) {
+      const textPart = msg.content.find((p: any) => p.type === 'text');
+      if (textPart) textPart.text = newContent;
+    } else {
+      msg.content = newContent;
+    }
+  }
+
+  return isStringInput ? msg.content : undefined;
+}
+
+export async function resolvePdfRef(
+  uriPath: string,
+  workspaceRoot?: string
+): Promise<{ resolvedContent: string; imagePath: string | null; imageBase64: string | null } | null> {
+  const parts = uriPath.split(':');
+  const relativePdfPath = parts[0];
+  const pageNumStr = parts[1] || '1';
+  const pageNum = parseInt(pageNumStr, 10) || 1;
+
+  const wsRoot = (workspaceRoot && workspaceRoot.trim()) ? path.resolve(workspaceRoot) : process.cwd();
+  const absPdfPath = path.resolve(wsRoot, relativePdfPath);
+  const pdfName = path.basename(absPdfPath);
+
+  if (!await fs.pathExists(absPdfPath)) {
+    console.error(`[resolvePdfRef] PDF not found: ${absPdfPath}`);
+    return null;
+  }
+
+  // 1. Check if index/offset is cached
+  const memoryKey = `pdf:index:${pdfName}`;
+  const { memoryManager } = await import('../memory/index.js');
+  const savedIndex = await memoryManager.longTerm.load(memoryKey) as any;
+
+  let physicalPage = pageNum;
+  if (savedIndex && typeof savedIndex.offset === 'number') {
+    if (pageNum !== savedIndex.index_page) {
+      physicalPage = pageNum + savedIndex.offset;
+    }
+  }
+
+  // 2. Run the python renderer script
+  const serverRoot = path.resolve(__dirname, '../..');
+  const hasServerVenv = await fs.pathExists(path.join(serverRoot, 'venv'));
+  const pythonPath = process.platform === 'win32'
+    ? path.join(hasServerVenv ? serverRoot : process.cwd(), 'venv', 'Scripts', 'python.exe')
+    : path.join(hasServerVenv ? serverRoot : process.cwd(), 'venv', 'bin', 'python');
+
+  let scriptPath = path.join(serverRoot, 'scripts', 'utils', 'pdf_screenshot.py');
+  if (!await fs.pathExists(scriptPath)) {
+    scriptPath = path.join(serverRoot, 'scripts', 'pdf_screenshot.py');
+  }
+  if (!await fs.pathExists(scriptPath)) {
+    scriptPath = path.join(process.cwd(), 'scripts', 'utils', 'pdf_screenshot.py');
+    if (!await fs.pathExists(scriptPath)) {
+      scriptPath = path.join(process.cwd(), 'scripts', 'pdf_screenshot.py');
+    }
+  }
+
+  let renderResult: any;
+  try {
+    const cmd = `"${pythonPath}" "${scriptPath}" "${absPdfPath}" ${physicalPage}`;
+    const { stdout } = await execAsync(cmd);
+    renderResult = JSON.parse(stdout);
+    if (renderResult.error) {
+      console.error(`[resolvePdfRef] Python script error: ${renderResult.error}`);
+      return null;
+    }
+  } catch (err) {
+    console.error(`[resolvePdfRef] Failed to execute Python script:`, err);
+    return null;
+  }
+
+  const textContent = (renderResult.text || '').trim();
+
+  let imageBase64: string | null = null;
+  if (renderResult.image_path) {
+    try {
+      const imgBuffer = await fs.readFile(renderResult.image_path);
+      const ext = path.extname(renderResult.image_path).toLowerCase().replace('.', '');
+      const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+      imageBase64 = `data:${mimeType};base64,${imgBuffer.toString('base64')}`;
+    } catch (err) {
+      console.error(`[resolvePdfRef] Failed to convert PDF page image to base64:`, err);
+    }
+  }
+
+  // 3. If not cached, detect if this is an index page via multimodal LLM call
+  if (!savedIndex) {
+    try {
+      const registry = ProviderRegistry.getInstance();
+      const provider = registry.getAvailableProviders().find(p => p.id !== 'siliconflow') || registry.getProvider('gemini');
+      if (provider) {
+        const promptForLLM = `Analyze the attached screenshot from the PDF page.
+Determine if this page is a Table of Contents (TOC) / Index of the document.
+Return ONLY a valid JSON object matching this structure:
+{
+  "is_index": true/false,
+  "offset": <number or 0>,
+  "explanation": "Why or why not"
+}
+Note: 'offset' is defined as the difference (physical_page_number - printed_page_number). 
+For example:
+- If this page is physical page 2, and the printed page number on the page is '2', the offset is 0.
+- If this page is physical page 5, but the printed page number on it is '1', the offset is 4.
+- If it is not an index page, set offset to 0.`;
+
+        const response = await provider.chat({
+          model: provider.models[0]?.id,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: promptForLLM },
+                {
+                  type: 'image_url',
+                  image_url: { url: imageBase64 || '' }
+                }
+              ]
+            }
+          ],
+          temperature: 0.1,
+          max_tokens: 150
+        });
+
+        const choice = response.choices?.[0];
+        const content = getMessageContent(choice?.message) || '';
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(content.replace(/```json|```/g, '').trim());
+        } catch {
+          const match = content.match(/\{[\s\S]*?\}/);
+          if (match) parsed = JSON.parse(match[0]);
+        }
+
+        if (parsed && parsed.is_index) {
+          await memoryManager.longTerm.save(memoryKey, {
+            is_index: true,
+            index_page: pageNum,
+            offset: parsed.offset || 0
+          });
+          console.log(`[resolvePdfRef] Saved index mapping for ${pdfName}: page ${pageNum}, offset ${parsed.offset}`);
+        } else {
+          await memoryManager.longTerm.save(memoryKey, {
+            is_index: false,
+            index_page: pageNum,
+            offset: 0
+          });
+        }
+      }
+    } catch (err) {
+      console.error(`[resolvePdfRef] LLM classification failed:`, err);
+    }
+  }
+
+  const finalContent = `[PDF-Context] --- FILE: ${pdfName} physical_page:${physicalPage} ---\n` +
+    `Page Text:\n${textContent || '(No extractable text found. Vision analysis screenshot attached.)'}`;
+
+  return {
+    resolvedContent: finalContent,
+    imagePath: renderResult.image_path,
+    imageBase64: imageBase64
+  };
 }
 
 export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> {
@@ -249,11 +470,11 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     }
   }
 
-  // v1.0.4 Resolution Pass: Resolve file, artifact, ctx7 references in user messages
+  // v1.0.4 Resolution Pass: Resolve file, artifact, ctx7, pdf references in user messages
   if (agentic) {
     for (const msg of messages) {
-      if (msg.role === 'user' && typeof msg.content === 'string') {
-        msg.content = await resolveFileRefs(msg.content, messages, workspaceRoot);
+      if (msg.role === 'user' && (typeof msg.content === 'string' || Array.isArray(msg.content))) {
+        await resolveFileRefs(msg, messages, workspaceRoot);
       }
     }
 
