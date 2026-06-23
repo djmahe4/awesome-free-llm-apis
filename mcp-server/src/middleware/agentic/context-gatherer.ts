@@ -210,6 +210,7 @@ export class ContextGatherer {
 
         // 7. Execute Search (Single pass with combined pattern)
         const results: string[] = [];
+        let sortedFiles: string[] = [];
         try {
             const normalizedCandidates = candidates.map(c => c.replace(/\\/g, '/'));
             let stdout = '';
@@ -300,7 +301,7 @@ export class ContextGatherer {
                     return 3; // Docs and others
                 };
 
-                const sortedFiles = Array.from(grouped.keys()).sort((a, b) => {
+                sortedFiles = Array.from(grouped.keys()).sort((a, b) => {
                     const prioA = getPriority(a);
                     const prioB = getPriority(b);
                     if (prioA !== prioB) return prioA - prioB;
@@ -317,6 +318,10 @@ export class ContextGatherer {
             }
         } catch (e: any) {
             // Handle no matches found error (rg/grep exit code 1)
+        }
+
+        if (!isTheoretical) {
+            await enrichWithGraph(workspaceRoot, sortedFiles, query, results);
         }
 
         // Cache results
@@ -345,3 +350,49 @@ export class ContextGatherer {
         return results;
     }
 }
+
+export async function enrichWithGraph(
+    workspaceRoot: string,
+    matchedFiles: string[],
+    query: string,
+    results: string[]
+): Promise<void> {
+    try {
+        const graphPath = path.join(workspaceRoot, '.free-llm-mcp', 'repo_graph.json');
+        const graphData = JSON.parse(await fs.readFile(graphPath, 'utf-8'));
+        const { RepositoryGraph, semanticScore } = await import('../../memory/dependency-scanner.js');
+        const graph = RepositoryGraph.deserialize(workspaceRoot, graphData);
+
+        // 1. Find semantically related nodes by keyword scoring
+        const scored = semanticScore(query, graph, false, 4);
+        const graphFiles = scored
+            .map(s => s.node.id)
+            .filter(id => !matchedFiles.includes(id));
+
+        // 2. For each matched grep file, get 1-hop neighbours
+        for (const mf of matchedFiles.slice(0, 3)) {
+            const nb = graph.getNeighborhood(mf, 1);
+            nb.nodes
+                .filter(n => n.type === 'code' && n.id !== mf)
+                .forEach(n => { if (!graphFiles.includes(n.id)) graphFiles.push(n.id); });
+        }
+
+        // 3. Read and inject up to 3 additional files as condensed snippets
+        const injected: string[] = [];
+        for (const relFile of graphFiles.slice(0, 3)) {
+            try {
+                const fullPath = path.resolve(workspaceRoot, relFile);
+                const content = await fs.readFile(fullPath, 'utf-8');
+                const preview = content.split('\n').slice(0, 30).join('\n');
+                injected.push(
+                    `[Graph-Context] --- RELATED FILE: ${relFile} (via dep-graph) ---\n${preview}`
+                );
+            } catch { /* file may have been deleted or doesn't exist */ }
+        }
+
+        results.push(...injected);
+    } catch (err) {
+        // repo_graph.json not built or other error, ignore and let grep return directly
+    }
+}
+

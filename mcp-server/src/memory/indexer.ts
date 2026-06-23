@@ -91,9 +91,21 @@ export class WorkspaceIndexer {
 
                 // 3. Upsert to Vectra
                 const sanitizedContent = Sanitizer.sanitize(content);
+                const ext = path.extname(file).toLowerCase();
+                const { WorkspaceDependencyScanner } = await import('./dependency-scanner.js');
+                const profile = WorkspaceDependencyScanner.generateSemanticProfile(content, ext);
+                
+                const profileStr = `File: ${relativePath}
+Role: ${profile.docstring || 'Undocumented module'}
+Provides: ${profile.exports.join(', ')}
+Depends on: ${profile.imports.join(', ')}
+
+Implementation Snippet:
+${sanitizedContent.slice(0, 2000)}`;
+
                 await vectorStore.upsert(wsHash, {
                     id: vectorKey,
-                    content: `File: ${relativePath}\n\n${sanitizedContent.slice(0, 5000)}`, // Cap content for indexing
+                    content: profileStr,
                     metadata: { 
                         type: 'file',
                         path: relativePath,

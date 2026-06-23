@@ -122,8 +122,23 @@ Return ONLY a markdown block in this format:
 - [missing detail 1]
 - [missing detail 2]`;
 
+    let graphHints = '';
+    if (workspaceRoot) {
+        try {
+            const graphPath = path.join(workspaceRoot, '.free-llm-mcp', 'repo_graph.json');
+            const { RepositoryGraph, semanticScore } = await import('../../memory/dependency-scanner.js');
+            const graphData = JSON.parse(await fs.readFile(graphPath, 'utf-8'));
+            const graph = RepositoryGraph.deserialize(workspaceRoot, graphData);
+            const scored = semanticScore(prompt, graph, true, 3);
+            if (scored.length > 0) {
+                graphHints = `\n\n**Most relevant files (by dependency graph):**\n` +
+                    scored.map(s => `- \`${s.node.id}\` (${s.reason})`).join('\n');
+            }
+        } catch { /* graph not ready */ }
+    }
+
     try {
-        const userPrompt = `Here is the repository structure:\n${repoSnapshot}\n\nUser said: "${prompt}"`;
+        const userPrompt = `Here is the repository structure:\n${repoSnapshot}${graphHints}\n\nUser said: "${prompt}"`;
         const response = await provider.chat({
             model: provider.models[0]?.id,
             messages: [

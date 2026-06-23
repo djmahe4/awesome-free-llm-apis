@@ -104,6 +104,7 @@ For more detailed information on the inner workings or specific use cases, refer
 
 - [**System Architecture**](references/architecture.md): Deep dive into grounding protocols, steering engine mechanics, and advanced agentic patterns.
 - [**Memory Usage Guide**](references/memory-usage.md): Architectural details of the persistent memory system and search optimization.
+- [**Documentation Maintainer**](references/doc-maintainer.md): Context-aware best practices, docstring formats, and export guidelines to optimize semantic profiling.
 - [**Tool Usage Matrix**](references/usages.md): Full test matrix with actual responses, token counts, and latency measurements for all tools.
 
 ---

@@ -541,4 +541,210 @@ export class WorkspaceDependencyScanner {
 
         return md;
     }
+
+    static generateSemanticProfile(content: string, ext: string): { docstring: string, exports: string[], imports: string[] } {
+        const profile = {
+            docstring: '',
+            exports: [] as string[],
+            imports: [] as string[]
+        };
+
+        // Extract docstring (first block comment / JSDoc / line docstring)
+        if (ext === '.py') {
+            const pyDocMatch = content.match(/^\s*"""([\s\S]*?)"""/m) || content.match(/^\s*'''([\s\S]*?)'''/m);
+            if (pyDocMatch) {
+                profile.docstring = pyDocMatch[1].trim();
+            }
+        } else if (['.rs', '.dart', '.go', '.c', '.cpp', '.h', '.hpp', '.kt'].includes(ext)) {
+            // Match consecutive lines starting with /// or //! or //
+            const rustDocMatch = content.match(/^(\s*\/\/\/.*(?:\r?\n\s*\/\/\/.*)*)/m) || 
+                                 content.match(/^(\s*\/\/!.*(?:\r?\n\s*\/\/!.*)*)/m) ||
+                                 content.match(/^(\s*\/\/.*(?:\r?\n\s*\/\/.*)*)/m);
+            if (rustDocMatch) {
+                profile.docstring = rustDocMatch[1].replace(/^\s*\/\/\/?!?\s?/gm, '').trim();
+            } else {
+                const jsDocMatch = content.match(/\/\*\*([\s\S]*?)\*\//);
+                if (jsDocMatch) {
+                    profile.docstring = jsDocMatch[1].replace(/^\s*\* ?/gm, '').trim();
+                }
+            }
+        } else {
+            const jsDocMatch = content.match(/\/\*\*([\s\S]*?)\*\//);
+            if (jsDocMatch) {
+                profile.docstring = jsDocMatch[1].replace(/^\s*\* ?/gm, '').trim();
+            }
+        }
+
+        // Extract imports & exports
+        if (['.ts', '.tsx', '.js', '.jsx', '.sol', '.dart'].includes(ext)) {
+            const patterns = [
+                /import\s+[\s\S]*?\s+from\s+['"]([^'"]+)['"]/g,
+                /import\s+['"]([^'"]+)['"]/g,
+                /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+            ];
+            for (const pattern of patterns) {
+                let match;
+                while ((match = pattern.exec(content)) !== null) {
+                    profile.imports.push(match[1]);
+                }
+            }
+
+            let exportPattern = /export\s+(class|function|interface|const|let|var|type)\s+([a-zA-Z0-9_]+)/g;
+            if (ext === '.sol') {
+                exportPattern = /^\s*(contract|library|interface|struct)\s+([a-zA-Z0-9_]+)/gm;
+            } else if (ext === '.dart') {
+                exportPattern = /^\s*(class|enum|mixin|extension)\s+([a-zA-Z0-9_]+)/gm;
+            }
+            
+            let exportMatch;
+            while ((exportMatch = exportPattern.exec(content)) !== null) {
+                profile.exports.push(exportMatch[2]);
+            }
+        } else if (ext === '.py') {
+            const importPattern = /^\s*import\s+([a-zA-Z0-9_.,\s]+)/gm;
+            const fromPattern = /^\s*from\s+(\.?\.?[a-zA-Z0-9_.]+)\s+import/gm;
+            let match;
+            while ((match = importPattern.exec(content)) !== null) {
+                match[1].split(',').forEach(m => profile.imports.push(m.trim().split(/\s+/)[0]));
+            }
+            while ((match = fromPattern.exec(content)) !== null) {
+                profile.imports.push(match[1]);
+            }
+
+            const exportPattern = /^\s*(def|class)\s+([a-zA-Z0-9_]+)/gm;
+            let exportMatch;
+            while ((exportMatch = exportPattern.exec(content)) !== null) {
+                profile.exports.push(exportMatch[2]);
+            }
+        } else if (ext === '.rs') {
+            const importPattern = /^\s*use\s+([a-zA-Z0-9_:]+)/gm;
+            let match;
+            while ((match = importPattern.exec(content)) !== null) {
+                profile.imports.push(match[1]);
+            }
+
+            const exportPattern = /^\s*pub\s+(fn|struct|enum|trait|mod|const)\s+([a-zA-Z0-9_]+)/gm;
+            let exportMatch;
+            while ((exportMatch = exportPattern.exec(content)) !== null) {
+                profile.exports.push(exportMatch[2]);
+            }
+        } else if (ext === '.java') {
+            const importPattern = /^\s*import\s+([a-zA-Z0-9_.]+)/gm;
+            let match;
+            while ((match = importPattern.exec(content)) !== null) {
+                profile.imports.push(match[1]);
+            }
+
+            const exportPattern = /^\s*public\s+(class|interface|enum)\s+([a-zA-Z0-9_]+)/gm;
+            let exportMatch;
+            while ((exportMatch = exportPattern.exec(content)) !== null) {
+                profile.exports.push(exportMatch[2]);
+            }
+        } else if (ext === '.go') {
+            // Imports: single line 'import "fmt"' or block 'import (\n  "fmt"\n)'
+            const singleImport = /import\s+['"]([^'"]+)['"]/g;
+            const blockImport = /import\s*\(([\s\S]*?)\)/g;
+            let match;
+            while ((match = singleImport.exec(content)) !== null) {
+                profile.imports.push(match[1]);
+            }
+            while ((match = blockImport.exec(content)) !== null) {
+                const inner = match[1];
+                const lines = inner.split('\n');
+                for (const line of lines) {
+                    const cleanLine = line.trim().replace(/['"]/g, '');
+                    if (cleanLine && !cleanLine.startsWith('//') && !cleanLine.startsWith('/*')) {
+                        profile.imports.push(cleanLine.split(/\s+/)[0]);
+                    }
+                }
+            }
+
+            // Exports: functions, types, consts, vars starting with capital letters
+            const exportPattern = /^\s*(func|type|const|var)\s+([A-Z][a-zA-Z0-9_]*)/gm;
+            let exportMatch;
+            while ((exportMatch = exportPattern.exec(content)) !== null) {
+                profile.exports.push(exportMatch[2]);
+            }
+        } else if (['.c', '.cpp', '.h', '.hpp'].includes(ext)) {
+            // C/C++ imports: #include <vector> or #include "helper.h"
+            const importPattern = /^\s*#include\s+['"<]([^'">]+)['">]/gm;
+            let match;
+            while ((match = importPattern.exec(content)) !== null) {
+                profile.imports.push(match[1]);
+            }
+
+            // C/C++ exports: class, struct, enum definitions
+            const exportPattern = /^\s*(class|struct|enum)\s+([a-zA-Z0-9_]+)/gm;
+            let exportMatch;
+            while ((exportMatch = exportPattern.exec(content)) !== null) {
+                profile.exports.push(exportMatch[2]);
+            }
+        } else if (ext === '.kt') {
+            // Kotlin imports: import kotlinx.coroutines.flow
+            const importPattern = /^\s*import\s+([a-zA-Z0-9_.]+)/gm;
+            let match;
+            while ((match = importPattern.exec(content)) !== null) {
+                profile.imports.push(match[1]);
+            }
+
+            // Kotlin exports: class, interface, object, fun
+            const exportPattern = /^\s*(class|interface|object|fun)\s+([a-zA-Z0-9_]+)/gm;
+            let exportMatch;
+            while ((exportMatch = exportPattern.exec(content)) !== null) {
+                profile.exports.push(exportMatch[2]);
+            }
+        }
+
+        profile.imports = Array.from(new Set(profile.imports));
+        profile.exports = Array.from(new Set(profile.exports));
+
+        return profile;
+    }
 }
+
+export interface ScoredNode {
+    node: Node;
+    score: number;
+    reason: string;
+}
+
+export function semanticScore(
+    query: string,
+    graph: RepositoryGraph,
+    includeDocs: boolean = false,
+    topK: number = 5
+): ScoredNode[] {
+    const tokens = query.toLowerCase()
+        .split(/[\W_]+/)
+        .filter(t => t.length > 2);
+
+    if (tokens.length === 0) return [];
+
+    const results: ScoredNode[] = [];
+    for (const node of graph.getAllNodes()) {
+        if (node.type !== 'code' && (!includeDocs || (node.type !== 'doc' && node.type !== 'concept' && node.type !== 'pdf'))) {
+            continue;
+        }
+
+        const parts = node.id.toLowerCase()
+            .split(/[\/\.\-_]/)
+            .flatMap(p => p.split(/(?=[A-Z])/))
+            .map(p => p.toLowerCase())
+            .filter(p => p.length > 2);
+
+        const hits = tokens.filter(t => parts.some(p => p.includes(t)));
+        if (hits.length === 0) continue;
+
+        const edgeCount = graph.getEdgesFrom(node.id).length;
+
+        const score = (hits.length * 3) + Math.min(edgeCount, 5);
+        results.push({
+            node,
+            score,
+            reason: `keyword:[${hits.join(',')}] hub:${edgeCount}`
+        });
+    }
+
+    return results.sort((a, b) => b.score - a.score).slice(0, topK);
+}
+
