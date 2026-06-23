@@ -7,6 +7,7 @@ import {
 import { useFreeLLM } from '../tools/use-free-llm.js';
 import { visionTool } from '../tools/vision-tool.js';
 import { loadSkillPrompt } from '../tools/load-skill-prompt.js';
+import { executeSkill } from '../tools/execute-skill.js';
 // v1.0.5 Deprecated: Unnecessary feature (Remove this comment and import in new update)
 //import { listAvailableFreeModels } from '../tools/list-models.js';
 // v1.0.5 Deprecated: Unnecessary feature (DO NOT REMOVE THE CODE COMMENT)
@@ -443,6 +444,21 @@ export async function createMCPServer(): Promise<Server> {
           required: ['workspace_root'],
         },
       },
+      {
+        name: 'execute_skill',
+        description: 'Execute a prompt using a specific local skill\'s instructions and reference files.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            skill: { type: 'string', description: 'Name of the skill directory under .free-llm-mcp/skills/' },
+            input: { type: 'string', description: 'The prompt or instruction to run with the skill.' },
+            model: { type: 'string', description: 'Optional model to use.' },
+            workspace_root: { type: 'string', description: 'Optional absolute path to the project root.' },
+            sessionId: { type: 'string', description: 'Optional session identifier.' }
+          },
+          required: ['skill', 'input']
+        }
+      }
     ],
   }));
 
@@ -544,6 +560,14 @@ export async function createMCPServer(): Promise<Server> {
         const result = await indexWorkspace(input);
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      if (name === 'execute_skill') {
+        const input = args as any;
+        const result = await executeSkill(input);
+        return {
+          content: [{ type: 'text' as const, text: result.success ? result.response ?? '' : `Error: ${result.error}` }]
         };
       }
 

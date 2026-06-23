@@ -14,3 +14,5 @@ export { visionTool } from './vision-tool.js';
 export type { VisionToolInput } from './vision-tool.js';
 export { loadSkillPrompt } from './load-skill-prompt.js';
 export type { LoadSkillPromptInput } from './load-skill-prompt.js';
+export { executeSkill } from './execute-skill.js';
+export type { ExecuteSkillInput, ExecuteSkillResult } from './execute-skill.js';
