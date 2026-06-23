@@ -46,7 +46,7 @@ describe('execute_skill', () => {
       return false;
     });
 
-    vi.spyOn(fs, 'readFile').mockResolvedValue('## Core Instructions\nApply these guidelines.');
+    (vi.spyOn(fs, 'readFile') as any).mockResolvedValue('## Core Instructions\nApply these guidelines.');
 
     (useFreeLLM as any).mockResolvedValue({
       choices: [{ message: { content: 'Optimized response' } }]

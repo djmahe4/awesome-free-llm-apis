@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
-import { LOCAL_SKILLS_DIR } from '../middleware/agentic/constants.js';
+import { resolveConfigDir } from '../utils/config-path.js';
 import { useFreeLLM } from './use-free-llm.js';
 import { memoryManager } from '../memory/index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
@@ -69,7 +69,8 @@ export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput): Prom
 
     // Sanitize name for filesystem
     const skillSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50);
-    const skillDir = path.join(workspace_root, LOCAL_SKILLS_DIR, skillSlug);
+    const configDir = resolveConfigDir(workspace_root);
+    const skillDir = path.join(configDir, 'skills', skillSlug);
     const scriptsDir = path.join(skillDir, 'scripts');
 
     const generatedScripts: Record<string, string> = {};

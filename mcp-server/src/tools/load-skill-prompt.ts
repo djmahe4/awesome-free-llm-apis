@@ -2,6 +2,7 @@ import fetch from 'node-fetch';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { resolveConfigDir } from '../utils/config-path.js';
 
 const SKILL_INDEX_URL = 'https://sickn33.github.io/antigravity-awesome-skills/skills.json';
 const RAW_BASE_URL = 'https://raw.githubusercontent.com/sickn33/antigravity-awesome-skills/main';
@@ -57,11 +58,13 @@ async function fetchText(url: string): Promise<string> {
 }
 
 async function getBaseDir(workspaceDir?: string): Promise<string> {
-  return workspaceDir || os.homedir();
+  if (workspaceDir) {
+    return resolveConfigDir(workspaceDir);
+  }
+  return path.join(os.homedir(), '.free-llm-mcp');
 }
 
-async function getLocalSkillsIndex(baseDir: string): Promise<SkillIndexEntry[]> {
-  const configDir = path.join(baseDir, '.free-llm-mcp');
+async function getLocalSkillsIndex(configDir: string): Promise<SkillIndexEntry[]> {
   const indexFile = path.join(configDir, 'skills.json');
 
   try {
@@ -131,25 +134,25 @@ async function fetchAllFiles(skillPath: string, accumulator: { path: string, con
 
 export async function loadSkillPrompt(input: LoadSkillPromptInput): Promise<LoadSkillPromptResult> {
   try {
-    const baseDir = await getBaseDir(input.workspaceDir);
+    const configDir = await getBaseDir(input.workspaceDir);
     
     if (input.type === 'search') {
-      const results = await searchSkills(input.keywords || [], baseDir);
+      const results = await searchSkills(input.keywords || [], configDir);
       return { success: true, skills: results };
     }
 
     if (input.type === 'load') {
       const name = input.name || '';
-      const index = await getLocalSkillsIndex(baseDir);
+      const index = await getLocalSkillsIndex(configDir);
       const found = index.find(e => normalize(e.name || '') === normalize(name) || normalize(e.id || '') === normalize(name));
 
       if (!found || !found.path) {
         const keywords = name.split(/\s+/).filter(k => k.length > 0);
-        const results = await searchSkills(keywords, baseDir);
+        const results = await searchSkills(keywords, configDir);
         return { success: true, skills: results };
       }
 
-       const skillDir = path.join(baseDir, '.free-llm-mcp', 'skills', found.id || found.name || name);
+       const skillDir = path.join(configDir, 'skills', found.id || found.name || name);
        await fs.mkdir(skillDir, { recursive: true });
 
        const skillPath = found.path.replace(/^\/+/, '');

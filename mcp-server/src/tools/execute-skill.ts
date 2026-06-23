@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { useFreeLLM } from './use-free-llm.js';
 import { loadSkillPrompt } from './load-skill-prompt.js';
+import { resolveConfigDir } from '../utils/config-path.js';
 
 export interface ExecuteSkillInput {
   skill: string;
@@ -101,16 +102,9 @@ export async function executeSkill(input: ExecuteSkillInput): Promise<ExecuteSki
   }
 
   try {
-    const baseDir = workspace_root || os.homedir();
-    
-    // 2. Resolve skill directory (.free-llm-mcp or .free-llms-mcp)
-    let skillDir = path.join(baseDir, '.free-llm-mcp', 'skills', skill);
-    if (!await fs.pathExists(skillDir)) {
-      const altDir = path.join(baseDir, '.free-llms-mcp', 'skills', skill);
-      if (await fs.pathExists(altDir)) {
-        skillDir = altDir;
-      }
-    }
+    // 2. Resolve skill directory using resolveConfigDir
+    const configDir = workspace_root ? resolveConfigDir(workspace_root) : path.join(os.homedir(), '.free-llm-mcp');
+    let skillDir = path.join(configDir, 'skills', skill);
 
     let skillMdPath = path.join(skillDir, 'SKILL.md');
     
@@ -130,7 +124,7 @@ export async function executeSkill(input: ExecuteSkillInput): Promise<ExecuteSki
       }
       
       // Re-evaluate paths after load
-      skillDir = path.join(baseDir, '.free-llm-mcp', 'skills', skill);
+      skillDir = path.join(configDir, 'skills', skill);
       skillMdPath = path.join(skillDir, 'SKILL.md');
     }
 
