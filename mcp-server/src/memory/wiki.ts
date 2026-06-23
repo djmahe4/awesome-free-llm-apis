@@ -87,6 +87,36 @@ function stringifyFrontmatter(frontmatter: Record<string, any>, body: string): s
   return lines.join('\n') + '\n\n' + body;
 }
 
+async function safeRename(src: string, dest: string, retries = 5, delay = 10): Promise<void> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await fs.rename(src, dest);
+      return;
+    } catch (err: any) {
+      if ((err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'EBUSY') && i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+async function safeUnlink(filePath: string, retries = 5, delay = 10): Promise<void> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await fs.unlink(filePath);
+      return;
+    } catch (err: any) {
+      if ((err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'EBUSY') && i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 export class WikiMemory {
   private wikiDir: string;
 
@@ -197,7 +227,7 @@ export class WikiMemory {
     // Atomic write
     const tmpPath = `${targetPath}.${Date.now()}.${Math.random().toString(36).substring(7)}.tmp`;
     await fs.writeFile(tmpPath, raw, 'utf-8');
-    await fs.rename(tmpPath, targetPath);
+    await safeRename(tmpPath, targetPath);
 
     await this.enforcePageLimit();
 
@@ -264,7 +294,7 @@ export class WikiMemory {
     const toEvict = pages.slice(0, excessCount);
     for (const p of toEvict) {
       try {
-        await fs.unlink(p.path);
+        await safeUnlink(p.path);
       } catch {
         // ignore
       }
@@ -372,7 +402,7 @@ export class WikiMemory {
           // Atomic write
           const tmpPath = `${f}.${Date.now()}.${Math.random().toString(36).substring(7)}.tmp`;
           await fs.writeFile(tmpPath, updatedRaw, 'utf-8');
-          await fs.rename(tmpPath, f);
+          await safeRename(tmpPath, f);
         }
       } catch {
         // ignore
@@ -415,7 +445,7 @@ ${content}
 `;
     const tmpPath = `${adrPath}.${Date.now()}.${Math.random().toString(36).substring(7)}.tmp`;
     await fs.writeFile(tmpPath, adrContent, 'utf-8');
-    await fs.rename(tmpPath, adrPath);
+    await safeRename(tmpPath, adrPath);
 
     return adrId;
   }
@@ -456,7 +486,7 @@ ${rationale}
 `;
     const tmpPath = `${adrPath}.${Date.now()}.${Math.random().toString(36).substring(7)}.tmp`;
     await fs.writeFile(tmpPath, adrContent, 'utf-8');
-    await fs.rename(tmpPath, adrPath);
+    await safeRename(tmpPath, adrPath);
 
     return adrId;
   }

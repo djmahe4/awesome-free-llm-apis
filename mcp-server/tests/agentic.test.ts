@@ -201,7 +201,7 @@ describe('Agentic Intelligence & Middleware', () => {
             const context: PipelineContext = {
                 request: {
                     model: 'test',
-                    messages: [{ role: 'user', content: 'momentum' }]
+                    messages: [{ role: 'user', content: 'run momentum' }]
                 },
                 sessionId: 'session-1'
             } as any;
@@ -258,7 +258,7 @@ describe('Agentic Intelligence & Middleware', () => {
             const context: PipelineContext = {
                 request: {
                     model: 'test',
-                    messages: [{ role: 'user', content: 'momentum' }]
+                    messages: [{ role: 'user', content: 'run momentum' }]
                 },
                 agentic: true,
                 sessionId: 'explicit-session'
@@ -276,7 +276,7 @@ describe('Agentic Intelligence & Middleware', () => {
             const context: PipelineContext = {
                 request: {
                     model: 'test',
-                    messages: [{ role: 'user', content: 'momentum' }]
+                    messages: [{ role: 'user', content: 'run momentum' }]
                 }
                 // No sessionId
             } as any;

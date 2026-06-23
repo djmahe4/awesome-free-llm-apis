@@ -52,7 +52,7 @@ describe('Router Fallback Fix - Multiple next() Calls Bug', () => {
         };
         await router.execute(chatContext, async () => { });
         // Chat should try DeepSeek-R1 first (High Performance Free)
-        expect(firstModelAttempted).toBe('DeepSeek-R1');
+        expect(firstModelAttempted).toBe('deepseek/deepseek-r1');
     });
 
     it('should call next() exactly once even with multiple fallback attempts', async () => {

@@ -37,7 +37,7 @@ describe('Agentic Middleware Feedback Loop Tests', () => {
         const middleware = new AgenticMiddleware();
         const context: PipelineContext = {
             request: {
-                messages: [{ role: 'user', content: 'momentum' }]
+                messages: [{ role: 'user', content: 'run momentum' }]
             },
             agentic: true,
             sessionId: 'test-session-logging'
@@ -73,7 +73,7 @@ describe('Agentic Middleware Feedback Loop Tests', () => {
         const middleware = new AgenticMiddleware();
         const context: PipelineContext = {
             request: {
-                messages: [{ role: 'user', content: 'momentum' }]
+                messages: [{ role: 'user', content: 'run momentum' }]
             },
             agentic: true,
             sessionId: 'test-session-unavailable'
