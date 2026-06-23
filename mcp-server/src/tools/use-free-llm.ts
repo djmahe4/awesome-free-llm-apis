@@ -26,6 +26,7 @@ import { manageMemory } from './manage-memory.js';
 import { indexWorkspace } from './index-workspace.js';
 import { getTokenStats } from './get-token-stats.js';
 import { validateProvider } from './validate-provider.js';
+import { initWorkspace } from './init-workspace.js';
 
 export interface UseFreeLLMInput {
   model?: string;
@@ -472,6 +473,14 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
 
   // v1.0.4 Resolution Pass: Resolve file, artifact, ctx7, pdf references in user messages
   if (agentic) {
+    if (workspaceRoot) {
+      setImmediate(() => {
+        initWorkspace(workspaceRoot).catch(err => {
+          console.error('[free-llm-mcp] Failed to initialize workspace config:', err);
+        });
+      });
+    }
+
     for (const msg of messages) {
       if (msg.role === 'user' && (typeof msg.content === 'string' || Array.isArray(msg.content))) {
         await resolveFileRefs(msg, messages, workspaceRoot);
