@@ -46,6 +46,8 @@ interface CacheEntry {
     branch: string;
 }
 
+import os from 'os';
+
 const contextCache = new LRUCache<string, CacheEntry>({
     max: 500,
     ttl: 1000 * 60 * 30, // 30 minutes
@@ -57,6 +59,7 @@ export interface ContextGathererOptions {
     keywords?: string[];
     limit?: number;
     envType?: 'node' | 'python' | 'general';
+    sessionId?: string;
 }
 
 export class ContextGatherer {
@@ -68,6 +71,7 @@ export class ContextGatherer {
      */
     static async gatherContext(options: ContextGathererOptions): Promise<string[]> {
         const { workspaceRoot, query, limit = 5 } = options;
+        const grepStartMs = Date.now();
 
         // MD5 of workspace root to create unique key
         const wsHash = crypto.createHash('md5').update(workspaceRoot).digest('hex');
@@ -82,6 +86,25 @@ export class ContextGatherer {
         const cacheKey = `${wsHash}:${branch}:${queryHash}`;
         const cached = contextCache.get(cacheKey);
         if (cached && cached.branch === branch) {
+            const grepElapsedMs = Date.now() - grepStartMs;
+            const sessionId = options.sessionId;
+            if (sessionId) {
+                try {
+                    const homedir = os.homedir();
+                    const projectsDir = path.join(homedir, '.free-llm-mcp', 'projects');
+                    const entry = JSON.stringify({
+                        ts: new Date().toISOString(),
+                        sessionId,
+                        type: 'grep_execution',
+                        tool: 'cache',
+                        query,
+                        resultCount: cached.results.length,
+                        elapsedMs: grepElapsedMs,
+                        cacheHit: true
+                    }) + '\n';
+                    await fs.appendFile(path.join(projectsDir, sessionId, 'agentic-debug.log'), entry, 'utf-8');
+                } catch {}
+            }
             return cached.results;
         }
 
@@ -298,6 +321,26 @@ export class ContextGatherer {
 
         // Cache results
         contextCache.set(cacheKey, { results, timestamp: Date.now(), branch });
+
+        const grepElapsedMs = Date.now() - grepStartMs;
+        const sessionId = options.sessionId;
+        if (sessionId) {
+            try {
+                const homedir = os.homedir();
+                const projectsDir = path.join(homedir, '.free-llm-mcp', 'projects');
+                const entry = JSON.stringify({
+                    ts: new Date().toISOString(),
+                    sessionId,
+                    type: 'grep_execution',
+                    tool,
+                    query: combinedPattern,
+                    resultCount: results.length,
+                    elapsedMs: grepElapsedMs,
+                    cacheHit: false
+                }) + '\n';
+                await fs.appendFile(path.join(projectsDir, sessionId, 'agentic-debug.log'), entry, 'utf-8');
+            } catch {}
+        }
 
         return results;
     }

@@ -15,6 +15,9 @@ import {
     KNOWLEDGE_FILE
 } from './constants.js';
 import { ContextGatherer } from './context-gatherer.js';
+import { classifyIntent, disambiguateConfusedIntent } from './intent-classifier.js';
+import { buildExecutionPlan } from './task-classifier.js';
+import { ProviderRegistry } from '../../providers/registry.js';
 
 
 interface QueueState {
@@ -129,7 +132,22 @@ function distillToSkillEntry(content: string, sessionId: string): string | null 
         ? '```\n' + codeBlockMatch[1].split('\n').slice(0, 3).join('\n') + '\n```'
         : null;
 
-    // 5. Compose skill-writer-schema entry
+    // 5. Extract entity relationships (minimal Entity Graph)
+    const relationships: string[] = [];
+    if (fileRefs.length > 1) {
+        // Simple heuristic: relate first file to subsequent files
+        const primary = fileRefs[0];
+        for (let i = 1; i < fileRefs.length; i++) {
+            relationships.push(`- [FILE] ${primary} → [DEPENDS_ON] ${fileRefs[i]}`);
+        }
+    }
+    decisions.forEach(d => {
+        if (d.includes('use') || d.includes('implement') || d.includes('select')) {
+            relationships.push(`- [DECISION] ${d} → [RATIONALE] Refined in session ${sessionId.slice(0, 8)}`);
+        }
+    });
+
+    // 6. Compose skill-writer-schema entry
     const entry = [
         `\n\n---`,
         ``,
@@ -140,6 +158,7 @@ function distillToSkillEntry(content: string, sessionId: string): string | null 
         `**what:**`,
         decisions.map(d => `- ${d}`).join('\n'),
         fileRefs.length > 0 ? `\n**files:**\n${fileRefs.map(f => `- \`${f}\``).join('\n')}` : '',
+        relationships.length > 0 ? `\n## Entity Graph\n<!-- entities -->\n${relationships.join('\n')}` : '',
         example ? `\n**example:**\n${example}` : '',
     ].filter(l => l !== '').join('\n');
 
@@ -494,31 +513,287 @@ export function summarizeResponse(text: string): string {
     return recencyAnchor + summary;
 }
 
+const DATA_DEMAND_SIGNALS = [
+    "could you provide", "I need more context", "I don't have access to",
+    "read the file", "inspect file", "read file", "view file",
+    /show me (all|the) (usages|references|calls|imports) of [`'"]?([A-Z]\w+|[a-zA-Z0-9_\-\/\\.]+\.[a-zA-Z0-9]+)[`'"]?/i,
+    /where is [`'"]?([A-Z]\w+|[a-zA-Z0-9_\-\/\\.]+\.[a-zA-Z0-9]+)[`'"]? (used|defined|called|imported)/i,
+    /find (all )?occurrences of [`'"]?([A-Z]\w+|[a-zA-Z0-9_\-\/\\.]+\.[a-zA-Z0-9]+)[`'"]?/i,
+    /which files (use|import|reference|call) [`'"]?([A-Z]\w+|[a-zA-Z0-9_\-\/\\.]+\.[a-zA-Z0-9]+)[`'"]?/i,
+    /what calls? [`'"]?([A-Z]\w+|[a-zA-Z0-9_\-\/\\.]+\.[a-zA-Z0-9]+)[`'"]?/i,
+    /trace the (call|import|dependency) chain of [`'"]?([A-Z]\w+|[a-zA-Z0-9_\-\/\\.]+\.[a-zA-Z0-9]+)[`'"]?/i,
+    /grep for [`'"]?([A-Z]\w+|[a-zA-Z0-9_\-\/\\.]+\.[a-zA-Z0-9]+)[`'"]?/i
+];
+
+export function detectDataDemand(responseContent: string): { triggered: boolean; cues: string[] } {
+    const cues: string[] = [];
+    for (const signal of DATA_DEMAND_SIGNALS) {
+        if (typeof signal === 'string') {
+            if (responseContent.toLowerCase().includes(signal.toLowerCase())) {
+                cues.push(signal);
+            }
+        } else {
+            const match = responseContent.match(signal);
+            if (match) {
+                cues.push(match[3] || match[0]);
+            }
+        }
+    }
+    return { triggered: cues.length > 0, cues };
+}
+
+export function compareTaskScope(originalTask: string, newResponse: string): boolean {
+    const filePattern = /\b[a-zA-Z0-9_\-\/\\.]+\.(ts|js|py|go|rs|md)\b/g;
+    const originalFiles = new Set(originalTask.match(filePattern) || []);
+    const newFiles = new Set(newResponse.match(filePattern) || []);
+
+    for (const f of newFiles) {
+        if (!originalFiles.has(f)) return true;
+    }
+
+    const actionVerbs = /\b(also|additionally|furthermore|moreover|we should also|this requires)\b/i;
+    return actionVerbs.test(newResponse);
+}
+
+function cleanSubtaskContent(content: string): string {
+    return content
+        .replace(/^(sure|ok|here is|here's|i will|i have|successfully|let's|let me)[\s\S]*?\n\n/i, '')
+        .trim();
+}
+
+async function executeSingleSubtask(
+    currentTask: string,
+    context: PipelineContext,
+    sessionId: string,
+    projectDir: string,
+    workspaceRoot: string | undefined,
+    subtaskIteration: number
+): Promise<boolean> {
+    let enrichmentCycleCount = 0;
+    const MAX_ENRICHMENT_CYCLES = 2;
+    let subtaskCompleted = false;
+
+    while (!subtaskCompleted && enrichmentCycleCount <= MAX_ENRICHMENT_CYCLES) {
+        try {
+            const userKeywords = context.keywords || [];
+            const subtaskPrompt = await getIntelligentSystemPrompt({
+                context: currentTask,
+                keywords: [...new Set(['mcp', 'memory', 'filesystem', ...userKeywords])],
+                memory: (context as any).memoryContext,
+                workspace: (context as any).grepContext,
+                isSubtask: true
+            });
+            const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${currentTask}\n\nStrictly focus on this subtask using the tools provided.`;
+
+            const messages = context.request.messages;
+            const sysMsgIdx = messages.findIndex(m => m.role === 'system');
+            if (sysMsgIdx !== -1) {
+                messages[sysMsgIdx] = { role: 'system', content: `${subtaskPrompt}${taskHeader}` };
+            } else {
+                messages.unshift({ role: 'system', content: `${subtaskPrompt}${taskHeader}` });
+            }
+        } catch (err) {
+            console.error(`[AgenticMiddleware] Failed to inject subtask prompt: ${err}`);
+        }
+
+        await logAgenticDebug(sessionId, {
+            type: 'subtask_start',
+            subtask: currentTask,
+            iteration: subtaskIteration,
+            enrichmentCycle: enrichmentCycleCount,
+            messages: context.request.messages
+        });
+
+        const readKeywords = /\b(?:read|view|inspect|show|print|cat|get|display)\b/i;
+        const filePattern = /(?:[a-zA-Z]:)?[\\/][a-zA-Z0-9_\-\/\\\.]+\.[a-zA-Z0-9]+|\b([a-zA-Z0-9_\-\/\\\.]+\.[a-zA-Z0-9]+)\b/;
+        const isSimpleRead = readKeywords.test(currentTask) && filePattern.test(currentTask);
+        let handledProactively = false;
+        
+        if (isSimpleRead) {
+            const match = currentTask.match(filePattern);
+            if (match) {
+                const filename = match[0];
+                try {
+                    const fullPath = workspaceRoot ? path.resolve(workspaceRoot, filename) : path.resolve(process.cwd(), filename);
+                    let exists = false;
+                    try {
+                        await fs.access(fullPath);
+                        exists = true;
+                    } catch {}
+
+                    if (exists) {
+                        const content = await fs.readFile(fullPath, 'utf8');
+                        const extension = path.extname(filename).slice(1) || 'text';
+                        const proactiveMsg = `[PROACTIVE-CONTEXT] Content of \`${filename}\`:\n\n\`\`\`${extension}\n${content}\n\`\`\``;
+                        context.request.messages.push({ role: 'user', content: proactiveMsg });
+                        await logAgenticDebug(sessionId, {
+                            type: 'proactive_context_injected',
+                            file: filename
+                        });
+                        
+                        context.response = {
+                            choices: [{
+                                message: {
+                                    role: 'assistant',
+                                    content: `Successfully read and inspected the file contents:\n\n\`\`\`${extension}\n${content}\n\`\`\``
+                                }
+                            }]
+                        } as any;
+                        handledProactively = true;
+                    }
+                } catch (err) {
+                    // ignore
+                }
+            }
+        }
+
+        if (!handledProactively) {
+            const instances = await import('../../pipeline/instances.js');
+            await instances.sharedRouter.execute(context, async () => { });
+        }
+
+        const responseContent = getResponseContent(context);
+        if (!responseContent) {
+            subtaskCompleted = true;
+            break;
+        }
+
+        await logAgenticDebug(sessionId, {
+            type: 'subtask_response',
+            subtask: currentTask,
+            response: responseContent
+        });
+
+        if (detectContextSignal(responseContent)) {
+            enrichmentCycleCount++;
+            if (enrichmentCycleCount > MAX_ENRICHMENT_CYCLES) {
+                subtaskCompleted = true;
+                break;
+            }
+
+            const cues = extractCues(responseContent);
+            const gatheredContextLines: string[] = [];
+
+            if (cues.length > 0) {
+                const results = await ContextGatherer.gatherContext({
+                    workspaceRoot: workspaceRoot || process.cwd(),
+                    query: cues.join(' '),
+                    keywords: cues
+                });
+                if (results && results.length > 0) {
+                    gatheredContextLines.push(...results);
+                }
+            } else {
+                const entity = extractEntity(responseContent);
+                const results = await ContextGatherer.gatherContext({
+                    workspaceRoot: workspaceRoot || process.cwd(),
+                    query: entity
+                });
+                if (results && results.length > 0) {
+                    gatheredContextLines.push(...results);
+                }
+            }
+
+            if (gatheredContextLines.length > 0) {
+                const uniqueLines = [...new Set(gatheredContextLines)];
+                const enrichmentMsg = `[CONTEXT-ENRICHMENT] Here is the gathered context from the workspace:\n\n${uniqueLines.join('\n')}`;
+                context.request.messages.push({ role: 'user', content: enrichmentMsg });
+            } else {
+                const entityName = cues.length > 0 ? cues.join(', ') : 'requested content';
+                const unavailableMsg = `[CONTEXT-UNAVAILABLE] ${entityName} was not found in the workspace. Please proceed with available information.`;
+                context.request.messages.push({ role: 'user', content: unavailableMsg });
+            }
+            continue;
+        }
+
+        const verifyReport = detectHallucination(responseContent);
+        const isFail = verifyReport.status === 'FAIL' || verifyReport.status === 'LOOP_DETECTED';
+
+        if (isFail) {
+            const lines = responseContent.split('\n');
+            const trailingQuestions = lines
+                .map(l => l.trim())
+                .filter(l => l.endsWith('?'))
+                .slice(-3);
+
+            if (trailingQuestions.length > 0) {
+                await logAgenticDebug(sessionId, {
+                    type: 'hallucination_recovery_attempt',
+                    subtask: currentTask,
+                    reason: verifyReport.reason,
+                    questions: trailingQuestions
+                });
+
+                const recoveryAnswers: string[] = [];
+                for (const question of trailingQuestions) {
+                    const answers = await ContextGatherer.gatherContext({
+                        workspaceRoot: workspaceRoot || process.cwd(),
+                        query: question
+                    });
+                    if (answers && answers.length > 0) {
+                        recoveryAnswers.push(...answers);
+                    }
+                }
+
+                if (recoveryAnswers.length > 0) {
+                    const recoveryMsg = `[RECOVERY-CONTEXT] We noticed a potential hallucination or missing info. Here is the gathered recovery context:\n\n${recoveryAnswers.join('\n')}`;
+                    context.request.messages.push({ role: 'user', content: recoveryMsg });
+                    
+                    const instances = await import('../../pipeline/instances.js');
+                    await instances.sharedRouter.execute(context, async () => { });
+                    
+                    const recoveryResponse = getResponseContent(context);
+                    if (recoveryResponse) {
+                        const secondVerify = detectHallucination(recoveryResponse);
+                        const isSecondFail = secondVerify.status === 'FAIL' || secondVerify.status === 'LOOP_DETECTED';
+                        if (isSecondFail) {
+                            context.request.messages.push({ role: 'assistant', content: recoveryResponse });
+                        } else {
+                            const summarized = summarizeResponse(recoveryResponse);
+                            context.request.messages.push({ role: 'assistant', content: summarized });
+                            if (context.wsHash) {
+                                await appendKnowledge(projectDir, sessionId, recoveryResponse);
+                            }
+                        }
+                    }
+                    subtaskCompleted = true;
+                    break;
+                }
+            }
+
+            context.request.messages.push({ role: 'assistant', content: responseContent });
+            subtaskCompleted = true;
+            break;
+        }
+
+        const summarized = summarizeResponse(responseContent);
+        context.request.messages.push({ role: 'assistant', content: summarized });
+        if (context.wsHash) {
+            await appendKnowledge(projectDir, sessionId, responseContent);
+        }
+        subtaskCompleted = true;
+    }
+
+    return true;
+}
+
 export class AgenticMiddleware implements Middleware {
     name = 'AgenticMiddleware';
 
-    // v1.0.4 optimization: Cap decomposed plan to 2 high-level steps to prevent over-iteration
     private limitSubtasks(steps: string[]): string[] {
-        if (steps.length > 2) {
-            return steps.slice(0, 2);
+        if (steps.length > 3) {
+            return steps.slice(0, 3);
         }
         return steps;
     }
 
-    /**
-     * Gathers grep-based context from the workspace root based on a query.
-     * Delegates to the ContextGatherer utility.
-     */
     async gatherGrepContext(workspaceRoot: string, query: string): Promise<string[]> {
         return ContextGatherer.gatherContext({ workspaceRoot, query });
     }
 
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
         const startMs = Date.now();
-        // Dual-Mode Trigger: Global Env OR Per-Request Flag
         const isAgenticExplicitlyRequested = context.agentic === true || context.request?.agentic === true;
-
-        // Hardened Session ID: Must be provided for agentic state to exist
         const sessionId: string | undefined = context.sessionId || (context.request as any)?.sessionId;
 
         const iterationCountKey = `_iteration_${sessionId}`;
@@ -547,317 +822,219 @@ export class AgenticMiddleware implements Middleware {
         const projectDir = await ensureProjectFiles(sessionId, workspaceRoot);
         const q = await getOrLoadState(sessionId);
 
-        // Prepend system prompt with user context if available
         const userMessage = context.request.messages.find(m => m.role === 'user');
         const userContent = userMessage ? String(userMessage.content) : undefined;
 
-        // Context and memory are now handled by WorkspaceContextMiddleware
-        // which runs BEFORE AgenticMiddleware in the pipeline.
         (context as any).isSubtask = q.nowQueue.length > 0;
 
-        try {
-            const groundingGate: string = (context as any).groundingGate || '';
-            const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **2** high-level steps.`;
-            const userKeywords = context.keywords || [];
-            const initialPrompt = await getIntelligentSystemPrompt({
-                context: userContent || "",
-                keywords: isAgenticExplicitlyRequested ? ['agentic', 'orchestration', ...userKeywords] : userKeywords,
-                memory: (context as any).memoryContext,
-                workspace: (context as any).grepContext,
-                isSubtask: false
-            });
-            const sysMsg = context.request.messages.find(m => m.role === 'system');
-            const fullPrompt = `${initialPrompt}${highLevelStepsSection}${groundingGate}`;
-            if (sysMsg) {
-                sysMsg.content = fullPrompt;
-            } else {
-                // Ensure system message is ALWAYS at index 0
-                context.request.messages.unshift({ role: 'system', content: fullPrompt });
+        if (userContent && q.nowQueue.length === 0) {
+            const intent = classifyIntent(userContent);
+            if (intent === 'CONFUSED') {
+                console.error(`[AgenticMiddleware] User intent classified as CONFUSED. Executing bare clarification.`);
+                const clarification = await disambiguateConfusedIntent(userContent, workspaceRoot);
+                context.response = {
+                    id: `clarification-${Date.now()}`,
+                    object: 'chat.completion',
+                    created: Date.now(),
+                    model: 'clarification-model',
+                    choices: [{
+                        index: 0,
+                        message: { role: 'assistant', content: clarification.markdown },
+                        finish_reason: 'stop'
+                    }]
+                } as any;
+                return;
             }
-        } catch (err) {
-            console.error(`[AgenticMiddleware] Failed to inject initial prompt: ${err}`);
-            // Minimal fallback to ensure role integrity
-            if (!context.request.messages.some(m => m.role === 'system')) {
-                context.request.messages.unshift({ 
-                    role: 'system', 
-                    content: "You are an agentic AI coding assistant. Maintain MOMENTUM ENGINE protocols." 
-                });
+
+            if (intent === 'QUESTION') {
+                console.error(`[AgenticMiddleware] User intent classified as QUESTION. Skipping decomposition loop.`);
+                try {
+                    const groundingGate: string = (context as any).groundingGate || '';
+                    const userKeywords = context.keywords || [];
+                    const questionPrompt = await getIntelligentSystemPrompt({
+                        context: userContent,
+                        keywords: isAgenticExplicitlyRequested ? ['agentic', 'orchestration', ...userKeywords] : userKeywords,
+                        memory: (context as any).memoryContext,
+                        workspace: (context as any).grepContext,
+                        isSubtask: false
+                    });
+                    const sysMsg = context.request.messages.find(m => m.role === 'system');
+                    if (sysMsg) {
+                        sysMsg.content = `${questionPrompt}${groundingGate}`;
+                    } else {
+                        context.request.messages.unshift({ role: 'system', content: `${questionPrompt}${groundingGate}` });
+                    }
+                } catch (err) {
+                    console.error(`[AgenticMiddleware] Failed to inject system prompt: ${err}`);
+                }
+
+                const instances = await import('../../pipeline/instances.js');
+                await instances.sharedRouter.execute(context, async () => { });
+                return;
             }
         }
 
-        // Research validation...
-        // This provides an explicit audit trail to reduce agent ambiguity and hallucination risk.
         if (userContent && detectResearchIntent(userContent)) {
             logResearchValidation(sessionId, userContent, 'pre-execution-research-detection');
-            // Auto-enable Google Search if research intent is detected in agentic mode
             if (!context.request.google_search) {
                 context.request.google_search = true;
                 console.error(`[AgenticMiddleware] Research intent detected, auto-enabling google_search for session=${sessionId}`);
             }
         }
 
-
-        // Task decomposition: Only perform if nowQueue is empty to prevent multi-turn duplication
+        let executionPlanBrief = '';
         if (userContent && q.nowQueue.length === 0) {
             const steps = decomposeGoal(userContent);
-
-            // v1.0.4 optimization: Apply subtask limit before queuing to prevent over-iteration
             const limitedSteps = this.limitSubtasks(steps);
+            
+            const plan = await buildExecutionPlan(limitedSteps, workspaceRoot || process.cwd());
+            executionPlanBrief = `<details><summary>🔍 Task Plan</summary>\n\n${plan.userBrief}\n</details>\n\n`;
+            
             q.nowQueue.push(...limitedSteps);
         }
 
         persistStateDebounced(sessionId, projectDir);
 
-        // Execute the pipeline in a loop for each subtask
         let subtaskIteration = 0;
-        const MAX_SUBTASKS = 5;
+        const MAX_SUBTASKS = 3;
+        let globalRetrospectionCount = 0;
 
-        // If no tasks, at least run once
         if (q.nowQueue.length === 0) {
             await next();
         }
 
         while (q.nowQueue.length > 0 && subtaskIteration < MAX_SUBTASKS) {
             subtaskIteration++;
-            const currentTask = q.nowQueue[0];
-            console.error(`[AgenticMiddleware] Starting subtask ${subtaskIteration}: ${currentTask}`);
+            
+            const plan = await buildExecutionPlan(q.nowQueue, workspaceRoot || process.cwd());
+            const phase1Tasks = plan.phase1;
+            if (phase1Tasks.length === 0) break;
 
-            let enrichmentCycleCount = 0;
-            const MAX_ENRICHMENT_CYCLES = 2;
-            let subtaskCompleted = false;
+            const isParallel = phase1Tasks.every(t => t.lane === 'parallel');
+            
+            const registry = ProviderRegistry.getInstance();
+            const activeProvider = registry.getAvailableProviders().find(p => p.id !== 'siliconflow') || registry.getProvider('gemini');
+            const isLowThroughput = activeProvider && activeProvider.rateLimits?.rpm && activeProvider.rateLimits.rpm <= 15;
 
-            while (!subtaskCompleted && enrichmentCycleCount <= MAX_ENRICHMENT_CYCLES) {
-                // 1. Inject Intelligent Prompt and Task Instruction
-                try {
-                    // CLEAR and REFRESH System Prompt to avoid accumulation
-                    const userKeywords = context.keywords || [];
-                    const subtaskPrompt = await getIntelligentSystemPrompt({
-                        context: currentTask,
-                        keywords: [...new Set(['mcp', 'memory', 'filesystem', ...userKeywords])], // Merge core steering with user keywords
-                        memory: (context as any).memoryContext,
-                        workspace: (context as any).grepContext,
-                        isSubtask: true
-                    });
-                    const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${currentTask}\n\nStrictly focus on this subtask using the tools provided.`;
-
-                    const messages = context.request.messages;
-                    const sysMsgIdx = messages.findIndex(m => m.role === 'system');
-                    if (sysMsgIdx !== -1) {
-                        // Replace existing system message to ensure clean state and prevent accumulation
-                        messages[sysMsgIdx] = { role: 'system', content: `${subtaskPrompt}${taskHeader}` };
-                    } else {
-                        messages.unshift({ role: 'system', content: `${subtaskPrompt}${taskHeader}` });
-                    }
-                } catch (err) {
-                    console.error(`[AgenticMiddleware] Failed to inject subtask prompt: ${err}`);
-                }
-
-                // Log subtask execution
-                await logAgenticDebug(sessionId, {
-                    type: 'subtask_start',
-                    subtask: currentTask,
-                    iteration: subtaskIteration,
-                    enrichmentCycle: enrichmentCycleCount,
-                    messages: context.request.messages
-                });
-                // --- Proactive Context Injection for Simple Read Tasks ---
-                const readKeywords = /\b(?:read|view|inspect|show|print|cat|get|display)\b/i;
-                const filePattern = /(?:[a-zA-Z]:)?[\\/][a-zA-Z0-9_\-\/\\\.]+\.[a-zA-Z0-9]+|\b([a-zA-Z0-9_\-\/\\\.]+\.[a-zA-Z0-9]+)\b/;
-                const isSimpleRead = readKeywords.test(currentTask) && filePattern.test(currentTask);
-                let handledProactively = false;
+            if (isParallel && !isLowThroughput && phase1Tasks.length > 1) {
+                console.error(`[AgenticMiddleware] Parallel execution: running ${phase1Tasks.length} tasks concurrently`);
                 
-                if (isSimpleRead) {
-                    const match = currentTask.match(filePattern);
-                    if (match) {
-                        const filename = match[0];
-                        try {
-                            const fullPath = workspaceRoot ? path.resolve(workspaceRoot, filename) : path.resolve(process.cwd(), filename);
-                            let exists = false;
-                            try {
-                                await fs.access(fullPath);
-                                exists = true;
-                            } catch {}
-
-                            if (exists) {
-                                const content = await fs.readFile(fullPath, 'utf8');
-                                const extension = path.extname(filename).slice(1) || 'text';
-                                const proactiveMsg = `[PROACTIVE-CONTEXT] Content of \`${filename}\`:\n\n\`\`\`${extension}\n${content}\n\`\`\``;
-                                context.request.messages.push({ role: 'user', content: proactiveMsg });
-                                await logAgenticDebug(sessionId, {
-                                    type: 'proactive_context_injected',
-                                    file: filename
-                                });
-                                
-                                // Direct fulfillment of simple read: do not forward to the router
-                                context.response = {
-                                    choices: [{
-                                        message: {
-                                            role: 'assistant',
-                                            content: `Successfully read and inspected the file contents:\n\n\`\`\`${extension}\n${content}\n\`\`\``
-                                        }
-                                    }]
-                                } as any;
-                                handledProactively = true;
-                            }
-                        } catch (err) {
-                            // ignore and fallback
+                const parallelPromises = phase1Tasks.map(async (t) => {
+                    const clonedCtx: PipelineContext = {
+                        ...context,
+                        request: {
+                            ...context.request,
+                            messages: context.request.messages.map(m => ({ ...m }))
                         }
-                    }
-                }
-
-                if (!handledProactively) {
-                    // 2. Direct execution of the router (the next step in the pipeline)
-                    // Using dynamic import to break circular dependency at runtime
-                    const instances = await import('../../pipeline/instances.js');
-                    await instances.sharedRouter.execute(context, async () => { });
-                }
-
-                // 3. Process result
-                const responseContent = getResponseContent(context);
-                if (!responseContent) {
-                    subtaskCompleted = true;
-                    break;
-                }
-
-                await logAgenticDebug(sessionId, {
-                    type: 'subtask_response',
-                    subtask: currentTask,
-                    response: responseContent
+                    } as any;
+                    
+                    await executeSingleSubtask(t.task, clonedCtx, sessionId, projectDir, workspaceRoot, subtaskIteration);
+                    return clonedCtx;
                 });
 
-                // Check for context-request signals
-                if (detectContextSignal(responseContent)) {
-                    enrichmentCycleCount++;
-                    if (enrichmentCycleCount > MAX_ENRICHMENT_CYCLES) {
-                        subtaskCompleted = true;
-                        break;
-                    }
-
-                    const cues = extractCues(responseContent);
-                    const gatheredContextLines: string[] = [];
-
-                    if (cues.length > 0) {
-                        const results = await ContextGatherer.gatherContext({
-                            workspaceRoot: workspaceRoot || process.cwd(),
-                            query: cues.join(' '),
-                            keywords: cues
-                        });
-                        if (results && results.length > 0) {
-                            gatheredContextLines.push(...results);
+                const results = await Promise.allSettled(parallelPromises);
+                
+                const outputs: string[] = [];
+                const errors: string[] = [];
+                
+                results.forEach((res, idx) => {
+                    const taskName = phase1Tasks[idx].task;
+                    if (res.status === 'fulfilled') {
+                        const clonedCtx = res.value;
+                        const content = getResponseContent(clonedCtx);
+                        if (content) {
+                            const cleaned = cleanSubtaskContent(content);
+                            outputs.push(`### ✅ Subtask: ${taskName}\n\n${cleaned}`);
+                            context.request.messages.push({ role: 'assistant', content });
+                        } else {
+                            errors.push(`Subtask ${idx + 1} failed or returned empty: ${taskName}`);
                         }
                     } else {
-                        const entity = extractEntity(responseContent);
-                        const results = await ContextGatherer.gatherContext({
-                            workspaceRoot: workspaceRoot || process.cwd(),
-                            query: entity
-                        });
-                        if (results && results.length > 0) {
-                            gatheredContextLines.push(...results);
-                        }
+                        errors.push(`Subtask ${idx + 1} crashed: ${taskName} - ${res.reason?.message || res.reason}`);
                     }
+                });
 
-                    if (gatheredContextLines.length > 0) {
-                        const uniqueLines = [...new Set(gatheredContextLines)];
-                        const enrichmentMsg = `[CONTEXT-ENRICHMENT] Here is the gathered context from the workspace:\n\n${uniqueLines.join('\n')}`;
-                        context.request.messages.push({ role: 'user', content: enrichmentMsg });
-                    } else {
-                        const entityName = cues.length > 0 ? cues.join(', ') : 'requested content';
-                        const unavailableMsg = `[CONTEXT-UNAVAILABLE] ${entityName} was not found in the workspace. Please proceed with available information.`;
-                        context.request.messages.push({ role: 'user', content: unavailableMsg });
-                    }
-                    continue; // Re-run subtask with the new context
+                const combinedOutput = outputs.join('\n\n');
+                let finalContent = combinedOutput;
+                if (errors.length > 0) {
+                    finalContent += `\n\n### ⚠️ Objections/Failures:\n- ${errors.join('\n- ')}\n*Use "git checkout -- <files>" to discard partial changes.*`;
                 }
 
-                // Handle hallucination check and recovery loop
-                const verifyReport = detectHallucination(responseContent);
-                const isFail = verifyReport.status === 'FAIL' || verifyReport.status === 'LOOP_DETECTED';
+                if (executionPlanBrief) {
+                    finalContent = executionPlanBrief + finalContent;
+                }
 
-                if (isFail) {
-                    // Extract trailing questions (lines ending with '?')
-                    const lines = responseContent.split('\n');
-                    const trailingQuestions = lines
-                        .map(l => l.trim())
-                        .filter(l => l.endsWith('?'))
-                        .slice(-3); // Limit to last 3 questions to avoid overflow
+                context.response = {
+                    id: `parallel-${Date.now()}`,
+                    object: 'chat.completion',
+                    created: Date.now(),
+                    model: activeProvider?.models[0]?.id || 'gemini-3.1-flash-lite',
+                    choices: [{
+                        index: 0,
+                        message: { role: 'assistant', content: finalContent },
+                        finish_reason: 'stop'
+                    }]
+                } as any;
 
-                    if (trailingQuestions.length > 0) {
-                        await logAgenticDebug(sessionId, {
-                            type: 'hallucination_recovery_attempt',
-                            subtask: currentTask,
-                            reason: verifyReport.reason,
-                            questions: trailingQuestions
+                q.nowQueue.splice(0, phase1Tasks.length);
+                persistStateDebounced(sessionId, projectDir);
+
+            } else {
+                const currentTaskNode = phase1Tasks[0];
+                const currentTask = currentTaskNode.task;
+                console.error(`[AgenticMiddleware] Sequential execution: ${currentTask}`);
+
+                if (isLowThroughput && isParallel) {
+                    await new Promise(r => setTimeout(r, 500));
+                }
+
+                const success = await executeSingleSubtask(currentTask, context, sessionId, projectDir, workspaceRoot, subtaskIteration);
+                
+                const responseContent = getResponseContent(context);
+                if (success && responseContent && globalRetrospectionCount < 2) {
+                    const dataDemand = detectDataDemand(responseContent);
+                    if (dataDemand.triggered) {
+                        globalRetrospectionCount++;
+                        console.error(`[AgenticMiddleware] Data-demand triggered (${globalRetrospectionCount}/2): ${dataDemand.cues.join(', ')}`);
+                        
+                        const gathered = await ContextGatherer.gatherContext({
+                            workspaceRoot: workspaceRoot || process.cwd(),
+                            query: dataDemand.cues.join(' ')
                         });
 
-                        const recoveryAnswers: string[] = [];
-                        for (const question of trailingQuestions) {
-                            const answers = await ContextGatherer.gatherContext({
-                                workspaceRoot: workspaceRoot || process.cwd(),
-                                query: question
-                            });
-                            if (answers && answers.length > 0) {
-                                recoveryAnswers.push(...answers);
-                            }
-                        }
+                        if (gathered && gathered.length > 0) {
+                            const limited = gathered.slice(0, 10);
+                            const enrichmentMsg = `[CONTEXT-ENRICHMENT] Here is the gathered context from the workspace:\n\n${limited.join('\n')}`;
+                            context.request.messages.push({ role: 'user', content: enrichmentMsg });
 
-                        if (recoveryAnswers.length > 0) {
-                            const recoveryMsg = `[RECOVERY-CONTEXT] We noticed a potential hallucination or missing info. Here is the gathered recovery context:\n\n${recoveryAnswers.join('\n')}`;
-                            context.request.messages.push({ role: 'user', content: recoveryMsg });
-                            
-                            // Re-run router once
                             const instances = await import('../../pipeline/instances.js');
                             await instances.sharedRouter.execute(context, async () => { });
-                            
-                            const recoveryResponse = getResponseContent(context);
-                            if (recoveryResponse) {
-                                const secondVerify = detectHallucination(recoveryResponse);
-                                const isSecondFail = secondVerify.status === 'FAIL' || secondVerify.status === 'LOOP_DETECTED';
-                                if (isSecondFail) {
-                                    q.improveQueue.push(`[BLOCKED] Still failing hallucination recovery: ${secondVerify.reason}`);
-                                    await logAgenticDebug(sessionId, {
-                                        type: 'hallucination_recovery_failed',
-                                        subtask: currentTask,
-                                        reason: secondVerify.reason
-                                    });
-                                } else {
-                                    const summarized = summarizeResponse(recoveryResponse);
-                                    context.request.messages.push({ role: 'assistant', content: summarized });
-                                    const wsHash = context.wsHash;
-                                    if (wsHash) {
-                                        await appendKnowledge(projectDir, sessionId, recoveryResponse);
-                                    }
+
+                            const newResponse = getResponseContent(context);
+                            if (newResponse) {
+                                const scopeChanged = compareTaskScope(currentTask, newResponse);
+                                if (scopeChanged) {
+                                    console.error(`[AgenticMiddleware] Subtask scope expansion detected. Mutating queue.`);
+                                    const newSubtask = `Address expanded scope from retrospection: ${newResponse.slice(0, 80)}...`;
+                                    q.nowQueue.splice(1, 0, newSubtask);
                                 }
                             }
-                            subtaskCompleted = true;
-                            break;
                         }
                     }
-
-                    q.improveQueue.push(verifyReport.reason || 'hallucination or loop detected');
-                    await logAgenticDebug(sessionId, {
-                        type: 'hallucination_detected_no_recovery',
-                        subtask: currentTask,
-                        reason: verifyReport.reason
-                    });
-                    subtaskCompleted = true;
-                    break;
                 }
 
-                // Clean PASS/WARN
-                const summarized = summarizeResponse(responseContent);
-                context.request.messages.push({ role: 'assistant', content: summarized });
-                const wsHash = context.wsHash;
-                if (wsHash) {
-                    await appendKnowledge(projectDir, sessionId, responseContent);
+                q.nowQueue.shift();
+                persistStateDebounced(sessionId, projectDir);
+
+                if (q.nowQueue.length === 0 && context.response && executionPlanBrief) {
+                    const resContent = getResponseContent(context);
+                    if (resContent) {
+                        context.response.choices[0].message.content = executionPlanBrief + resContent;
+                    }
                 }
-                subtaskCompleted = true;
             }
-
-            // 4. Update queue
-            q.nowQueue.shift();
-            persistStateDebounced(sessionId, projectDir);
         }
 
-        // v1.0.5: Critical fix - signal completion to the pipeline
         if (!context.response) {
             await next();
         }

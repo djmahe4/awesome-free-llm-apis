@@ -123,7 +123,69 @@ export class WorkspaceIndexer {
             }
         }
 
+        // 5. Build and update the Repository dependency & concept graph
+        try {
+            const mcpDir = path.join(workspaceRoot, '.free-llm-mcp');
+            await fs.mkdir(mcpDir, { recursive: true });
+            
+            const graphPath = path.join(mcpDir, 'repo_graph.json');
+            const wikiPath = path.join(mcpDir, 'wiki_links.md');
+            const metaPath = path.join(mcpDir, 'wiki_cache_meta.json');
+
+            let runScan = true;
+            let currentCommitHash = '';
+            
+            // 5a. Determine if we can bypass scanning
+            if (!force) {
+                try {
+                    const diffScan = await DiffScanner.scan(workspaceRoot);
+                    if (diffScan && diffScan.hasGit) {
+                        currentCommitHash = diffScan.lastCommitHash || '';
+                        
+                        // Compare with cached commit hash
+                        try {
+                            const metaContent = await fs.readFile(metaPath, 'utf-8');
+                            const meta = JSON.parse(metaContent);
+                            if (meta.lastCommitHash === currentCommitHash && currentCommitHash !== '') {
+                                runScan = false;
+                                console.log('[WorkspaceIndexer] Repository graph cache hit via Git commit hash');
+                            }
+                        } catch {}
+                    }
+                } catch (err) {
+                    console.error('[WorkspaceIndexer] Failed to check Git HEAD commit for cache bypass:', err);
+                }
+            }
+
+            if (runScan) {
+                const { RepositoryGraph, WorkspaceDependencyScanner } = await import('./dependency-scanner.js');
+                const scanner = new WorkspaceDependencyScanner(workspaceRoot);
+                const graph = new RepositoryGraph(workspaceRoot);
+                
+                await scanner.scanWorkspace(graph);
+                
+                // Serialize graph
+                const serialized = graph.serialize();
+                await fs.writeFile(graphPath, JSON.stringify(serialized, null, 2), 'utf-8');
+                
+                // Generate Wiki links markdown
+                const wikiMd = scanner.generateWikiLinksMarkdown(graph);
+                await fs.writeFile(wikiPath, wikiMd, 'utf-8');
+                
+                // Save cache meta
+                const meta = {
+                    lastCommitHash: currentCommitHash,
+                    lastScannedAt: Date.now()
+                };
+                await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+                console.log('[WorkspaceIndexer] Rebuilt repository dependency graph and wiki index.');
+            }
+        } catch (err) {
+            console.error('[WorkspaceIndexer] Failed to run repository dependency graph scanner:', err);
+        }
+
         await memoryManager.flush();
         return result;
     }
 }
+
