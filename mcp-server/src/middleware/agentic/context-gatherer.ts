@@ -266,9 +266,11 @@ export class ContextGatherer {
                 for (const match of rawMatches) {
                     if (match === '--') continue;
                     try {
+                        // Strip trailing carriage return for CRLF compatibility
+                        const cleanMatch = match.replace(/\r$/, '');
                         // Handle formatting: path/to/file:line:content or path/to/file-line-content
                         // Use regex to split reliably even if path contains colons or dashes
-                        const parts = match.match(/^(.+?)[:|-](\d+)[:|-](.*)$/);
+                        const parts = cleanMatch.match(/^(.+?)[:|-](\d+)[:|-](.*)$/);
                         if (parts) {
                             const rawFilePath = parts[1];
                             const lineNum = parseInt(parts[2]);
