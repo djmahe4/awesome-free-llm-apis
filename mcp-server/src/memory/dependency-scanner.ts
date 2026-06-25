@@ -714,9 +714,10 @@ export function semanticScore(
     includeDocs: boolean = false,
     topK: number = 5
 ): ScoredNode[] {
+    const STOPWORDS = new Set(['how','does','the','and','are','was','for','not','can','its','use','via','per']);
     const tokens = query.toLowerCase()
         .split(/[\W_]+/)
-        .filter(t => t.length > 2);
+        .filter(t => t.length > 2 && !STOPWORDS.has(t));
 
     if (tokens.length === 0) return [];
 

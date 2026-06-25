@@ -115,7 +115,7 @@ export class StructuralMarkdownMiddleware implements Middleware {
                 );
             } else {
                 const extracted = await extractMdContext(knowledgeRes, 2000);
-                if (extracted && extracted.length > 50) {
+                if (extracted && extracted.length > 100) {
                     sections.push(`### SESSION DISTILLATION\n${extracted}`);
                 }
             }

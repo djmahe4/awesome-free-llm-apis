@@ -156,9 +156,9 @@ async function simulate() {
     console.log(`TOTAL PROMPT OVERHEAD         : ${tTotal.toString().padStart(5)} tokens`);
     console.log(`(Approx cost: $${((tTotal / 1000000) * 0.15).toFixed(6)} for Gemini 1.5 Flash)`);
 
-    console.log('\n--- Sample Short-Term Snippet (First 200 chars) ---');
+    console.log('\n--- Sample Short-Term Snippet (Full) ---');
     if (grepContextStr.length > 0) {
-        console.log(grepContextStr.slice(0, 200) + '...');
+        console.log(grepContextStr);
     } else {
         console.log('(No snippets found - check if rg/grep is in PATH)');
     }

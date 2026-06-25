@@ -208,7 +208,8 @@ export class IntelligentRouterMiddleware implements Middleware {
         }
 
         // 3. Fallback to Message Content Analysis
-        const lastMsg = getMessageContent(messages[messages.length - 1]).toLowerCase();
+        const rawLastMsg = getMessageContent(messages[messages.length - 1]);
+        const lastMsg = this.getOriginalUserContent(rawLastMsg).toLowerCase();
 
         // Specific Tasks First
         if (lastMsg.includes('classify') || lastMsg.includes('sentiment') || lastMsg.includes('categorize')) {
@@ -241,11 +242,27 @@ export class IntelligentRouterMiddleware implements Middleware {
         return TaskType.Chat;
     }
 
+    private getOriginalUserContent(content: string): string {
+        if (content.includes('## MCP INTERNAL SESSION STATE')) {
+            const startMarker = '```file:relative/path/from/session/root.ts';
+            const startIndex = content.indexOf(startMarker);
+            if (startIndex !== -1) {
+                const endMarker = '```';
+                const endIndex = content.indexOf(endMarker, startIndex + startMarker.length);
+                if (endIndex !== -1) {
+                    return content.substring(endIndex + endMarker.length).trim();
+                }
+            }
+        }
+        return content;
+    }
+
     /**
      * Detects if a prompt is complex enough to warrant decomposition.
      */
     private isComplex(messages: Message[]): boolean {
-        const lastMsg = getMessageContent(messages[messages.length - 1]);
+        const rawLastMsg = getMessageContent(messages[messages.length - 1]);
+        const lastMsg = this.getOriginalUserContent(rawLastMsg);
         const lower = lastMsg.toLowerCase();
 
         // 1. Numbered steps (e.g., "1. Do this, 2. Do that")
@@ -278,9 +295,19 @@ export class IntelligentRouterMiddleware implements Middleware {
         console.debug(`[Router] Decomposing complex task...`);
 
         // 1. Pick a Planner model (SiliconFlow V3, DeepSeek-R1, or Gemini Flash Lite)
-        const plannerModels = context.request.google_search
+        const candidatePlannerModels = context.request.google_search
             ? ['gemini-3.1-flash-lite', 'deepseek/deepseek-r1', 'deepseek-ai/DeepSeek-V3', 'qwen/qwen3-coder:free']
             : ['deepseek/deepseek-r1', 'deepseek-ai/DeepSeek-V3', 'gemini-3.1-flash-lite', 'qwen/qwen3-coder:free', 'llama-3.3-70b-versatile'];
+        
+        const availableProviders = ProviderRegistry.getInstance().getAvailableProviders();
+        const plannerModels = candidatePlannerModels.filter(modelId => 
+            availableProviders.some(p => p.models.some((m: any) => m.id === modelId))
+        );
+
+        if (plannerModels.length === 0) {
+            plannerModels.push('any');
+        }
+
         let plannerResponse: string | null = null;
 
         const lastMessage = context.request.messages.length > 0
