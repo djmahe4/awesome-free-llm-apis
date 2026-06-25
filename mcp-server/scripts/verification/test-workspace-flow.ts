@@ -16,11 +16,13 @@ import { PipelineContext } from '../../src/pipeline/middleware.js';
  * the full file context and mandates a specific response format for the orchestrator to apply.
  */
 
+import { PROJECTS_DIR } from '../../src/middleware/agentic/constants.js';
+
 async function main() {
     console.log('\n🚀 --- Workspace Flow Verification ---\n');
 
     const sessionId = 'demo-test-workspace';
-    const projectDir = path.join(process.cwd(), 'data', 'projects', sessionId);
+    const projectDir = path.join(PROJECTS_DIR, sessionId);
     const knowledgePath = path.join(projectDir, 'knowledge.md');
 
     // 1. Setup Mock Workspace Environment

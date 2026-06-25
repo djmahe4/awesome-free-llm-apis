@@ -188,7 +188,7 @@ export class ContextGatherer {
         const persona = detectPersona(query, workspaceRoot);
 
         const isTheoretical = /\b(doc|documentation|guide|explain|theory|writeup|summary|overview)\b/i.test(query) || persona === 'student' || persona === 'researcher';
-        const overrideIgnores = /\b(override|all files|gitignored|ignored|data)\b/i.test(query) || persona === 'debugger';
+        const overrideIgnores = /\b(override|all files|gitignored|ignored)\b/i.test(query);
 
         // 5. Rank Candidates with priorityFiles support
         const candidates = await WorkspaceWalker.findRelevantFiles(workspaceRoot, Array.from(terms), limit, overrideIgnores, isTheoretical, priorityFiles);
@@ -218,10 +218,11 @@ export class ContextGatherer {
         try {
             const normalizedCandidates = candidates.map(c => c.replace(/\\/g, '/'));
             let stdout = '';
+            const contextLines = isTheoretical ? '4' : '2';
             
             // We use a total match limit of 10 per file to prevent bloat
             if (tool === 'rg') {
-                const args = ['-m', '10', '-n', '-i', '-C', '2', '--no-heading'];
+                const args = ['-m', '10', '-n', '-i', '-C', contextLines, '--no-heading'];
                 if (overrideIgnores) args.push('-u');
                 args.push('-e', `(${combinedPattern})`);
                 args.push(...normalizedCandidates);
@@ -229,7 +230,7 @@ export class ContextGatherer {
                 const res = await spawnAsync('rg', args, 15000);
                 stdout = res.stdout;
             } else if (tool === 'grep') {
-                const args = ['-n', '-E', '-i', '-m', '10', '-C', '2', `(${combinedPattern})`].concat(normalizedCandidates);
+                const args = ['-n', '-E', '-i', '-m', '10', '-C', contextLines, `(${combinedPattern})`].concat(normalizedCandidates);
                 const res = await spawnAsync('grep', args, 15000);
                 stdout = res.stdout;
             } else if (tool === 'powershell') {
@@ -242,7 +243,7 @@ export class ContextGatherer {
                             const res = await spawnAsync('powershell', [
                                 '-NoProfile',
                                 '-Command',
-                                `Get-Content -Path "${cleanPath}" | Select-String -Pattern "${cleanPattern}" -Context 2 | ForEach-Object { $lineNum = $_.LineNumber; $preCount = $_.Context.PreContext.Count; for ($i = 0; $i -lt $preCount; $i++) { "${cleanPath}:$($lineNum - $preCount + $i):$($_.Context.PreContext[$i])" }; "${cleanPath}:$lineNum:$($_.Line)"; for ($i = 0; $i -lt $_.Context.PostContext.Count; $i++) { "${cleanPath}:$($lineNum + 1 + $i):$($_.Context.PostContext[$i])" } }`
+                                `Get-Content -Path "${cleanPath}" | Select-String -Pattern "${cleanPattern}" -Context ${contextLines} | ForEach-Object { $lineNum = $_.LineNumber; $preCount = $_.Context.PreContext.Count; for ($i = 0; $i -lt $preCount; $i++) { "${cleanPath}:$($lineNum - $preCount + $i):$($_.Context.PreContext[$i])" }; "${cleanPath}:$lineNum:$($_.Line)"; for ($i = 0; $i -lt $_.Context.PostContext.Count; $i++) { "${cleanPath}:$($lineNum + 1 + $i):$($_.Context.PostContext[$i])" } }`
                             ], 15000);
                             if (res.stdout) {
                                 stdout += res.stdout + '\n';

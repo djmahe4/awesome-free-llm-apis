@@ -13,9 +13,11 @@ export interface FileCandidate {
     score: number;
 }
 
-export class WorkspaceWalker {
-    private static filesScanned = 0;
+export interface WalkState {
+    filesScanned: number;
+}
 
+export class WorkspaceWalker {
     /**
      * Recursively find and rank files based on keyword relevance
      */
@@ -28,7 +30,7 @@ export class WorkspaceWalker {
         priorityFiles?: string[]
     ): Promise<string[]> {
         const candidates: FileCandidate[] = [];
-        this.filesScanned = 0;
+        const state: WalkState = { filesScanned: 0 };
 
         const ig = ignore().add(EXCLUDE_DIRS);
         let gitignoreRoot = rootPath;
@@ -50,7 +52,7 @@ export class WorkspaceWalker {
             }
         }
 
-        await this.walk(rootPath, rootPath, keywords, candidates, ig, 0, overrideIgnores, gitignoreRoot, isTheoretical, priorityFiles);
+        await this.walk(rootPath, rootPath, keywords, candidates, ig, 0, overrideIgnores, gitignoreRoot, isTheoretical, state, priorityFiles);
 
         // Sort by score (descending) and return top paths
         return candidates
@@ -69,9 +71,10 @@ export class WorkspaceWalker {
         overrideIgnores: boolean,
         gitignoreRoot: string,
         isTheoretical: boolean,
+        state: WalkState,
         priorityFiles?: string[]
     ): Promise<void> {
-        if (depth > MAX_DEPTH || this.filesScanned >= MAX_FILES_SCANNED) return;
+        if (depth > MAX_DEPTH || state.filesScanned >= MAX_FILES_SCANNED) return;
 
         try {
             const entries = await fs.readdir(currentDir, { withFileTypes: true });
@@ -86,10 +89,13 @@ export class WorkspaceWalker {
             });
 
             for (const entry of sortedEntries) {
-                if (this.filesScanned >= MAX_FILES_SCANNED) break;
+                if (state.filesScanned >= MAX_FILES_SCANNED) break;
 
                 const fullPath = path.join(currentDir, entry.name);
-                const relativePathToGitignore = path.relative(gitignoreRoot, fullPath);
+                let relativePathToGitignore = path.relative(gitignoreRoot, fullPath).replace(/\\/g, '/');
+                if (entry.isDirectory()) {
+                    relativePathToGitignore += '/';
+                }
 
                 // Skip if ignored (unless overridden or the entry name exactly matches a keyword — 
                 // explicit filename pinning always bypasses gitignore)
@@ -99,9 +105,9 @@ export class WorkspaceWalker {
                 }
 
                 if (entry.isDirectory()) {
-                    await this.walk(root, fullPath, keywords, candidates, ig, depth + 1, overrideIgnores, gitignoreRoot, isTheoretical, priorityFiles);
+                    await this.walk(root, fullPath, keywords, candidates, ig, depth + 1, overrideIgnores, gitignoreRoot, isTheoretical, state, priorityFiles);
                 } else if (entry.isFile()) {
-                    this.filesScanned++;
+                    state.filesScanned++;
                     const ext = path.extname(entry.name).toLowerCase();
                     
                     // Simple extension filter (still useful to prune binaries quickly)
@@ -133,7 +139,52 @@ export class WorkspaceWalker {
         const nameLower = filename.toLowerCase();
         const pathLower = relativePath.toLowerCase();
 
-        // 1. Extension boost (prioritize source code or docs based on mode)
+        // 1. Keyword matching check (mandatory when keywords are provided)
+        let keywordMatched = false;
+        if (keywords.length > 0) {
+            for (const kw of keywords) {
+                const kwLower = kw.toLowerCase();
+                
+                // Filename matches
+                if (nameLower.includes(kwLower)) {
+                    keywordMatched = true;
+                    score += 15;
+                    // Exact full-filename match (including extension): user explicitly named this file.
+                    // Boost strongly so it always wins the candidate race regardless of extension penalty.
+                    if (nameLower === kwLower) {
+                        score += 100;
+                    } else {
+                        // Partial exact match (keyword matches name minus extension)
+                        const nameWithoutExt = path.parse(nameLower).name;
+                        const normalizedName = nameWithoutExt.replace(/[_-]/g, '').toLowerCase();
+                        const normalizedKw = kwLower.replace(/[_-]/g, '').toLowerCase();
+                        if (normalizedName === normalizedKw) score += 30;
+                    }
+                }
+                
+                // Path matches (excluding filename itself to avoid double counting)
+                const dirPart = path.dirname(pathLower);
+                if (dirPart.includes(kwLower)) {
+                    keywordMatched = true;
+                    
+                    // Check if any directory segment exactly matches the keyword
+                    const segments = dirPart.split(/[/\\]/);
+                    const exactDirMatch = segments.some(seg => seg === kwLower);
+                    if (exactDirMatch) {
+                        score += 25; // High boost for exact folder match
+                    } else {
+                        score += 10; // Generic substring directory match
+                    }
+                }
+            }
+
+            // Reject files that have zero keyword matches
+            if (!keywordMatched) {
+                return 0;
+            }
+        }
+
+        // 2. Extension boost (prioritize source code or docs based on mode)
         const codeExtensions = ['.ts', '.js', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.h'];
         const docExtensions = ['.md', '.txt', '.pdf', '.json', '.yaml', '.yml'];
         
@@ -143,25 +194,6 @@ export class WorkspaceWalker {
         } else {
             if (codeExtensions.includes(ext)) score += 20;
             if (docExtensions.includes(ext)) score += 5;
-        }
-
-        // 2. Keyword matches in filename
-        for (const kw of keywords) {
-            const kwLower = kw.toLowerCase();
-            if (nameLower.includes(kwLower)) {
-                score += 15;
-                // Exact full-filename match (including extension): user explicitly named this file.
-                // Boost strongly so it always wins the candidate race regardless of extension penalty.
-                if (nameLower === kwLower) {
-                    score += 100;
-                } else {
-                    // Partial exact match (keyword matches name minus extension)
-                    const nameWithoutExt = path.parse(nameLower).name;
-                    const normalizedName = nameWithoutExt.replace(/[_-]/g, '').toLowerCase();
-                    const normalizedKw = kwLower.replace(/[_-]/g, '').toLowerCase();
-                    if (normalizedName === normalizedKw) score += 30;
-                }
-            }
         }
 
         // 3. Path-based boosts/penalties
@@ -175,7 +207,11 @@ export class WorkspaceWalker {
             score -= 50;
         }
 
-        // 4. Structural boost
+        // 4. Progressive Nesting Depth Penalty
+        const depth = relativePath.split(/[/\\]/).length - 1;
+        score -= depth * 2;
+
+        // 5. Structural boost
         if (nameLower.includes('config') || nameLower.includes('setup') || nameLower.includes('index')) {
             score += 3;
         }
