@@ -36,7 +36,7 @@ export class StructuralMarkdownMiddleware implements Middleware {
         const userMsg = context.request.messages?.find(m => m.role === 'user');
         if (userMsg) {
             const memStart = Date.now();
-            const workspaceRoot = (context.request as any)?.workspace_root as string | undefined;
+            const workspaceRoot = context.workspaceRoot || (context.request as any)?.workspace_root as string | undefined;
             const fullMemory = await this.readFullSessionMemory(sessionId, workspaceRoot);
             console.error(`[memory-read] ${Date.now() - memStart}ms session=${sessionId}`);
 

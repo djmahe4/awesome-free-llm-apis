@@ -23,8 +23,8 @@ async function verify() {
         (registry as any).providers = new Map();
         
         const mockModels = [
-            { id: 'DeepSeek-R1', name: 'DS-R1', contextWindow: 64000 },
-            { id: 'gemini-2.0-flash', name: 'Gemini Flash', contextWindow: 1000000 }
+            { id: 'deepseek-ai/DeepSeek-R1', name: 'DS-R1', contextWindow: 64000 },
+            { id: 'gemini-3.1-flash-lite', name: 'Gemini Flash', contextWindow: 1000000 }
         ];
 
         // We simulate the BaseProvider's race logic here since these mocks avoid real network calls

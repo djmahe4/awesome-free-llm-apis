@@ -818,7 +818,7 @@ export class AgenticMiddleware implements Middleware {
             return;
         }
 
-        const workspaceRoot: string | undefined = (context.request as any)?.workspace_root;
+        const workspaceRoot: string | undefined = context.workspaceRoot || (context.request as any)?.workspace_root;
         const projectDir = await ensureProjectFiles(sessionId, workspaceRoot);
         const q = await getOrLoadState(sessionId);
 
