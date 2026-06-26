@@ -1,37 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock FS module
-vi.mock('node:fs', () => {
-    const mockPromises = {
-        writeFile: vi.fn(),
-        mkdir: vi.fn(),
-        access: vi.fn(),
-        readFile: vi.fn(),
-        stat: vi.fn(async () => ({ mtimeMs: 1000 })),
-    };
-    return {
-        promises: mockPromises,
-        default: {
-            promises: mockPromises,
-        },
-    };
-});
-
-vi.mock('fs', () => {
-    const mockPromises = {
-        writeFile: vi.fn(),
-        mkdir: vi.fn(),
-        access: vi.fn(),
-        readFile: vi.fn(),
-        stat: vi.fn(async () => ({ mtimeMs: 1000 })),
-    };
-    return {
-        promises: mockPromises,
-        default: {
-            promises: mockPromises,
-        },
-    };
-});
+// fs is spied in beforeEach to prevent global mock leak to other test files
 
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -95,25 +64,26 @@ describe('Agentic Intelligence & Middleware', () => {
     };
 
     beforeEach(() => {
-        vi.resetAllMocks();
         vi.stubEnv('ENABLE_AGENTIC_MIDDLEWARE', 'true');
         resetPromptCache();
 
-        // Setup default mock behaviors (Async)
-        (vi.mocked(fsp.access) as any).mockImplementation(async (path: string) => {
+        // Spy on fsp promises instead of global mocks to prevent leakage
+        vi.spyOn(fsp, 'writeFile').mockResolvedValue(undefined as any);
+        vi.spyOn(fsp, 'mkdir').mockResolvedValue(undefined as any);
+        vi.spyOn(fsp, 'access').mockImplementation(async (path: string) => {
             if (path.endsWith('prompt.json') || path.endsWith('system-prompt-raw.md') || path.endsWith('README.md')) return undefined;
             throw new Error('File not found');
         });
-        (vi.mocked(fsp.stat) as any).mockImplementation(async () => ({ mtimeMs: Date.now() }));
-        (vi.mocked(fsp.readFile) as any).mockImplementation(async (path: string) => {
+        vi.spyOn(fsp, 'stat').mockResolvedValue({ mtimeMs: 1000 } as any);
+        vi.spyOn(fsp, 'readFile').mockImplementation(async (path: string) => {
             if (path.endsWith('prompt.json')) return JSON.stringify(mockPromptData);
             if (path.endsWith('README.md')) return "Tier 2 Fallback (README) [Context-aware fallback content for agentic testing]";
             return "";
         });
+    });
 
-        vi.mocked(fsp.mkdir).mockResolvedValue(undefined);
-        vi.mocked(fsp.writeFile).mockResolvedValue(undefined);
-        (vi.mocked(fsp.stat) as any).mockResolvedValue({ mtimeMs: 1000 });
+    afterEach(() => {
+        vi.restoreAllMocks();
     });
 
     describe('getIntelligentSystemPrompt (Async)', () => {

@@ -92,53 +92,6 @@ async function validateSandboxDependencies() {
     }
   }
 
-  if (pythonPath) {
-    try {
-      execSync(`${pythonPath} --version`, { stdio: 'ignore' });
-      try {
-        execSync(`${pythonPath} -c "import RestrictedPython"`, { stdio: 'ignore' });
-        console.error(`  [✓] Python: ${pythonPath} and RestrictedPython available`);
-      } catch {
-        console.error(`  [!] Python: ${pythonPath} found but RestrictedPython missing. Run: ${pythonPath} -m pip install RestrictedPython`);
-      }
-    } catch {
-      console.error(`  [!] Python: ${pythonPath} failed to execute`);
-    }
-  } else {
-    console.error('  [!] Python: not found on PATH or in venv');
-  }
-
-  // 2. Go Validation
-  const goRunnerPath = path.join(__dirname, '../scripts/go-sandbox-runner/sandbox-runner' + (isWin ? '.exe' : ''));
-  if (fs.existsSync(goRunnerPath)) {
-    console.error('  [✓] Go: Pre-built sandbox-runner available');
-  } else {
-    try {
-      execSync('go version', { stdio: 'ignore' });
-      console.error('  [i] Go: Building sandbox-runner...');
-      const goDir = path.join(__dirname, '../scripts/go-sandbox-runner');
-      execSync('go build -o sandbox-runner .', { cwd: goDir, stdio: 'ignore' });
-      console.error('  [✓] Go: sandbox-runner built successfully');
-    } catch {
-      console.error('  [!] Go: sandbox-runner missing and go compiler not found');
-    }
-  }
-
-  // 3. Rust Validation
-  const rustRunnerPath = path.join(__dirname, '../scripts/rust-sandbox-runner/target/release/sandbox-runner' + (isWin ? '.exe' : ''));
-  if (fs.existsSync(rustRunnerPath)) {
-    console.error('  [✓] Rust: Pre-built sandbox-runner available');
-  } else {
-    try {
-      execSync('cargo --version', { stdio: 'ignore' });
-      console.error('  [i] Rust: Building sandbox-runner...');
-      const rustDir = path.join(__dirname, '../scripts/rust-sandbox-runner');
-      execSync('cargo build --release', { cwd: rustDir, stdio: 'ignore' });
-      console.error('  [✓] Rust: sandbox-runner built successfully');
-    } catch {
-      console.error('  [!] Rust: sandbox-runner missing and cargo not found');
-    }
-  }
 }
 
 async function initTelemetry() {

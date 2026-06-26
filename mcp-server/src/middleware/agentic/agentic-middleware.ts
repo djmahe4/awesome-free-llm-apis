@@ -7,6 +7,8 @@ import type { Middleware, PipelineContext, NextFunction } from '../../pipeline/m
 import { getMessageContent } from '../../utils/MessageUtils.js';
 import { memoryManager } from '../../memory/index.js';
 import { getIntelligentSystemPrompt } from './prompts.js';
+import { withFileLock } from '../../utils/file-lock.js';
+import { WorkspaceIndexer } from '../../memory/indexer.js';
 // Removed top-level import of instances.js to break circular dependency
 
 import {
@@ -72,12 +74,15 @@ const persistStateDebounced = debounce(async (sessionId: string, projectDir: str
     const state = queues.get(sessionId);
     if (!state) return;
 
+    const statePath = path.join(projectDir, STATE_FILE);
     try {
-        await fs.writeFile(
-            path.join(projectDir, STATE_FILE),
-            JSON.stringify(state, null, 2),
-            'utf-8',
-        );
+        await withFileLock(statePath, async () => {
+            await fs.writeFile(
+                statePath,
+                JSON.stringify(state, null, 2),
+                'utf-8',
+            );
+        });
     } catch {
         // non-fatal
     }
@@ -176,8 +181,11 @@ async function appendKnowledge(projectDir: string, sessionId: string, content: s
     const entry = distillToSkillEntry(content, sessionId);
     if (!entry) return;
 
+    const knowledgePath = path.join(projectDir, KNOWLEDGE_FILE);
     try {
-        await fs.appendFile(path.join(projectDir, KNOWLEDGE_FILE), entry, 'utf-8');
+        await withFileLock(knowledgePath, async () => {
+            await fs.appendFile(knowledgePath, entry, 'utf-8');
+        });
     } catch {
         // non-fatal
     }
@@ -575,9 +583,12 @@ async function executeSingleSubtask(
 
     while (!subtaskCompleted && enrichmentCycleCount <= MAX_ENRICHMENT_CYCLES) {
         try {
+            const userMessage = context.request.messages.find(m => m.role === 'user');
+            const mainPrompt = userMessage ? String(userMessage.content) : undefined;
             const userKeywords = context.keywords || [];
             const subtaskPrompt = await getIntelligentSystemPrompt({
                 context: currentTask,
+                mainPrompt,
                 keywords: [...new Set(['mcp', 'memory', 'filesystem', ...userKeywords])],
                 memory: (context as any).memoryContext,
                 workspace: (context as any).grepContext,
@@ -853,6 +864,7 @@ export class AgenticMiddleware implements Middleware {
                     const userKeywords = context.keywords || [];
                     const questionPrompt = await getIntelligentSystemPrompt({
                         context: userContent,
+                        mainPrompt: userContent,
                         keywords: isAgenticExplicitlyRequested ? ['agentic', 'orchestration', ...userKeywords] : userKeywords,
                         memory: (context as any).memoryContext,
                         workspace: (context as any).grepContext,
@@ -919,11 +931,23 @@ export class AgenticMiddleware implements Middleware {
             if (isParallel && !isLowThroughput && phase1Tasks.length > 1) {
                 console.error(`[AgenticMiddleware] Parallel execution: running ${phase1Tasks.length} tasks concurrently`);
                 
+                // Pre-parallel indexing run: index once so children are fully up-to-date and lock-free
+                if (workspaceRoot) {
+                    try {
+                        console.error(`[AgenticMiddleware] Running pre-parallel workspace indexing...`);
+                        const indexer = new WorkspaceIndexer(workspaceRoot);
+                        await indexer.indexWorkspace(workspaceRoot, false);
+                    } catch (err) {
+                        console.error(`[AgenticMiddleware] Pre-parallel workspace indexing failed: ${err}`);
+                    }
+                }
+
                 const parallelPromises = phase1Tasks.map(async (t) => {
                     const clonedCtx: PipelineContext = {
                         ...context,
                         request: {
                             ...context.request,
+                            skipIndexing: true, // <-- Skip concurrent indexing to avoid lock races
                             messages: context.request.messages.map(m => ({ ...m }))
                         }
                     } as any;

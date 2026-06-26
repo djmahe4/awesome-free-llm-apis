@@ -2,6 +2,99 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/**
+ * Calculates Jaccard similarity between a set of tokens and a string.
+ */
+function calculateJaccardSimilarity(setA: Set<string>, str: string): number {
+    const words = str.toLowerCase().split(/\W+/).filter(Boolean);
+    if (words.length === 0) return 0;
+    
+    let intersection = 0;
+    const uniqueWords = new Set(words);
+    uniqueWords.forEach(w => {
+        if (setA.has(w)) intersection++;
+    });
+    
+    return intersection / (setA.size + uniqueWords.size - intersection);
+}
+
+/**
+ * Filters paragraphs or entries within prompt sections using Jaccard semantic similarity.
+ */
+function compressContentSemantically(content: string, semanticTokens: Set<string>, threshold = 1.5): string {
+    if (semanticTokens.size === 0) return content;
+
+    const paragraphs = content.split(/\n\n+/);
+    const keptParagraphs: string[] = [];
+
+    for (const paragraph of paragraphs) {
+        const trimmed = paragraph.trim();
+        
+        // Preserve headers and markdown structure
+        if (trimmed.startsWith('#') || trimmed.startsWith('---') || trimmed.startsWith('```') || /^[A-Z0-9\s_\-:]+$/.test(trimmed)) {
+            keptParagraphs.push(paragraph);
+            continue;
+        }
+
+        // If it's a list (lines starting with - or * or numbers)
+        if (trimmed.startsWith('-') || trimmed.startsWith('*') || /^\d+\./.test(trimmed)) {
+            const lines = paragraph.split('\n');
+            const keptLines: string[] = [];
+            let currentHeaderLine = "";
+
+            for (const line of lines) {
+                const lineTrimmed = line.trim();
+                if (!lineTrimmed.startsWith('-') && !lineTrimmed.startsWith('*') && !/^\d+\./.test(lineTrimmed)) {
+                    currentHeaderLine = line;
+                    continue;
+                }
+
+                // Compute line TF-IDF score
+                const lineWords = lineTrimmed.toLowerCase().split(/\W+/).filter(w => w.length >= 3);
+                let lineScore = 0;
+                const matchedTokens = new Set<string>();
+                lineWords.forEach(w => {
+                    if (semanticTokens.has(w)) matchedTokens.add(w);
+                });
+                matchedTokens.forEach(t => {
+                    lineScore += getIDF(t);
+                });
+
+                if (lineScore >= threshold) {
+                    if (currentHeaderLine) {
+                        keptLines.push(currentHeaderLine);
+                        currentHeaderLine = "";
+                    }
+                    keptLines.push(line);
+                }
+            }
+
+            if (keptLines.length > 0) {
+                keptParagraphs.push(keptLines.join('\n'));
+            }
+            continue;
+        }
+
+        // For prose paragraphs, check overall paragraph TF-IDF score
+        const paraWords = trimmed.toLowerCase().split(/\W+/).filter(w => w.length >= 3);
+        let paraScore = 0;
+        const matchedTokens = new Set<string>();
+        paraWords.forEach(w => {
+            if (semanticTokens.has(w)) matchedTokens.add(w);
+        });
+        matchedTokens.forEach(t => {
+            paraScore += getIDF(t);
+        });
+
+        // Always keep the very first paragraph of the section for context
+        if (paraScore >= threshold || paragraphs.indexOf(paragraph) === 0) {
+            keptParagraphs.push(paragraph);
+        }
+    }
+
+    return keptParagraphs.join('\n\n');
+}
+
 /** Minimum character length for a raw prompt file to be considered valid. */
 const MIN_PROMPT_LENGTH = 500;
 /** Maximum character budget for the dynamically assembled system prompt. */
@@ -59,6 +152,14 @@ interface PromptData {
 
 let cachedPromptData: PromptData | null = null;
 let lastMtime: number = 0;
+let cachedIdfMap: Map<string, number> | null = null;
+
+function getIDF(word: string): number {
+    if (!cachedIdfMap) return 0;
+    const df = cachedIdfMap.get(word.toLowerCase()) || 0;
+    const N = cachedPromptData?.sections.length || 1;
+    return df > 0 ? Math.log(1 + N / df) : Math.log(1 + N);
+}
 
 /**
  * Resets the in-memory cache. Used primarily for testing or forced reloads.
@@ -66,6 +167,7 @@ let lastMtime: number = 0;
 export function resetPromptCache(): void {
     cachedPromptData = null;
     lastMtime = 0;
+    cachedIdfMap = null;
 }
 
 /**
@@ -106,6 +208,21 @@ async function loadPromptData(): Promise<PromptData | null> {
         const data = JSON.parse(raw);
         cachedPromptData = data;
         lastMtime = mtime;
+
+        // Recompute IDF Map
+        const dfMap = new Map<string, number>();
+        const getWords = (text: string): Set<string> => {
+            const words = text.toLowerCase().split(/\W+/).filter(w => w.length >= 3);
+            return new Set(words);
+        };
+        data.sections.forEach((sec: any) => {
+            const uniqueWords = getWords((sec.title || "") + " " + (sec.content || "") + " " + (sec.keywords || []).join(" "));
+            uniqueWords.forEach(w => {
+                dfMap.set(w, (dfMap.get(w) || 0) + 1);
+            });
+        });
+        cachedIdfMap = dfMap;
+
         return data;
     } catch (e) {
         return null;
@@ -128,6 +245,7 @@ export interface PromptOptions {
     memory?: string;
     workspace?: string;
     isSubtask?: boolean;
+    mainPrompt?: string;
 }
 
 /**
@@ -142,12 +260,14 @@ export async function getIntelligentSystemPrompt(
 ): Promise<string> {
     let context = "";
     let workspaceContext: string | undefined;
+    let mainPrompt: string | undefined;
     if (typeof contextOrOptions === 'object') {
         context = contextOrOptions.context || "";
         explicitKeywords = contextOrOptions.keywords;
         memoryContext = contextOrOptions.memory;
         workspaceContext = contextOrOptions.workspace;
         isSubtask = contextOrOptions.isSubtask || false;
+        mainPrompt = contextOrOptions.mainPrompt;
     } else {
         context = contextOrOptions;
     }
@@ -190,88 +310,116 @@ export async function getIntelligentSystemPrompt(
         return `${assembled}${GROUNDING_PROTOCOL}`;
     }
 
-    // Tokenize
+    // Tokenize both context and mainPrompt to build query tokens
     const tokens = new Set<string>();
     const stopwords = new Set(['and', 'the', 'with', 'your', 'from', 'that', 'this', 'for', 'are', 'you', 'was', 'were', 'been', 'have', 'has', 'had']);
     
-    if (explicitKeywords && explicitKeywords.length > 0) {
-        explicitKeywords.forEach(k => tokens.add(k.toLowerCase()));
-    }
-    
-    if (contextLower) {
-        contextLower.split(/\W+/).forEach(t => {
+    const addTokens = (str: string) => {
+        str.toLowerCase().split(/\W+/).forEach(t => {
             if (t.length >= 3 && !stopwords.has(t)) tokens.add(t);
         });
+    };
+
+    const isStrictSteering = explicitKeywords && explicitKeywords.length > 0 && 
+        explicitKeywords.some(k => !['mcp', 'memory', 'filesystem'].includes(k.toLowerCase()));
+
+    if (isStrictSteering) {
+        explicitKeywords!.forEach(k => tokens.add(k.toLowerCase()));
+    } else {
+        if (explicitKeywords) {
+            explicitKeywords.forEach(k => tokens.add(k.toLowerCase()));
+        }
+        if (contextLower) {
+            addTokens(contextLower);
+        }
+        if (mainPrompt) {
+            addTokens(mainPrompt);
+        }
     }
+
+    const isResearchQuery = /\b(explain|research|appendix|layers|architecture|design|structure|summary|system|theory)\b/i.test(contextLower);
 
     // Score sections
     const scoredSections = data.sections.map(section => {
         let score = 0;
-        let matches: string[] = [];
         
-        // 1. Explicit Keywords (Highest Priority)
+        // Count keyword overlap to verify semantic relevance
+        let keywordOverlapCount = 0;
+        section.keywords.forEach(kw => {
+            const kwLower = kw.toLowerCase();
+            if (tokens.has(kwLower)) {
+                keywordOverlapCount++;
+                score += getIDF(kwLower);
+            }
+        });
+
+        // 1. Explicit Keywords boost
         if (explicitKeywords) {
             const titleLower = section.title.toLowerCase();
             explicitKeywords.forEach(kw => {
                 const kwLower = kw.toLowerCase();
                 if (section.keywords.includes(kwLower)) {
-                    score += 10.0;
-                    matches.push(`explicit:${kw}`);
+                    score += 5.0;
                 }
                 if (titleLower.includes(kwLower)) {
-                    score += 10.0;
-                    matches.push(`explicit-title:${kw}`);
+                    score += 5.0;
                 }
             });
         }
 
-        // 2. Title relevance: restrict to explicit keywords if provided, else use context tokens
+        // 2. Title relevance
         const titleMatchSource = (explicitKeywords && explicitKeywords.length > 0) 
             ? new Set(explicitKeywords.map(k => k.toLowerCase())) 
             : tokens;
             
-        if (section.title.toLowerCase().split(/\W+/).some(t => titleMatchSource.has(t))) {
-            score += 5.0;
-        }
-
-        // 3. Keyword Density Normalization: prevent "bloated" sections from matching everything
-        const keywordCount = section.keywords.length;
-        const kwFactor = keywordCount > 25 ? (25 / keywordCount) : 1.0;
-
-        section.keywords.forEach(kw => {
-            const lowKw = kw.toLowerCase();
-            if (tokens.has(lowKw)) {
-                const added = 2.0 * kwFactor;
-                score += added;
-            } else if (lowKw.length > 4 && contextLower.includes(lowKw)) {
-                const added = 0.5 * kwFactor;
-                score += added;
+        section.title.toLowerCase().split(/\W+/).forEach(t => {
+            if (titleMatchSource.has(t)) {
+                score += getIDF(t) * 1.5;
             }
         });
 
-        if (section.level === 1) score += 3.0; // Moderate boost for major categories; needs a keyword match for inclusion in dense context
-        if (section.level === 2) score += 1.5;
+        if (section.level === 1) score += 1.0;
+        if (section.level === 2) score += 0.5;
 
+        // Semantic Category Constraints & subtask filtering
         const isReference = ['research_appendix', 'subsystem_reference_map', 'open_source_architecture_references'].includes(section.id);
+        const isMetaPlan = ['reader_contract', 'momentum_ratchets', 'first_milestone_definition'].includes(section.id);
+
         if (isReference) {
             const architecturalKeywords = ['rest', 'api', 'url', 'github', 'architecture', 'patterns', 'audit'];
-            architecturalKeywords.forEach(ak => { if (tokens.has(ak) || contextLower.includes(ak)) score += 5; });
+            architecturalKeywords.forEach(ak => { if (tokens.has(ak) || contextLower.includes(ak)) score += 2; });
+        }
+
+        // Subtask Optimization: Exclude high-level meta orchestration details
+        if (isSubtask && isMetaPlan) {
+            score = 0;
+        }
+
+        // Exclude reference appendices unless query is explicitly research/architecture oriented or has matching reference/architectural keywords
+        const hasReferenceKeyword = tokens.has('appendix') || tokens.has('reference') || tokens.has('references') || tokens.has('research') || tokens.has('temporal') || tokens.has('stripe') || tokens.has('twilio') || tokens.has('api');
+        if (isReference && !isResearchQuery && !hasReferenceKeyword) {
+            score = 0;
+        }
+
+        // Strict Guard: Ensure at least one keyword matches query context to prevent semantic hallucination/noise
+        if (keywordOverlapCount === 0 && !explicitKeywords && !isMetaPlan && !(isReference && hasReferenceKeyword)) {
+            score = 0;
         }
 
         const scored = { ...section, score };
         return scored;
     });
 
-    const minScore = 5.0; // Hardened threshold for high-density synthesis
+    const minScore = 2.0; // Hardened threshold for high-density synthesis using IDF
     const relevant = scoredSections
         .filter(s => {
             if (s.score < minScore) return false;
             const isRef = ['research_appendix', 'subsystem_reference_map', 'open_source_architecture_references'].includes(s.id);
-            if (isSubtask && isRef) return s.score > 20;
+            if (isSubtask && isRef) return s.score > 10; // Adjusted threshold for IDF
             return true;
         })
         .sort((a, b) => b.score - a.score)
-        .slice(0, isSubtask ? 3 : 7);
+        .slice(0, isSubtask ? 5 : 7);
 
     // Reserve 1000 chars for introduction and protocols
     const budgetLimit = (isSubtask ? 8000 : PROMPT_CHAR_BUDGET) - 1000;
@@ -280,6 +428,7 @@ export async function getIntelligentSystemPrompt(
     for (const section of relevant) {
         let content = section.content;
         const isRef = ['research_appendix', 'subsystem_reference_map', 'open_source_architecture_references'].includes(section.id);
+        const isStructuredLayers = section.id === 'system_layers_to_build';
         
         if (isRef) {
             const parts = content.split(/\n(?=\s*- )/).map(p => p.trim()).filter(p => p.length > 0);
@@ -287,16 +436,16 @@ export async function getIntelligentSystemPrompt(
             let currentCategory = "";
             // High-score sections (explicitly requested) get full content baseline, except reference maps.
             const isReferenceMap = section.id.includes('reference') || section.id.includes('appendix');
-            const minEntryScore = (section.score > 20 && !isReferenceMap) ? 0 : (section.score > 12 ? 1.0 : 2.5);
+            const minEntryScore = (section.score > 20 && !isReferenceMap) ? 0 : (section.score > 8 ? 1.0 : 2.5);
 
             for (const part of parts) {
                 if (part.trim().startsWith('-')) {
                     let entryScore = 0;
                     const contextText = (currentCategory + " " + part).toLowerCase();
                     contextText.split(/\W+/).forEach(et => {
-                        if (tokens.has(et)) entryScore += (['python', 'rust', 'javascript', 'typescript', 'go'].includes(et)) ? 0.5 : 2.0;
+                        if (tokens.has(et)) entryScore += (['python', 'rust', 'javascript', 'typescript', 'go'].includes(et)) ? 0.5 : getIDF(et);
                     });
-                    tokens.forEach(t => { if (t.length > 3 && contextText.includes(t)) entryScore += 0.5; });
+                    tokens.forEach(t => { if (t.length > 3 && contextText.includes(t)) entryScore += getIDF(t) * 0.25; });
                     scoredEntries.push({ entry: part, entryScore });
                 } else {
                     currentCategory = part.replace(/^-\s*/, '');
@@ -309,6 +458,36 @@ export async function getIntelligentSystemPrompt(
                 .slice(0, 15)
                 .map(se => se.entry)
                 .join('\n');
+        } else if (isStructuredLayers) {
+            // Parse system layers into individual blocks (e.g. LAYER A, LAYER B...)
+            const blocks = content.split(/(?=^LAYER [A-Z]:)/m);
+            const processedBlocks = blocks.map(block => {
+                const lines = block.trim().split('\n');
+                if (lines.length <= 1) return block;
+
+                const headerLine = lines[0];
+                let blockScore = 0;
+                const blockTextLower = block.toLowerCase();
+                const matchedTokens = new Set<string>();
+                blockTextLower.split(/\W+/).forEach(t => {
+                    if (tokens.has(t)) matchedTokens.add(t);
+                });
+                matchedTokens.forEach(t => {
+                    blockScore += getIDF(t);
+                });
+
+                // If block is irrelevant and budget pressure or subtask is active, compress to header only
+                const remainingBudget = budgetLimit - currentSize;
+                const isUnderPressure = remainingBudget < 5000;
+                if (blockScore < 1.5 && (isUnderPressure || isSubtask)) {
+                    return `${headerLine}\n*(Detailed description omitted to fit prompt token budget)*`;
+                }
+                return block;
+            });
+            content = processedBlocks.join('\n\n');
+        } else {
+            // For general sections, compress them semantically based on IDF weights
+            content = compressContentSemantically(content, tokens, 1.5);
         }
 
         if (content.length > 0) {

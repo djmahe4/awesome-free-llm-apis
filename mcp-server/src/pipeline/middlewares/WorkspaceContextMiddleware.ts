@@ -76,7 +76,7 @@ export class WorkspaceContextMiddleware implements Middleware {
         }
 
         // 0. Pre-emptive Memory Update for Agentic Requests
-        if (isAgentic && context.workspaceRoot) {
+        if (isAgentic && context.workspaceRoot && !(context.request as any).skipIndexing) {
             try {
                 console.debug(`[WorkspaceContextMiddleware] Pre-emptive indexing for agentic task in ${context.workspaceRoot}`);
                 const indexer = new WorkspaceIndexer(context.workspaceRoot);
