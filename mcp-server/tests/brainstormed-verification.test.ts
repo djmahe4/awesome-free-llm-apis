@@ -10,6 +10,8 @@ import { ProviderRegistry } from '../src/providers/registry.js';
 import { BaseProvider } from '../src/providers/base.js';
 import { TaskType, type PipelineContext } from '../src/pipeline/index.js';
 
+import { TaskClassifier } from '../src/utils/TaskClassifier.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -49,7 +51,7 @@ describe('Brainstormed Verification Scenarios (Phases 1-3)', () => {
         };
 
         // Classify the task
-        const taskType = (router as any).autoClassify(context.request.messages, context.keywords);
+        const taskType = TaskClassifier.autoClassify(context.request.messages, context.keywords);
         expect(taskType).toBe(TaskType.Coding);
     });
 

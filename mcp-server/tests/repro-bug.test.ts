@@ -8,6 +8,8 @@ import { LLMExecutor } from '../src/utils/LLMExecutor.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import { BaseProvider } from '../src/providers/base.js';
 
+import { TaskClassifier } from '../src/utils/TaskClassifier.js';
+
 class MockProvider extends BaseProvider {
     name = 'Mock';
     id = 'mock';
@@ -71,7 +73,7 @@ describe('Intelligent Router - Multi-modal Content Bug Repro', () => {
 
         // autoClassify is now synchronous and takes (messages, explicitKeywords)
         // We use (router as any) because it's a private method
-        const taskType = (router as any).autoClassify(context.request.messages, context.keywords);
+        const taskType = TaskClassifier.autoClassify(context.request.messages, context.keywords);
         context.taskType = taskType;
 
         // "2+2" should be classified as Chat or something similar (not empty)
