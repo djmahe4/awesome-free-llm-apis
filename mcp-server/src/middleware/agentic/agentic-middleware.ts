@@ -9,6 +9,7 @@ import { memoryManager } from '../../memory/index.js';
 import { getIntelligentSystemPrompt } from './prompts.js';
 import { withFileLock } from '../../utils/file-lock.js';
 import { WorkspaceIndexer } from '../../memory/indexer.js';
+import { writeFileAtomic } from '../../utils/FileUtils.js';
 // Removed top-level import of instances.js to break circular dependency
 
 import {
@@ -95,10 +96,9 @@ const persistStateDebounced = debounce(async (sessionId: string, projectDir: str
     const statePath = path.join(projectDir, STATE_FILE);
     try {
         await withFileLock(statePath, async () => {
-            await fs.writeFile(
+            await writeFileAtomic(
                 statePath,
-                JSON.stringify(state, null, 2),
-                'utf-8',
+                JSON.stringify(state, null, 2)
             );
         });
     } catch {
@@ -230,7 +230,7 @@ async function ensureProjectFiles(sessionId: string, workspaceRoot?: string): Pr
     try {
         await fs.access(knowledgePath);
     } catch {
-        await fs.writeFile(knowledgePath, `# Knowledge\n\n${workspaceStamp}`, 'utf-8');
+        await writeFileAtomic(knowledgePath, `# Knowledge\n\n${workspaceStamp}`);
     }
 
     return projectDir;
