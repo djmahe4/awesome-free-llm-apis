@@ -1,4 +1,5 @@
-import { IntelligentRouterMiddleware, ImageRouterMiddleware } from './middlewares/IntelligentRouterMiddleware.js';
+import { TextRouterMiddleware } from './middlewares/TextRouterMiddleware.js';
+import { ImageRouterMiddleware } from './middlewares/ImageRouterMiddleware.js';
 import { AgenticMiddleware } from '../middleware/agentic/agentic-middleware.js';
 import { WorkspaceContextMiddleware } from './middlewares/WorkspaceContextMiddleware.js';
 import { ResponseCacheMiddleware } from './middlewares/ResponseCacheMiddleware.js';
@@ -16,7 +17,7 @@ import { StructuralMarkdownMiddleware } from '../middleware/agentic/structural-m
 let _structuralMarkdownMiddleware: StructuralMarkdownMiddleware | null = null;
 let _sharedResponseCache: ResponseCacheMiddleware | null = null;
 let _workspaceContextMiddleware: WorkspaceContextMiddleware | null = null;
-let _sharedRouter: IntelligentRouterMiddleware | null = null;
+let _sharedRouter: TextRouterMiddleware | null = null;
 let _sharedImageRouter: ImageRouterMiddleware | null = null;
 let _agenticMiddleware: AgenticMiddleware | null = null;
 
@@ -53,9 +54,9 @@ export function getWorkspaceContextMiddleware(): WorkspaceContextMiddleware {
 /**
  * Gets the singleton instance of IntelligentRouterMiddleware.
  */
-export function getSharedRouter(): IntelligentRouterMiddleware {
+export function getSharedRouter(): TextRouterMiddleware {
     if (!_sharedRouter) {
-        _sharedRouter = new IntelligentRouterMiddleware();
+        _sharedRouter = new TextRouterMiddleware();
     }
     return _sharedRouter;
 }

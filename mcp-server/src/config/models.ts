@@ -75,6 +75,7 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     // B-Tier & Specialized
     'mistral-small-latest': { capability: 0.82, contextWindow: 128000 },
     'gemini-3.1-flash-lite': { capability: 0.82, contextWindow: 150000, isVision: true },
+    'gemini-exp-1206': { capability: 0.90, contextWindow: 128000 },
     'stepfun-ai/step-3.5-flash': { capability: 0.82, contextWindow: 128000, isVision: true },
     'nvidia/nemotron-3-nano-30b-a3b:free': { capability: 0.82, contextWindow: 128000 },
     'command-a-03-2025': { capability: 0.80, contextWindow: 128000 },

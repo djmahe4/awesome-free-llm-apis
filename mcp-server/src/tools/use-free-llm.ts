@@ -54,6 +54,7 @@ const STOP_WORDS = new Set(['and', 'the', 'with', 'your', 'from', 'that', 'this'
 import {
   sharedResponseCache,
   sharedRouter,
+  sharedImageRouter,
   agenticMiddleware,
   workspaceContextMiddleware,
   structuralMarkdownMiddleware
@@ -534,6 +535,7 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
   pipeline.use(sharedResponseCache);
   pipeline.use(workspaceContextMiddleware);
   pipeline.use(agenticMiddleware);
+  pipeline.use(sharedImageRouter);
   pipeline.use(sharedRouter);
 
   const wsHash = await workspaceScanner.getWorkspaceHash(workspaceRoot);
