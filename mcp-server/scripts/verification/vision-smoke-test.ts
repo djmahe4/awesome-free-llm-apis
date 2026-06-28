@@ -3,6 +3,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { ProviderRegistry } from '../../src/providers/registry.js';
 import { ImageRouterMiddleware } from '../../src/pipeline/middlewares/IntelligentRouterMiddleware.js';
+import { getModelCapability } from '../../src/config/models.js';
 
 async function runVisionSmokeTest() {
     console.log('\n=== Multi-Provider Vision Smoke Test ===');
@@ -41,8 +42,8 @@ async function runVisionSmokeTest() {
         if (provider.visionModels && provider.visionModels.length > 0) {
             // Score by imageModelCapabilities if available, else default 0.5
             const best = [...provider.visionModels].sort((a, b) =>
-                (ImageRouterMiddleware.imageModelCapabilities[b.id] || 0.5) -
-                (ImageRouterMiddleware.imageModelCapabilities[a.id] || 0.5)
+                (getModelCapability(b.id)) -
+                (getModelCapability(a.id))
             )[0];
             providerModelPairs.push({ providerName: provider.name, providerId: provider.id, modelId: best.id });
         } else {

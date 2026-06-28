@@ -378,7 +378,7 @@ export class ContextManager {
             const systemTokens = this.countTokens(systemMsgs);
             const remainingBudget = Math.max(0, targetTokens - systemTokens - 20); // 20 buffer
 
-            if (remainingBudget > 50) {
+            if (remainingBudget > 5) {
                 const content = getMessageContent(lastMsg);
                 // High-performance truncation
                 const approxChars = remainingBudget * 3;

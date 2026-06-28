@@ -599,14 +599,29 @@ export function compressSemantically(text: string, maxChars: number): string {
     let compressed = resultLines.join('\n');
     if (compressed.trim().length === 0) {
         // Fallback to safe character truncation ensuring we don't leave open code blocks
-        return text.slice(0, maxChars) + '\n... (truncated)';
+        const suffix = '\n... (truncated)';
+        return text.slice(0, maxChars - suffix.length) + suffix;
     }
 
     return compressed;
 }
 
 export function summarizeResponse(text: string): string {
-    return compressSemantically(text, 2000);
+    if (text.length <= 2000) return text;
+    
+    const tag = '\n\n<!-- TF-IDF SUMMARY -->';
+    const limit = 2000 - tag.length;
+    
+    let compressed = compressSemantically(text, limit);
+    if (!compressed.includes('<!-- TF-IDF SUMMARY -->')) {
+        compressed = compressed + tag;
+    }
+    
+    if (compressed.length > 2000) {
+        compressed = compressed.slice(0, 2000 - tag.length) + tag;
+    }
+    
+    return compressed;
 }
 
 const DATA_DEMAND_SIGNALS = [
@@ -1231,7 +1246,7 @@ export class AgenticMiddleware implements Middleware {
                 const currentTask = currentTaskNode.task;
 
                 // 1. Detect if subtask requires a terminal run
-                const requiresTerminal = /\b(?:run|execute|spawn|start|launch|npm|python|pip|cargo|go run|sh|bash|cmd|terminal|command)\b/i.test(currentTask) && !currentTask.includes('(User input:');
+                const requiresTerminal = (/\b(?:run|execute|spawn|start|launch|npm|pip|cargo|go run|sh|bash|cmd|terminal|command)\b/i.test(currentTask) || /\bpython\s+/i.test(currentTask)) && !currentTask.includes('(User input:');
                 
                 if (requiresTerminal && !q.paused) {
                     if (!q.promptId) {

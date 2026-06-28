@@ -30,6 +30,8 @@ export function calculateModelWeightedMaxTokens(modelId?: string): number {
   return 4096;
 }
 
+import { getModelContextLimit as getCentralizedLimit } from '../config/models.js';
+
 export function getModelContextLimit(modelId?: string): number {
   if (!modelId) return 32000;
 
@@ -47,27 +49,7 @@ export function getModelContextLimit(modelId?: string): number {
     // Registry not fully initialized or other error
   }
 
-  const lower = modelId.toLowerCase();
-  
-  if (lower.includes('gemini')) return 150000;
-  if (lower.includes('gemma')) return 130000;
-  if (lower.includes('claude')) return 200000;
-  if (lower.includes('gpt-4o') || lower.includes('gpt-4') || lower.includes('gpt-5')) return 128000;
-  if (lower.includes('llama-4') || lower.includes('llama-3') || lower.includes('llama3')) return 128000;
-  if (lower.includes('llama-2') || lower.includes('llama2')) return 8000;
-  if (lower.includes('deepseek-r1') || lower.includes('r1')) return 64000;
-  if (lower.includes('deepseek-v3')) return 128000;
-  if (lower.includes('qwen3') || lower.includes('qwen2.5')) return 128000;
-  if (lower.includes('phi-4')) return 128000;
-  if (lower.includes('nemotron-3')) return 128000;
-  if (lower.includes('ministral-3') || lower.includes('mistral-large')) return 128000;
-
-  const size = inferModelSizeBillions(modelId);
-  if (size) {
-    if (size <= 8) return 8000;
-    if (size <= 70) return 32000;
-  }
-  return 32000;
+  return getCentralizedLimit(modelId);
 }
 
 export const MODEL_TOKEN_DEFAULT = DEFAULT_MAX_TOKENS;

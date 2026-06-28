@@ -17,7 +17,7 @@ export async function withFileLock<T>(filePath: string, fn: () => Promise<T>, ti
             await fs.writeFile(lockPath, String(process.pid), { flag: 'wx' });
             break; // Lock acquired successfully
         } catch (err: any) {
-            if (err.code === 'EEXIST') {
+            if (err.code === 'EEXIST' || err.code === 'EPERM' || err.code === 'EACCES') {
                 if (Date.now() - start > timeoutMs) {
                     throw new Error(`Timeout waiting for lock on file: ${filePath}`);
                 }

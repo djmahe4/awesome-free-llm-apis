@@ -19,10 +19,6 @@ export class NvidiaProvider extends BaseProvider {
     { id: 'nvidia/nemotron-mini-4b-instruct', name: 'Nemotron Mini 4B' },
     { id: 'bytedance/seed-oss-36b-instruct', name: 'Seed OSS 36B' },
     { id: 'microsoft/phi-4-multimodal-instruct', name: 'Phi-4 Multimodal' },
-  ];
-
-  visionModels: ProviderModel[] = [
-    { id: 'microsoft/phi-4-multimodal-instruct', name: 'Phi-4 Multimodal (Vision)' },
     { id: 'meta/llama-3.2-90b-vision-instruct', name: 'Llama 3.2 90B Vision' },
     { id: 'meta/llama-3.2-11b-vision-instruct', name: 'Llama 3.2 11B Vision' },
     { id: 'google/paligemma', name: 'PaliGemma (Vision)' },

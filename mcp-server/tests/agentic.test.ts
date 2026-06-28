@@ -70,6 +70,7 @@ describe('Agentic Intelligence & Middleware', () => {
         // Spy on fsp promises instead of global mocks to prevent leakage
         vi.spyOn(fsp, 'writeFile').mockResolvedValue(undefined as any);
         vi.spyOn(fsp, 'mkdir').mockResolvedValue(undefined as any);
+        vi.spyOn(fsp, 'rename').mockResolvedValue(undefined as any);
         vi.spyOn(fsp, 'access').mockImplementation(async (path: any) => {
             if (typeof path === 'string' && (path.endsWith('prompt.json') || path.endsWith('system-prompt-raw.md') || path.endsWith('README.md'))) return undefined;
             throw new Error('File not found');
@@ -171,7 +172,7 @@ describe('Agentic Intelligence & Middleware', () => {
             const context: PipelineContext = {
                 request: {
                     model: 'test',
-                    messages: [{ role: 'user', content: 'run momentum' }]
+                    messages: [{ role: 'user', content: 'implement momentum' }]
                 },
                 sessionId: 'session-1'
             } as any;
@@ -228,7 +229,7 @@ describe('Agentic Intelligence & Middleware', () => {
             const context: PipelineContext = {
                 request: {
                     model: 'test',
-                    messages: [{ role: 'user', content: 'run momentum' }]
+                    messages: [{ role: 'user', content: 'implement momentum' }]
                 },
                 agentic: true,
                 sessionId: 'explicit-session'

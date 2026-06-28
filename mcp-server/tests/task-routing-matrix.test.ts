@@ -102,7 +102,7 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await verifyRouting(
             'Check this comment for any policy violations or safety concerns.',
             TaskType.Moderation,
-            'llama-3.3-70b-versatile'
+            'google/gemma-4-31b-it:free'
         );
     });
 

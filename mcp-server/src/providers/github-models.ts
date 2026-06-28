@@ -24,20 +24,12 @@ export class GitHubModelsProvider extends BaseProvider {
     { id: 'microsoft/phi-4-mini-reasoning', name: 'Phi-4 Mini Reasoning' },
 
     { id: 'mistral-ai/codestral-2501', name: 'Codestral 25.01' },
-    { id: 'mistral-ai/mistral-small-2503', name: 'Mistral Small 3.1' }
+    { id: 'mistral-ai/mistral-small-2503', name: 'Mistral Small 3.1' },
+
+    { id: 'meta/llama-3.2-90b-vision-instruct', name: 'Llama 3.2 90B Vision' },
+    { id: 'meta/llama-3.2-11b-vision-instruct', name: 'Llama 3.2 11B Vision' },
+    { id: 'microsoft/phi-4-multimodal-instruct', name: 'Phi-4 Multimodal (Vision)' }
   ];
-
-  visionModels: ProviderModel[] = [
-  { id: 'openai/gpt-4o', name: 'GPT-4o (Vision)' },
-  { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini (Vision)' },
-
-  { id: 'meta/llama-3.2-90b-vision-instruct', name: 'Llama 3.2 90B Vision' },
-  { id: 'meta/llama-3.2-11b-vision-instruct', name: 'Llama 3.2 11B Vision' },
-
-  { id: 'meta/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout (Vision)' },
-
-  { id: 'microsoft/phi-4-multimodal-instruct', name: 'Phi-4 Multimodal (Vision)' },
-];
 
   private transformRequest(request: ChatRequest): any {
     const updatedRequest = { ...request } as any;

@@ -4,13 +4,17 @@ import * as path from 'path';
 import type { ChatRequest, ChatResponse, Message, Provider, ProviderModel, RateLimits } from './types.js';
 import { Sanitizer } from '../utils/Sanitizer.js';
 
+import { isVisionSupported } from '../config/models.js';
+
 export abstract class BaseProvider implements Provider {
   abstract name: string;
   abstract id: string;
   abstract baseURL: string;
   abstract models: ProviderModel[];
-  /** Vision-capable models. Override in providers that support multimodal input. */
-  visionModels: ProviderModel[] = [];
+  /** Vision-capable models. Computed dynamically from the centralized config. */
+  get visionModels(): ProviderModel[] {
+    return this.models.filter(m => isVisionSupported(m.id));
+  }
   abstract rateLimits: RateLimits;
   abstract envVar: string;
 

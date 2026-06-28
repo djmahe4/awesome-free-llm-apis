@@ -16,6 +16,7 @@ export interface ChatRequest {
   timeoutMs?: number;
   abortSignal?: AbortSignal;
   sessionId?: string;
+  allowRetries?: boolean;
 }
 
 export interface ChatResponse {

@@ -462,7 +462,7 @@ export class LLMExecutor {
 
         let response: ChatResponse | null = null;
         let attempt = 0;
-        const maxAttempts = 3;
+        const maxAttempts = (process.env.NODE_ENV === 'test' && !context.request.allowRetries) ? 1 : 3;
         let delayMs = 1500;
 
         while (attempt < maxAttempts) {
@@ -571,8 +571,8 @@ export class LLMExecutor {
                 'llama-3.3-70b-versatile'
             ],
             chat: [
-                'gemini-3.1-flash-lite',
                 'deepseek-ai/DeepSeek-V3',
+                'gemini-3.1-flash-lite',
                 'glm-4.7',
                 'llama-3.3-70b-versatile',
                 'command-r-plus-08-2024'

@@ -6,6 +6,7 @@
 import { ProviderRegistry } from '../../src/providers/registry.js';
 import { IntelligentRouterMiddleware, ImageRouterMiddleware } from '../../src/pipeline/middlewares/IntelligentRouterMiddleware.js';
 import { TaskType } from '../../src/pipeline/middleware.js';
+import { MODEL_METADATA, isVisionSupported } from '../../src/config/models.js';
 
 /**
  * Diagnostic tool to identify missing model-provider mappings 
@@ -40,7 +41,7 @@ async function run() {
         });
     }
 
-    for (const modelId of Object.keys(ImageRouterMiddleware.imageModelCapabilities)) {
+    for (const modelId of Object.keys(MODEL_METADATA).filter(isVisionSupported)) {
         routerModels.add(modelId);
         if (!modelToTasks[modelId]) modelToTasks[modelId] = [];
         modelToTasks[modelId].push('IMAGE_ROUTING');

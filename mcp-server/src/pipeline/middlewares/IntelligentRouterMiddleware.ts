@@ -6,6 +6,7 @@ import { ContextManager } from '../../utils/ContextManager.js';
 import { getMessageContent, prependToMessageContent } from '../../utils/MessageUtils.js';
 import { LLMExecutor } from '../../utils/LLMExecutor.js';
 import { calculateModelWeightedMaxTokens, getModelContextLimit } from '../../utils/model-tokens.js';
+import { getModelCapability, isVisionSupported, isVisionOnlyModel } from '../../config/models.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -14,107 +15,6 @@ export class IntelligentRouterMiddleware implements Middleware {
 
     private executor: LLMExecutor;
     private contextManager: ContextManager;
-
-    // Model capability scores (0.0 to 1.0)
-    private static readonly modelCapabilities: Record<string, number> = {
-        // Frontier Reasoning (Benchmark)
-        'deepseek/deepseek-r1': 1.0,
-        'deepseek-ai/DeepSeek-R1': 1.0,
-
-        // S-Tier Generalists (0.90 - 0.99)
-        'gemma-4-31b-it': 0.95,
-        'google/gemma-4-31B-it': 0.95,
-        'google/gemma-4-31b-it:free': 0.95,
-        'zai-glm-4.7': 0.95,
-        'gemma-4-26b-a4b-it': 0.94,
-        'google/gemma-4-26B-A4B-it': 0.94,
-        'google/gemma-4-26b-a4b-it:free': 0.94,
-        'gpt-oss-120b': 0.94,
-        'qwen/qwen3-coder-480b-a35b:free': 0.96,
-        'qwen/qwen3-coder-480b-a35b-instruct': 0.96,
-        //'Qwen/Qwen3-235B-A22B-nim': 0.92,
-        'qwen3-235b': 0.92,
-        'DeepSeek-V3': 0.92,
-        'deepseek-ai/DeepSeek-V3': 0.92,
-        'glm-5.1': 0.90,
-        'glm-5-turbo': 0.90,
-        'glm-4.7': 0.90,
-        'command-r-plus-08-2024': 0.90,
-        'openai/gpt-4o': 0.90,
-
-        // A-Tier (0.81 - 0.89)
-        'qwen/qwen3-32b': 0.88,
-        'meta-llama/llama-4-scout-17b-16e-instruct': 0.88,
-        'meta/llama-4-maverick-17b-128e-instruct': 0.88,
-        'microsoft/phi-4-multimodal-instruct': 0.88,
-        'mistralai/mistral-nemotron': 0.88,
-        'google/gemma-3-27b-it': 0.88,
-        'liquid/lfm2.5-1.2b-thinking:free': 0.88,
-        'qwen/qwen3-next-80b-a3b-instruct:free': 0.88,
-        'openai/gpt-4o-mini': 0.85,
-        'llama-3.3-70b-versatile': 0.85,
-        'meta-llama/Llama-3.3-70B-Instruct': 0.85,
-        'meta/llama-3.3-70b-instruct': 0.85,
-        '@cf/meta/llama-3.3-70b-instruct-fp8-fast': 0.85,
-        'mistral-large-latest': 0.85,
-        'mistralai/mistral-large-3-675b-instruct-2512': 0.85,
-        'Qwen/Qwen2.5-72B-Instruct': 0.85,
-        'minimaxai/minimax-m2.7': 0.85,
-        'bytedance/seed-oss-36b-instruct': 0.85,
-        'nvidia/nemotron-nano-12b-v2-vl:free': 0.85,
-        'mistral-small-latest': 0.82,
-        //'ministral-8b-2512': 0.82,
-        'gemini-3.1-flash-lite': 0.82,
-        'stepfun-ai/step-3.5-flash': 0.82,
-        'nvidia/nemotron-3-nano-30b-a3b:free': 0.82,
-
-        // B-Tier & Specialized (0.60 - 0.80)
-        'command-a-03-2025': 0.80,
-        'c4ai-aya-expanse-32b': 0.80,
-        'google/gemma-3n-e4b-it': 0.80,
-        //'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo': 0.75,
-        'llama-3.1-8b-instant': 0.75,
-        'openai/gpt-oss-20b:free': 0.75,
-        //'gpt-oss-20b': 0.75,
-        'glm-4.5-air': 0.75,
-        'z-ai/glm-4.5-air:free': 0.75,
-        'google/gemma-3n-e2b-it': 0.80,
-        'Qwen/Qwen3-8B': 0.70,
-        'nvidia/nemotron-mini-4b-instruct:free': 0.65,
-        'nvidia/nemotron-mini-4b-instruct': 0.65,
-        'nvidia/nemotron-nano-9b-v2:free': 0.65,
-
-        // NEW (v1.0.6)
-        'gpt-oss:20b': 0.78,
-        'nemotron-3-ultra': 0.90,
-        'qwen3-coder:480b': 0.88,
-        'minimax-m2.7': 0.87,
-        'ministral-3:14b': 0.84,
-        'gemma3:27b': 0.85,
-        'qwen3-coder-next': 0.85,
-        'ministral-3:3b': 0.72,
-        'kimi-k2.6': 0.88,
-        'minimax-m2.1': 0.82,
-        'gemma3:4b': 0.75,
-        'gemma3:12b': 0.82,
-        'nemotron-3-super': 0.88,
-        'deepseek-v4-flash': 0.88,
-        'gpt-oss:120b': 0.86,
-        'nemotron-3-nano:30b': 0.80,
-        'gemma4:31b': 0.90,
-        'rnj-1:8b': 0.75,
-        'minimax-m3': 0.90,
-        'minimax-m2.5': 0.85,
-        'ministral-3:8b': 0.80,
-        'devstral-2:123b': 0.88,
-        'openai/gpt-4.1-mini':0.86,
-        'openai/gpt-5-mini':0.93,
-        'deepseek/deepseek-v3-0324':0.95,
-        'meta/llama-4-maverick-17b-128e-instruct-fp8':0.90,
-        'microsoft/phi-4-mini-reasoning':0.78,
-        'mistral-ai/codestral-2501':0.84,
-        'mistral-ai/mistral-small-2503':0.82,
-    };
 
     constructor(executor?: LLMExecutor) {
         this.executor = executor || new LLMExecutor();
@@ -235,7 +135,7 @@ export class IntelligentRouterMiddleware implements Middleware {
         }
 
         // Coding last as it has some very common words like 'class' or 'debug'
-        if (lastMsg.includes('```') || /\b(function|class|debug|implement)\b/i.test(lastMsg)) {
+        if (lastMsg.includes('```') || /\b(function|class|debug|implement|implementation|refactor|code|method|compile|build|test|rust|python|javascript|golang|cpp|c\+\+|java|ruby|php|html|css|sql|develop|program|script)\b/i.test(lastMsg)) {
             return TaskType.Coding;
         }
 
@@ -923,17 +823,24 @@ Request: ${lastMessage}`;
         // Detect if prompt or keywords mention code files/extensions or coding terms
         const hasCodeExtensions = /\.(ts|js|py|go|rs|cpp|h|java|sh|rb|php|cs|swift|json|yml|yaml|toml)\b/i.test(lowerPrompt) ||
             (context.keywords && context.keywords.some(kw => /\.(ts|js|py|go|rs|cpp|h|java|sh|rb|php|cs|swift|json|yml|yaml|toml)\b/i.test(kw)));
-        const hasCodingTerms = /\b(code|function|class|method|implement|refactor|debug|compile|build|test|git|repo|syntax)\b/i.test(lowerPrompt);
+        const hasCodingTerms = /\b(code|function|class|method|implement|implementation|refactor|debug|compile|build|test|git|repo|syntax|develop|program|script|rust|python|javascript|golang|cpp|c\+\+|java|ruby|php|html|css|sql)\b/i.test(lowerPrompt);
         const isCodingContext = hasCodeExtensions || hasCodingTerms || taskType === TaskType.Coding;
 
         const scoredCandidates = finalTierModels.map(modelId => {
-            const cap = IntelligentRouterMiddleware.modelCapabilities[modelId] || 0.5;
-            const contextWindow = getModelContextLimit(modelId);
+            const cap = getModelCapability(modelId);
             
-            // Hard filter: if the model's context window is too small, discard it
-            if (contextWindow < estimatedTokens) {
+            // Find the available providers supporting this model
+            const providersWithModel = availableProviders.filter(p => p.models.some(m => m.id === modelId));
+            if (providersWithModel.length === 0) {
                 return { modelId, score: -1 };
             }
+
+            const maxContextWindow = Math.max(...providersWithModel.map(p => {
+                const m = p.models.find(model => model.id === modelId);
+                return m?.contextWindow || getModelContextLimit(modelId);
+            }));
+            
+
 
             let score = cap;
             const lowerModel = modelId.toLowerCase();
@@ -956,6 +863,16 @@ Request: ${lastMessage}`;
         // Keep the top 15 most suitable candidates
         finalTierModels = scoredCandidates.slice(0, 15).map(c => c.modelId);
 
+        // Append all other available models supported by any available provider as a safety fallback
+        if (requestedModel === 'any') {
+            const allAvailableModels = availableProviders.flatMap(p => p.models.map(m => m.id));
+            for (const mId of allAvailableModels) {
+                if (!finalTierModels.includes(mId)) {
+                    finalTierModels.push(mId);
+                }
+            }
+        }
+
         // --- Post-Compression Routing Priority (Quantum-Inspired Collapse) ---
         const quantumProbabilities = this.calculateQuantumModelProbabilities(
             finalTierModels,
@@ -964,8 +881,16 @@ Request: ${lastMessage}`;
             availableProviders
         );
 
-        // Sort by quantum probability descending
+        // Sort by quantum probability descending, but always keep requestedModel at the absolute front
         finalTierModels.sort((a, b) => {
+            if (requestedModel && requestedModel !== 'any') {
+                if (a === requestedModel) return -1;
+                if (b === requestedModel) return 1;
+            }
+            if (context.request.google_search) {
+                if (a === 'gemini-3.1-flash-lite') return -1;
+                if (b === 'gemini-3.1-flash-lite') return 1;
+            }
             const probA = quantumProbabilities.find(qp => qp.modelId === a)?.probability || 0;
             const probB = quantumProbabilities.find(qp => qp.modelId === b)?.probability || 0;
             return probB - probA;
@@ -979,7 +904,7 @@ Request: ${lastMessage}`;
 
         // --- Fallback Execution Loop ---
         for (const modelId of finalTierModels) {
-            const capability = IntelligentRouterMiddleware.modelCapabilities[modelId] || 0.5;
+            const capability = getModelCapability(modelId);
 
             // Adaptive Headroom: Powerhouses need more space for complex thoughts
             let requiredHeadroom = 1.1; // Default 10%
@@ -1198,30 +1123,33 @@ context.response = res ?? undefined;
 
         // 2. Apply U_task (Task Alignment Gate)
         for (const state of states) {
-            const cap = IntelligentRouterMiddleware.modelCapabilities[state.modelId] || 0.5;
+            const cap = getModelCapability(state.modelId);
             let alignment = 1.0;
 
             const lowerModel = state.modelId.toLowerCase();
             const isCoder = lowerModel.includes('coder') || lowerModel.includes('code');
             const isReasoning = lowerModel.includes('r1') || lowerModel.includes('deepseek') || lowerModel.includes('pro') || lowerModel.includes('o1') || lowerModel.includes('o3');
 
-            switch (taskType) {
-                case TaskType.Coding:
-                    alignment = isCoder ? cap * 2.0 : (isReasoning ? cap * 1.5 : cap * 0.8);
-                    break;
-                case TaskType.Reasoning:
-                    alignment = isReasoning ? cap * 2.5 : cap * 0.6;
-                    break;
-                case TaskType.Vision:
-                    const isVisionSupported = lowerModel.includes('gemini') || lowerModel.includes('gpt-4o') || lowerModel.includes('vl');
-                    alignment = isVisionSupported ? cap * 2.0 : 0.1;
-                    break;
-                case TaskType.Summarization:
-                    alignment = cap * 1.2;
-                    break;
-                default:
-                    alignment = cap;
-                    break;
+            if (taskType !== TaskType.Vision && isVisionOnlyModel(state.modelId)) {
+                alignment = 0.01;
+            } else {
+                switch (taskType) {
+                    case TaskType.Coding:
+                        alignment = isCoder ? cap * 2.0 : (isReasoning ? cap * 1.5 : cap * 0.8);
+                        break;
+                    case TaskType.Reasoning:
+                        alignment = isReasoning ? cap * 2.5 : cap * 0.6;
+                        break;
+                    case TaskType.Vision:
+                        alignment = isVisionSupported(state.modelId) ? cap * 2.0 : 0.1;
+                        break;
+                    case TaskType.Summarization:
+                        alignment = cap * 1.2;
+                        break;
+                    default:
+                        alignment = cap;
+                        break;
+                }
             }
 
             state.amplitude *= alignment;
@@ -1310,14 +1238,13 @@ context.response = res ?? undefined;
         // 1. Base Score using capability and headroom
         let baseScore = capability;
         if (model?.contextWindow) {
-            const bufferedTokens = Math.ceil(estimatedTokens * 1.1);
-            const actualHeadroom = (model.contextWindow - bufferedTokens) / model.contextWindow;
-
-            // Hard Block: If truly overloaded, skip immediately
-            const hardBlockThreshold = modelId === requestedModel ? 0 : 0.05;
-            if (actualHeadroom < hardBlockThreshold) {
+            // Hard Block: If unbuffered tokens exceed the context window, skip immediately
+            if (estimatedTokens > model.contextWindow) {
                 return -1;
             }
+
+            const bufferedTokens = Math.ceil(estimatedTokens * 1.1);
+            const actualHeadroom = (model.contextWindow - bufferedTokens) / model.contextWindow;
 
             // Refine base score with headroom
             baseScore = (capability * 0.6) + (Math.max(0, actualHeadroom) * 0.4);
@@ -1416,58 +1343,6 @@ context.response = res ?? undefined;
 export class ImageRouterMiddleware implements Middleware {
     name = 'ImageRouterMiddleware';
     private executor: LLMExecutor;
-
-    public static readonly imageModelCapabilities: Record<string, number> = {
-        // Gemini
-        'gemini-3.1-flash-lite': 0.85,
-        'gemma-4-31b-it': 0.90,
-        'gemma-4-26b-a4b-it': 0.88,
-
-        // SiliconFlow
-        'THUDM/GLM-4.1V-9B-Thinking': 0.88,
-        'deepseek-ai/DeepSeek-OCR': 0.80,
-
-        // Cloudflare
-        '@cf/meta/llama-4-scout-17b-16e-instruct': 0.88,
-        '@cf/google/gemma-3-12b-it': 0.82,
-        '@cf/google/gemma-4-26b-a4b-it': 0.88,
-        '@cf/moonshotai/kimi-k2.6': 0.88,
-        '@cf/mistralai/mistral-small-3.1-24b-instruct': 0.85,
-        '@cf/meta/llama-3.2-11b-vision-instruct': 0.75,
-
-        // NVIDIA (phi-4-multimodal-instruct is working and preferred)
-        'meta/llama-3.2-90b-vision-instruct': 0.86,
-        'meta/llama-3.2-11b-vision-instruct': 0.80,
-        'google/paligemma': 0.70,
-        'microsoft/phi-4-multimodal-instruct': 0.85,
-
-        // OpenRouter (prefer nemotron VL model — gemma-4-31b hits Google AI Studio rate limits on free tier)
-        'nvidia/nemotron-nano-12b-v2-vl:free': 0.90,
-        'meta-llama/llama-4-maverick:free': 0.88,
-        'meta-llama/llama-4-scout:free': 0.87,
-        'google/gemma-4-31b-it:free': 0.82,
-        'google/gemma-4-26b-a4b-it:free': 0.80,
-        'openrouter/free': 0.75,
-
-        // Kilo Code (kilo-auto/free explicitly returns 404 for image input — no supported vision model yet)
-
-        // LLM7
-        //'GLM-4.6V-Flash': 0.90,
-        'devstral-small-2:24b': 0.75,
-        'gpt-5.4-mini':0.91,
-        //'mistral-small-2506': 0.88,
-
-        // Ollama Cloud / Hosted Registry
-        'gemma4:31b': 0.92,
-        'devstral-2:123b': 0.90,
-        'glm-4.7': 0.88,
-        'gemma4:27b': 0.86,
-        'ministral-3:14b': 0.82,
-        'gemma3:12b': 0.78,
-        'gemma3:4b': 0.70,
-        'ministral-3:8b': 0.72,
-        'ministral-3:3b': 0.65
-    };
 
     constructor(executor?: LLMExecutor) {
         this.executor = executor || new LLMExecutor();
@@ -1685,8 +1560,8 @@ export class ImageRouterMiddleware implements Middleware {
         // and ascending (try faster/cheaper first) for small images.
         const thresholdBytes = 50 * 1024;
         candidateModels.sort((a, b) => {
-            const scoreA = ImageRouterMiddleware.imageModelCapabilities[a] || 0.5;
-            const scoreB = ImageRouterMiddleware.imageModelCapabilities[b] || 0.5;
+            const scoreA = getModelCapability(a);
+            const scoreB = getModelCapability(b);
             return totalImageSize > thresholdBytes ? scoreB - scoreA : scoreA - scoreB;
         });
 
