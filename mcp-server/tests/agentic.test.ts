@@ -70,14 +70,14 @@ describe('Agentic Intelligence & Middleware', () => {
         // Spy on fsp promises instead of global mocks to prevent leakage
         vi.spyOn(fsp, 'writeFile').mockResolvedValue(undefined as any);
         vi.spyOn(fsp, 'mkdir').mockResolvedValue(undefined as any);
-        vi.spyOn(fsp, 'access').mockImplementation(async (path: string) => {
-            if (path.endsWith('prompt.json') || path.endsWith('system-prompt-raw.md') || path.endsWith('README.md')) return undefined;
+        vi.spyOn(fsp, 'access').mockImplementation(async (path: any) => {
+            if (typeof path === 'string' && (path.endsWith('prompt.json') || path.endsWith('system-prompt-raw.md') || path.endsWith('README.md'))) return undefined;
             throw new Error('File not found');
         });
         vi.spyOn(fsp, 'stat').mockResolvedValue({ mtimeMs: 1000 } as any);
-        vi.spyOn(fsp, 'readFile').mockImplementation(async (path: string) => {
-            if (path.endsWith('prompt.json')) return JSON.stringify(mockPromptData);
-            if (path.endsWith('README.md')) return "Tier 2 Fallback (README) [Context-aware fallback content for agentic testing]";
+        vi.spyOn(fsp, 'readFile').mockImplementation(async (path: any) => {
+            if (typeof path === 'string' && path.endsWith('prompt.json')) return JSON.stringify(mockPromptData);
+            if (typeof path === 'string' && path.endsWith('README.md')) return "Tier 2 Fallback (README) [Context-aware fallback content for agentic testing]";
             return "";
         });
     });

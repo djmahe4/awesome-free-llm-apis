@@ -41,6 +41,7 @@ export interface UseFreeLLMInput {
   agentic?: boolean;
   sessionId?: string;
   taskType?: TaskType | string;
+  isOnePass?: boolean;
   keywords?: string[];
   skill?: string;
 }
@@ -552,7 +553,8 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     providerId: providerId,
     agentic,
     sessionId: effectiveSessionId,
-    keywords
+    keywords,
+    isOnePass: input.isOnePass || false
   };
 
   let finalContext = await pipeline.execute(context);

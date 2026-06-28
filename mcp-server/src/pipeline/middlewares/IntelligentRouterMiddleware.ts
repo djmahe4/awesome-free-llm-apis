@@ -5,7 +5,7 @@ import type { Middleware, PipelineContext, NextFunction } from '../middleware.js
 import { ContextManager } from '../../utils/ContextManager.js';
 import { getMessageContent, prependToMessageContent } from '../../utils/MessageUtils.js';
 import { LLMExecutor } from '../../utils/LLMExecutor.js';
-import { calculateModelWeightedMaxTokens } from '../../utils/model-tokens.js';
+import { calculateModelWeightedMaxTokens, getModelContextLimit } from '../../utils/model-tokens.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -211,23 +211,23 @@ export class IntelligentRouterMiddleware implements Middleware {
         const rawLastMsg = getMessageContent(messages[messages.length - 1]);
         const lastMsg = this.getOriginalUserContent(rawLastMsg).toLowerCase();
 
-        // Specific Tasks First
-        if (lastMsg.includes('classify') || lastMsg.includes('sentiment') || lastMsg.includes('categorize')) {
+        // Specific Tasks First (using word boundaries to prevent substring collisions like "findings" -> "find" -> search, or "undefined" -> "find" -> search)
+        if (/\b(classify|sentiment|categorize)\b/i.test(lastMsg)) {
             return TaskType.Classification;
         }
-        if (lastMsg.includes('moderate') || lastMsg.includes('safety') || lastMsg.includes('policy') || lastMsg.includes('violation')) {
+        if (/\b(moderate|safety|policy|violation)\b/i.test(lastMsg)) {
             return TaskType.Moderation;
         }
-        if (lastMsg.includes('summarize') || lastMsg.includes('summarization') || lastMsg.includes('tldr') || lastMsg.includes('tl;dr') || lastMsg.includes('concise')) {
+        if (/\b(summarize|summarization|tldr|tl;dr|concise)\b/i.test(lastMsg)) {
             return TaskType.Summarization;
         }
-        if (lastMsg.includes('extract') || lastMsg.includes('entities') || lastMsg.includes('json') || lastMsg.includes('fields')) {
+        if (/\b(extract|entities|json|fields)\b/i.test(lastMsg)) {
             return TaskType.EntityExtraction;
         }
-        if (lastMsg.includes('search') || lastMsg.includes('find') || lastMsg.includes('lookup')) {
+        if (/\b(search|find|lookup)\b/i.test(lastMsg)) {
             return TaskType.SemanticSearch;
         }
-        if (lastMsg.includes('think') || lastMsg.includes('reason') || lastMsg.includes('logic') || lastMsg.includes('step by step')) {
+        if (/\b(think|reason|logic|step\s+by\s+step)\b/i.test(lastMsg)) {
             return TaskType.Reasoning;
         }
         if (lastMsg.includes('who are you') || lastMsg.includes('what can you do') || lastMsg.includes('help') || lastMsg.includes('capabilities')) {
@@ -235,7 +235,7 @@ export class IntelligentRouterMiddleware implements Middleware {
         }
 
         // Coding last as it has some very common words like 'class' or 'debug'
-        if (lastMsg.includes('```') || lastMsg.includes('function ') || lastMsg.includes('class ') || lastMsg.includes('debug') || lastMsg.includes('implement')) {
+        if (lastMsg.includes('```') || /\b(function|class|debug|implement)\b/i.test(lastMsg)) {
             return TaskType.Coding;
         }
 
@@ -294,15 +294,18 @@ export class IntelligentRouterMiddleware implements Middleware {
     private async decomposeAndExecute(context: PipelineContext): Promise<void> {
         console.debug(`[Router] Decomposing complex task...`);
 
-        // 1. Pick a Planner model (SiliconFlow V3, DeepSeek-R1, or Gemini Flash Lite)
+        // 1. Pick a Planner model (SiliconFlow V3, DeepSeek-R1, or Gemini Flash Lite, Zhipu, Cohere, Mistral)
         const candidatePlannerModels = context.request.google_search
-            ? ['gemini-3.1-flash-lite', 'deepseek/deepseek-r1', 'deepseek-ai/DeepSeek-V3', 'qwen/qwen3-coder:free']
-            : ['deepseek/deepseek-r1', 'deepseek-ai/DeepSeek-V3', 'gemini-3.1-flash-lite', 'qwen/qwen3-coder:free', 'llama-3.3-70b-versatile'];
+            ? ['gemini-3.1-flash-lite', 'deepseek/deepseek-r1', 'deepseek-ai/DeepSeek-R1', 'deepseek-ai/DeepSeek-V3', 'qwen/qwen3-coder:free', 'glm-4.7', 'mistral-large-latest', 'command-r-plus-08-2024']
+            : ['deepseek/deepseek-r1', 'deepseek-ai/DeepSeek-R1', 'deepseek-ai/DeepSeek-V3', 'gemini-3.1-flash-lite', 'qwen/qwen3-coder:free', 'llama-3.3-70b-versatile', 'glm-4.7', 'mistral-large-latest', 'command-r-plus-08-2024'];
         
         const availableProviders = ProviderRegistry.getInstance().getAvailableProviders();
-        const plannerModels = candidatePlannerModels.filter(modelId => 
-            availableProviders.some(p => p.models.some((m: any) => m.id === modelId))
-        );
+        const plannerModels = candidatePlannerModels.filter(modelId => {
+            const provider = availableProviders.find(p => p.models.some((m: any) => m.id === modelId));
+            if (!provider) return false;
+            // Exclude providers whose circuit breaker is open to prevent immediate failure
+            return !this.executor.isProviderCircuitOpen(provider.id);
+        });
 
         if (plannerModels.length === 0) {
             plannerModels.push('any');
@@ -391,7 +394,25 @@ Request: ${lastMessage}`;
                 subtaskResults.push(`### Subtask ${i + 1}: ${taskStr}\n${subtaskRes.choices[0].message.content}`);
             } catch (err) {
                 console.error(`[Router] Subtask ${i + 1} failed:`, err);
-                subtaskResults.push(`### Subtask ${i + 1}: ${taskStr}\nFAILED: ${err}`);
+                const remainingTasks = subtasks.slice(i).map(t => `- ${getMessageContent(t)}`).join('\n');
+                const failureMessage = `❌ **Execution Halted on Subtask ${i + 1}**\n\n` +
+                    `**Error**: ${err instanceof Error ? err.message : String(err)}\n\n` +
+                    `**Completed Subtasks**:\n${subtaskResults.join('\n\n') || '*None*'}\n\n` +
+                    `**Remaining Subtasks**:\n${remainingTasks}\n\n` +
+                    `You can manually continue the remaining subtasks by copying them into a new prompt.`;
+
+                context.response = {
+                    id: `decomposed-failed-${Date.now()}`,
+                    object: 'chat.completion',
+                    created: Math.floor(Date.now() / 1000),
+                    model: 'intelligent-orchestrator',
+                    choices: [{
+                        index: 0,
+                        message: { role: 'assistant', content: failureMessage },
+                        finish_reason: 'stop'
+                    }]
+                };
+                return;
             }
         }
 
@@ -858,12 +879,12 @@ Request: ${lastMessage}`;
             throw new Error('All summarization providers failed.');
         };
 
-        // Level 1: Context Compression for complex prompts (> 4000 tokens) or imminent overflow
+        // Level 1: Context Compression for complex prompts (> 8000 tokens) or imminent overflow
         const maxWindow = Math.max(...availableProviders.flatMap(p => p.models).map(m => m.contextWindow || 0));
         const absoluteOverflow = maxWindow > 0 && estimatedTokens > maxWindow;
 
-        if (estimatedTokens > 4000 || absoluteOverflow) {
-            const targetTokens = absoluteOverflow ? Math.min(estimatedTokens * 0.5, maxWindow * 0.8) : Math.max(2000, estimatedTokens * 0.4);
+        if (estimatedTokens > 8000 || absoluteOverflow) {
+            const targetTokens = absoluteOverflow ? Math.min(estimatedTokens * 0.5, maxWindow * 0.8) : Math.max(4000, estimatedTokens * 0.5);
 
             try {
                 const compResult = await this.contextManager.compress(context, targetTokens, sharedSummarizer);
@@ -892,15 +913,69 @@ Request: ${lastMessage}`;
         const compressionRatio = originalTokens / estimatedTokens;
         const isHeavyPrompt = originalTokens > 8000 || compressionRatio > 2.0;
 
-        // --- Post-Compression Routing Priority ---
-        if (isHeavyPrompt) {
-            // Sort by capability descending to ensure heavy prompts use strong models
-            finalTierModels.sort((a, b) => {
-                const ca = IntelligentRouterMiddleware.modelCapabilities[a] || 0.5;
-                const cb = IntelligentRouterMiddleware.modelCapabilities[b] || 0.5;
-                return cb - ca;
-            });
-        }
+        // --- Context-Aware Capability Pre-Filter ---
+        // Dynamically score and select the top 15 candidates based on capability, context window, and prompt context
+        const rawLastMsg = context.request.messages.length > 0
+            ? getMessageContent(context.request.messages[context.request.messages.length - 1])
+            : '';
+        const lowerPrompt = rawLastMsg.toLowerCase();
+        
+        // Detect if prompt or keywords mention code files/extensions or coding terms
+        const hasCodeExtensions = /\.(ts|js|py|go|rs|cpp|h|java|sh|rb|php|cs|swift|json|yml|yaml|toml)\b/i.test(lowerPrompt) ||
+            (context.keywords && context.keywords.some(kw => /\.(ts|js|py|go|rs|cpp|h|java|sh|rb|php|cs|swift|json|yml|yaml|toml)\b/i.test(kw)));
+        const hasCodingTerms = /\b(code|function|class|method|implement|refactor|debug|compile|build|test|git|repo|syntax)\b/i.test(lowerPrompt);
+        const isCodingContext = hasCodeExtensions || hasCodingTerms || taskType === TaskType.Coding;
+
+        const scoredCandidates = finalTierModels.map(modelId => {
+            const cap = IntelligentRouterMiddleware.modelCapabilities[modelId] || 0.5;
+            const contextWindow = getModelContextLimit(modelId);
+            
+            // Hard filter: if the model's context window is too small, discard it
+            if (contextWindow < estimatedTokens) {
+                return { modelId, score: -1 };
+            }
+
+            let score = cap;
+            const lowerModel = modelId.toLowerCase();
+            const isCoder = lowerModel.includes('coder') || lowerModel.includes('code');
+            const isReasoning = lowerModel.includes('r1') || lowerModel.includes('deepseek') || lowerModel.includes('pro') || lowerModel.includes('o1') || lowerModel.includes('o3');
+
+            // Apply contextual boosts
+            if (isCodingContext) {
+                if (isCoder) score += 0.5;
+                else if (isReasoning) score += 0.25;
+            } else if (taskType === TaskType.Reasoning) {
+                if (isReasoning) score += 0.5;
+            }
+
+            return { modelId, score };
+        })
+        .filter(c => c.score >= 0)
+        .sort((a, b) => b.score - a.score);
+
+        // Keep the top 15 most suitable candidates
+        finalTierModels = scoredCandidates.slice(0, 15).map(c => c.modelId);
+
+        // --- Post-Compression Routing Priority (Quantum-Inspired Collapse) ---
+        const quantumProbabilities = this.calculateQuantumModelProbabilities(
+            finalTierModels,
+            taskType,
+            estimatedTokens,
+            availableProviders
+        );
+
+        // Sort by quantum probability descending
+        finalTierModels.sort((a, b) => {
+            const probA = quantumProbabilities.find(qp => qp.modelId === a)?.probability || 0;
+            const probB = quantumProbabilities.find(qp => qp.modelId === b)?.probability || 0;
+            return probB - probA;
+        });
+
+        console.error(`[Router][Quantum] Top sorted candidates by collapse probability:`);
+        finalTierModels.slice(0, 3).forEach(mId => {
+            const prob = quantumProbabilities.find(qp => qp.modelId === mId)?.probability || 0;
+            console.error(`  |${mId}⟩: ${(prob * 100).toFixed(1)}%`);
+        });
 
         // --- Fallback Execution Loop ---
         for (const modelId of finalTierModels) {
@@ -1065,7 +1140,7 @@ Request: ${lastMessage}`;
 
         // --- Emergency Fallback: Last Resort Deep Truncation ---
         const emergencyModels = ['gemini-3.1-flash-lite', 'google/gemma-4-31b-it', 'glm-4.5-air', 'llama-3.3-70b-versatile'];
-        const emergencyTruncation = this.contextManager.truncateOldest(context.request.messages, 1500);
+        const emergencyTruncation = this.contextManager.truncateOldest(context.request.messages, 8000);
         context.request.messages = emergencyTruncation.messages;
         delete context.estimatedTokens;
 
@@ -1093,6 +1168,129 @@ context.response = res ?? undefined;
         const mainError = primaryError || lastError;
         const errorSummary = allErrors.slice(-3).join('; ');
         throw new Error(this.renderRouterError(taskType, context, mainError, errorSummary));
+    }
+
+    private calculateQuantumModelProbabilities(
+        models: string[],
+        taskType: TaskType,
+        estimatedTokens: number,
+        availableProviders: any[]
+    ): { modelId: string; probability: number }[] {
+        const N = models.length;
+        if (N === 0) return [];
+
+        const stats = this.executor.getProviderStats();
+        const tokenState = this.executor.getTokenState();
+
+        // 1. Initialize State Vector with uniform amplitude: 1/sqrt(N)
+        const states = models.map(modelId => {
+            const provider = availableProviders.find(p => p.models.some((m: any) => m.id === modelId));
+            const contextWindow = getModelContextLimit(modelId);
+
+            return {
+                modelId,
+                providerId: provider?.id || '',
+                contextWindow,
+                amplitude: 1.0 / Math.sqrt(N),
+                probability: 0
+            };
+        });
+
+        // 2. Apply U_task (Task Alignment Gate)
+        for (const state of states) {
+            const cap = IntelligentRouterMiddleware.modelCapabilities[state.modelId] || 0.5;
+            let alignment = 1.0;
+
+            const lowerModel = state.modelId.toLowerCase();
+            const isCoder = lowerModel.includes('coder') || lowerModel.includes('code');
+            const isReasoning = lowerModel.includes('r1') || lowerModel.includes('deepseek') || lowerModel.includes('pro') || lowerModel.includes('o1') || lowerModel.includes('o3');
+
+            switch (taskType) {
+                case TaskType.Coding:
+                    alignment = isCoder ? cap * 2.0 : (isReasoning ? cap * 1.5 : cap * 0.8);
+                    break;
+                case TaskType.Reasoning:
+                    alignment = isReasoning ? cap * 2.5 : cap * 0.6;
+                    break;
+                case TaskType.Vision:
+                    const isVisionSupported = lowerModel.includes('gemini') || lowerModel.includes('gpt-4o') || lowerModel.includes('vl');
+                    alignment = isVisionSupported ? cap * 2.0 : 0.1;
+                    break;
+                case TaskType.Summarization:
+                    alignment = cap * 1.2;
+                    break;
+                default:
+                    alignment = cap;
+                    break;
+            }
+
+            state.amplitude *= alignment;
+        }
+
+        // 3. Apply U_capacity (Capacity / Headroom Gate)
+        for (const state of states) {
+            if (state.contextWindow < estimatedTokens) {
+                // Collapse to 0 if context size exceeds model's window
+                state.amplitude = 0;
+                continue;
+            }
+
+            // Resonance factor for headroom: we prefer models with comfortable headroom
+            const headroom = (state.contextWindow - estimatedTokens) / state.contextWindow;
+            const resonance = 1.0 + 0.5 * Math.sin(Math.PI * headroom);
+            state.amplitude *= resonance;
+        }
+
+        // 4. Apply P_circuit (Circuit Breaker Projection Operator)
+        for (const state of states) {
+            if (!state.providerId) continue;
+            const pStats = stats[state.providerId];
+            let health = 1.0;
+
+            if (pStats) {
+                if (pStats.circuitOpen) {
+                    health = 0.01; // Project to near-zero
+                } else if (pStats.errors > 0) {
+                    health = Math.max(0.1, 1.0 - (pStats.errors * 0.25));
+                }
+            }
+
+            state.amplitude *= health;
+        }
+
+        // 5. Apply U_quota (Token Quota Gate)
+        for (const state of states) {
+            if (!state.providerId) continue;
+            const tracking = tokenState[state.providerId];
+            if (tracking && tracking.remainingTokens !== undefined && Number.isFinite(tracking.remainingTokens)) {
+                // Soft damping if remaining tokens are low compared to a safety buffer
+                const safetyBuffer = estimatedTokens * 5;
+                const ratio = tracking.remainingTokens / Math.max(1, safetyBuffer);
+                const quotaFactor = Math.min(1.5, ratio > 1 ? 1.0 + Math.log10(ratio) * 0.15 : ratio);
+                state.amplitude *= quotaFactor;
+            }
+        }
+
+        // 6. Renormalize: Σ |α_i|^2 = 1
+        let normSumSquare = 0;
+        for (const state of states) {
+            normSumSquare += state.amplitude * state.amplitude;
+        }
+
+        if (normSumSquare > 0) {
+            const norm = Math.sqrt(normSumSquare);
+            for (const state of states) {
+                state.amplitude /= norm;
+                state.probability = state.amplitude * state.amplitude;
+            }
+        } else {
+            // Fallback: If all collapsed to 0, use uniform probability
+            for (const state of states) {
+                state.probability = 1.0 / N;
+            }
+        }
+
+        return states.map(s => ({ modelId: s.modelId, probability: s.probability }));
     }
 
     private calculateProviderScore(
@@ -1275,6 +1473,28 @@ export class ImageRouterMiddleware implements Middleware {
         this.executor = executor || new LLMExecutor();
     }
 
+    private calculateTotalImageSize(messages: any[]): number {
+        let totalSize = 0;
+        if (!messages || !Array.isArray(messages)) return 0;
+        for (const msg of messages) {
+            if (Array.isArray(msg.content)) {
+                for (const item of msg.content) {
+                    if (item?.type === 'image_url' && typeof item.image_url?.url === 'string') {
+                        const url = item.image_url.url;
+                        if (url.startsWith('data:image/')) {
+                            const base64Data = url.split(',')[1] || '';
+                            totalSize += Math.round(base64Data.length * 0.75);
+                        }
+                    }
+                }
+            } else if (typeof msg.content === 'string' && msg.content.startsWith('data:image/')) {
+                const base64Data = msg.content.split(',')[1] || '';
+                totalSize += Math.round(base64Data.length * 0.75);
+            }
+        }
+        return totalSize;
+    }
+
     private async processImageMessages(messages: any[]): Promise<any[]> {
         if (!messages || !Array.isArray(messages)) return messages;
 
@@ -1435,11 +1655,39 @@ export class ImageRouterMiddleware implements Middleware {
             }
         }
 
-        // Sort candidates based on capability score descending
+        const totalImageSize = this.calculateTotalImageSize(context.request.messages);
+        console.debug(`[ImageRouter] Total image size detected: ${(totalImageSize / 1024).toFixed(1)} KB`);
+
+        // Hard limit of 20 MB to prevent buffer overflow (common VLM baseline)
+        const maxImageSizeBytes = 20 * 1024 * 1024;
+        if (totalImageSize > maxImageSizeBytes) {
+            console.error(`[ImageRouter] Image payload of ${(totalImageSize / (1024 * 1024)).toFixed(1)} MB exceeds the hard limit of 20 MB.`);
+            context.response = {
+                id: `rejected-image-${Date.now()}`,
+                choices: [
+                    {
+                        message: {
+                            role: 'assistant',
+                            content: `⚠️ **Error: Image size is over the allowed size.**\n\nThe total image size of **${(totalImageSize / (1024 * 1024)).toFixed(1)} MB** exceeds the system limit of **20 MB**. Please compress the image or use a smaller resolution.`
+                        },
+                        finish_reason: 'stop',
+                        index: 0
+                    }
+                ],
+                model: 'none',
+                object: 'chat.completion',
+                created: Date.now()
+            };
+            return;
+        }
+
+        // Sort candidates based on capability score: descending (try best first) for large images (> 50KB),
+        // and ascending (try faster/cheaper first) for small images.
+        const thresholdBytes = 50 * 1024;
         candidateModels.sort((a, b) => {
             const scoreA = ImageRouterMiddleware.imageModelCapabilities[a] || 0.5;
             const scoreB = ImageRouterMiddleware.imageModelCapabilities[b] || 0.5;
-            return scoreB - scoreA;
+            return totalImageSize > thresholdBytes ? scoreB - scoreA : scoreA - scoreB;
         });
 
         if (availableProviders.length === 0) {

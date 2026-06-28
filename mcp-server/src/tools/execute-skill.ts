@@ -170,7 +170,8 @@ export async function executeSkill(input: ExecuteSkillInput): Promise<ExecuteSki
       ],
       workspace_root,
       sessionId,
-      agentic: false // Disable auto-enrichment to prevent double-enrichment and token waste
+      agentic: false, // Disable auto-enrichment to prevent double-enrichment and token waste
+      isOnePass: true
     });
 
     const responseText = result?.choices?.[0]?.message?.content;

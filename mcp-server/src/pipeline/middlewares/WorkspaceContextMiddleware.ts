@@ -116,10 +116,17 @@ export class WorkspaceContextMiddleware implements Middleware {
 
         // 3. Search Vector Memory with Priority Sorting
         let memoryContext: string | undefined;
-        if (context.wsHash) {
-            try {
-                const queryForMemory = userContent + (grepResults.length > 0 ? ' ' + grepResults.join(' ').slice(0, 500) : '');
-                const memoryResults = await memoryManager.search(context.wsHash, queryForMemory);
+        const allowMemory = context.isOnePass ? !!context.workspaceRoot : true;
+
+        if (allowMemory) {
+            const memoryNamespace = context.wsHash 
+                ? context.wsHash 
+                : (!context.isOnePass ? context.sessionId : undefined);
+
+            if (memoryNamespace) {
+                try {
+                    const queryForMemory = userContent + (grepResults.length > 0 ? ' ' + grepResults.join(' ').slice(0, 500) : '');
+                    const memoryResults = await memoryManager.search(memoryNamespace, queryForMemory);
                 
                 if (Array.isArray(memoryResults) && memoryResults.length > 0) {
                     // Priority function consistent with ContextGatherer
@@ -156,6 +163,7 @@ export class WorkspaceContextMiddleware implements Middleware {
                 console.error(`[WorkspaceContextMiddleware] Memory lookup failed: ${err}`);
             }
         }
+    }
 
         // 4. Grounding Gate check
         let groundingGate = '';

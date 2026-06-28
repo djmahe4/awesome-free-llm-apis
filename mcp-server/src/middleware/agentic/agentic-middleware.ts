@@ -22,11 +22,22 @@ import { buildExecutionPlan } from './task-classifier.js';
 import { ProviderRegistry } from '../../providers/registry.js';
 
 
+interface SubtaskHistoryEntry {
+    task: string;
+    output: string;
+    filesModified: string[];
+    timestamp: number;
+}
+
 interface QueueState {
     nowQueue: string[];
     nextQueue: string[];
     blockedQueue: string[];
     improveQueue: string[];
+    history?: SubtaskHistoryEntry[];
+    paused?: boolean;
+    promptId?: string;
+    pausedSubtaskIndex?: number;
 }
 
 /**
@@ -61,8 +72,15 @@ async function getOrLoadState(sessionId: string): Promise<QueueState> {
             nextQueue: [],
             blockedQueue: [],
             improveQueue: [],
+            history: [],
+            paused: false,
+            promptId: undefined,
+            pausedSubtaskIndex: undefined
         };
         queues.set(sessionId, state);
+    } else {
+        if (!state.history) state.history = [];
+        if (state.paused === undefined) state.paused = false;
     }
     return state;
 }
@@ -484,46 +502,117 @@ async function logAgenticDebug(sessionId: string, data: any): Promise<void> {
     }
 }
 
+export function compressSemantically(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+
+    const lines = text.split('\n');
+    const resultLines: string[] = [];
+    let currentLength = 0;
+    
+    let inCodeBlock = false;
+    let codeBlockLines: string[] = [];
+    let codeBlockLang = '';
+
+    const flushCodeBlock = () => {
+        if (codeBlockLines.length === 0) return;
+        
+        let blockText = codeBlockLines.join('\n');
+        const maxBlockChars = Math.max(200, Math.floor(maxChars * 0.4)); // Allocate up to 40% of budget for a single block
+
+        if (blockText.length > maxBlockChars) {
+            // Compress the code block: keep first 10 and last 10 lines
+            if (codeBlockLines.length > 20) {
+                const firstPart = codeBlockLines.slice(0, 10);
+                const lastPart = codeBlockLines.slice(-10);
+                blockText = [
+                    ...firstPart,
+                    `  // ... [Compressed ${codeBlockLines.length - 20} lines of code to fit context budget] ...`,
+                    ...lastPart
+                ].join('\n');
+            } else {
+                blockText = blockText.slice(0, maxBlockChars) + '\n  // ... [Compressed] ...';
+            }
+        }
+
+        const formattedBlock = `\`\`\`${codeBlockLang}\n${blockText}\n\`\`\``;
+        resultLines.push(formattedBlock);
+        currentLength += formattedBlock.length;
+        
+        codeBlockLines = [];
+        inCodeBlock = false;
+    };
+
+    for (const line of lines) {
+        // Handle code block boundaries
+        if (line.trim().startsWith('```')) {
+            if (inCodeBlock) {
+                flushCodeBlock();
+            } else {
+                inCodeBlock = true;
+                codeBlockLang = line.replace('```', '').trim();
+            }
+            continue;
+        }
+
+        if (inCodeBlock) {
+            codeBlockLines.push(line);
+            continue;
+        }
+
+        // Filter out conversational filler in non-code lines
+        const lowerLine = line.toLowerCase();
+        if (
+            lowerLine.startsWith('here is') || 
+            lowerLine.startsWith('sure,') || 
+            lowerLine.startsWith('i will') || 
+            lowerLine.startsWith('let\'s') ||
+            lowerLine.includes('hope this helps')
+        ) {
+            continue;
+        }
+
+        // Keep headers, lists, and key statements
+        if (
+            line.startsWith('#') || 
+            line.trim().startsWith('-') || 
+            line.trim().startsWith('*') || 
+            line.trim().match(/^\d+\./) ||
+            line.includes('**') ||
+            line.includes('error') ||
+            line.includes('success') ||
+            line.includes('fail')
+        ) {
+            resultLines.push(line);
+            currentLength += line.length + 1;
+        }
+
+        // Check if we are approaching the limit
+        if (currentLength > maxChars) {
+            break;
+        }
+    }
+
+    if (inCodeBlock) {
+        flushCodeBlock();
+    }
+
+    let compressed = resultLines.join('\n');
+    if (compressed.trim().length === 0) {
+        // Fallback to safe character truncation ensuring we don't leave open code blocks
+        return text.slice(0, maxChars) + '\n... (truncated)';
+    }
+
+    return compressed;
+}
+
 export function summarizeResponse(text: string): string {
-    if (text.length <= 2000) return text;
-
-    const recencyAnchor = text.substring(0, 500);
-    const rest = text.substring(500);
-
-    const sentences = rest.split(/[.\n]/).filter(s => s.trim().length > 10);
-    if (sentences.length < 5) {
-        return recencyAnchor + "\n... [truncated Rest]\n" + rest.substring(0, 1400);
-    }
-
-    const words = rest.toLowerCase().match(/\w+/g) || [];
-    const freq = new Map<string, number>();
-    for (const w of words) {
-        if (w.length > 3) freq.set(w, (freq.get(w) || 0) + 1);
-    }
-
-    const scored = sentences.map(s => {
-        const sWords = s.toLowerCase().match(/\w+/g) || [];
-        let score = 0;
-        for (const sw of sWords) score += freq.get(sw) || 0;
-        return { text: s.trim(), score: score / (sWords.length || 1) };
-    });
-
-    scored.sort((a, b) => b.score - a.score);
-
-    let summary = "\n\n<!-- TF-IDF SUMMARY -->\n";
-    let currentLen = recencyAnchor.length + summary.length;
-    for (const s of scored) {
-        if (currentLen + s.text.length + 2 > 2000) break;
-        summary += s.text + ".\n";
-        currentLen += s.text.length + 2;
-    }
-
-    return recencyAnchor + summary;
+    return compressSemantically(text, 2000);
 }
 
 const DATA_DEMAND_SIGNALS = [
     "could you provide", "I need more context", "I don't have access to",
     "read the file", "inspect file", "read file", "view file",
+    /\b([a-zA-Z0-9_\-\/\\.]+\.(ts|js|py|go|rs|md|json|sql|txt))\b/i,
     /show me (all|the) (usages|references|calls|imports) of [`'"]?([A-Z]\w+|[a-zA-Z0-9_\-\/\\.]+\.[a-zA-Z0-9]+)[`'"]?/i,
     /where is [`'"]?([A-Z]\w+|[a-zA-Z0-9_\-\/\\.]+\.[a-zA-Z0-9]+)[`'"]? (used|defined|called|imported)/i,
     /find (all )?occurrences of [`'"]?([A-Z]\w+|[a-zA-Z0-9_\-\/\\.]+\.[a-zA-Z0-9]+)[`'"]?/i,
@@ -569,13 +658,67 @@ function cleanSubtaskContent(content: string): string {
         .trim();
 }
 
+function getTaskFiles(task: string): string[] {
+    const filePattern = /\b[a-zA-Z0-9_\-\/\\.]+\.(ts|js|py|go|rs|md|json|sql|txt)\b/gi;
+    const matches = task.match(filePattern) || [];
+    return matches.map(f => f.replace(/\\/g, '/').toLowerCase());
+}
+
+interface QuantumRelationNode {
+    task: string;
+    distance: number;
+    weight: number;
+}
+
+function calculateQuantumSemanticWeights(
+    currentTask: string,
+    history: SubtaskHistoryEntry[]
+): QuantumRelationNode[] {
+    const currentFiles = getTaskFiles(currentTask);
+    const currentWords = new Set(currentTask.toLowerCase().split(/\W+/).filter(w => w.length > 3));
+
+    return history.map((entry, idx) => {
+        let distance = 3; // Default far distance
+
+        // 1. Check direct file sharing (high entanglement)
+        const entryFiles = getTaskFiles(entry.task).concat(entry.filesModified || []);
+        const sharedFiles = entryFiles.filter(f => currentFiles.includes(f));
+        if (sharedFiles.length > 0) {
+            distance = 1;
+        } else {
+            // 2. Check semantic word overlap (medium entanglement)
+            const entryWords = entry.task.toLowerCase().split(/\W+/).filter(w => w.length > 3);
+            const overlap = entryWords.filter(w => currentWords.has(w));
+            if (overlap.length >= 2) {
+                distance = 2;
+            } else {
+                // 3. Check sequential order
+                const stepsAgo = history.length - idx;
+                if (stepsAgo === 1) {
+                    distance = 2;
+                } else {
+                    distance = 2 + stepsAgo;
+                }
+            }
+        }
+
+        const weight = Math.exp(-distance);
+        return {
+            task: entry.task,
+            distance,
+            weight
+        };
+    });
+}
+
 async function executeSingleSubtask(
     currentTask: string,
     context: PipelineContext,
     sessionId: string,
     projectDir: string,
     workspaceRoot: string | undefined,
-    subtaskIteration: number
+    subtaskIteration: number,
+    history: SubtaskHistoryEntry[]
 ): Promise<boolean> {
     let enrichmentCycleCount = 0;
     const MAX_ENRICHMENT_CYCLES = 2;
@@ -594,7 +737,44 @@ async function executeSingleSubtask(
                 workspace: (context as any).grepContext,
                 isSubtask: true
             });
-            const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${currentTask}\n\nStrictly focus on this subtask using the tools provided.`;
+
+            // Assemble quantum-weighted prior execution trail
+            const totalHistoryBudget = 3000;
+            const weights = calculateQuantumSemanticWeights(currentTask, history);
+            const totalWeight = weights.reduce((sum, w) => sum + w.weight, 0);
+
+            let historySection = '';
+            if (history.length > 0 && totalWeight > 0) {
+                historySection = '\n\n## 🔄 PRIOR EXECUTION TRAIL (Quantum-Weighted Context)\n';
+                for (let i = 0; i < history.length; i++) {
+                    const entry = history[i];
+                    const w = weights[i];
+                    const normalizedWeight = w.weight / totalWeight;
+                    const tokenBudget = Math.floor(totalHistoryBudget * normalizedWeight);
+
+                    let formattedOutput = entry.output;
+                    let priorityLabel = 'LOW (Status Only)';
+                    if (tokenBudget > 1500) {
+                        priorityLabel = 'HIGH (Full Detail)';
+                        formattedOutput = compressSemantically(formattedOutput, 12000);
+                    } else if (tokenBudget > 500) {
+                        priorityLabel = 'MEDIUM (Summary)';
+                        formattedOutput = compressSemantically(formattedOutput, 4000);
+                    } else {
+                        priorityLabel = 'LOW (Status Only)';
+                        formattedOutput = compressSemantically(formattedOutput, 800);
+                    }
+
+                    historySection += `\n### |Subtask: ${entry.task}⟩ (Entanglement Distance: ${w.distance}, Priority: ${priorityLabel})\n`;
+                    historySection += `**Status**: Completed\n`;
+                    if (entry.filesModified && entry.filesModified.length > 0) {
+                        historySection += `**Files Modified**: ${entry.filesModified.map(f => `\`${f}\``).join(', ')}\n`;
+                    }
+                    historySection += `**Execution Output**:\n\`\`\`\n${formattedOutput}\n\`\`\`\n`;
+                }
+            }
+
+            const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${currentTask}\n\nStrictly focus on this subtask using the tools provided.${historySection}`;
 
             const messages = context.request.messages;
             const sysMsgIdx = messages.findIndex(m => m.role === 'system');
@@ -777,7 +957,7 @@ async function executeSingleSubtask(
             break;
         }
 
-        const summarized = summarizeResponse(responseContent);
+    const summarized = summarizeResponse(responseContent);
         context.request.messages.push({ role: 'assistant', content: summarized });
         if (context.wsHash) {
             await appendKnowledge(projectDir, sessionId, responseContent);
@@ -786,6 +966,15 @@ async function executeSingleSubtask(
     }
 
     return true;
+}
+
+function getOriginalUserContent(content: string): string {
+    const marker = '// FULL file content here (never partial diffs)\n```';
+    const index = content.indexOf(marker);
+    if (index !== -1) {
+        return content.substring(index + marker.length).trim();
+    }
+    return content;
 }
 
 export class AgenticMiddleware implements Middleware {
@@ -834,7 +1023,30 @@ export class AgenticMiddleware implements Middleware {
         const q = await getOrLoadState(sessionId);
 
         const userMessage = context.request.messages.find(m => m.role === 'user');
-        const userContent = userMessage ? String(userMessage.content) : undefined;
+        let userContent = userMessage ? String(userMessage.content).trim() : undefined;
+        if (userContent) {
+            userContent = getOriginalUserContent(userContent);
+        }
+
+        // Resume check: "continue <prompt_id> <input-for-next-subtask>"
+        if (userContent) {
+            const continueMatch = userContent.match(/^continue\s+([a-z0-9]{6})\s*(.*)/i);
+            if (continueMatch) {
+                const suppliedId = continueMatch[1].toUpperCase();
+                const inputForNext = continueMatch[2];
+
+                if (q.paused && q.promptId === suppliedId) {
+                    console.error(`[AgenticMiddleware] Resume command matched! Resuming session=${sessionId} with input: ${inputForNext}`);
+                    q.paused = false;
+                    if (inputForNext && q.nowQueue.length > 0) {
+                        q.nowQueue[0] = `${q.nowQueue[0]} (User input: ${inputForNext})`;
+                    }
+                    persistStateDebounced(sessionId, projectDir);
+                } else {
+                    console.error(`[AgenticMiddleware] Resume failed: suppliedId=${suppliedId}, expected=${q.promptId}, paused=${q.paused}`);
+                }
+            }
+        }
 
         (context as any).isSubtask = q.nowQueue.length > 0;
 
@@ -952,7 +1164,7 @@ export class AgenticMiddleware implements Middleware {
                         }
                     } as any;
                     
-                    await executeSingleSubtask(t.task, clonedCtx, sessionId, projectDir, workspaceRoot, subtaskIteration);
+                    await executeSingleSubtask(t.task, clonedCtx, sessionId, projectDir, workspaceRoot, subtaskIteration, q.history || []);
                     return clonedCtx;
                 });
 
@@ -982,6 +1194,17 @@ export class AgenticMiddleware implements Middleware {
                 let finalContent = combinedOutput;
                 if (errors.length > 0) {
                     finalContent += `\n\n### ⚠️ Objections/Failures:\n- ${errors.join('\n- ')}\n*Use "git checkout -- <files>" to discard partial changes.*`;
+                } else {
+                    const firstTask = phase1Tasks[0]?.task || '';
+                    const action = firstTask.toLowerCase().includes('fix') || firstTask.toLowerCase().includes('bug') ? 'fix' : 'feat';
+                    let scopeStr = '';
+                    const pathMatch = firstTask.match(/\/([a-zA-Z0-9_\-]+)\/[a-zA-Z0-9_\-]+\.[a-z]+/i) ||
+                                      firstTask.match(/(?:^|\s)([a-zA-Z0-9_\-]+)\/[a-zA-Z0-9_\-]+/i) ||
+                                      firstTask.match(/([a-zA-Z0-9_\-]+)\.(?:[a-z0-9]+)/i);
+                    if (pathMatch) {
+                        scopeStr = `(${pathMatch[1].toLowerCase()})`;
+                    }
+                    finalContent += `\n\n### 🚀 Task Completed Successfully!\n*Suggested: Run "git commit -m \"${action}${scopeStr}: complete task execution\"" to save your progress.*`;
                 }
 
                 if (executionPlanBrief) {
@@ -1006,16 +1229,99 @@ export class AgenticMiddleware implements Middleware {
             } else {
                 const currentTaskNode = phase1Tasks[0];
                 const currentTask = currentTaskNode.task;
+
+                // 1. Detect if subtask requires a terminal run
+                const requiresTerminal = /\b(?:run|execute|spawn|start|launch|npm|python|pip|cargo|go run|sh|bash|cmd|terminal|command)\b/i.test(currentTask) && !currentTask.includes('(User input:');
+                
+                if (requiresTerminal && !q.paused) {
+                    if (!q.promptId) {
+                        q.promptId = Math.random().toString(36).substring(2, 8).toUpperCase();
+                    }
+                    q.paused = true;
+                    persistStateDebounced(sessionId, projectDir);
+                    
+                    console.error(`[AgenticMiddleware] Pausing pipeline for terminal run. promptId=${q.promptId}`);
+                    
+                    context.response = {
+                        id: `pause-${Date.now()}`,
+                        object: 'chat.completion',
+                        created: Date.now(),
+                        model: activeProvider?.models[0]?.id || 'gemini-3.1-flash-lite',
+                        choices: [{
+                            index: 0,
+                            message: {
+                                role: 'assistant',
+                                content: `⚠️ **Pipeline Paused for Terminal Action**\n\nThe next subtask requires executing a terminal command:\n- **Subtask**: \`${currentTask}\`\n\nPlease execute the command in your terminal. Once completed, resume the pipeline by replying with:\n\`\`\`\ncontinue ${q.promptId} <any results or output from the command>\n\`\`\``
+                            },
+                            finish_reason: 'stop'
+                        }]
+                    } as any;
+                    return;
+                }
+
+                if (q.paused) {
+                    context.response = {
+                        id: `pause-${Date.now()}`,
+                        object: 'chat.completion',
+                        created: Date.now(),
+                        model: activeProvider?.models[0]?.id || 'gemini-3.1-flash-lite',
+                        choices: [{
+                            index: 0,
+                            message: {
+                                role: 'assistant',
+                                content: `⚠️ **Pipeline is currently Paused**\n\nPlease resume by replying with:\n\`\`\`\ncontinue ${q.promptId} <any results or output>\n\`\`\``
+                            },
+                            finish_reason: 'stop'
+                        }]
+                    } as any;
+                    return;
+                }
+
                 console.error(`[AgenticMiddleware] Sequential execution: ${currentTask}`);
 
                 if (isLowThroughput && isParallel) {
                     await new Promise(r => setTimeout(r, 500));
                 }
 
-                const success = await executeSingleSubtask(currentTask, context, sessionId, projectDir, workspaceRoot, subtaskIteration);
+                const success = await executeSingleSubtask(currentTask, context, sessionId, projectDir, workspaceRoot, subtaskIteration, q.history || []);
                 
                 const responseContent = getResponseContent(context);
-                if (success && responseContent && globalRetrospectionCount < 2) {
+
+                if (!success || !responseContent) {
+                    if (!q.promptId) {
+                        q.promptId = Math.random().toString(36).substring(2, 8).toUpperCase();
+                    }
+                    q.paused = true;
+                    persistStateDebounced(sessionId, projectDir);
+
+                    context.response = {
+                        id: `failed-pause-${Date.now()}`,
+                        object: 'chat.completion',
+                        created: Date.now(),
+                        model: activeProvider?.models[0]?.id || 'gemini-3.1-flash-lite',
+                        choices: [{
+                            index: 0,
+                            message: {
+                                role: 'assistant',
+                                content: `❌ **Subtask Execution Failed**\n\n- **Failed Subtask**: \`${currentTask}\`\n\nYou can address the issue and resume/continue the subtask execution by replying with:\n\`\`\`\ncontinue ${q.promptId} <any results or instructions>\n\`\`\``
+                            },
+                            finish_reason: 'stop'
+                        }]
+                    } as any;
+                    return;
+                }
+
+                // Record history of the completed subtask
+                const filesModified = getTaskFiles(responseContent);
+                if (!q.history) q.history = [];
+                q.history.push({
+                    task: currentTask,
+                    output: responseContent,
+                    filesModified,
+                    timestamp: Date.now()
+                });
+
+                if (globalRetrospectionCount < 2) {
                     const dataDemand = detectDataDemand(responseContent);
                     if (dataDemand.triggered) {
                         globalRetrospectionCount++;

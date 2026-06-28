@@ -27,7 +27,12 @@ export async function visionTool(input: VisionToolInput): Promise<{ response: st
     throw new Error('image_path must use file:/// scheme.');
   }
 
-  const decodedPath = decodeURIComponent(image_path.replace(/^file:\/\//, ''));
+  let decodedPath = decodeURIComponent(image_path.replace(/^file:\/\//, ''));
+  if (decodedPath.startsWith('/')) {
+    if (/^\/[A-Za-z]:\//.test(decodedPath)) {
+      decodedPath = decodedPath.substring(1);
+    }
+  }
   const imageFsPath = path.resolve(decodedPath);
   const ws = path.resolve(workspace_root);
 
@@ -47,7 +52,6 @@ export async function visionTool(input: VisionToolInput): Promise<{ response: st
   pipeline.use(getStructuralMarkdownMiddleware());
   pipeline.use(getSharedResponseCache());
   pipeline.use(getWorkspaceContextMiddleware());
-  pipeline.use(getAgenticMiddleware());
   pipeline.use(getSharedImageRouter());
 
   const context: PipelineContext = {
@@ -64,7 +68,8 @@ export async function visionTool(input: VisionToolInput): Promise<{ response: st
       ]
     },
     taskType: TaskType.Vision,
-    workspaceRoot: workspace_root
+    workspaceRoot: workspace_root,
+    isOnePass: true
   };
 
   const finalContext = await pipeline.execute(context);

@@ -49,7 +49,8 @@ export function getModelContextLimit(modelId?: string): number {
 
   const lower = modelId.toLowerCase();
   
-  if (lower.includes('gemini')) return 1000000;
+  if (lower.includes('gemini')) return 150000;
+  if (lower.includes('gemma')) return 130000;
   if (lower.includes('claude')) return 200000;
   if (lower.includes('gpt-4o') || lower.includes('gpt-4') || lower.includes('gpt-5')) return 128000;
   if (lower.includes('llama-4') || lower.includes('llama-3') || lower.includes('llama3')) return 128000;

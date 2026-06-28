@@ -3,7 +3,7 @@ import { persistence, PersistentUsage } from './PersistenceManager.js';
 import { getSharedEncoder } from './tiktoken.js';
 import type { Message, ChatResponse } from '../providers/types.js';
 import { ProviderRegistry } from '../providers/registry.js';
-import type { PipelineContext } from '../pipeline/middleware.js';
+import { TaskType, type PipelineContext } from '../pipeline/middleware.js';
 import { getMessageContent, prependToMessageContent } from './MessageUtils.js';
 import { Sanitizer } from './Sanitizer.js';
 import { calculateModelWeightedMaxTokens } from './model-tokens.js';
@@ -461,39 +461,51 @@ export class LLMExecutor {
         }
 
         let response: ChatResponse | null = null;
-        try {
-            // Use sanitized request
-            const requestWithTimeout = { 
-                ...sanitizedRequest, 
-                timeoutMs,
-                abortSignal: context.request.abortSignal 
-            };
-            response = await provider.chat(requestWithTimeout);
-        } catch (err: any) {
-            // 6. Handle rate limit errors even without headers (Robust extraction)
-            const errorMessage = err.message?.toLowerCase() || '';
-            const isRateLimit = err.status === 429 ||
-                errorMessage.includes('rate_limit_exceeded') ||
-                errorMessage.includes('resource_exhausted') ||
-                errorMessage.includes('too many requests') ||
-                errorMessage.includes('quota exceeded') ||
-                errorMessage.includes('limit reached');
+        let attempt = 0;
+        const maxAttempts = 3;
+        let delayMs = 1500;
 
-            if (isRateLimit) {
-                this.updateProviderTokenState(providerId, {
-                    remainingTokens: 0,
-                    remainingRequests: 0,
-                    refreshTime: Date.now() + 60000,
-                    requestsRefreshTime: Date.now() + 60000
-                });
-            } else {
-                this.refundTokens(providerId, totalWithCompletion);
+        while (attempt < maxAttempts) {
+            attempt++;
+            try {
+                // Use sanitized request
+                const requestWithTimeout = { 
+                    ...sanitizedRequest, 
+                    timeoutMs,
+                    abortSignal: context.request.abortSignal 
+                };
+                response = await provider.chat(requestWithTimeout);
+                break;
+            } catch (err: any) {
+                const errorMessage = err.message?.toLowerCase() || '';
+                const isRateLimit = err.status === 429 ||
+                    errorMessage.includes('rate_limit_exceeded') ||
+                    errorMessage.includes('resource_exhausted') ||
+                    errorMessage.includes('too many requests') ||
+                    errorMessage.includes('quota exceeded') ||
+                    errorMessage.includes('limit reached');
+
+                if (isRateLimit && attempt < maxAttempts) {
+                    console.warn(`[LLMExecutor] Rate limited on ${providerId} (attempt ${attempt}/${maxAttempts}). Retrying in ${delayMs}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
+                    delayMs *= 2;
+                    continue;
+                }
+
+                if (isRateLimit) {
+                    this.updateProviderTokenState(providerId, {
+                        remainingTokens: 0,
+                        remainingRequests: 0,
+                        refreshTime: Date.now() + 60000,
+                        requestsRefreshTime: Date.now() + 60000
+                    });
+                } else {
+                    this.refundTokens(providerId, totalWithCompletion);
+                }
+
+                this.recordProviderFailure(providerId, err.status);
+                throw err;
             }
-
-            this.recordProviderFailure(providerId, err.status);
-
-            // Still re-throw the error so the router knows to try next provider
-            throw err;
         }
 
         // 7. Update token tracking from response headers (drift correction)
@@ -536,12 +548,47 @@ export class LLMExecutor {
             throw new Error('No providers available');
         }
 
-        // v1.0.4: Strategic model selection for high-stakes planning/decomposition
-        const targetModels = modelOverride === 'any'
-            ? (options.google_search 
-                ? ['gemini-3.1-flash-lite', 'deepseek-ai/DeepSeek-V3', 'nvidia/nemotron-3-super-120b-a12b:free', 'qwen/qwen3-coder:free', 'llama-3.3-70b-versatile', 'glm-4.7']
-                : ['deepseek-ai/DeepSeek-V3', 'nvidia/nemotron-3-super-120b-a12b:free', 'qwen/qwen3-coder:free', 'gemini-3.1-flash-lite', 'llama-3.3-70b-versatile', 'glm-4.7'])
-            : [modelOverride];
+        // TaskType-aware model prioritization for subtasks
+        const taskModels: Record<string, string[]> = {
+            coding: [
+                'qwen/qwen3-coder-480b-a35b:free',
+                'qwen/qwen3-coder-480b-a35b-instruct',
+                'qwen/qwen3-coder:free',
+                'deepseek/deepseek-r1',
+                'deepseek-ai/DeepSeek-R1',
+                'deepseek-ai/DeepSeek-V3',
+                'gemini-3.1-flash-lite',
+                'glm-4.7',
+                'mistral-large-latest',
+                'command-r-plus-08-2024'
+            ],
+            reasoning: [
+                'deepseek/deepseek-r1',
+                'deepseek-ai/DeepSeek-R1',
+                'deepseek-ai/DeepSeek-V3',
+                'gemini-3.1-flash-lite',
+                'glm-4.7',
+                'llama-3.3-70b-versatile'
+            ],
+            chat: [
+                'gemini-3.1-flash-lite',
+                'deepseek-ai/DeepSeek-V3',
+                'glm-4.7',
+                'llama-3.3-70b-versatile',
+                'command-r-plus-08-2024'
+            ]
+        };
+
+        let targetModels = [modelOverride];
+        if (modelOverride === 'any') {
+            const taskKey = options.taskType ? options.taskType.toLowerCase() : 'chat';
+            targetModels = taskModels[taskKey] || taskModels.chat;
+            
+            // If google search is enabled, prioritize gemini
+            if (options.google_search) {
+                targetModels = ['gemini-3.1-flash-lite', ...targetModels.filter(m => m !== 'gemini-3.1-flash-lite')];
+            }
+        }
 
         // Pre-calculate scores once for efficiency
         const scoredProviders = providers.map(p => {
@@ -551,32 +598,66 @@ export class LLMExecutor {
             return { provider: p, score };
         }).sort((a, b) => b.score - a.score);
 
-        for (const modelId of targetModels) {
-            for (const { provider: p, score } of scoredProviders) {
-                if (score < 0) continue;
+        const context: PipelineContext = {
+            request: {
+                model: modelOverride,
+                messages,
+                google_search: options.google_search,
+                sessionId: options.sessionId,
+                agentic: options.agentic
+            },
+            taskType: options.taskType as any || TaskType.Chat
+        };
 
-                // Google Search is a Gemini-exclusive feature in this architecture
-                if (options.google_search && p.id !== 'gemini') continue;
-                
-                if (modelOverride === 'any' || p.models.some((m: any) => m.id === modelId)) {
-                    try {
-                        const actualModel = (modelId === 'any' || !p.models.some((m: any) => m.id === modelId))
-                            ? p.models[0].id 
-                            : modelId;
+        // Two-pass strategy:
+        // Pass 1: Try only healthy providers (score >= 0)
+        // Pass 2: Fall back to unhealthy/cooling-down providers (score < 0) on a best-effort basis
+        const passes = [true, false];
+        for (const healthyOnly of passes) {
+            for (const modelId of targetModels) {
+                for (const { provider: p, score } of scoredProviders) {
+                    if (healthyOnly && score < 0) continue;
 
-                        const res = await p.chat({
-                            model: actualModel,
-                            messages,
-                            timeoutMs: options.timeoutMs || 15000,
-                            google_search: options.google_search,
-                            sessionId: options.sessionId,
-                            agentic: options.agentic
-                        });
-                        this.recordProviderSuccess(p.id);
-                        return res;
-                    } catch (err: any) {
-                        this.recordProviderFailure(p.id, err.status);
-                        continue;
+                    // Google Search is a Gemini-exclusive feature in this architecture
+                    if (options.google_search && p.id !== 'gemini') continue;
+                    
+                    // Only use this provider if it supports the specific model we want to run
+                    const supportsModel = p.models.some((m: any) => m.id === modelId);
+                    if (modelOverride === 'any' ? supportsModel : p.models.some((m: any) => m.id === modelOverride)) {
+                        try {
+                            const actualModel = modelOverride === 'any' ? modelId : modelOverride;
+                            const res = await this.tryProvider(context, p.id, actualModel, options.timeoutMs || 15000);
+                            if (res) {
+                                this.recordProviderSuccess(p.id);
+                                return res;
+                            }
+                        } catch (err: any) {
+                            this.recordProviderFailure(p.id, err.status || 500);
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // Ultimate fallback within the current pass (if modelOverride is 'any')
+            if (modelOverride === 'any') {
+                for (const { provider: p, score } of scoredProviders) {
+                    if (healthyOnly && score < 0) continue;
+                    if (options.google_search && p.id !== 'gemini') continue;
+
+                    const fallbackModel = p.models[0]?.id;
+                    if (fallbackModel) {
+                        try {
+                            console.error(`[LLMExecutor] Routing fallback (healthyOnly=${healthyOnly}) to ${p.id}/${fallbackModel}`);
+                            const res = await this.tryProvider(context, p.id, fallbackModel, options.timeoutMs || 15000);
+                            if (res) {
+                                this.recordProviderSuccess(p.id);
+                                return res;
+                            }
+                        } catch (err: any) {
+                            this.recordProviderFailure(p.id, err.status || 500);
+                            continue;
+                        }
                     }
                 }
             }

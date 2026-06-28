@@ -9,6 +9,7 @@ export interface PipelineContext {
     workspaceRoot?: string;
     wsHash?: string;
     keywords?: string[];
+    isOnePass?: boolean;
     /**
      * Set by LLMExecutor after a successful provider call when the provider
      * reports remaining token quota via response headers (x-ratelimit-remaining-tokens).

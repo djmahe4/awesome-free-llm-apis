@@ -396,10 +396,18 @@ export class ContextManager {
                     content: `[...truncated...] ${truncatedContent.trim()}`
                 };
             } else {
-                nonSystemMsgs[nonSystemMsgs.length - 1] = {
-                    ...lastMsg,
-                    content: `[...truncated for emergencyFallback...]`
-                };
+                // System messages alone exceed the target budget.
+                // Keep the last 1500 tokens of the user message (or the whole message if smaller)
+                // so we don't wipe out the code context.
+                const content = getMessageContent(lastMsg);
+                const approxChars = 1500 * 3;
+                if (content.length > approxChars) {
+                    const truncatedContent = content.slice(-approxChars);
+                    nonSystemMsgs[nonSystemMsgs.length - 1] = {
+                        ...lastMsg,
+                        content: `[...truncated...] ${truncatedContent.trim()}`
+                    };
+                }
             }
             result = [...systemMsgs, ...nonSystemMsgs];
         }

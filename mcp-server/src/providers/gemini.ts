@@ -59,7 +59,7 @@ export class GeminiProvider extends BaseProvider {
     return this.cachedPythonPath;
   }
 
-  private async runPythonClient(request: any): Promise<any> {
+  private async runPythonClient(request: any, timeoutMs: number = 30000): Promise<any> {
     const pythonPath = this.resolvePythonPath();
     const scriptPath = path.join(__dirname, 'gemini_client.py');
     if (process.env.DEBUG) {
@@ -70,6 +70,12 @@ export class GeminiProvider extends BaseProvider {
       const py = spawn(pythonPath, [scriptPath], {
         env: { ...process.env }
       });
+
+      const timer = setTimeout(() => {
+        py.kill();
+        reject(new Error(`Gemini client execution timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
       const input = JSON.stringify({
         ...request,
       });
@@ -89,6 +95,7 @@ export class GeminiProvider extends BaseProvider {
       });
 
       py.on('close', (code) => {
+        clearTimeout(timer);
         if (code !== 0) {
           try {
             const err = JSON.parse(stderr);
@@ -117,6 +124,8 @@ export class GeminiProvider extends BaseProvider {
       actualModel = 'gemini-3.1-flash-lite';
     }
 
+    const timeoutMs = request.timeoutMs || this.defaultTimeout;
+
     let result;
     try {
       result = await this.runPythonClient({
@@ -126,7 +135,7 @@ export class GeminiProvider extends BaseProvider {
         temperature: request.temperature,
         response_format: request.response_format,
         google_search: request.google_search,
-      });
+      }, timeoutMs);
     } catch (err: any) {
       const error = new Error(`Gemini Error: ${err.message}`);
       const msg = err.message.toLowerCase();
