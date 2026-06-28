@@ -139,6 +139,7 @@ export class ImageRouterMiddleware implements Middleware {
 
     private hasImageContent(messages: any[]): boolean {
         if (!messages || !Array.isArray(messages)) return false;
+        const ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif'];
         for (const msg of messages) {
             if (Array.isArray(msg.content)) {
                 for (const item of msg.content) {
@@ -147,8 +148,17 @@ export class ImageRouterMiddleware implements Middleware {
                     }
                 }
             } else if (typeof msg.content === 'string') {
-                if (msg.content.includes('data:image/') || msg.content.includes('file:///')) {
+                if (msg.content.includes('data:image/')) {
                     return true;
+                }
+                const fileMatches = msg.content.match(/file:\/\/\/\S+/g);
+                if (fileMatches) {
+                    for (const url of fileMatches) {
+                        const ext = url.split('.').pop()?.toLowerCase().split(/[?#]/)[0] || '';
+                        if (ALLOWED_EXTENSIONS.includes(ext)) {
+                            return true;
+                        }
+                    }
                 }
             }
         }
