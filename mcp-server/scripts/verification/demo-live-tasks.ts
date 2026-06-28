@@ -10,7 +10,7 @@ import {
     TaskType, 
     PipelineContext 
 } from '../../src/pipeline/index.js';
-import { StructuralMarkdownMiddleware } from '../../src/middleware/agentic/structural-middleware.js';
+import { StructuralMarkdownMiddleware } from '../../src/pipeline/middlewares/StructuralMiddleware.js';
 import { LLMExecutor } from '../../src/utils/LLMExecutor.js';
 import path from 'node:path';
 

@@ -1,4 +1,4 @@
-import { WorkspaceWalker } from '../../src/middleware/agentic/workspace-walker.js';
+import { WorkspaceWalker } from '../../src/pipeline/middlewares/workspace-walker.js';
 
 const WORKSPACE  = 'c:\\Users\\mahes\\OneDrive\\Desktop\\Python-Projects\\nday-research-ai-cve';
 const KEYWORDS   = ['daily-nday-pipeline.import.json', 'splitInBatches', 'typeVersion'];

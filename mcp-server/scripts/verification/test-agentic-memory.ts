@@ -3,7 +3,7 @@
  * @description Verifies that the AgenticMiddleware can correctly gather grep context from the workspace.
  * Usage: tsx scripts/verification/test-agentic-memory.ts
  */
-import { AgenticMiddleware } from '../../src/middleware/agentic/agentic-middleware.js';
+import { AgenticMiddleware } from '../../src/pipeline/middlewares/AgenticMiddleware.js';
 import path from 'node:path';
 
 async function testGrepContext() {

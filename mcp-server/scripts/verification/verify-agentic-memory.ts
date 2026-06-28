@@ -3,7 +3,7 @@
  * for both full and subtask modes. The free LLM only gets workspace context —
  * NOT tool-usage instructions (the orchestrating agent handles that).
  */
-import { getIntelligentSystemPrompt } from '../../src/middleware/agentic/prompts.js';
+import { getIntelligentSystemPrompt } from '../../src/pipeline/middlewares/prompts.js';
 
 async function testAgenticPromptInjection() {
     console.log('--- Testing Agentic Prompt Assembly ---\n');

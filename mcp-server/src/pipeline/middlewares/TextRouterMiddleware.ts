@@ -347,10 +347,7 @@ export class TextRouterMiddleware implements Middleware {
             }
         ];
         
-        const planResponse = await this.executor.prompt(planningMessages, {
-            temperature: 0.1,
-            response_format: { type: 'json_object' }
-        });
+        const planResponse = await this.executor.prompt(planningMessages);
         
         const planContent = planResponse.choices?.[0]?.message?.content || '[]';
         let subtasks: any[] = [];
@@ -378,10 +375,7 @@ export class TextRouterMiddleware implements Middleware {
                 }
             ];
 
-            const response = await this.executor.prompt(subtaskMessages, {
-                model: originalModel,
-                temperature: 0.3
-            });
+            const response = await this.executor.prompt(subtaskMessages, originalModel || 'any');
 
             if (response && response.choices?.[0]?.message?.content) {
                 accumulatedContext += `\n\n### Output of Subtask ${i + 1} (${taskStr}):\n${response.choices[0].message.content}`;

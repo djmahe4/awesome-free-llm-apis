@@ -4,8 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
-import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/agentic/prompts.js';
+import { AgenticMiddleware } from '../src/pipeline/middlewares/AgenticMiddleware.js';
+import { getIntelligentSystemPrompt, resetPromptCache } from '../src/pipeline/middlewares/prompts.js';
 import type { PipelineContext } from '../src/pipeline/middleware.js';
 import { promises as fsp } from 'node:fs';
 import * as fs from 'node:fs';

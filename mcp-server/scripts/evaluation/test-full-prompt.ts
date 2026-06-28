@@ -1,5 +1,5 @@
-import { ContextGatherer } from '../../src/middleware/agentic/context-gatherer.js';
-import { getIntelligentSystemPrompt } from '../../src/middleware/agentic/prompts.js';
+import { ContextGatherer } from '../../src/pipeline/middlewares/context-gatherer.js';
+import { getIntelligentSystemPrompt } from '../../src/pipeline/middlewares/prompts.js';
 
 async function main() {
     const workspaceRoot = "/home/kali/Desktop/Study-AI-Agent"; //"c:\\Users\\mahes\\OneDrive\\Desktop\\Python-Projects\\Study-AI-Agent";

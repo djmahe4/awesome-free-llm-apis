@@ -14,7 +14,7 @@
  */
 
 import { bench, describe, beforeEach, afterAll } from 'vitest';
-import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/agentic/prompts.js';
+import { getIntelligentSystemPrompt, resetPromptCache } from '../src/pipeline/middlewares/prompts.js';
 import { ContextManager } from '../src/utils/ContextManager.js';
 import { executeInSandbox } from '../src/sandbox/executor.js';
 import type { Message } from '../src/providers/types.js';

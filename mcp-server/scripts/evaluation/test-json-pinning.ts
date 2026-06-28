@@ -3,7 +3,7 @@
  * Run with: npx tsx scripts/evaluation/test-json-pinning.ts
  * No build required.
  */
-import { ContextGatherer } from '../../src/middleware/agentic/context-gatherer.js';
+import { ContextGatherer } from '../../src/pipeline/middlewares/context-gatherer.js';
 
 const WORKSPACE  = 'c:\\Users\\mahes\\OneDrive\\Desktop\\Python-Projects\\nday-research-ai-cve';
 const QUERY      = 'In "daily-nday-pipeline.import.json", does the Split in Batches node (typeVersion: 3) have a splitBy parameter?';

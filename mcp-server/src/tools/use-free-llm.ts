@@ -18,7 +18,7 @@ import {
   TaskType,
   type PipelineContext
 } from '../pipeline/middleware.js';
-import { StructuralMarkdownMiddleware } from '../middleware/agentic/structural-middleware.js';
+import { StructuralMarkdownMiddleware } from '../pipeline/middlewares/StructuralMiddleware.js';
 import { calculateModelWeightedMaxTokens } from '../utils/model-tokens.js';
 import { toMarkdownResponse } from '../utils/markdown.js';
 import { loadSkillPrompt } from './load-skill-prompt.js';

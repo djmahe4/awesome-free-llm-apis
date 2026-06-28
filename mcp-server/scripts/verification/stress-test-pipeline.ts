@@ -5,7 +5,7 @@
  */
 import path from 'node:path';
 import fs from 'fs-extra';
-import { StructuralMarkdownMiddleware } from '../../src/middleware/agentic/structural-middleware.js';
+import { StructuralMarkdownMiddleware } from '../../src/pipeline/middlewares/StructuralMiddleware.js';
 import { ResponseCacheMiddleware } from '../../src/pipeline/middlewares/ResponseCacheMiddleware.js';
 import { TokenManagerMiddleware } from '../../src/pipeline/middlewares/TokenManagerMiddleware.js';
 import { IntelligentRouterMiddleware } from '../../src/pipeline/middlewares/IntelligentRouterMiddleware.js';
@@ -14,7 +14,7 @@ import { ProviderRegistry } from '../../src/providers/registry.js';
 import { LLMExecutor } from '../../src/utils/LLMExecutor.js';
 import { WorkspaceScanner } from '../../src/cache/workspace.js';
 import { resolveFileRefs, summarizeTextLocally } from '../../src/tools/use-free-llm.js';
-import { PROJECTS_DIR } from '../../src/middleware/agentic/constants.js';
+import { PROJECTS_DIR } from '../../src/pipeline/middlewares/constants.js';
 
 
 let lastCapturedRequest: any = null;

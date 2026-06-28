@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as path from 'path';
 import fs from 'fs-extra';
-import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
+import { AgenticMiddleware } from '../src/pipeline/middlewares/AgenticMiddleware.js';
 import { PipelineContext } from '../src/pipeline/middleware.js';
 
 describe('AgenticMiddleware - Concurrency Stress Test', () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
-import { StructuralMarkdownMiddleware } from '../src/middleware/agentic/structural-middleware.js';
+import { AgenticMiddleware } from '../src/pipeline/middlewares/AgenticMiddleware.js';
+import { StructuralMarkdownMiddleware } from '../src/pipeline/middlewares/StructuralMiddleware.js';
 import { TokenManagerMiddleware } from '../src/pipeline/middlewares/TokenManagerMiddleware.js';
 import { PipelineContext, TaskType } from '../src/pipeline/middleware.js';
 

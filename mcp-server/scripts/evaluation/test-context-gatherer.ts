@@ -1,5 +1,5 @@
-import { ContextGatherer } from '../../src/middleware/agentic/context-gatherer.js';
-import { WorkspaceWalker } from '../../src/middleware/agentic/workspace-walker.js';
+import { ContextGatherer } from '../../src/pipeline/middlewares/context-gatherer.js';
+import { WorkspaceWalker } from '../../src/pipeline/middlewares/workspace-walker.js';
 import path from 'path';
 
 async function main() {

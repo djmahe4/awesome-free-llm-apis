@@ -5,8 +5,8 @@ import { resolveConfigDir } from '../utils/config-path.js';
 import { useFreeLLM } from './use-free-llm.js';
 import { memoryManager } from '../memory/index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
-import { getIntelligentSystemPrompt } from '../middleware/agentic/prompts.js';
-import { ContextGatherer } from '../middleware/agentic/context-gatherer.js';
+import { getIntelligentSystemPrompt } from '../pipeline/middlewares/prompts.js';
+import { ContextGatherer } from '../pipeline/middlewares/context-gatherer.js';
 
 export interface StoreWorkspaceSkillInput {
     name: string;

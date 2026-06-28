@@ -5,7 +5,7 @@
  */
 import path from 'node:path';
 import fs from 'fs-extra';
-import { StructuralMarkdownMiddleware } from '../../src/middleware/agentic/structural-middleware.js';
+import { StructuralMarkdownMiddleware } from '../../src/pipeline/middlewares/StructuralMiddleware.js';
 import { PipelineContext } from '../../src/pipeline/middleware.js';
 
 /**
@@ -16,7 +16,7 @@ import { PipelineContext } from '../../src/pipeline/middleware.js';
  * the full file context and mandates a specific response format for the orchestrator to apply.
  */
 
-import { PROJECTS_DIR } from '../../src/middleware/agentic/constants.js';
+import { PROJECTS_DIR } from '../../src/pipeline/middlewares/constants.js';
 
 async function main() {
     console.log('\n🚀 --- Workspace Flow Verification ---\n');

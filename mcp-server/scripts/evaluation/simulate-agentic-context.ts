@@ -8,9 +8,9 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import os from 'os';
 import { getEncoding } from 'js-tiktoken';
-import { ContextGatherer } from '../../src/middleware/agentic/context-gatherer.js';
-import { PROJECTS_DIR, SESSION_STATE_HEADER, KNOWLEDGE_FILE } from '../../src/middleware/agentic/constants.js';
-import { getIntelligentSystemPrompt } from '../../src/middleware/agentic/prompts.js';
+import { ContextGatherer } from '../../src/pipeline/middlewares/context-gatherer.js';
+import { PROJECTS_DIR, SESSION_STATE_HEADER, KNOWLEDGE_FILE } from '../../src/pipeline/middlewares/constants.js';
+import { getIntelligentSystemPrompt } from '../../src/pipeline/middlewares/prompts.js';
 
 const enc = getEncoding("cl100k_base");
 

@@ -1,9 +1,9 @@
 import { TextRouterMiddleware } from './middlewares/TextRouterMiddleware.js';
 import { ImageRouterMiddleware } from './middlewares/ImageRouterMiddleware.js';
-import { AgenticMiddleware } from '../middleware/agentic/agentic-middleware.js';
+import { AgenticMiddleware } from './middlewares/AgenticMiddleware.js';
 import { WorkspaceContextMiddleware } from './middlewares/WorkspaceContextMiddleware.js';
 import { ResponseCacheMiddleware } from './middlewares/ResponseCacheMiddleware.js';
-import { StructuralMarkdownMiddleware } from '../middleware/agentic/structural-middleware.js';
+import { StructuralMarkdownMiddleware } from './middlewares/StructuralMiddleware.js';
 
 /**
  * Pipeline Instance Registry (Hardened)

@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { memoryManager } from '../src/memory/index.js';
 import { WorkspaceIndexer } from '../src/memory/indexer.js';
-import { DiffScanner } from '../src/middleware/agentic/diff-scanner.js';
+import { DiffScanner } from '../src/pipeline/middlewares/diff-scanner.js';
 import fs from 'fs-extra';
 import path from 'path';
 
-vi.mock('../src/middleware/agentic/diff-scanner.js', () => ({
+vi.mock('../src/pipeline/middlewares/diff-scanner.js', () => ({
   DiffScanner: {
     scan: vi.fn().mockResolvedValue({
       changedFiles: ['src/edited.ts'],

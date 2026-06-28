@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
 import { PipelineExecutor } from '../src/pipeline/index.js';
-import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
-import { StructuralMarkdownMiddleware } from '../src/middleware/agentic/structural-middleware.js';
+import { AgenticMiddleware } from '../src/pipeline/middlewares/AgenticMiddleware.js';
+import { StructuralMarkdownMiddleware } from '../src/pipeline/middlewares/StructuralMiddleware.js';
 import { IntelligentRouterMiddleware } from '../src/pipeline/middlewares/IntelligentRouterMiddleware.js';
 import { LLMExecutor } from '../src/utils/LLMExecutor.js';
 import { WorkspaceScanner } from '../src/cache/workspace.js';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import { PROJECTS_DIR } from '../src/middleware/agentic/constants.js';
+import { PROJECTS_DIR } from '../src/pipeline/middlewares/constants.js';
 
 // Mock LLMExecutor to avoid actual API calls
 vi.mock('../src/utils/LLMExecutor.js', () => {

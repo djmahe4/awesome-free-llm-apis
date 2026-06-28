@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { RepositoryGraph, WorkspaceDependencyScanner, semanticScore } from '../src/memory/dependency-scanner.js';
 import { WorkspaceIndexer } from '../src/memory/indexer.js';
-import { enrichWithGraph } from '../src/middleware/agentic/context-gatherer.js';
+import { enrichWithGraph } from '../src/pipeline/middlewares/context-gatherer.js';
 import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { memoryManager } from '../src/memory/index.js';

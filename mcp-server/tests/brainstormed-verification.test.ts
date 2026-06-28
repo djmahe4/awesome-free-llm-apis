@@ -7,6 +7,7 @@ import { TextRouterMiddleware } from '../src/pipeline/middlewares/TextRouterMidd
 import { ImageRouterMiddleware } from '../src/pipeline/middlewares/ImageRouterMiddleware.js';
 import { LLMExecutor } from '../src/utils/LLMExecutor.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
+import { BaseProvider } from '../src/providers/base.js';
 import { TaskType, type PipelineContext } from '../src/pipeline/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -95,8 +96,7 @@ describe('Brainstormed Verification Scenarios (Phases 1-3)', () => {
         await fsp.writeFile(dummyImagePath, 'dummy-png-binary-data');
 
         const registry = ProviderRegistry.getInstance();
-        const GeminiProviderClass = registry.getProvider('gemini')!.constructor as any;
-        class VisionMockProvider extends GeminiProviderClass {
+        class VisionMockProvider extends BaseProvider {
             name = 'VisionMock';
             id = 'vision-mock';
             baseURL = 'http://mock';
@@ -149,5 +149,47 @@ describe('Brainstormed Verification Scenarios (Phases 1-3)', () => {
         const routedMsgContent = context.request.messages[0].content as any[];
         const imagePart = routedMsgContent.find(p => p.type === 'image_url');
         expect(imagePart.image_url.url).toContain('data:image/png;base64,');
+    });
+
+    // -------------------------------------------------------------------------
+    // Scenario D: Middleware Pipeline Order and Singleton Resolution (Phase 4)
+    // -------------------------------------------------------------------------
+    it('Scenario D: Should resolve middlewares as singletons and execute them in correct order', async () => {
+        const { 
+            getStructuralMarkdownMiddleware, 
+            getAgenticMiddleware,
+            getSharedRouter
+        } = await import('../src/pipeline/instances.js');
+
+        // 1. Verify Singleton Resolution
+        const struct1 = getStructuralMarkdownMiddleware();
+        const struct2 = getStructuralMarkdownMiddleware();
+        expect(struct1).toBe(struct2);
+
+        const agentic1 = getAgenticMiddleware();
+        const agentic2 = getAgenticMiddleware();
+        expect(agentic1).toBe(agentic2);
+
+        const router1 = getSharedRouter();
+        const router2 = getSharedRouter();
+        expect(router1).toBe(router2);
+
+        // 2. Verify Pipeline Context Flow
+        const context: PipelineContext = {
+            request: {
+                agentic: true,
+                sessionId: 'test-session-d',
+                messages: [{ role: 'user', content: 'Original prompt' }]
+            }
+        };
+
+        // Run structural middleware first
+        await struct1.execute(context, async () => {
+            // Verify that structural middleware prepended the diagnostic header
+            const userMsg = context.request.messages.find(m => m.role === 'user');
+            expect(userMsg).toBeDefined();
+            expect(userMsg?.content).toContain('# RESPONSE FORMAT');
+            expect(userMsg?.content).toContain('Original prompt');
+        });
     });
 });

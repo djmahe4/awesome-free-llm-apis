@@ -4,8 +4,8 @@ import os from 'os';
 import type { Middleware, PipelineContext, NextFunction } from '../middleware.js';
 import { memoryManager } from '../../memory/index.js';
 import { WorkspaceScanner } from '../../cache/workspace.js';
-import { getIntelligentSystemPrompt } from '../../middleware/agentic/prompts.js';
-import { ContextGatherer } from '../../middleware/agentic/context-gatherer.js';
+import { getIntelligentSystemPrompt } from './prompts.js';
+import { ContextGatherer } from './context-gatherer.js';
 import { WorkspaceIndexer } from '../../memory/indexer.js';
 import { getMessageContent, prependToMessageContent } from '../../utils/MessageUtils.js';
 

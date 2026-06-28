@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { LRUCache } from 'lru-cache';
 import { debounce } from '../../utils/debounce.js';
-import type { Middleware, PipelineContext, NextFunction } from '../../pipeline/middleware.js';
+import type { Middleware, PipelineContext, NextFunction } from '../middleware.js';
 import { getMessageContent } from '../../utils/MessageUtils.js';
 import { memoryManager } from '../../memory/index.js';
 import { getIntelligentSystemPrompt } from './prompts.js';

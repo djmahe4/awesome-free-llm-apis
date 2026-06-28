@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getIntelligentSystemPrompt } from '../src/middleware/agentic/prompts.js';
+import { getIntelligentSystemPrompt } from '../src/pipeline/middlewares/prompts.js';
 
 describe('Agentic Precision Tests', () => {
     it('Broad keywords should not explode reference sections', async () => {

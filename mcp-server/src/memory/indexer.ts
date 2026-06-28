@@ -3,10 +3,10 @@ import path from 'path';
 import { vectorStore } from './vector.js';
 import { memoryManager } from './index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
-import { WorkspaceWalker } from '../middleware/agentic/workspace-walker.js';
+import { WorkspaceWalker } from '../pipeline/middlewares/workspace-walker.js';
 import { Sanitizer } from '../utils/Sanitizer.js';
 
-import { DiffScanner } from '../middleware/agentic/diff-scanner.js';
+import { DiffScanner } from '../pipeline/middlewares/diff-scanner.js';
 
 export interface IndexingResult {
     totalFiles: number;

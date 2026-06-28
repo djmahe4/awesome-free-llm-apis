@@ -23,7 +23,7 @@ vi.mock('../src/memory/indexer.js', () => ({
 }));
 
 // Mock ContextGatherer and others for Middleware test
-vi.mock('../src/middleware/agentic/context-gatherer.js', () => ({
+vi.mock('../src/pipeline/middlewares/context-gatherer.js', () => ({
     ContextGatherer: {
         gatherContext: vi.fn().mockResolvedValue([])
     }

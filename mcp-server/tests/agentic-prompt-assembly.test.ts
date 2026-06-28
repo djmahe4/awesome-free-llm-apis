@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/agentic/prompts.js';
+import { getIntelligentSystemPrompt, resetPromptCache } from '../src/pipeline/middlewares/prompts.js';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';

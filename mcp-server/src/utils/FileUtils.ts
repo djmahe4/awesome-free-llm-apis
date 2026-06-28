@@ -31,7 +31,21 @@ export async function writeFileAtomic(filePath: string, content: string): Promis
         const tempPath = `${absolutePath}.${Math.random().toString(36).substring(2, 8)}.tmp`;
         try {
             await fsp.writeFile(tempPath, content, 'utf-8');
-            await fsp.rename(tempPath, absolutePath);
+            
+            let retries = 5;
+            while (retries > 0) {
+                try {
+                    await fsp.rename(tempPath, absolutePath);
+                    break;
+                } catch (err: any) {
+                    if ((err.code === 'EPERM' || err.code === 'EBUSY') && retries > 1) {
+                        retries--;
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                    } else {
+                        throw err;
+                    }
+                }
+            }
         } catch (err) {
             // Cleanup temp file if write/rename failed
             try {

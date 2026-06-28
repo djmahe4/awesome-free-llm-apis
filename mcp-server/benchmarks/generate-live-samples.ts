@@ -1,5 +1,5 @@
-import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/agentic/prompts.js';
-import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
+import { getIntelligentSystemPrompt, resetPromptCache } from '../src/pipeline/middlewares/prompts.js';
+import { AgenticMiddleware } from '../src/pipeline/middlewares/AgenticMiddleware.js';
 import { ContextManager } from '../src/utils/ContextManager.js';
 import { executeInSandbox } from '../src/sandbox/executor.js';
 import fs from 'fs';

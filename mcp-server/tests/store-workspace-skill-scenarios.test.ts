@@ -3,7 +3,7 @@ import { storeWorkspaceSkill } from '../src/tools/store-workspace-skill.js';
 import { normalizeScriptFilename, addScriptMetadataHeader } from '../src/tools/store-workspace-skill.js';
 import { useFreeLLM } from '../src/tools/use-free-llm.js';
 import { memoryManager } from '../src/memory/index.js';
-import { ContextGatherer } from '../src/middleware/agentic/context-gatherer.js';
+import { ContextGatherer } from '../src/pipeline/middlewares/context-gatherer.js';
 import fs from 'node:fs/promises';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import path from 'node:path';
@@ -20,7 +20,7 @@ vi.mock('../src/memory/index.js', () => ({
     }
 }));
 
-vi.mock('../src/middleware/agentic/context-gatherer.js', () => ({
+vi.mock('../src/pipeline/middlewares/context-gatherer.js', () => ({
     ContextGatherer: {
         gatherContext: vi.fn()
     }

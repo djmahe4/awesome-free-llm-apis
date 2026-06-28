@@ -3,7 +3,7 @@
  * @description Tests the recursive workspace walker's ability to discover and index project files.
  * Usage: tsx scripts/verification/test-workspace-walker.ts
  */
-import { WorkspaceWalker } from '../../src/middleware/agentic/workspace-walker.js';
+import { WorkspaceWalker } from '../../src/pipeline/middlewares/workspace-walker.js';
 import path from 'path';
 
 import { fileURLToPath } from 'url';

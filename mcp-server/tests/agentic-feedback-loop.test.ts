@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs-extra';
 import path from 'path';
 import os from 'os';
-import { AgenticMiddleware, detectHallucination, summarizeResponse, extractCues } from '../src/middleware/agentic/agentic-middleware.js';
-import { ContextGatherer } from '../src/middleware/agentic/context-gatherer.js';
+import { AgenticMiddleware, detectHallucination, summarizeResponse, extractCues } from '../src/pipeline/middlewares/AgenticMiddleware.js';
+import { ContextGatherer } from '../src/pipeline/middlewares/context-gatherer.js';
 import type { PipelineContext } from '../src/pipeline/middleware.js';
 
 describe('Agentic Middleware Feedback Loop Tests', () => {

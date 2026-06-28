@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { decomposeGoal } from '../src/middleware/agentic/agentic-middleware.js';
-import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
+import { decomposeGoal } from '../src/pipeline/middlewares/AgenticMiddleware.js';
+import { AgenticMiddleware } from '../src/pipeline/middlewares/AgenticMiddleware.js';
 import type { PipelineContext } from '../src/pipeline/middleware.js';
 import fs from 'fs-extra';
 import path from 'path';

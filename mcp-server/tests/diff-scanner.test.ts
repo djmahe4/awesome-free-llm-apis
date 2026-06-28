@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs-extra';
 import path from 'path';
 import os from 'os';
-import { DiffScanner } from '../src/middleware/agentic/diff-scanner.js';
+import { DiffScanner } from '../src/pipeline/middlewares/diff-scanner.js';
 
 describe('DiffScanner Lock-Based Git Integration Tests', () => {
     const testDir = path.join(os.tmpdir(), 'mcp-diff-test-' + Date.now());

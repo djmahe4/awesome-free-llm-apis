@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectHallucination } from '../src/middleware/agentic/agentic-middleware.js';
+import { detectHallucination } from '../src/pipeline/middlewares/AgenticMiddleware.js';
 
 describe('Hallucination Detector Unit Tests', () => {
     it('detectHallucination() returns PASS for clean response', () => {
