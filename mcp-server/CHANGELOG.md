@@ -14,6 +14,16 @@
 - Added line-by-line cosine similarity (TF-IDF based) in memory manager and workspace-index integration for similar-file diff summaries.
 - Replaced fixed fallback `max_tokens` behavior with model-weighted token sizing utility.
 - Updated Hugging Face routing behavior to treat it as credit-based and deprioritize it versus fully-free alternatives.
+- Added `execute_skill` tool for executing prompts grounded in local skill instructions and reference files.
+- Added `vision_tool` for analyzing local images or remote image URLs and pdf files with optional text prompts.
+
+### 🔄 Refactoring & Robustness (Phases 1–5)
+
+- **Decoupled Routing Layer**: Split the monolithic `IntelligentRouterMiddleware` into specialized `TextRouterMiddleware` and `ImageRouterMiddleware`.
+- **Centralized Task Classification**: Created `TaskClassifier.ts` to house all prompt classification heuristics, improving execution speed and preventing vision model routing for text-based tasks.
+- **Consolidated Middleware Directories**: Moved all middleware files from `src/middleware/agentic/` and other directories into `src/pipeline/middlewares/` and standardized their naming (e.g., `AgenticMiddleware.ts`, `StructuralMiddleware.ts`).
+- **Resilient File Operations**: Added a retry-rename loop with backoff in `FileUtils.ts` to mitigate Windows file-locking issues (`EPERM`/`EBUSY`) during concurrent atomic writes.
+- **Benchmark Harness & Performance Tracking**: Upgraded `generate-live-samples.ts` to run fully isolated with a mocked `LLMExecutor`, profile memory, and output a performance table in `SAMPLES.md`.
 
 ### Next updates
 - **URL Context**: Planned support for direct URL consumption in the LLM pipeline by google or other llms if supported.

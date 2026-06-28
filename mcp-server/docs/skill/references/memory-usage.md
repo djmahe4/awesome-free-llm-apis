@@ -1,8 +1,6 @@
 # Memory Usage Strategy — `free-llm-apis`
 
-The `manage_memory` tool provides content-addressed, workspace-aware persistence. 
-
-**Architecture Note:** All memory is physically stored in the MCP server's local `data/memory.json` file. The `workspace_root` parameter is used to generate a unique cryptographic hash, acting as a logical namespace to isolate context between different projects.
+The server provides content-addressed, workspace-aware persistence using local JSON stores, a semantic wiki, and a PDF index cache.
 
 ---
 
@@ -10,12 +8,9 @@ The `manage_memory` tool provides content-addressed, workspace-aware persistence
 
 ### 1. Workspace Fingerprinting
 Always list the current workspace hash before reloading state:
-
 ```json
 { "action": "list", "workspace_root": "/absolute/path/to/workspace" }
 ```
-
-Use this hash to confirm project integrity.
 
 ### 2. Knowledge Retrieval
 Search for existing context before starting any task:
@@ -33,32 +28,53 @@ Monitor `stats` to prevent memory bloat:
 
 ---
 
-## 🔁 Evolving Pipeline Memory Schema
+## 📖 Semantic Wiki Structure [NEW]
 
-Use structured keys to version agent knowledge across iterations:
+The server automatically maintains a structured wiki under `.free-llm-mcp/wiki/` containing markdown files with YAML frontmatter.
 
+### Wiki Page Schema
+```markdown
+---
+title: user_authentication_refactor
+created: 2026-06-28T12:34:56.789Z
+updated: 2026-06-28T12:34:56.789Z
+confidence: 0.95
+tier: semantic
+tags: [code, adr, architecture]
+links: [session_history_slug]
+adr_ref: adr_001
+---
+
+# User Authentication Refactor
+
+We decided to use Redis for session management instead of JWT tokens.
 ```
-research/<topic>/<iteration_number>   → findings string
-subagent/<name>/instructions/<ts>     → instruction snapshot
-learning/<task>/score_history         → JSON array of quality scores
-```
 
-### Example: Research Accumulation
-Append each research call to the topic's record:
-1. `search` for `research/cybersecurity/3` (last known iteration).
-2. Merge with new LLM output.
-3. Store as `research/cybersecurity/4` for the next cycle.
-
-### Example: Subagent Instruction Versioning
-Refine instructions after each evaluation:
-1. `search` for `subagent/recon-agent/instructions/latest`.
-2. Generate improved instructions with a critique model.
-3. Write back with a new timestamp key.
-4. Maintain previous keys for rollback capability.
+### Auto-ADR (Architecture Decision Record) Extraction
+The wiki manager automatically parses all incoming agent completions for decision keywords. If a match is found, it creates/updates an ADR entry in the wiki:
+- **Triggers**: `/decided to/i`, `/chose\s+.*\s+over\s+.*/i`, `/we\s+use\s+.*\s+because/i`, `/decision:/i`.
 
 ---
 
-## 🛠️ Agentic Memory-State Patterns [NEW]
+## 📄 PDF Index Offset Caching [NEW]
+
+When a PDF file is referenced using a `#page=N` hash (e.g., `manual.pdf#page=12`), the server translates the page number using a cached offset.
+
+### Cached Index Schema
+Stored in long-term memory under `pdf:index:<pdf_filename_slug>`:
+```json
+{
+  "offset": 4,
+  "index_page": 1,
+  "last_updated": "2026-06-28T12:34:56.789Z"
+}
+```
+* **Offset**: The difference between the physical PDF page number and the printed document page number (e.g. if page 1 of the document is physical page 5, the offset is `4`).
+* **Auto-Detection**: If no offset is cached, the server automatically runs a quick multimodal LLM check on physical page 1 to detect table-of-contents / index indicators and compute the offset.
+
+---
+
+## 🦾 Agentic Memory-State Patterns
 
 ### Session-Based Task Queues
 Track multi-turn objectives without polluting the system prompt:

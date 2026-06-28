@@ -1,70 +1,77 @@
-# Code Mode Execution — `free-llm-apis`
+# Skill Execution & Sandboxed Code Logic
 
-The `code_mode` tool enables sandboxed JavaScript execution against a `DATA` string variable.
+The server provides a structured skill execution framework via the `execute_skill` tool and executes untrusted code safely using an internal QuickJS sandbox.
 
-## 🧪 Implementation Patterns
+---
 
-### 1. Data Processing
-Inject JSON strings into `DATA` and use `JSON.parse()`:
-```javascript
-const list = JSON.parse(DATA);
-const result = list.filter(item => item.active);
-print(JSON.stringify(result));
+## 🛠️ Writing Custom Skills
+
+Skills are structured directories placed under `.free-llm-mcp/skills/` (project-specific) or `C:\Users\<Username>\.gemini\config\skills\` (global).
+
+### 📁 Skill Directory Structure
+Each skill must have a `SKILL.md` file and optional supporting files:
+```
+.free-llm-mcp/skills/my-custom-skill/
+├── SKILL.md                  # Main instructions and frontmatter
+├── references/               # Technical references & docs
+│   └── API.md
+├── resources/                # Assets & templates
+└── examples/                 # Code examples
 ```
 
-### 2. Algorithmic Transformation
-Use for tasks poorly suited for LLMs (e.g., precise sorting, statistical reductions):
-- **Sorting:** Use `Array.prototype.sort()` for O(n log n) efficiency.
-- **Reductions:** Use `Array.prototype.reduce()` for single-pass statistics.
+### 📄 SKILL.md Format
+The `SKILL.md` file uses YAML frontmatter and standard markdown:
+```markdown
+---
+name: my-custom-skill
+description: "Brief description of what this skill does."
+---
 
-### 3. Agentic Prompt Compression [NEW]
-Compress large research findings before storing in memory or returning to the user:
+# My Custom Skill Guide
+
+Explain the core steps of the skill here. Reference any files in your skill directory:
+- Refer to the API in [API.md](references/API.md).
+```
+
+When calling `execute_skill` with `"skill": "my-custom-skill"`, the engine will automatically parse these file references, load their contents, and inject them into the system prompt.
+
+---
+
+## ⚡ The `execute_skill` Tool
+
+Execute a prompt grounded in a specific skill's instructions.
+
+**Example Request:**
+```json
+{
+  "skill": "my-custom-skill",
+  "input": "Write a script to fetch data.",
+  "workspace_root": "c:/Users/mahes/project"
+}
+```
+
+**Workflow**:
+1. **Security Gate**: Sanitizes the skill name to prevent path traversal (`..` is blocked).
+2. **Skill Resolution**: Searches the local `.free-llm-mcp/skills/` and global config directories.
+3. **Reference Parsing**: Extracts all relative file paths mentioned in `SKILL.md` (e.g. `references/`, `resources/`, `examples/`).
+4. **Context Injection**: Reads and compiles the contents of `SKILL.md` and all resolved reference files.
+5. **LLM Execution**: Invokes `use_free_llm` with the compiled skill instructions injected as a system prompt.
+
+---
+
+## 🛡️ Internal QuickJS Sandbox
+
+While the user-facing `code_mode` tool is deprecated, the `AgenticMiddleware` internally utilizes a secure QuickJS sandbox ([executor.ts](file:///c:/Users/mahes/OneDrive/Desktop/Python-Projects/awesome-free-llm-apis/mcp-server/src/sandbox/executor.ts)) to validate code, parse logs, or run algorithmic transformations during subtask execution.
+
+### Sandbox Constraints
+- **Isolation**: No access to `fs`, `net`, `os`, or `child_process`. It is a pure JavaScript execution context.
+- **Timeout**: Hard limit of `5000ms` to prevent infinite loops.
+- **Data Injection**: Inputs are injected as a global `DATA` string variable.
+- **Output Capture**: Only output printed via the global `print()` function is captured and returned.
+
+### Example Internal Sandbox Logic
 ```javascript
 const data = JSON.parse(DATA);
-const summary = data.map(item => ({
-  id: item.id,
-  summary: item.text.substring(0, 100) + '...',
-  tags: [...new Set(item.keywords.split(','))]
-}));
-print(JSON.stringify(summary));
+const results = data.items.filter(item => item.score > 0.8);
+print(JSON.stringify(results));
 ```
-
-### 4. Semantic Deduplication [NEW]
-Remove overlapping findings between iterative subagent calls:
-```javascript
-const sessions = JSON.parse(DATA); // Array of previous session results
-const uniqueFindings = {};
-sessions.forEach(session => {
-  session.findings.forEach(f => {
-    if (!uniqueFindings[f.id]) uniqueFindings[f.id] = f;
-  });
-});
-print(JSON.stringify(Object.values(uniqueFindings)));
-```
-
-### 🎯 Keyword Steering [NEW]
-The Intelligent Router uses keyword-based task classification to optimize prompt routing. When building logic, include relevant keywords in the task description or output to signal the router:
-- **`api`**: Triggers enhanced header extraction and rate-limit tracking.
-- **`memory`**: Prioritizes `manage_memory` search and usage logs.
-- **`sql` / `json`**: Optimizes the parser for structured data extraction.
-- **`system`**: Forces high-precision model selection for architectural tasks.
-
----
-
-## 🛡️ Sandbox Limits
-- **Timeout**: 5000ms.
-- **Access**: No `fs`, `net`, or `os` modules.
-- **Output**: Only `print()` captured via `stdout` is returned.
-
-## 💡 Best Practices
-- **Token Optimization**: Use `code_mode` to flatten deeply nested JSON before it reaches the LLM context.
-- **Deduplication**: Always deduplicate repetitive research hits to keep the `compressionRatio` low.
-- **JSON Safety**: Wrap `print()` output in `JSON.stringify()` to ensure correct parsing.
-
----
-
-## Agentic Use Case: "The Chain of Logic"
-When a task requires multiple mathematical or logical steps (e.g., calculating cumulative ROI across 100 scenarios), do **not** let the LLM do the math. 
-1. **Generate**: Use `use_free_llm` to produce the raw data components.
-2. **Execute**: Use `code_mode` to perform the precise logic.
-3. **Store**: Use `manage_memory` to persist the final validated result.
