@@ -19,6 +19,7 @@ export interface PersistentUsage {
   lastSyncTime?: number;
   optOutTelemetry?: boolean;
   firebaseUid?: string;
+  firebaseRefreshToken?: string;
   fallbackUid?: string;
   providers: Record<string, {
     lastSyncTime: number;
@@ -213,6 +214,7 @@ export class PersistenceManager {
       lastSyncTime: Math.max(base.lastSyncTime || 0, memory.lastSyncTime || 0),
       optOutTelemetry: memory.optOutTelemetry !== undefined ? memory.optOutTelemetry : base.optOutTelemetry,
       firebaseUid: memory.firebaseUid || base.firebaseUid,
+      firebaseRefreshToken: memory.firebaseRefreshToken || base.firebaseRefreshToken,
       fallbackUid: memory.fallbackUid || base.fallbackUid,
       providers: { ...base.providers }
     };

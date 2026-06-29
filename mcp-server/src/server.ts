@@ -36,6 +36,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import helmet from 'helmet';
 import crypto from 'crypto';
+import os from 'os';
 import { getTokenStats } from './tools/get-token-stats.js';
 import { listAvailableFreeModels } from './tools/list-models.js';
 import { validateProvider } from './tools/validate-provider.js';
@@ -248,6 +249,19 @@ async function main() {
         try {
           const state = await persistence.load();
           const list = await getLeaderboard(state.userId);
+          
+          // Local fallback: ensure the current user is always visible
+          if (!list.some((u: any) => u.isCurrentUser)) {
+            list.push({
+              isCurrentUser: true,
+              username: state.username || `anonymous-${state.userId?.substring(0, 6)}`,
+              lifetimeTokens: state.lifetimeTotalTokens || 0,
+              lifetimeRequests: state.lifetimeTotalRequests || 0,
+              lastSyncTime: state.lastSyncTime || Date.now()
+            });
+            list.sort((a: any, b: any) => b.lifetimeTokens - a.lifetimeTokens);
+          }
+          
           res.json(list);
         } catch (err) {
           res.status(500).json({ error: String(err) });
@@ -313,12 +327,20 @@ async function main() {
               const messages = Array.isArray(params.messages)
                 ? params.messages
                 : [{ role: 'user', content: String(params.messages || params.prompt || '') }];
+              
+              // Resolve sessionId from workspace_root if not provided
+              let sid = params.sessionId;
+              if (!sid && params.workspace_root) {
+                sid = Buffer.from(params.workspace_root).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+              }
+
               const r = await useFreeLLM({
                 messages,
                 model: params.model,
                 keywords: params.keywords,
                 agentic: !!params.agentic,
                 workspace_root: params.workspace_root,
+                sessionId: sid || '__no_ws__',
               });
               result = { content: r?.choices?.[0]?.message?.content ?? '' };
               break;
@@ -353,6 +375,16 @@ async function main() {
                 force: !!params.force,
               });
               break;
+            case 'load_skill_prompt': {
+              const { loadSkillPrompt } = await import('./tools/load-skill-prompt.js');
+              result = await loadSkillPrompt({
+                type: params.type,
+                name: params.name,
+                keywords: params.keywords,
+                workspaceDir: params.workspaceDir,
+              });
+              break;
+            }
             case 'store_workspace_skill': {
               const { storeWorkspaceSkill } = await import('./tools/store-workspace-skill.js');
               result = await storeWorkspaceSkill({
@@ -389,7 +421,7 @@ async function main() {
       app.get('/api/sessions', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
-          const projectsBase = path.join(process.cwd(), 'data', 'projects');
+          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
           try { await fsp.access(projectsBase); } catch { return res.json({ sessions: [] }); }
 
           const entries = await fsp.readdir(projectsBase);
@@ -417,6 +449,17 @@ async function main() {
             sessions.push(...results.filter((s): s is SessionMeta => s !== null));
           }
 
+          // Ensure __no_ws__ is always present in the list
+          if (!sessions.some(s => s.id === '__no_ws__')) {
+            let msgCount = 0; let lastTs = Date.now() - 365 * 24 * 60 * 60 * 1000; // 1 year ago default
+            try {
+              const log: any[] = JSON.parse(await fsp.readFile(path.join(projectsBase, '__no_ws__', 'chat-log.json'), 'utf-8'));
+              msgCount = log.length;
+              if (log.length) lastTs = log[log.length - 1].ts || Date.now();
+            } catch {}
+            sessions.push({ id: '__no_ws__', msgCount, lastTs });
+          }
+
           sessions.sort((a, b) => b.lastTs - a.lastTs);
           res.json({ sessions });
         } catch (err) {
@@ -434,8 +477,8 @@ async function main() {
             res.status(400).json({ error: 'Invalid sessionId' });
             return;
           }
-          // Step 2: Resolve and verify the resulting path is a direct child of data/projects/
-          const projectsBase = path.join(process.cwd(), 'data', 'projects');
+          // Step 2: Resolve and verify the resulting path is a direct child of projects/
+          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
           const projectDir = path.resolve(projectsBase, sessionId);
           if (path.dirname(projectDir) !== projectsBase) {
             res.status(400).json({ error: 'Invalid sessionId' });
@@ -491,21 +534,34 @@ async function main() {
           if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
             return res.status(400).json({ error: 'Invalid sessionId' });
           }
-          const projectsBase = path.join(process.cwd(), 'data', 'projects');
+          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
           const logPath = path.resolve(projectsBase, sessionId, 'chat-log.json');
           // Path traversal guard: must stay within projectsBase
           if (!logPath.startsWith(path.resolve(projectsBase) + path.sep)) {
             return res.status(400).json({ error: 'Invalid sessionId' });
           }
-          let log: any[] = [];
+           let log: any[] = [];
           try {
             log = JSON.parse(await fsp.readFile(logPath, 'utf-8'));
           } catch { /* file doesn't exist yet — empty log */ }
+
+          let workspace = '';
+          if (sessionId !== '__no_ws__') {
+            try {
+              const knowledgePath = path.resolve(projectsBase, sessionId, 'knowledge.md');
+              const knowledgeContent = await fsp.readFile(knowledgePath, 'utf-8');
+              const match = knowledgeContent.match(/<!-- workspace: (.*?) -->/);
+              if (match) {
+                workspace = match[1].trim();
+              }
+            } catch {}
+          }
+
           const q = ((req.query.q as string) || '').toLowerCase().trim();
           const filtered = q
             ? log.filter(m => (m.content || '').toLowerCase().includes(q))
             : log;
-          res.json({ sessionId, log: filtered.slice(-200) });
+          res.json({ sessionId, log: filtered.slice(-200), workspace });
         } catch (err) {
           res.status(500).json({ error: String(err) });
         }
@@ -523,7 +579,7 @@ async function main() {
           const { role, tool, content, latencyMs, ts } = req.body || {};
           if (!role || !content) return res.status(400).json({ error: 'role and content required' });
 
-          const projectsBase = path.join(process.cwd(), 'data', 'projects');
+          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
           const dir = path.resolve(projectsBase, sessionId);
           if (!dir.startsWith(path.resolve(projectsBase) + path.sep) && dir !== path.resolve(projectsBase, '__no_ws__')) {
             return res.status(400).json({ error: 'Invalid sessionId' });
@@ -554,7 +610,7 @@ async function main() {
             return res.status(400).json({ error: 'Invalid sessionId' });
           }
           const logPath = path.resolve(
-            path.join(process.cwd(), 'data', 'projects'), sessionId, 'chat-log.json'
+            path.join(os.homedir(), '.free-llm-mcp', 'projects'), sessionId, 'chat-log.json'
           );
           await withFileLock(logPath, async () => {
             await writeFileAtomic(logPath, '[]');

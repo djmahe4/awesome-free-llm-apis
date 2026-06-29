@@ -293,6 +293,16 @@ const TOOLS = [
     ]
   },
   {
+    id: 'load_skill_prompt', label: 'load_skill_prompt', icon: '📥',
+    tag: 'Skill Loading',
+    fields: [
+      { id: 'type',         label: 'Action Type', type: 'select', options: ['load', 'search'] },
+      { id: 'name',         label: 'Skill Name', type: 'text', placeholder: 'tdd-workflow' },
+      { id: 'keywords',     label: 'Keywords (comma-separated for search)', type: 'text', placeholder: 'tdd, testing' },
+      { id: 'workspaceDir', label: 'Workspace Directory (optional)', type: 'text', placeholder: 'C:/path/to/workspace' }
+    ]
+  },
+  {
     id: 'manage_memory', label: 'manage_memory', icon: '🧠',
     tag: 'Memory',
     fields: [
@@ -593,7 +603,17 @@ async function loadChatHistory(sid) {
   try {
     const r = await fetch(`/api/chat-log/${encodeURIComponent(sid)}`);
     if (!r.ok) return [];
-    const { log } = await r.json();
+    const { log, workspace } = await r.json();
+    
+    if (workspace && workspace !== 'unknown') {
+      pgWorkspace.value = workspace;
+      localStorage.setItem('mcp-workspace', workspace);
+    } else {
+      pgWorkspace.value = '';
+      localStorage.setItem('mcp-workspace', '');
+    }
+    updateWorkspaceUI();
+    
     return Array.isArray(log) ? log : [];
   } catch { return []; }
 }
@@ -642,7 +662,85 @@ function appendBubbleFromRecord(msg) {
     });
   } else if (msg.role === 'error') {
     addErrorBubbleEl(msg.content, msg.tool, msg.ts);
+  } else if (msg.role === 'subtask_start') {
+    addSubtaskStartBubble(msg.content, msg.ts);
+  } else if (msg.role === 'subtask_response') {
+    addSubtaskResponseBubble(msg.content, msg.output, msg.ts, msg.contextInjected);
   }
+}
+
+function addSubtaskStartBubble(taskText, ts) {
+  chatEmpty.style.display = 'none';
+  const div = document.createElement('div');
+  div.className = 'chat-spinner-bubble subtask-active-spinner';
+  div.innerHTML = `
+    <div class="spin-header">
+      <div class="spin-dots">
+        <span class="spin-dot"></span><span class="spin-dot"></span><span class="spin-dot"></span>
+      </div>
+      <span>Subagent Executing:</span>
+      <span class="spin-tool-tag">${esc(taskText)}</span>
+    </div>
+    <span class="chat-meta-timestamp">${new Date(ts || Date.now()).toLocaleTimeString()}</span>`;
+  chatLog.appendChild(div);
+  scrollChatBottom();
+  return div;
+}
+
+function addSubtaskResponseBubble(taskText, outputText, ts, contextInjected) {
+  chatEmpty.style.display = 'none';
+  
+  // Remove any active spinner for this subtask to keep the flow clean
+  const activeSpinners = chatLog.querySelectorAll('.subtask-active-spinner');
+  activeSpinners.forEach(s => {
+    const tag = s.querySelector('.spin-tool-tag');
+    if (tag && tag.textContent === taskText) {
+      s.remove();
+    }
+  });
+
+  const div = document.createElement('div');
+  div.className = 'chat-msg assistant subtask-collapse-card';
+  div.style.margin = '8px 0 8px 16px';
+  div.style.opacity = '0.85';
+  
+  const uniqueId = 'subtask-' + Math.random().toString(36).substring(2, 9);
+  
+  const contextHtml = Array.isArray(contextInjected) && contextInjected.length > 0
+    ? `<details style="margin-top:8px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.04);">
+        <summary style="cursor:pointer; font-size:.7rem; color:var(--accent-cyan); display:flex; align-items:center; gap:4px; outline:none; list-style:none;">
+          <span>📂</span> <span>View Injected Context (${contextInjected.length})</span>
+        </summary>
+        <ul style="margin-top:6px; padding-left:16px; font-size:.7rem; color:var(--text-muted); display:flex; flex-direction:column; gap:4px; list-style-type:circle;">
+          ${contextInjected.map(c => `<li>${esc(c)}</li>`).join('')}
+        </ul>
+       </details>`
+    : '';
+
+  div.innerHTML = `
+    <div class="chat-bubble" style="padding:10px 14px; background:rgba(255,255,255,0.02); border-left: 3px solid var(--accent-purple);">
+      <details id="${uniqueId}">
+        <summary style="cursor:pointer; font-size:.78rem; font-weight:600; color:var(--text-secondary); display:flex; justify-content:space-between; align-items:center; outline:none; list-style:none;">
+          <span style="display:flex; align-items:center; gap:6px;">
+            <span style="color:var(--accent-green)">✓</span> 
+            <span>Subtask: ${esc(taskText.replace('Completed: ', ''))}</span>
+          </span>
+          <span style="font-size:.7rem; color:var(--text-muted);">click to view output</span>
+        </summary>
+        <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); font-size:.75rem; font-family:'JetBrains Mono', monospace; overflow-x:auto; max-height:200px; white-space:pre-wrap; color:var(--text-muted);">
+          ${esc(outputText || 'No output details recorded.')}
+        </div>
+      </details>
+      ${contextHtml}
+    </div>
+    <div class="chat-meta" style="margin-left: 16px;">
+      <span>Subagent Execution</span>
+      <span>${new Date(ts || Date.now()).toLocaleTimeString()}</span>
+    </div>`;
+  
+  chatLog.appendChild(div);
+  scrollChatBottom();
+  return div;
 }
 
 function addUserBubbleEl(text, tool, ts) {
@@ -754,9 +852,14 @@ function renderConvList(sessions) {
     el.addEventListener('click', async () => {
       const sid = el.dataset.sid;
       if (sid === activeSessionId) return;
-      // Find the workspace that maps to this session ID — we can't reverse the hash,
-      // so just switch the history without changing the workspace input.
+      
       activeSessionId = sid;
+      if (sid === '__no_ws__') {
+        pgWorkspace.value = '';
+        localStorage.setItem('mcp-workspace', '');
+        updateWorkspaceUI();
+      }
+      
       chatHistory = await loadChatHistory(sid);
       rebuildChatLog();
       refreshConvList(convSearch?.value || '');
@@ -843,7 +946,13 @@ pgRunBtn.addEventListener('click', async () => {
   const params = collectParams(activeTool);
 
   const ws = pgWorkspace.value.trim();
-  if (activeTool.id === 'use_free_llm' && ws) params.agentic = true;
+  if (ws) {
+    params.workspace_root = ws;
+    params.sessionId = activeSessionId;
+    if (activeTool.id === 'use_free_llm') {
+      params.agentic = true;
+    }
+  }
 
   const userText = params.prompt || params.query || params.input
     || `[${activeTool.label}] ${JSON.stringify(params).slice(0, 120)}`;
@@ -860,6 +969,17 @@ pgRunBtn.addEventListener('click', async () => {
   pgRunBtn.innerHTML = '<span class="spinner"></span>';
   pgStatus.textContent = '';
   pgLatency.style.display = 'none';
+
+  let pollInterval = setInterval(async () => {
+    try {
+      const log = await loadChatHistory(activeSessionId);
+      // Only rebuild if there's new content to avoid layout jumps
+      if (log.length !== chatHistory.length) {
+        chatHistory = log;
+        rebuildChatLog();
+      }
+    } catch {}
+  }, 800);
 
   try {
     const r    = await fetch('/api/tool', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tool: activeTool.id, params }) });
@@ -897,6 +1017,12 @@ pgRunBtn.addEventListener('click', async () => {
     spinnerEl.replaceWith(addErrorBubbleEl(errMsg, activeTool.id, Date.now()));
     pgStatus.textContent = '✗ Error'; pgStatus.style.color = 'var(--accent-red)';
   } finally {
+    clearInterval(pollInterval);
+    // Do one final sync to ensure everything is matched up
+    try {
+      chatHistory = await loadChatHistory(activeSessionId);
+      rebuildChatLog();
+    } catch {}
     pgRunBtn.disabled = false;
     pgRunBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send`;
     refreshConvList(); // update message count in sidebar
@@ -939,7 +1065,8 @@ async function fetchSessions() {
     while (memSessionSelect.options.length > 1) memSessionSelect.remove(1);
     sessions.forEach(s => {
       const o = document.createElement('option');
-      o.value = s; o.textContent = s;
+      o.value = s.id;
+      o.textContent = s.id === '__no_ws__' ? '⚡ One-shot' : s.id;
       memSessionSelect.appendChild(o);
     });
   } catch {}

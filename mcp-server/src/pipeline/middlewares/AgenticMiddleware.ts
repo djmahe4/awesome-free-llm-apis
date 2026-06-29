@@ -503,6 +503,22 @@ async function logAgenticDebug(sessionId: string, data: any): Promise<void> {
     }
 }
 
+async function logChatTurn(sessionId: string, turn: any): Promise<void> {
+    try {
+        const logPath = path.join(PROJECTS_DIR, sessionId, 'chat-log.json');
+        let log: any[] = [];
+        try {
+            const raw = await fs.readFile(logPath, 'utf-8');
+            log = JSON.parse(raw);
+        } catch {}
+        log.push({ ts: Date.now(), ...turn });
+        if (log.length > 200) log = log.slice(-200);
+        await writeFileAtomic(logPath, JSON.stringify(log));
+    } catch {
+        // non-fatal
+    }
+}
+
 export function compressSemantically(text: string, maxChars: number): string {
     if (text.length <= maxChars) return text;
 
@@ -731,7 +747,8 @@ async function executeSingleSubtask(
     workspaceRoot: string | undefined,
     subtaskIteration: number,
     history: SubtaskHistoryEntry[],
-    executor: LLMExecutor
+    executor: LLMExecutor,
+    subtaskContexts: string[]
 ): Promise<boolean> {
     let enrichmentCycleCount = 0;
     const MAX_ENRICHMENT_CYCLES = 2;
@@ -834,6 +851,7 @@ async function executeSingleSubtask(
                         const extension = path.extname(filename).slice(1) || 'text';
                         const proactiveMsg = `[PROACTIVE-CONTEXT] Content of \`${filename}\`:\n\n\`\`\`${extension}\n${truncated}\n\`\`\``;
                         context.request.messages.push({ role: 'user', content: proactiveMsg });
+                        subtaskContexts.push(`📄 **File Injected**: \`${filename}\` (${truncated.length} chars)`);
                         await logAgenticDebug(sessionId, {
                             type: 'proactive_context_injected',
                             file: filename
@@ -915,6 +933,7 @@ async function executeSingleSubtask(
                 const uniqueLines = [...new Set(gatheredContextLines)];
                 const enrichmentMsg = `[CONTEXT-ENRICHMENT] Here is the gathered context from the workspace:\n\n${uniqueLines.join('\n')}`;
                 context.request.messages.push({ role: 'user', content: enrichmentMsg });
+                subtaskContexts.push(`🔍 **Grep Context**: Injected ${uniqueLines.length} lines matching: \`${cues.join(', ') || 'workspace query'}\``);
             } else {
                 const entityName = cues.length > 0 ? cues.join(', ') : 'requested content';
                 const unavailableMsg = `[CONTEXT-UNAVAILABLE] ${entityName} was not found in the workspace. Please proceed with available information.`;
@@ -955,6 +974,7 @@ async function executeSingleSubtask(
                 if (recoveryAnswers.length > 0) {
                     const recoveryMsg = `[RECOVERY-CONTEXT] We noticed a potential hallucination or missing info. Here is the gathered recovery context:\n\n${recoveryAnswers.join('\n')}`;
                     context.request.messages.push({ role: 'user', content: recoveryMsg });
+                    subtaskContexts.push(`🛡️ **Recovery Context**: Injected ${recoveryAnswers.length} lines to resolve hallucination.`);
                     
                     const recoveryResponse = await executor.prompt(context.request.messages, context.request.model, {
                         taskType: context.taskType || 'coding',
@@ -1151,6 +1171,9 @@ export class AgenticMiddleware implements Middleware {
 
         let executionPlanBrief = '';
         if (userContent && q.nowQueue.length === 0) {
+            // Log the user's turn to the chat log
+            await logChatTurn(sessionId, { role: 'user', tool: 'use_free_llm', content: userContent });
+
             const steps = decomposeGoal(userContent);
             const limitedSteps = this.limitSubtasks(steps);
             
@@ -1218,7 +1241,7 @@ export class AgenticMiddleware implements Middleware {
                         }
                     } as any;
                     
-                    await executeSingleSubtask(t.task, clonedCtx, sessionId, projectDir, workspaceRoot, subtaskIteration, q.history || [], this.executor);
+                    await executeSingleSubtask(t.task, clonedCtx, sessionId, projectDir, workspaceRoot, subtaskIteration, q.history || [], this.executor, []);
                     return clonedCtx;
                 });
 
@@ -1337,11 +1360,17 @@ export class AgenticMiddleware implements Middleware {
                     await new Promise(r => setTimeout(r, 500));
                 }
 
-                const success = await executeSingleSubtask(currentTask, context, sessionId, projectDir, workspaceRoot, subtaskIteration, q.history || [], this.executor);
+                // Log subtask start
+                const subtaskContexts: string[] = [];
+                await logChatTurn(sessionId, { role: 'subtask_start', tool: 'Agentic Subtask', content: currentTask });
+
+                const success = await executeSingleSubtask(currentTask, context, sessionId, projectDir, workspaceRoot, subtaskIteration, q.history || [], this.executor, subtaskContexts);
                 
                 const responseContent = getResponseContent(context);
 
                 if (!success || !responseContent) {
+                    // Log subtask failure
+                    await logChatTurn(sessionId, { role: 'error', tool: 'Agentic Subtask', content: `Failed: ${currentTask}` });
                     if (!q.promptId) {
                         q.promptId = Math.random().toString(36).substring(2, 8).toUpperCase();
                     }
@@ -1364,6 +1393,15 @@ export class AgenticMiddleware implements Middleware {
                     } as any;
                     return;
                 }
+
+                // Log subtask completion
+                await logChatTurn(sessionId, { 
+                    role: 'subtask_response', 
+                    tool: 'Agentic Subtask', 
+                    content: `Completed: ${currentTask}`, 
+                    output: responseContent,
+                    contextInjected: subtaskContexts
+                });
 
                 // Record history of the completed subtask
                 const filesModified = getTaskFiles(responseContent);
@@ -1388,6 +1426,7 @@ export class AgenticMiddleware implements Middleware {
 
                         if (gathered && gathered.length > 0) {
                             const limited = gathered.slice(0, 5);
+                            subtaskContexts.push(`💡 **Data Demand Context**: Injected ${limited.length} lines of matching code/text.`);
                             const enrichmentMsg = `[CONTEXT-ENRICHMENT] Here is the gathered context from the workspace:\n\n${limited.join('\n')}`;
                             context.request.messages.push({ role: 'user', content: enrichmentMsg });
 
@@ -1430,6 +1469,14 @@ export class AgenticMiddleware implements Middleware {
 
         if (!context.response) {
             await next();
+        }
+
+        // Log final agentic response if the queue is fully processed
+        if (context.response && q.nowQueue.length === 0) {
+            const finalContent = getResponseContent(context);
+            if (finalContent) {
+                await logChatTurn(sessionId, { role: 'assistant', tool: 'Agentic Output', content: finalContent });
+            }
         }
 
         console.error(`[agentic-middleware] ${Date.now() - startMs}ms session=${sessionId} iterations=${subtaskIteration}`);

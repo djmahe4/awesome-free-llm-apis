@@ -1,39 +1,20 @@
-import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getAuth, signInAnonymously } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, query, orderBy, limit, getDocs } from 'firebase/firestore/lite';
 import crypto from 'crypto';
 import { persistence } from './PersistenceManager.js';
 
-let app: FirebaseApp | null = null;
-let db: any = null;
-let auth: any = null;
-let anonymousUser: any = null;
 let isOffline = true;
-
-export interface FirebaseConfig {
-    apiKey: string;
-    authDomain: string;
-    projectId: string;
-    storageBucket: string;
-    messagingSenderId: string;
-    appId: string;
-    measurementId?: string;
-}
+let apiKey = '';
+let projectId = '';
+let cachedIdToken = '';
+let idTokenExpiry = 0;
+let cachedRefreshToken = '';
 
 export async function initFirebase(): Promise<string> {
-    const config: FirebaseConfig = {
-        apiKey: process.env.FIREBASE_API_KEY || '',
-        authDomain: process.env.FIREBASE_AUTH_DOMAIN || '',
-        projectId: process.env.FIREBASE_PROJECT_ID || '',
-        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || '',
-        messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || '',
-        appId: process.env.FIREBASE_APP_ID || '',
-        measurementId: process.env.FIREBASE_MEASUREMENT_ID
-    };
+    apiKey = process.env.FIREBASE_API_KEY || '';
+    projectId = process.env.FIREBASE_PROJECT_ID || '';
 
     const state = await persistence.load();
 
-    if (!config.apiKey || !config.projectId) {
+    if (!apiKey || !projectId) {
         console.warn('[Firebase] Firebase configuration missing, running in offline fallback mode.');
         isOffline = true;
         
@@ -45,33 +26,51 @@ export async function initFirebase(): Promise<string> {
     }
 
     try {
-        if (getApps().length === 0) {
-            app = initializeApp(config);
-        } else {
-            app = getApp();
+        const savedRefreshToken = (state as any).firebaseRefreshToken;
+        const savedUid = state.firebaseUid;
+
+        if (savedRefreshToken && savedUid) {
+            // Attempt to refresh the token to verify it and obtain a fresh idToken
+            const refreshed = await exchangeRefreshToken(savedRefreshToken);
+            if (refreshed) {
+                cachedIdToken = refreshed.idToken;
+                idTokenExpiry = Date.now() + refreshed.expiresIn * 1000;
+                cachedRefreshToken = refreshed.refreshToken;
+                isOffline = false;
+                
+                (state as any).firebaseRefreshToken = refreshed.refreshToken;
+                state.firebaseUid = refreshed.userId;
+                await persistence.save(state);
+
+                console.error(`[Firebase Debug] Syncing stats. Authenticated UID: "${refreshed.userId}", Target Document ID: "${refreshed.userId}"`);
+                return refreshed.userId;
+            }
         }
-        auth = getAuth(app);
-        
-        // Re-use already persisted Firebase UID to prevent resets on restart
-        if (state.firebaseUid) {
-            db = getFirestore(app);
-            isOffline = false;
-            console.error(`[Firebase Debug] Syncing stats. Authenticated UID: "${state.firebaseUid}", Target Document ID: "${state.firebaseUid}"`);
-            return state.firebaseUid;
+
+        // Fallback or brand new sign-in: Sign up anonymously via REST
+        const url = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`;
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ returnSecureToken: true })
+        });
+
+        if (!res.ok) {
+            throw new Error(`Auth request failed with status ${res.status}`);
         }
-        
-        const credential = await signInAnonymously(auth);
-        anonymousUser = credential.user;
-        
-        state.firebaseUid = anonymousUser.uid;
-        await persistence.save(state);
-        
-        // Initialize Firestore only after Auth is fully completed
-        db = getFirestore(app);
-        
+
+        const data = await res.json();
+        cachedIdToken = data.idToken;
+        idTokenExpiry = Date.now() + parseInt(data.expiresIn, 10) * 1000;
+        cachedRefreshToken = data.refreshToken;
         isOffline = false;
-        console.error(`[Firebase Debug] Syncing stats. Authenticated UID: "${anonymousUser.uid}", Target Document ID: "${anonymousUser.uid}"`);
-        return anonymousUser.uid;
+
+        state.firebaseUid = data.localId;
+        (state as any).firebaseRefreshToken = data.refreshToken;
+        await persistence.save(state);
+
+        console.error(`[Firebase Debug] Syncing stats. Authenticated UID: "${data.localId}", Target Document ID: "${data.localId}"`);
+        return data.localId;
     } catch (error) {
         console.warn(`[Firebase] Connection failed: ${(error as Error).message}. Running in offline fallback mode.`);
         isOffline = true;
@@ -84,33 +83,92 @@ export async function initFirebase(): Promise<string> {
     }
 }
 
-export async function syncStats(userId: string, data: any): Promise<boolean> {
-    if (isOffline || !db) return false;
+async function exchangeRefreshToken(refreshToken: string): Promise<{ idToken: string; refreshToken: string; userId: string; expiresIn: number } | null> {
     try {
-        const currentUid = auth?.currentUser?.uid;
-        console.error(`[Firebase Debug] Syncing stats. Authenticated UID: "${currentUid}", Target Document ID: "${userId}"`);
-        
+        const url = `https://securetoken.googleapis.com/v1/token?key=${apiKey}`;
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        return {
+            idToken: data.id_token,
+            refreshToken: data.refresh_token,
+            userId: data.user_id,
+            expiresIn: parseInt(data.expires_in, 10)
+        };
+    } catch {
+        return null;
+    }
+}
+
+async function getValidIdToken(): Promise<string> {
+    if (Date.now() >= idTokenExpiry - 60000) {
+        // Refresh token 1 minute before expiry
+        const refreshed = await exchangeRefreshToken(cachedRefreshToken);
+        if (refreshed) {
+            cachedIdToken = refreshed.idToken;
+            idTokenExpiry = Date.now() + refreshed.expiresIn * 1000;
+            cachedRefreshToken = refreshed.refreshToken;
+            
+            const state = await persistence.load();
+            (state as any).firebaseRefreshToken = refreshed.refreshToken;
+            await persistence.save(state);
+        }
+    }
+    return cachedIdToken;
+}
+
+export async function syncStats(userId: string, data: any): Promise<boolean> {
+    if (isOffline) return false;
+    try {
+        const token = await getValidIdToken();
         const todayStr = new Date().toISOString().split('T')[0];
-        const userDocRef = doc(db, 'users', userId);
-        const dailyDocRef = doc(db, 'token_usage', `${userId}_${todayStr}`);
         
-        await setDoc(userDocRef, {
-            username: data.username || `anonymous-${userId.substring(0, 6)}`,
-            lifetimeTokens: data.lifetimeTotalTokens || 0,
-            lifetimeRequests: data.lifetimeTotalRequests || 0,
-            lastSyncTime: Date.now(),
-            optOutTelemetry: data.optOutTelemetry || false
-        }, { merge: true });
+        const userDocData = {
+            fields: {
+                username: { stringValue: data.username || `anonymous-${userId.substring(0, 6)}` },
+                lifetimeTokens: { integerValue: String(data.lifetimeTotalTokens || 0) },
+                lifetimeRequests: { integerValue: String(data.lifetimeTotalRequests || 0) },
+                lastSyncTime: { integerValue: String(Date.now()) },
+                optOutTelemetry: { booleanValue: !!data.optOutTelemetry }
+            }
+        };
 
-        await setDoc(dailyDocRef, {
-            userId: userId,
-            date: todayStr,
-            dailyRequests: data.dailyTotalRequests || 0,
-            dailyTokens: data.dailyTotalTokens || 0,
-            lastUpdated: Date.now()
-        }, { merge: true });
+        // Write user document
+        const userRes = await fetch(`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/users/${userId}?updateMask.fieldPaths=username&updateMask.fieldPaths=lifetimeTokens&updateMask.fieldPaths=lifetimeRequests&updateMask.fieldPaths=lastSyncTime&updateMask.fieldPaths=optOutTelemetry`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(userDocData)
+        });
 
-        return true;
+        // Write daily document
+        const dailyUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/token_usage/${userId}_${todayStr}`;
+        const dailyDocData = {
+            fields: {
+                userId: { stringValue: userId },
+                date: { stringValue: todayStr },
+                dailyRequests: { integerValue: String(data.dailyTotalRequests || 0) },
+                dailyTokens: { integerValue: String(data.dailyTotalTokens || 0) },
+                lastUpdated: { integerValue: String(Date.now()) }
+            }
+        };
+
+        await fetch(`${dailyUrl}?updateMask.fieldPaths=userId&updateMask.fieldPaths=date&updateMask.fieldPaths=dailyRequests&updateMask.fieldPaths=dailyTokens&updateMask.fieldPaths=lastUpdated`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(dailyDocData)
+        });
+
+        return userRes.ok;
     } catch (err) {
         console.error('[Firebase] Failed to sync stats:', err);
         return false;
@@ -119,7 +177,6 @@ export async function syncStats(userId: string, data: any): Promise<boolean> {
 
 function sanitizeText(text: string): string {
     if (!text) return text;
-    // Redact common API key signatures: Google/Firebase (AIzaSy...), OpenAI/Anthropic/Groq/Mistral (sk-..., gsk_...), Cloudflare (cfut_...)
     return text
         .replace(/AIzaSy[A-Za-z0-9_\-]{33}/g, '[REDACTED_API_KEY]')
         .replace(/(?:sk|gsk|cfut)_[A-Za-z0-9_\-]{30,}/g, '[REDACTED_API_KEY]')
@@ -127,25 +184,38 @@ function sanitizeText(text: string): string {
 }
 
 export async function logErrorTelemetry(userId: string, errorMsg: string, stack: string, promptQueue: string[], commsQueue: string[]): Promise<boolean> {
-    if (isOffline || !db) return false;
+    if (isOffline) return false;
     try {
+        const token = await getValidIdToken();
         const errorId = crypto.randomUUID();
-        const errorDocRef = doc(db, 'errors', errorId);
+        const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/errors/${errorId}`;
         
         const cleanPrompts = promptQueue.map(p => sanitizeText(p));
         const cleanComms = commsQueue.map(c => sanitizeText(c));
         const cleanError = sanitizeText(errorMsg);
         const cleanStack = sanitizeText(stack);
 
-        await setDoc(errorDocRef, {
-            userId,
-            error: cleanError,
-            stack: cleanStack,
-            promptQueue: cleanPrompts,
-            commsQueue: cleanComms,
-            timestamp: Date.now()
+        const errorDocData = {
+            fields: {
+                userId: { stringValue: userId },
+                error: { stringValue: cleanError },
+                stack: { stringValue: cleanStack },
+                promptQueue: { arrayValue: { values: cleanPrompts.map(p => ({ stringValue: p })) } },
+                commsQueue: { arrayValue: { values: cleanComms.map(c => ({ stringValue: c })) } },
+                timestamp: { integerValue: String(Date.now()) }
+            }
+        };
+
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(errorDocData)
         });
-        return true;
+
+        return res.ok;
     } catch (err) {
         console.error('[Firebase] Failed to log error telemetry:', err);
         return false;
@@ -153,42 +223,85 @@ export async function logErrorTelemetry(userId: string, errorMsg: string, stack:
 }
 
 export async function getLeaderboard(currentUserId?: string): Promise<any[]> {
-    if (isOffline || !db) return [];
+    if (isOffline) return [];
     try {
-        const q = query(collection(db, 'users'), orderBy('lifetimeTokens', 'desc'), limit(10));
-        const querySnapshot = await getDocs(q);
-        const list: any[] = [];
-        let currentUserInTop10 = false;
+        const token = await getValidIdToken();
+        const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:runQuery`;
         
-        querySnapshot.forEach((doc) => {
-            const data = doc.data();
-            const isCurrent = doc.id === currentUserId;
-            if (isCurrent) {
-                currentUserInTop10 = true;
+        const queryBody = {
+            structuredQuery: {
+                from: [{ collectionId: 'users' }],
+                orderBy: [
+                    {
+                        field: { fieldPath: 'lifetimeTokens' },
+                        direction: 'DESCENDING'
+                    },
+                    { field: { fieldPath: '__name__' }, direction: 'DESCENDING' }
+                ],
+                limit: 10
             }
-            list.push({ 
-                isCurrentUser: isCurrent,
-                username: data.username || `anonymous-${doc.id.substring(0, 6)}`,
-                lifetimeTokens: data.lifetimeTokens || 0,
-                lifetimeRequests: data.lifetimeRequests || 0,
-                lastSyncTime: data.lastSyncTime || 0
-            });
+        };
+
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(queryBody)
         });
 
-        if (currentUserId && !currentUserInTop10) {
-            const userDocRef = doc(db, 'users', currentUserId);
-            const userDoc = await getDoc(userDocRef);
-            if (userDoc.exists()) {
-                const data = userDoc.data();
-                list.push({ 
-                    isCurrentUser: true,
-                    username: data.username || `anonymous-${userDoc.id.substring(0, 6)}`,
-                    lifetimeTokens: data.lifetimeTokens || 0,
-                    lifetimeRequests: data.lifetimeRequests || 0,
-                    lastSyncTime: data.lastSyncTime || 0
+        if (!res.ok) {
+            throw new Error(`Query failed with status ${res.status}`);
+        }
+
+        const data = await res.json();
+        const list: any[] = [];
+        let currentUserInTop10 = false;
+
+        if (Array.isArray(data)) {
+            for (const item of data) {
+                const doc = item.document;
+                if (!doc) continue;
+                
+                const pathParts = doc.name.split('/');
+                const docId = pathParts[pathParts.length - 1];
+                const fields = doc.fields || {};
+                
+                const isCurrent = docId === currentUserId;
+                if (isCurrent) {
+                    currentUserInTop10 = true;
+                }
+
+                list.push({
+                    isCurrentUser: isCurrent,
+                    username: fields.username?.stringValue || `anonymous-${docId.substring(0, 6)}`,
+                    lifetimeTokens: parseInt(fields.lifetimeTokens?.integerValue || '0', 10),
+                    lifetimeRequests: parseInt(fields.lifetimeRequests?.integerValue || '0', 10),
+                    lastSyncTime: parseInt(fields.lastSyncTime?.integerValue || '0', 10)
                 });
             }
         }
+
+        if (currentUserId && !currentUserInTop10) {
+            // Fetch current user document
+            const userUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/users/${currentUserId}`;
+            const userRes = await fetch(userUrl, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (userRes.ok) {
+                const userDoc = await userRes.json();
+                const fields = userDoc.fields || {};
+                list.push({
+                    isCurrentUser: true,
+                    username: fields.username?.stringValue || `anonymous-${currentUserId.substring(0, 6)}`,
+                    lifetimeTokens: parseInt(fields.lifetimeTokens?.integerValue || '0', 10),
+                    lifetimeRequests: parseInt(fields.lifetimeRequests?.integerValue || '0', 10),
+                    lastSyncTime: parseInt(fields.lastSyncTime?.integerValue || '0', 10)
+                });
+            }
+        }
+
         return list;
     } catch (err) {
         console.error('[Firebase] Failed to get leaderboard:', err);

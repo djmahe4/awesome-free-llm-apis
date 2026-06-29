@@ -28,7 +28,7 @@ export class TextRouterMiddleware implements Middleware {
     }
 
     public async init(): Promise<void> {
-        // No-op for backward compatibility
+        await this.executor.init();
     }
 
     public getExecutor(): LLMExecutor {
