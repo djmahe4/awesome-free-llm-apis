@@ -1,15 +1,14 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getAuth, signInAnonymously, UserCredential } from 'firebase/auth';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, query, orderBy, limit, getDocs } from 'firebase/firestore/lite';
 import crypto from 'crypto';
+import { persistence } from './PersistenceManager.js';
 
 let app: FirebaseApp | null = null;
 let db: any = null;
 let auth: any = null;
 let anonymousUser: any = null;
 let isOffline = true;
-
-const fallbackUserId = crypto.randomUUID();
 
 export interface FirebaseConfig {
     apiKey: string;
@@ -32,10 +31,17 @@ export async function initFirebase(): Promise<string> {
         measurementId: process.env.FIREBASE_MEASUREMENT_ID
     };
 
+    const state = await persistence.load();
+
     if (!config.apiKey || !config.projectId) {
         console.warn('[Firebase] Firebase configuration missing, running in offline fallback mode.');
         isOffline = true;
-        return fallbackUserId;
+        
+        if (!state.fallbackUid) {
+            state.fallbackUid = crypto.randomUUID();
+            await persistence.save(state);
+        }
+        return state.fallbackUid;
     }
 
     try {
@@ -46,18 +52,35 @@ export async function initFirebase(): Promise<string> {
         }
         auth = getAuth(app);
         
+        // Re-use already persisted Firebase UID to prevent resets on restart
+        if (state.firebaseUid) {
+            db = getFirestore(app);
+            isOffline = false;
+            console.error(`[Firebase Debug] Syncing stats. Authenticated UID: "${state.firebaseUid}", Target Document ID: "${state.firebaseUid}"`);
+            return state.firebaseUid;
+        }
+        
         const credential = await signInAnonymously(auth);
         anonymousUser = credential.user;
+        
+        state.firebaseUid = anonymousUser.uid;
+        await persistence.save(state);
         
         // Initialize Firestore only after Auth is fully completed
         db = getFirestore(app);
         
         isOffline = false;
+        console.error(`[Firebase Debug] Syncing stats. Authenticated UID: "${anonymousUser.uid}", Target Document ID: "${anonymousUser.uid}"`);
         return anonymousUser.uid;
     } catch (error) {
         console.warn(`[Firebase] Connection failed: ${(error as Error).message}. Running in offline fallback mode.`);
         isOffline = true;
-        return fallbackUserId;
+        
+        if (!state.fallbackUid) {
+            state.fallbackUid = crypto.randomUUID();
+            await persistence.save(state);
+        }
+        return state.fallbackUid;
     }
 }
 

@@ -6,6 +6,11 @@
   <title>⚡ Free LLM APIs — Dashboard</title>
   <meta name="description" content="Real-time monitoring and tool playground for the Free LLM APIs MCP Server. View provider quotas, memory state, and call any tool live.">
   <link rel="stylesheet" href="/style.css">
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+    window.__mermaid = mermaid;
+  </script>
 </head>
 <body>
 
@@ -160,60 +165,92 @@
          TAB 3: TOOL PLAYGROUND
     ══════════════════════════════════════════════════════════ -->
     <section class="tab-panel" id="panel-playground" role="tabpanel" aria-labelledby="tab-playground">
-      <div class="section-title">🛠 Tool Playground</div>
-      <div class="section-sub">Select any MCP tool, fill in the parameters, and execute it live against the server.</div>
 
-      <div class="playground-layout">
+      <div class="pg-chat-layout">
 
-        <!-- Left: Tool Selector -->
-        <div class="card">
-          <div class="card-header"><span class="card-title">Select Tool</span></div>
-          <div class="card-body" style="padding:12px;">
-            <div class="tool-selector-list" id="tool-list">
-              <!-- populated by JS -->
+        <!-- LEFT: Tool Selector + Param Panel -->
+        <div class="pg-sidebar" id="pg-sidebar">
+          
+          <!-- Conversations Card -->
+          <div class="card" style="margin-bottom:12px; display:flex; flex-direction:column; max-height:280px; min-height:160px;">
+            <div class="card-header" style="padding:10px 16px; flex-shrink:0;">
+              <span class="card-title" style="font-size:.82rem; display:flex; align-items:center; gap:6px;">
+                <span>🗂</span> Conversations
+              </span>
+            </div>
+            <div class="card-body" style="padding:8px; display:flex; flex-direction:column; overflow:hidden; flex:1; min-height:0;">
+              <input type="text" id="pg-conv-search" placeholder="Search sessions..." style="font-size:.75rem; padding:6px 10px; margin-bottom:8px; border-radius:6px; flex-shrink:0; width:100%; border:1px solid var(--glass-border); background:rgba(255,255,255,0.03); color:var(--text-primary);">
+              <div id="pg-conv-list" class="conv-list" style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:4px;">
+                <div class="conv-empty">Loading conversations...</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:12px;">
+            <div class="card-header" style="padding:12px 16px;">
+              <span class="card-title" style="font-size:.82rem;">Select Tool</span>
+            </div>
+            <div class="card-body" style="padding:8px;">
+              <div class="tool-selector-list" id="tool-list"></div>
+            </div>
+          </div>
+
+          <!-- Params card -->
+          <div class="card" id="pg-params-card">
+            <div class="card-header" style="padding:10px 16px;cursor:pointer;" id="pg-params-toggle">
+              <span class="card-title" id="pg-tool-title" style="font-size:.82rem;">use_free_llm</span>
+              <svg id="pg-params-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .2s;margin-left:auto;"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div id="pg-params-body" class="card-body" style="padding:12px;">
+              <div id="pg-form" class="playground-form"></div>
             </div>
           </div>
         </div>
 
-        <!-- Right: Form + Response -->
-        <div style="display:flex;flex-direction:column;gap:16px;">
-          <div class="card">
-            <div class="card-header">
-              <span class="card-title" id="pg-tool-title">use_free_llm</span>
-              <div style="display:flex;gap:8px;align-items:center;">
-                <label class="field-label" style="margin:0;white-space:nowrap;">Workspace Root</label>
-                <input type="text" id="pg-workspace" placeholder="/abs/path/to/project" style="max-width:220px;" title="Saved automatically">
-              </div>
+        <!-- RIGHT: Chat Log + Send Bar -->
+        <div class="pg-chat-main">
+
+          <!-- Chat header -->
+          <div class="pg-chat-header">
+            <div style="display:flex;flex-direction:column;gap:2px;">
+              <span id="pg-chat-session-label" style="font-size:.8rem;color:var(--text-muted);">No workspace — one-shot mode</span>
+              <span id="pg-chat-mode-badge" class="badge badge-amber" style="width:fit-content;font-size:.65rem;">⚡ One-shot</span>
             </div>
-            <div class="card-body">
-              <div id="pg-form" class="playground-form">
-                <!-- dynamic fields rendered by JS -->
-              </div>
-              <div style="margin-top:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-                <button class="btn btn-primary" id="pg-run-btn">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                  Run Tool
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <!-- Workspace input inline -->
+              <div style="display:flex;gap:6px;align-items:center;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);flex-shrink:0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <input type="text" id="pg-workspace" placeholder="workspace path (enables agentic)" style="width:220px;font-size:.78rem;" title="Set workspace root — saved automatically. Changing this starts a new conversation.">
+                <button type="button" id="pg-folder-btn" class="btn btn-outline btn-sm" title="Pick workspace folder" style="padding:3px 7px;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                 </button>
-                <button class="btn btn-outline btn-sm" id="pg-clear-btn">Clear Response</button>
-                <span id="pg-status" style="font-size:.78rem;color:var(--text-muted);"></span>
               </div>
+              <button class="btn btn-outline btn-sm" id="pg-clear-btn" title="Clear conversation">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+              </button>
             </div>
           </div>
 
-          <!-- Response Panel -->
-          <div class="response-panel" id="pg-response-panel">
-            <div class="response-header">
-              <span>RESPONSE</span>
-              <div style="display:flex;gap:8px;align-items:center;">
-                <span id="pg-latency" class="latency-badge" style="display:none;"></span>
-                <button class="btn btn-outline btn-sm" id="pg-copy-btn" style="padding:3px 10px;">Copy</button>
-              </div>
-            </div>
-            <div class="response-body" id="pg-response-body" aria-live="polite">
-              <span style="color:var(--text-muted);font-style:italic;">Run a tool to see the response here…</span>
+          <!-- Chat log -->
+          <div class="pg-chat-log" id="pg-chat-log" aria-live="polite">
+            <div class="chat-empty-state" id="pg-chat-empty">
+              <div style="font-size:2rem;margin-bottom:8px;">🛠</div>
+              <div style="font-weight:600;color:var(--text-primary);margin-bottom:4px;">Tool Playground</div>
+              <div style="font-size:.8rem;color:var(--text-muted);max-width:320px;text-align:center;">Fill in params on the left and send a message. Set a workspace root above to enable agentic multi-step execution.</div>
             </div>
           </div>
+
+          <!-- Send bar -->
+          <div class="pg-send-bar">
+            <span id="pg-status" style="font-size:.72rem;color:var(--text-muted);"></span>
+            <span id="pg-latency" class="latency-badge" style="display:none;"></span>
+            <button class="btn btn-primary" id="pg-run-btn" style="margin-left:auto;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              Send
+            </button>
+          </div>
         </div>
+
       </div>
     </section>
 
@@ -279,8 +316,14 @@
             Subtask Execution History
           </span>
         </div>
+        <!-- Filter bar — always visible, full-width -->
+        <div style="display:flex;gap:8px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,.02);">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="history-filter" placeholder="Search subtask history…" style="flex:1;font-size:.8rem;padding:4px 8px;background:transparent;border:none;outline:none;color:var(--text-primary);" autocomplete="off">
+          <button class="btn btn-outline btn-sm" id="history-toggle-all" style="white-space:nowrap;flex-shrink:0;">Expand All</button>
+        </div>
         <div class="card-body">
-          <div id="queue-history" style="display:flex;flex-direction:column;gap:12px;">
+          <div id="queue-history" style="display:flex;flex-direction:column;gap:8px;">
             <div class="queue-empty">Select a session above to view history…</div>
           </div>
         </div>

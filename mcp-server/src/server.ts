@@ -49,6 +49,8 @@ import { execSync } from 'child_process';
 import fs, { promises as fsp } from 'fs';
 import { persistence } from './utils/PersistenceManager.js';
 import { initFirebase, syncStats, getLeaderboard } from './utils/firebase.js';
+import { withFileLock } from './utils/file-lock.js';
+import { writeFileAtomic } from './utils/FileUtils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -153,8 +155,9 @@ async function main() {
         contentSecurityPolicy: {
           directives: {
             ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-            "script-src": ["'self'", "https://cdn.jsdelivr.net"],
-            "style-src": ["'self'", "https://cdn.jsdelivr.net"],
+            "script-src": ["'self'", "https://cdn.jsdelivr.net", "'unsafe-inline'"],
+            "style-src": ["'self'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com", "'unsafe-inline'"],
+            "font-src": ["'self'", "https://fonts.gstatic.com"],
             "img-src": ["'self'", "data:", "https:*"],
             "connect-src": ["'self'", "https://cdn.jsdelivr.net"],
           },
@@ -382,39 +385,39 @@ async function main() {
         }
       });
 
-      // List all active agentic sessions (directories under data/projects/)
+      // List all agentic sessions with chat-log metadata (msgCount, lastTs)
       app.get('/api/sessions', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
           const projectsBase = path.join(process.cwd(), 'data', 'projects');
-          try {
-            await fsp.access(projectsBase);
-          } catch {
-            res.json({ sessions: [] });
-            return;
-          }
+          try { await fsp.access(projectsBase); } catch { return res.json({ sessions: [] }); }
+
           const entries = await fsp.readdir(projectsBase);
-          
-          // Phase 3 Optimization: Parallelize stats with a reasonable batch limit
-          // We limit concurrency to 20 to avoid descriptor exhaustion if there are thousands of sessions
-          const sessions: string[] = [];
           const MAX_CONCURRENT = 20;
-          
+          type SessionMeta = { id: string; msgCount: number; lastTs: number };
+          const sessions: SessionMeta[] = [];
+
           for (let i = 0; i < entries.length; i += MAX_CONCURRENT) {
             const batch = entries.slice(i, i + MAX_CONCURRENT);
             const results = await Promise.all(batch.map(async d => {
               const full = path.resolve(projectsBase, d);
-              if (path.dirname(full) !== projectsBase) return null;
+              if (path.dirname(full) !== path.resolve(projectsBase)) return null;
               try {
                 const stat = await fsp.stat(full);
-                return stat.isDirectory() ? d : null;
-              } catch {
-                return null;
-              }
+                if (!stat.isDirectory()) return null;
+                let msgCount = 0; let lastTs = stat.mtimeMs;
+                try {
+                  const log: any[] = JSON.parse(await fsp.readFile(path.join(full, 'chat-log.json'), 'utf-8'));
+                  msgCount = log.length;
+                  if (log.length) lastTs = Math.max(lastTs, log[log.length - 1].ts || 0);
+                } catch {}
+                return { id: d, msgCount, lastTs } as SessionMeta;
+              } catch { return null; }
             }));
-            sessions.push(...results.filter((d): d is string => d !== null));
+            sessions.push(...results.filter((s): s is SessionMeta => s !== null));
           }
 
+          sessions.sort((a, b) => b.lastTs - a.lastTs);
           res.json({ sessions });
         } catch (err) {
           res.status(500).json({ error: String(err) });
@@ -461,6 +464,109 @@ async function main() {
           res.status(500).json({ error: String(err) });
         }
       });
+
+      // ─── Chat Log API ─────────────────────────────────────────────────────────
+      // Resolve workspace path → stable session ID (same hash the agentic tools use)
+      // Isolated per CWD: each MCP server instance has its own data/projects/ tree.
+      app.post('/api/chat-log/resolve', express.json({ limit: '4kb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const ws: string = (req.body?.workspace || '').toString().trim();
+          if (!ws) return res.json({ sessionId: '__no_ws__' });
+          // Same algorithm as MemoryManager: first 8 chars of base64(workspacePath)
+          const sessionId = Buffer.from(ws).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+          res.json({ sessionId });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // GET /api/chat-log/:sessionId?q=<search>
+      // Returns up to 200 turns; filters by q if provided.
+      // Read is lock-free (safe for concurrent readers).
+      app.get('/api/chat-log/:sessionId', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { sessionId } = req.params;
+          if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
+            return res.status(400).json({ error: 'Invalid sessionId' });
+          }
+          const projectsBase = path.join(process.cwd(), 'data', 'projects');
+          const logPath = path.resolve(projectsBase, sessionId, 'chat-log.json');
+          // Path traversal guard: must stay within projectsBase
+          if (!logPath.startsWith(path.resolve(projectsBase) + path.sep)) {
+            return res.status(400).json({ error: 'Invalid sessionId' });
+          }
+          let log: any[] = [];
+          try {
+            log = JSON.parse(await fsp.readFile(logPath, 'utf-8'));
+          } catch { /* file doesn't exist yet — empty log */ }
+          const q = ((req.query.q as string) || '').toLowerCase().trim();
+          const filtered = q
+            ? log.filter(m => (m.content || '').toLowerCase().includes(q))
+            : log;
+          res.json({ sessionId, log: filtered.slice(-200) });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // POST /api/chat-log/:sessionId  { role, tool, content, latencyMs, ts }
+      // Appends one turn atomically using file lock — safe across concurrent MCP instances.
+      app.post('/api/chat-log/:sessionId', express.json({ limit: '512kb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { sessionId } = req.params;
+          if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
+            return res.status(400).json({ error: 'Invalid sessionId' });
+          }
+          const { role, tool, content, latencyMs, ts } = req.body || {};
+          if (!role || !content) return res.status(400).json({ error: 'role and content required' });
+
+          const projectsBase = path.join(process.cwd(), 'data', 'projects');
+          const dir = path.resolve(projectsBase, sessionId);
+          if (!dir.startsWith(path.resolve(projectsBase) + path.sep) && dir !== path.resolve(projectsBase, '__no_ws__')) {
+            return res.status(400).json({ error: 'Invalid sessionId' });
+          }
+          const logPath = path.join(dir, 'chat-log.json');
+
+          await withFileLock(logPath, async () => {
+            await fsp.mkdir(dir, { recursive: true });
+            let log: any[] = [];
+            try { log = JSON.parse(await fsp.readFile(logPath, 'utf-8')); } catch {}
+            log.push({ role, tool, content, latencyMs: latencyMs ?? null, ts: ts || Date.now() });
+            if (log.length > 200) log = log.slice(-200); // rolling 200-turn window
+            await writeFileAtomic(logPath, JSON.stringify(log));
+          });
+
+          res.json({ ok: true });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // DELETE /api/chat-log/:sessionId  — clear conversation (with lock)
+      app.delete('/api/chat-log/:sessionId', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { sessionId } = req.params;
+          if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
+            return res.status(400).json({ error: 'Invalid sessionId' });
+          }
+          const logPath = path.resolve(
+            path.join(process.cwd(), 'data', 'projects'), sessionId, 'chat-log.json'
+          );
+          await withFileLock(logPath, async () => {
+            await writeFileAtomic(logPath, '[]');
+          });
+          res.json({ ok: true });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // GET /api/sessions — enhanced with chat-log message counts
+      // (replaces the existing handler below)
 
       // v1.0.4 Memory Hardening: Use LRUCache for sessions to prevent memory leaks
       const sessionMap = new LRUCache<string, { server: any, transport: StreamableHTTPServerTransport }>({

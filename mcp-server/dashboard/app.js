@@ -17,21 +17,93 @@ function fmt(n) {
   return Number(n).toLocaleString();
 }
 
-// JSON syntax highlighter
+// JSON syntax highlighter — XSS-safe: escape HTML first
 function highlightJSON(obj) {
   const raw = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
-  return raw.replace(
-    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+  // Escape HTML entities before injecting into DOM
+  const safe = raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return safe.replace(
+    /(&quot;(?:\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\&])*&quot;(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
     match => {
-      if (/^"/.test(match)) {
-        if (/:$/.test(match)) return `<span class="json-key">${esc(match)}</span>`;
-        return `<span class="json-str">${esc(match)}</span>`;
+      if (/^&quot;/.test(match)) {
+        if (/:$/.test(match)) return `<span class="json-key">${match}</span>`;
+        return `<span class="json-str">${match}</span>`;
       }
       if (/true|false/.test(match)) return `<span class="json-bool">${match}</span>`;
       if (/null/.test(match))       return `<span class="json-null">${match}</span>`;
       return `<span class="json-num">${match}</span>`;
     }
   );
+}
+
+// ─── Markdown + Mermaid Renderer ────────────────────────────────
+let _mermaidCounter = 0;
+
+async function renderMarkdown(text) {
+  if (!text) return '';
+  // Split on mermaid fences first
+  const parts = text.split(/(```mermaid[\s\S]*?```)/g);
+  const rendered = await Promise.all(parts.map(async (part, i) => {
+    const mermaidMatch = part.match(/^```mermaid\s*([\s\S]*?)```$/);
+    if (mermaidMatch) {
+      const definition = mermaidMatch[1].trim();
+      const id = `mermaid-${Date.now()}-${_mermaidCounter++}`;
+      if (window.__mermaid) {
+        try {
+          const { svg } = await window.__mermaid.render(id, definition);
+          return `<div class="mermaid-diagram" style="overflow:auto;margin:12px 0;padding:12px;background:rgba(0,0,0,.25);border-radius:var(--radius-sm);">${svg}</div>`;
+        } catch (e) {
+          return `<pre style="color:var(--accent-red);font-size:.78rem;">Mermaid error: ${esc(e.message)}</pre>`;
+        }
+      }
+      return `<pre class="code-block" style="font-size:.78rem;">${esc(definition)}</pre>`;
+    }
+    // Regular markdown
+    return part
+      // Fenced code blocks (non-mermaid)
+      .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
+        `<pre class="code-block" style="font-size:.78rem;overflow-x:auto;"><code>${esc(code.trim())}</code></pre>`)
+      // Inline code
+      .replace(/`([^`]+)`/g, (_, c) => `<code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:.85em;">${esc(c)}</code>`)
+      // Bold
+      .replace(/\*\*([^*]+)\*\*/g, (_, t) => `<strong>${esc(t)}</strong>`)
+      // Italic
+      .replace(/\*([^*]+)\*/g, (_, t) => `<em>${esc(t)}</em>`)
+      // H1-H3
+      .replace(/^### (.+)$/gm, '<h3 style="font-size:.85rem;color:var(--text-primary);margin:10px 0 4px;">$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2 style="font-size:.95rem;color:var(--text-primary);margin:12px 0 6px;">$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1 style="font-size:1.05rem;color:var(--accent-purple);margin:14px 0 8px;">$1</h1>')
+      // Unordered lists
+      .replace(/^[\-\*] (.+)$/gm, '<li style="margin-left:16px;list-style:disc;">$1</li>')
+      // Ordered lists
+      .replace(/^\d+\. (.+)$/gm, '<li style="margin-left:16px;list-style:decimal;">$1</li>')
+      // Horizontal rule
+      .replace(/^---+$/gm, '<hr style="border-color:var(--glass-border);margin:12px 0;">')
+      // Paragraphs — blank line becomes paragraph break
+      .replace(/\n\n+/g, '</p><p style="margin:6px 0;">')
+      // Single newlines become <br>
+      .replace(/\n/g, '<br>');
+  }));
+  return `<div class="md-body" style="line-height:1.6;font-size:.82rem;color:var(--text-secondary);">${rendered.join('')}</div>`;
+}
+
+// Smart response renderer: detect markdown vs JSON
+async function renderResponse(data) {
+  const result = data.result ?? data;
+  // If result is a plain string with markdown indicators
+  if (typeof result === 'string' && /[#*`\n]|```/.test(result)) {
+    return await renderMarkdown(result);
+  }
+  // Nested content field (common MCP response shape)
+  if (result?.content && typeof result.content === 'string' && /[#*`\n]|```/.test(result.content)) {
+    return await renderMarkdown(result.content);
+  }
+  const SIZE_THRESHOLD = 100 * 1024; // 100KB
+  const jsonStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+  if (jsonStr.length > SIZE_THRESHOLD) {
+    return `<span style="color:var(--text-muted);font-size:.78rem;">Response too large to render (${(jsonStr.length/1024).toFixed(0)}KB). </span><button onclick="navigator.clipboard.writeText(this.dataset.v);this.textContent='Copied!'" data-v="${esc(jsonStr)}" class="btn btn-outline btn-sm" style="margin-left:8px;">Copy Raw</button>`;
+  }
+  return highlightJSON(result);
 }
 
 // ─── Tab System ─────────────────────────────────────────────────
@@ -200,7 +272,6 @@ const TOOLS = [
       { id: 'prompt', label: 'User Message', type: 'textarea', placeholder: 'Write a Hello World in Go' },
       { id: 'model',  label: 'Model Override', type: 'model-picker' },
       { id: 'keywords', label: 'Keywords (comma-separated)', type: 'text', placeholder: 'e.g. jwt, security' },
-      { id: 'agentic', label: 'Agentic Mode', type: 'toggle', hint: 'Enable subtask decomposition' },
     ]
   },
   {
@@ -268,17 +339,7 @@ let availableModels = [];
 const toolList      = document.getElementById('tool-list');
 const pgForm        = document.getElementById('pg-form');
 const pgToolTitle   = document.getElementById('pg-tool-title');
-const pgRunBtn      = document.getElementById('pg-run-btn');
-const pgClearBtn    = document.getElementById('pg-clear-btn');
-const pgCopyBtn     = document.getElementById('pg-copy-btn');
 const pgResponseBody = document.getElementById('pg-response-body');
-const pgLatency     = document.getElementById('pg-latency');
-const pgStatus      = document.getElementById('pg-status');
-const pgWorkspace   = document.getElementById('pg-workspace');
-
-// Persist workspace root
-pgWorkspace.value = localStorage.getItem('mcp-workspace') || '';
-pgWorkspace.addEventListener('change', () => localStorage.setItem('mcp-workspace', pgWorkspace.value.trim()));
 
 // Build tool list sidebar
 toolList.innerHTML = TOOLS.map((t, i) => `
@@ -367,44 +428,85 @@ function renderToolForm(tool) {
       wrap.appendChild(sel);
 
     } else if (f.type === 'model-picker') {
-      const container = document.createElement('div');
-      container.style.cssText = 'display:flex;gap:8px;align-items:center;';
+      // ── Combobox with live filtering ──────────────────────────
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'position:relative;';
 
-      const sel = document.createElement('select');
-      sel.id = `pg-field-${f.id}`;
-      sel.style.flex = '1';
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.id = `pg-field-${f.id}`;
+      inp.placeholder = '— auto-route or type to filter —';
+      inp.autocomplete = 'off';
+      inp.setAttribute('aria-autocomplete', 'list');
+      inp.setAttribute('role', 'combobox');
+      wrapper.appendChild(inp);
 
-      const optAuto = document.createElement('option');
-      optAuto.value = '';
-      optAuto.textContent = '— auto-route (recommended) —';
-      sel.appendChild(optAuto);
+      const dropdown = document.createElement('div');
+      dropdown.style.cssText = 'position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:9999;background:#1a1a2e;border:1px solid var(--glass-border);border-radius:var(--radius-sm);max-height:220px;overflow-y:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,.6);';
+      wrapper.appendChild(dropdown);
 
-      const populate = () => {
-        while (sel.options.length > 1) sel.remove(1);
-        availableModels.forEach(m => {
-          const o = document.createElement('option');
-          o.value = m.modelId;
-          o.textContent = `${m.modelName} (${m.providerName})`;
-          sel.appendChild(o);
+      // Store actual modelId separately from display value
+      inp._modelId = '';
+
+      const buildOptions = (filter = '') => {
+        dropdown.innerHTML = '';
+        const q = filter.toLowerCase();
+        const items = availableModels.filter(m =>
+          !q || m.modelName.toLowerCase().includes(q) || m.providerName.toLowerCase().includes(q) || m.modelId.toLowerCase().includes(q)
+        );
+        if (!items.length) {
+          const empty = document.createElement('div');
+          empty.style.cssText = 'padding:8px 12px;color:var(--text-muted);font-size:.78rem;';
+          empty.textContent = filter ? `Use "${filter}" as custom model ID` : 'No models loaded';
+          dropdown.appendChild(empty);
+          return;
+        }
+        items.forEach(m => {
+          const item = document.createElement('div');
+          item.style.cssText = 'padding:7px 12px;cursor:pointer;font-size:.8rem;transition:background .15s;';
+          item.innerHTML = `<span style="color:var(--text-primary);">${esc(m.modelName)}</span> <span style="color:var(--text-muted);font-size:.72rem;">[${esc(m.providerName)}]</span>`;
+          item.addEventListener('mouseenter', () => item.style.background = 'rgba(255,255,255,.07)');
+          item.addEventListener('mouseleave', () => item.style.background = '');
+          item.addEventListener('mousedown', e => {
+            e.preventDefault();
+            inp.value = `${m.modelName} [${m.providerName}]`;
+            inp._modelId = m.modelId;
+            dropdown.style.display = 'none';
+          });
+          dropdown.appendChild(item);
         });
       };
 
-      populate();
-
-      // Load on focus
-      sel.addEventListener('focus', async () => {
+      inp.addEventListener('focus', async () => {
         await ensureModels();
-        populate();
+        buildOptions(inp.value);
+        dropdown.style.display = 'block';
       });
+      inp.addEventListener('input', () => {
+        inp._modelId = ''; // reset on manual type
+        buildOptions(inp.value);
+        dropdown.style.display = 'block';
+      });
+      inp.addEventListener('keydown', e => {
+        const items = dropdown.querySelectorAll('div');
+        const active = dropdown.querySelector('.combo-active');
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const next = active ? active.nextElementSibling : items[0];
+          if (next) { active?.classList.remove('combo-active'); next.classList.add('combo-active'); next.style.background = 'rgba(255,255,255,.12)'; next.scrollIntoView({ block: 'nearest' }); }
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          const prev = active?.previousElementSibling;
+          if (prev) { active.classList.remove('combo-active'); active.style.background = ''; prev.classList.add('combo-active'); prev.style.background = 'rgba(255,255,255,.12)'; prev.scrollIntoView({ block: 'nearest' }); }
+        } else if (e.key === 'Enter' && active) {
+          e.preventDefault(); active.dispatchEvent(new MouseEvent('mousedown'));
+        } else if (e.key === 'Escape') {
+          dropdown.style.display = 'none';
+        }
+      });
+      document.addEventListener('click', e => { if (!wrapper.contains(e.target)) dropdown.style.display = 'none'; }, true);
 
-      const customInp = document.createElement('input');
-      customInp.type = 'text'; customInp.placeholder = 'or type custom model ID…';
-      customInp.id = `pg-field-${f.id}-custom`; customInp.style.flex = '1';
-      customInp.addEventListener('input', () => { if (customInp.value) sel.value = ''; });
-      sel.addEventListener('change', () => { if (sel.value) customInp.value = ''; });
-
-      container.appendChild(sel); container.appendChild(customInp);
-      wrap.appendChild(container);
+      wrap.appendChild(wrapper);
 
     } else if (f.type === 'number') {
       const inp = document.createElement('input');
@@ -435,8 +537,9 @@ function collectParams(tool) {
     if (f.type === 'toggle')       params[f.id] = el.checked;
     else if (f.type === 'number')  params[f.id] = el.value ? parseInt(el.value, 10) : undefined;
     else if (f.type === 'model-picker') {
-      const custom = document.getElementById(`pg-field-${f.id}-custom`)?.value.trim();
-      params[f.id] = custom || el.value || undefined;
+      const inp = document.getElementById(`pg-field-${f.id}`);
+      // Use the stored modelId if set (picked from dropdown), else use raw typed value
+      params[f.id] = (inp?._modelId) || inp?.value.trim() || undefined;
     } else if (f.type === 'textarea' && f.id === 'what') {
       params[f.id] = el.value.split('\n').map(l => l.trim()).filter(Boolean);
     } else if (f.id === 'keywords') {
@@ -452,62 +555,364 @@ function collectParams(tool) {
   return params;
 }
 
+// ─── CHAT ENGINE ────────────────────────────────────────────────
+
+const chatLog       = document.getElementById('pg-chat-log');
+const chatEmpty     = document.getElementById('pg-chat-empty');
+const chatLabel     = document.getElementById('pg-chat-session-label');
+const chatBadge     = document.getElementById('pg-chat-mode-badge');
+const pgRunBtn      = document.getElementById('pg-run-btn');
+const pgClearBtn    = document.getElementById('pg-clear-btn');
+const pgStatus      = document.getElementById('pg-status');
+const pgLatency     = document.getElementById('pg-latency');
+const pgWorkspace   = document.getElementById('pg-workspace');
+const convList      = document.getElementById('pg-conv-list');
+const convSearch    = document.getElementById('pg-conv-search');
+
+// In-memory cache of current conversation (avoids re-fetching for every append)
+let chatHistory = [];
+let activeSessionId = '__no_ws__';
+
+// ─── Session ID resolution (server-side, so all instances agree) ──
+async function resolveSessionId(ws) {
+  if (!ws) return '__no_ws__';
+  try {
+    const r = await fetch('/api/chat-log/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace: ws })
+    });
+    if (!r.ok) return '__no_ws__';
+    const { sessionId } = await r.json();
+    return sessionId || '__no_ws__';
+  } catch { return '__no_ws__'; }
+}
+
+// ─── Load history from server ─────────────────────────────────────
+async function loadChatHistory(sid) {
+  try {
+    const r = await fetch(`/api/chat-log/${encodeURIComponent(sid)}`);
+    if (!r.ok) return [];
+    const { log } = await r.json();
+    return Array.isArray(log) ? log : [];
+  } catch { return []; }
+}
+
+// ─── Append one turn to server (fire-and-forget, non-blocking) ───
+function saveTurn(sid, turn) {
+  fetch(`/api/chat-log/${encodeURIComponent(sid)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(turn)
+  }).catch(() => {}); // silent — dashboard still works if server is briefly unavailable
+}
+
+// ─── Clear server log + rebuild UI ────────────────────────────────
+async function clearServerLog(sid) {
+  try {
+    await fetch(`/api/chat-log/${encodeURIComponent(sid)}`, { method: 'DELETE' });
+  } catch {}
+}
+
+// ─── Rebuild DOM from history array ───────────────────────────────
+function rebuildChatLog() {
+  chatLog.innerHTML = '';
+  if (!chatHistory.length) {
+    chatLog.appendChild(chatEmpty);
+    chatEmpty.style.display = 'flex';
+    return;
+  }
+  chatEmpty.style.display = 'none';
+  chatHistory.forEach(msg => appendBubbleFromRecord(msg));
+  scrollChatBottom();
+}
+
+function scrollChatBottom() {
+  requestAnimationFrame(() => { chatLog.scrollTop = chatLog.scrollHeight; });
+}
+
+function appendBubbleFromRecord(msg) {
+  if (msg.role === 'user') {
+    addUserBubbleEl(msg.content, msg.tool, msg.ts);
+  } else if (msg.role === 'assistant') {
+    const el = addSpinnerBubble(msg.tool);
+    renderMarkdown(msg.content).then(html => {
+      if (!el.isConnected) return;
+      replaceSpinnerWithResponse(el, html, msg.latencyMs, msg.tool, msg.ts, false);
+    });
+  } else if (msg.role === 'error') {
+    addErrorBubbleEl(msg.content, msg.tool, msg.ts);
+  }
+}
+
+function addUserBubbleEl(text, tool, ts) {
+  chatEmpty.style.display = 'none';
+  const div = document.createElement('div');
+  div.className = 'chat-msg user';
+  div.innerHTML = `
+    <div class="chat-bubble">${esc(text)}</div>
+    <div class="chat-meta">
+      <span>${esc(tool || activeTool.id)}</span>
+      <span>${new Date(ts || Date.now()).toLocaleTimeString()}</span>
+    </div>`;
+  chatLog.appendChild(div);
+  return div;
+}
+
+function addErrorBubbleEl(text, tool, ts) {
+  const div = document.createElement('div');
+  div.className = 'chat-msg error';
+  div.innerHTML = `
+    <div class="chat-bubble">✗ ${esc(text)}</div>
+    <div class="chat-meta"><span>${esc(tool || '')}</span><span>${new Date(ts || Date.now()).toLocaleTimeString()}</span></div>`;
+  chatLog.appendChild(div);
+  return div;
+}
+
+function addSpinnerBubble(tool) {
+  chatEmpty.style.display = 'none';
+  const isAgentic = !!pgWorkspace.value.trim();
+  const div = document.createElement('div');
+  div.className = 'chat-spinner-bubble';
+  div.innerHTML = `
+    <div class="spin-header">
+      <div class="spin-dots">
+        <span class="spin-dot"></span><span class="spin-dot"></span><span class="spin-dot"></span>
+      </div>
+      <span>${isAgentic ? 'Running agentic subtasks…' : 'Executing…'}</span>
+      <span class="spin-tool-tag">${esc(tool)}</span>
+    </div>
+    ${isAgentic ? '<span class="chat-meta-timestamp">Decomposing into subtasks — this may take a moment</span>' : ''}`;
+  chatLog.appendChild(div);
+  scrollChatBottom();
+  return div;
+}
+
+function replaceSpinnerWithResponse(spinnerEl, html, latencyMs, tool, ts, save = true) {
+  const div = document.createElement('div');
+  div.className = 'chat-msg assistant';
+  const latBadge = latencyMs != null
+    ? `<span class="latency-badge${latencyMs > 3000 ? ' slow' : ''}" style="display:inline-flex;">${latencyMs}ms</span>`
+    : '';
+  div.innerHTML = `
+    <div class="chat-bubble">${html}</div>
+    <div class="chat-meta">${latBadge}<span>${esc(tool)}</span><span>${new Date(ts || Date.now()).toLocaleTimeString()}</span>
+      <button class="chat-copy-btn" onclick="navigator.clipboard.writeText(this.closest('.chat-msg').querySelector('.chat-bubble').innerText);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500);">Copy</button>
+    </div>`;
+  spinnerEl.replaceWith(div);
+  if (save) scrollChatBottom();
+}
+
+// ─── Update workspace header badges ──────────────────────────────
+function updateWorkspaceUI() {
+  const ws = pgWorkspace.value.trim();
+  if (ws) {
+    chatLabel.textContent = ws.split(/[\\\/]/).pop() || ws;
+    chatBadge.textContent = '🧠 Agentic';
+    chatBadge.className = 'badge badge-purple';
+  } else {
+    chatLabel.textContent = 'No workspace — one-shot mode';
+    chatBadge.textContent = '⚡ One-shot';
+    chatBadge.className = 'badge badge-amber';
+  }
+}
+
+// ─── Conversation list panel ──────────────────────────────────────
+let _convSearchTimer = null;
+
+async function refreshConvList(filter = '') {
+  if (!convList) return;
+  try {
+    const r = await fetch('/api/sessions');
+    if (!r.ok) return;
+    const { sessions } = await r.json();
+    const list = Array.isArray(sessions) ? sessions : [];
+    const q = filter.toLowerCase().trim();
+    const filtered = q ? list.filter(s => s.id.toLowerCase().includes(q)) : list;
+    renderConvList(filtered);
+  } catch {}
+}
+
+function renderConvList(sessions) {
+  if (!convList) return;
+  if (!sessions.length) {
+    convList.innerHTML = '<div class="conv-empty">No conversations yet</div>';
+    return;
+  }
+  convList.innerHTML = sessions.map(s => {
+    const isActive = s.id === activeSessionId;
+    const label = s.id === '__no_ws__' ? '⚡ One-shot' : s.id;
+    const sub = s.msgCount ? `${s.msgCount} msgs` : 'empty';
+    const ago = s.lastTs ? timeAgo(s.lastTs) : '';
+    return `<div class="conv-item${isActive ? ' active' : ''}" data-sid="${esc(s.id)}" title="${esc(s.id)}">
+      <div class="conv-item-label">${esc(label)}</div>
+      <div class="conv-item-meta"><span>${sub}</span><span>${ago}</span></div>
+    </div>`;
+  }).join('');
+
+  convList.querySelectorAll('.conv-item').forEach(el => {
+    el.addEventListener('click', async () => {
+      const sid = el.dataset.sid;
+      if (sid === activeSessionId) return;
+      // Find the workspace that maps to this session ID — we can't reverse the hash,
+      // so just switch the history without changing the workspace input.
+      activeSessionId = sid;
+      chatHistory = await loadChatHistory(sid);
+      rebuildChatLog();
+      refreshConvList(convSearch?.value || '');
+    });
+  });
+}
+
+function timeAgo(ts) {
+  const diff = Date.now() - ts;
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return `${Math.floor(diff/60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff/3600000)}h ago`;
+  return `${Math.floor(diff/86400000)}d ago`;
+}
+
+if (convSearch) {
+  convSearch.addEventListener('input', () => {
+    clearTimeout(_convSearchTimer);
+    _convSearchTimer = setTimeout(() => refreshConvList(convSearch.value), 200);
+  });
+}
+
+// ─── Workspace persistence + session switch ───────────────────────
+pgWorkspace.value = localStorage.getItem('mcp-workspace') || '';
+updateWorkspaceUI();
+
+// Switch session when workspace changes
+pgWorkspace.addEventListener('change', async () => {
+  const ws = pgWorkspace.value.trim();
+  localStorage.setItem('mcp-workspace', ws);
+  updateWorkspaceUI();
+  activeSessionId = await resolveSessionId(ws);
+  chatHistory = await loadChatHistory(activeSessionId);
+  rebuildChatLog();
+  refreshConvList();
+});
+
+// Initial load
+(async () => {
+  activeSessionId = await resolveSessionId(pgWorkspace.value.trim());
+  chatHistory = await loadChatHistory(activeSessionId);
+  rebuildChatLog();
+  refreshConvList();
+})();
+
+// ─── Folder picker ────────────────────────────────────────────────
+document.getElementById('pg-folder-btn').addEventListener('click', async () => {
+  if (!window.showDirectoryPicker) {
+    alert('Your browser does not support the Folder Picker API. Please type the path manually.');
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'read' });
+    const current = pgWorkspace.value.trim();
+    if (!current) {
+      pgWorkspace.value = handle.name;
+    } else {
+      const sep = current.includes('\\') ? '\\' : '/';
+      const parts = current.split(sep);
+      parts[parts.length - 1] = handle.name;
+      pgWorkspace.value = parts.join(sep);
+    }
+    pgWorkspace.dispatchEvent(new Event('change'));
+  } catch (e) {
+    if (e.name !== 'AbortError') console.warn('[FolderPicker]', e);
+  }
+});
+
+// ─── Params panel collapse ────────────────────────────────────────
+const pgParamsToggle  = document.getElementById('pg-params-toggle');
+const pgParamsBody    = document.getElementById('pg-params-body');
+const pgParamsChevron = document.getElementById('pg-params-chevron');
+let paramsOpen = true;
+
+pgParamsToggle.addEventListener('click', () => {
+  paramsOpen = !paramsOpen;
+  pgParamsBody.style.display = paramsOpen ? '' : 'none';
+  pgParamsChevron.style.transform = paramsOpen ? '' : 'rotate(-90deg)';
+});
+
+// ─── Run / Send ───────────────────────────────────────────────────
 pgRunBtn.addEventListener('click', async () => {
   await ensureModels();
   const params = collectParams(activeTool);
 
+  const ws = pgWorkspace.value.trim();
+  if (activeTool.id === 'use_free_llm' && ws) params.agentic = true;
+
+  const userText = params.prompt || params.query || params.input
+    || `[${activeTool.label}] ${JSON.stringify(params).slice(0, 120)}`;
+  const ts = Date.now();
+  const userTurn = { role: 'user', tool: activeTool.id, content: userText, ts };
+
+  chatHistory.push(userTurn);
+  saveTurn(activeSessionId, userTurn);
+  addUserBubbleEl(userText, activeTool.id, ts);
+
+  const spinnerEl = addSpinnerBubble(activeTool.id);
+
   pgRunBtn.disabled = true;
-  pgRunBtn.innerHTML = '<span class="spinner"></span> Running…';
+  pgRunBtn.innerHTML = '<span class="spinner"></span>';
   pgStatus.textContent = '';
   pgLatency.style.display = 'none';
-  pgResponseBody.innerHTML = '<span style="color:var(--text-muted);font-style:italic;">Executing…</span>';
 
   try {
-    const r = await fetch('/api/tool', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tool: activeTool.id, params })
-    });
+    const r    = await fetch('/api/tool', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tool: activeTool.id, params }) });
     const data = await r.json();
-
-    // Show latency
-    if (data.latencyMs != null) {
-      pgLatency.textContent = `${data.latencyMs}ms`;
-      pgLatency.className   = `latency-badge${data.latencyMs > 3000 ? ' slow' : ''}`;
-      pgLatency.style.display = 'inline-flex';
-    }
+    const latencyMs = data.latencyMs ?? null;
+    const replyTs   = Date.now();
 
     if (data.ok === false || !r.ok) {
-      pgResponseBody.innerHTML = `<span class="json-err">Error: ${esc(data.error || 'Unknown error')}</span>`;
-      pgStatus.textContent = '✗ Failed';
-      pgStatus.style.color = 'var(--accent-red)';
+      const errMsg = data.error || 'Unknown error';
+      const errTurn = { role: 'error', tool: activeTool.id, content: errMsg, ts: replyTs };
+      chatHistory.push(errTurn);
+      saveTurn(activeSessionId, errTurn);
+      spinnerEl.replaceWith(addErrorBubbleEl(errMsg, activeTool.id, replyTs));
+      pgStatus.textContent = '✗ Failed'; pgStatus.style.color = 'var(--accent-red)';
     } else {
-      pgResponseBody.innerHTML = highlightJSON(data.result ?? data);
-      pgStatus.textContent = '✓ Success';
-      pgStatus.style.color = 'var(--accent-green)';
+      const html    = await renderResponse(data);
+      const rawText = (data.result ?? data);
+      const content = typeof rawText === 'string' ? rawText : JSON.stringify(rawText, null, 2);
+      const assistantTurn = { role: 'assistant', tool: activeTool.id, content, latencyMs, ts: replyTs };
+      chatHistory.push(assistantTurn);
+      saveTurn(activeSessionId, assistantTurn);
+      replaceSpinnerWithResponse(spinnerEl, html, latencyMs, activeTool.id, replyTs);
+      if (latencyMs != null) {
+        pgLatency.textContent = `${latencyMs}ms`;
+        pgLatency.className = `latency-badge${latencyMs > 3000 ? ' slow' : ''}`;
+        pgLatency.style.display = 'inline-flex';
+      }
+      pgStatus.textContent = '✓ Success'; pgStatus.style.color = 'var(--accent-green)';
     }
   } catch (err) {
-    pgResponseBody.innerHTML = `<span class="json-err">Network error: ${esc(err.message)}</span>`;
-    pgStatus.textContent = '✗ Error';
-    pgStatus.style.color = 'var(--accent-red)';
+    const errMsg = `Network error: ${err.message}`;
+    const errTurn = { role: 'error', tool: activeTool.id, content: errMsg, ts: Date.now() };
+    chatHistory.push(errTurn);
+    saveTurn(activeSessionId, errTurn);
+    spinnerEl.replaceWith(addErrorBubbleEl(errMsg, activeTool.id, Date.now()));
+    pgStatus.textContent = '✗ Error'; pgStatus.style.color = 'var(--accent-red)';
   } finally {
     pgRunBtn.disabled = false;
-    pgRunBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Tool`;
+    pgRunBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send`;
+    refreshConvList(); // update message count in sidebar
   }
 });
 
-pgClearBtn.addEventListener('click', () => {
-  pgResponseBody.innerHTML = '<span style="color:var(--text-muted);font-style:italic;">Run a tool to see the response here…</span>';
-  pgLatency.style.display = 'none';
+// Clear conversation
+pgClearBtn.addEventListener('click', async () => {
+  await clearServerLog(activeSessionId);
+  chatHistory = [];
+  chatLog.innerHTML = '';
+  chatLog.appendChild(chatEmpty);
+  chatEmpty.style.display = 'flex';
   pgStatus.textContent = '';
-});
-
-pgCopyBtn.addEventListener('click', () => {
-  const text = pgResponseBody.innerText;
-  navigator.clipboard.writeText(text).then(() => {
-    pgCopyBtn.textContent = 'Copied!';
-    setTimeout(() => { pgCopyBtn.textContent = 'Copy'; }, 1500);
-  });
+  pgLatency.style.display = 'none';
+  refreshConvList();
 });
 
 // Render initial form
@@ -572,31 +977,91 @@ function renderQueue(id, items) {
     </div>`).join('');
 }
 
+let _historyData = [];
+let _historyExpanded = false;
+
 function renderHistory(history) {
   const el = document.getElementById('queue-history');
   if (!el) return;
-  if (!history || history.length === 0) {
+  _historyData = history || [];
+  _applyHistoryFilter(document.getElementById('history-filter')?.value || '');
+}
+
+function _applyHistoryFilter(q) {
+  const el = document.getElementById('queue-history');
+  if (!el) return;
+  if (!_historyData.length) {
     el.innerHTML = '<div class="queue-empty">No subtask history recorded yet.</div>';
     return;
   }
+  const filtered = q
+    ? _historyData.filter(h => h.task?.toLowerCase().includes(q.toLowerCase()))
+    : _historyData;
+  if (!filtered.length) {
+    el.innerHTML = `<div class="queue-empty">No history entries match "${esc(q)}".</div>`;
+    return;
+  }
 
-  el.innerHTML = history.map((h, idx) => {
-    const dateStr = new Date(h.timestamp).toLocaleTimeString();
-    const filesStr = h.filesModified && h.filesModified.length > 0
-      ? `<div style="font-size:.7rem;color:var(--accent-cyan);margin-top:4px;">Files: ${h.filesModified.map(f => `<code>${esc(f)}</code>`).join(', ')}</div>`
+  // Render timeline entries (synchronously, then async-patch mermaid)
+  el.innerHTML = filtered.map((h, idx) => {
+    const globalIdx = _historyData.indexOf(h);
+    const dateStr = h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : '';
+    const isError = /error|failed|exception/i.test(h.output || '');
+    const borderColor = isError ? 'var(--accent-red)' : 'var(--accent-green)';
+    const filesStr = h.filesModified?.length
+      ? `<div style="font-size:.7rem;color:var(--accent-cyan);margin-top:4px;">Files: ${h.filesModified.map(f => `<code style="font-size:.7rem;">${esc(f)}</code>`).join(', ')}</div>`
       : '';
+    const expanded = _historyExpanded;
     return `
-      <div class="queue-item" style="flex-direction:column;align-items:stretch;gap:4px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="const out = document.getElementById('hist-out-${idx}'); out.style.display = out.style.display === 'none' ? 'block' : 'none';">
-          <span style="font-weight:600;color:var(--text-primary);">[${idx + 1}] ${esc(h.task)}</span>
-          <span style="font-size:.7rem;color:var(--text-muted);margin-left:auto;">${dateStr}</span>
+      <div class="queue-item hist-entry" data-idx="${globalIdx}" style="flex-direction:column;align-items:stretch;gap:0;border-left:3px solid ${borderColor};padding-left:10px;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:6px 0;" onclick="toggleHistEntry(${globalIdx})">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:${isError ? 'var(--accent-red)' : 'var(--accent-purple)'};color:#fff;font-size:.65rem;font-weight:700;flex-shrink:0;">${globalIdx + 1}</span>
+            <span style="font-weight:600;color:var(--text-primary);font-size:.82rem;">${esc(h.task || 'Untitled step')}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            ${dateStr ? `<span style="font-size:.68rem;color:var(--text-muted);">${dateStr}</span>` : ''}
+            <span id="hist-chevron-${globalIdx}" style="color:var(--text-muted);transition:transform .2s;transform:${expanded ? 'rotate(90deg)' : 'rotate(0deg)'};">&rsaquo;</span>
+          </div>
         </div>
         ${filesStr}
-        <pre id="hist-out-${idx}" style="display:none;margin-top:8px;padding:8px;font-size:.72rem;background:rgba(0,0,0,.3);border-color:var(--glass-border);color:var(--text-secondary);white-space:pre-wrap;word-break:break-all;">${esc(h.output)}</pre>
+        <div id="hist-out-${globalIdx}" class="hist-body" style="display:${expanded ? 'block' : 'none'};margin-top:6px;padding:10px;font-size:.78rem;background:rgba(0,0,0,.3);border-radius:var(--radius-sm);border:1px solid var(--glass-border);">
+          <span style="color:var(--text-muted);font-style:italic;">Rendering…</span>
+        </div>
       </div>
     `;
   }).join('');
+
+  // Async render markdown/mermaid for each visible body
+  filtered.forEach((h, idx) => {
+    const globalIdx = _historyData.indexOf(h);
+    const bodyEl = document.getElementById(`hist-out-${globalIdx}`);
+    if (!bodyEl) return;
+    renderMarkdown(h.output || '').then(html => { bodyEl.innerHTML = html || '<em style="color:var(--text-muted);">No output</em>'; });
+  });
 }
+
+window.toggleHistEntry = function(idx) {
+  const body = document.getElementById(`hist-out-${idx}`);
+  const chevron = document.getElementById(`hist-chevron-${idx}`);
+  if (!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if (chevron) chevron.style.transform = open ? 'rotate(0deg)' : 'rotate(90deg)';
+};
+
+// History filter input
+document.getElementById('history-filter')?.addEventListener('input', e => {
+  _applyHistoryFilter(e.target.value);
+});
+
+// Expand / Collapse All
+document.getElementById('history-toggle-all')?.addEventListener('click', function() {
+  _historyExpanded = !_historyExpanded;
+  this.textContent = _historyExpanded ? 'Collapse All' : 'Expand All';
+  _applyHistoryFilter(document.getElementById('history-filter')?.value || '');
+});
+
 
 function startMemPoll(sid) {
   stopMemPoll();

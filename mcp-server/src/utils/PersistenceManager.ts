@@ -18,6 +18,8 @@ export interface PersistentUsage {
   sessionExpiresAt?: number;
   lastSyncTime?: number;
   optOutTelemetry?: boolean;
+  firebaseUid?: string;
+  fallbackUid?: string;
   providers: Record<string, {
     lastSyncTime: number;
     localTotalRequests: number;
@@ -204,6 +206,14 @@ export class PersistenceManager {
       dailyTotalTokens: base.dailyTotalTokens + deltaDailyTok,
       lifetimeTotalRequests: base.lifetimeTotalRequests + deltaLifetimeReq,
       lifetimeTotalTokens: base.lifetimeTotalTokens + deltaLifetimeTok,
+      userId: memory.userId || base.userId,
+      username: memory.username || base.username,
+      sessionToken: memory.sessionToken || base.sessionToken,
+      sessionExpiresAt: memory.sessionExpiresAt || base.sessionExpiresAt,
+      lastSyncTime: Math.max(base.lastSyncTime || 0, memory.lastSyncTime || 0),
+      optOutTelemetry: memory.optOutTelemetry !== undefined ? memory.optOutTelemetry : base.optOutTelemetry,
+      firebaseUid: memory.firebaseUid || base.firebaseUid,
+      fallbackUid: memory.fallbackUid || base.fallbackUid,
       providers: { ...base.providers }
     };
 
