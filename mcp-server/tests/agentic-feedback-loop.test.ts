@@ -55,15 +55,15 @@ describe('Agentic Middleware Feedback Loop Tests', () => {
         // Spy on ContextGatherer.gatherContext
         const gatherSpy = vi.spyOn(ContextGatherer, 'gatherContext').mockResolvedValue([]);
 
+        const logPath = path.join(os.homedir(), '.free-llm-mcp', 'projects', 'test-session-logging', 'agentic-debug.log');
+        await fs.remove(logPath);
+
         await middleware.execute(context, async () => {});
 
-        const logPath = path.join(os.homedir(), '.free-llm-mcp', 'projects', 'test-session-logging', 'agentic-debug.log');
         const logExists = await fs.pathExists(logPath);
-        expect(logExists).toBe(true);
+        expect(logExists).toBe(false); // Verify that agentic-debug.log is not written to disk
 
-        const logContent = await fs.readFile(logPath, 'utf8');
-        expect(logContent).toContain('test-session-logging');
-        expect(logContent).toContain('I need more context regarding auth.ts');
+        expect(promptSpy).toHaveBeenCalled();
     });
 
     it('injects CONTEXT-UNAVAILABLE when entity is not found in the workspace', async () => {
