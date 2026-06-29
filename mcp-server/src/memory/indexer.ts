@@ -80,9 +80,16 @@ export class WorkspaceIndexer {
                 const content = await fs.readFile(file, 'utf-8');
                 const contentHash = vectorStore.calculateHash(content);
 
-                // Double check via hash cache if mtime checks weren't initialized
+                // Load previous content from separate cache files to prevent memory.json bloat
+                const cacheDir = path.join(workspaceRoot, '.free-llm-mcp', 'cache');
                 const existingHash = await memoryManager.longTerm.load(`${vectorKey}:hash`);
-                const previousContent = await memoryManager.longTerm.load(`${vectorKey}:content`) as string | undefined;
+                let previousContent: string | undefined;
+                if (typeof existingHash === 'string' && existingHash) {
+                    try {
+                        previousContent = await fs.readFile(path.join(cacheDir, existingHash), 'utf-8');
+                    } catch {}
+                }
+
                 if (existingHash === contentHash && !force) {
                     await memoryManager.longTerm.save(cacheKeyMtime, stats.mtimeMs);
                     result.skippedFiles++;
@@ -115,10 +122,18 @@ ${sanitizedContent.slice(0, 2000)}`;
                     timestamp: Date.now()
                 });
 
-                // 4. Update hash cache
+                // 4. Update hash cache (only 2 saves instead of 3, no :content bloat)
                 await memoryManager.longTerm.save(`${vectorKey}:hash`, contentHash);
-                await memoryManager.longTerm.save(`${vectorKey}:content`, content);
                 await memoryManager.longTerm.save(`${vectorKey}:mtime`, stats.mtimeMs);
+
+                // Save content to separate cache file using atomic write
+                const { writeFileAtomic } = await import('../utils/FileUtils.js');
+                try {
+                    await fs.mkdir(cacheDir, { recursive: true });
+                    await writeFileAtomic(path.join(cacheDir, contentHash), content);
+                } catch (err) {
+                    console.error(`[WorkspaceIndexer] Failed to cache content for ${relativePath}: ${err}`);
+                }
 
                 if (previousContent && previousContent !== content) {
                     await memoryManager.updateWorkspaceMemoryForSimilarFiles(

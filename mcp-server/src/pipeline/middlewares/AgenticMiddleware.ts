@@ -88,10 +88,7 @@ async function getOrLoadState(sessionId: string): Promise<QueueState> {
     return state;
 }
 
-/**
- * Debounced State Persistence: Batches writes to reduce I/O under high throughput.
- */
-const persistStateDebounced = debounce(async (sessionId: string, projectDir: string) => {
+async function persistState(sessionId: string, projectDir: string) {
     const state = queues.get(sessionId);
     if (!state) return;
 
@@ -106,7 +103,12 @@ const persistStateDebounced = debounce(async (sessionId: string, projectDir: str
     } catch {
         // non-fatal
     }
-}, 2000);
+}
+
+/**
+ * Debounced State Persistence: Batches writes to reduce I/O under high throughput.
+ */
+const persistStateDebounced = debounce(persistState, 2000);
 
 
 /**
@@ -240,10 +242,27 @@ async function ensureProjectFiles(sessionId: string, workspaceRoot?: string): Pr
 
 export function decomposeGoal(goal: string): string[] {
     let items: string[] = [];
+    const lines = goal.split('\n').map(l => l.trim()).filter(Boolean);
+    
+    // Keep track of explicit mode for each line
+    const lineModes = lines.map(line => {
+        if (line.startsWith('>')) {
+            return { text: line.substring(1).trim(), mode: 'parallel' as const };
+        }
+        if (line.startsWith('-')) {
+            return { text: line.substring(1).trim(), mode: 'sequential' as const };
+        }
+        // Strip other bullets for clean text processing
+        const cleanText = line.replace(/^\s*(?:\d+[.)\-]|[-*])\s+/, '').trim();
+        return { text: cleanText, mode: undefined };
+    });
 
-    // Parse: "1. step", "- step", "* step" from prompt
     const listItems = goal.match(/^\s*(?:\d+[.)\-]|[-*])\s+(.+)/gm);
-    if (listItems && listItems.length >= 2) {
+    const hasExplicitDsl = lines.some(l => l.startsWith('>'));
+
+    if (hasExplicitDsl) {
+        items = lineModes.map(m => m.text).filter(Boolean);
+    } else if (listItems && listItems.length >= 2) {
         items = listItems.map(l => l.replace(/^\s*(?:\d+[.)\-]|[-*])\s+/, '').trim());
     } else {
         items = goal
@@ -252,42 +271,78 @@ export function decomposeGoal(goal: string): string[] {
             .filter(l => l.length > 0);
     }
 
-    if (items.length <= 1) {
-        return [goal];
+    if (items.length === 0) {
+        return [];
     }
 
     // Semantic combination of similar/simple tasks
-    const combined: string[] = [];
-    let pendingReads: string[] = [];
+    let finalTasks: { text: string; mode?: 'parallel' | 'sequential' }[] = [];
+    if (hasExplicitDsl) {
+        finalTasks = lineModes.filter(m => m.text).map(m => ({ text: m.text, mode: m.mode }));
+    } else {
+        const combined: string[] = [];
+        let pendingReads: string[] = [];
 
-    for (const item of items) {
-        const isRead = /\b(?:read|view|inspect|show|print|cat|get|display)\b/i.test(item) &&
-                       /\b[a-zA-Z0-9_\-\/\\\.]+\.[a-zA-Z0-9]+\b/i.test(item);
-        
-        if (isRead) {
-            // Extract the filename/file reference
-            const fileMatch = item.match(/\b([a-zA-Z0-9_\-\/\\\.]+\.[a-zA-Z0-9]+)\b/);
-            if (fileMatch) {
-                pendingReads.push(fileMatch[1]);
-                continue;
+        for (const item of items) {
+            const isRead = /\b(?:read|view|inspect|show|print|cat|get|display)\b/i.test(item) &&
+                           (/(?:[a-zA-Z]:)?[\\/]/i.test(item) || /\b[a-zA-Z0-9_\-\/\\\.]+\.[a-zA-Z0-9]+\b/i.test(item));
+            
+            if (isRead) {
+                const fileMatch = item.match(/(?:[a-zA-Z]:)?[\\/][a-zA-Z0-9_\-\/\\\.]+\.[a-zA-Z0-9]+|\b[a-zA-Z0-9_\-\/\\\.]+\.[a-zA-Z0-9]+\b/);
+                if (fileMatch) {
+                    pendingReads.push(fileMatch[0]);
+                    continue;
+                }
             }
+
+            if (pendingReads.length > 0) {
+                combined.push(`Read and inspect ${pendingReads.join(', ')}`);
+                pendingReads = [];
+            }
+
+            combined.push(item);
         }
 
-        // If we hit a non-read task, flush pending reads first
         if (pendingReads.length > 0) {
             combined.push(`Read and inspect ${pendingReads.join(', ')}`);
-            pendingReads = [];
         }
-
-        combined.push(item);
+        finalTasks = combined.map(t => ({ text: t }));
     }
 
-    // Flush any remaining reads
-    if (pendingReads.length > 0) {
-        combined.push(`Read and inspect ${pendingReads.join(', ')}`);
+    // Helper to infer TaskType
+    const inferTaskType = (t: string): string => {
+        const text = t.toLowerCase();
+        const codingExts = /\.(ts|js|py|go|rs|json|html|css|sh|yaml|yml)\b/;
+        const codingTerms = /\b(fix|bug|refactor|compile|build|implement|feature|code|function|class|variable|merge|git|commit|pr|pull request|issue|lint|syntax|type|interface)\b/;
+        const reasoningTerms = /\b(why|explain|reason|prove|analyze|diagnose|debug|verify|logical|math|derivation|theorem|proof)\b/;
+        const searchTerms = /\b(search|find|lookup|query|grep|google|fetch|web|internet)\b/;
+        const summarizationTerms = /\b(summarize|summary|distill|brief|outline|overview)\b/;
+        
+        if (codingExts.test(text) || codingTerms.test(text)) return 'coding';
+        if (reasoningTerms.test(text)) return 'reasoning';
+        if (searchTerms.test(text)) return 'search';
+        if (summarizationTerms.test(text)) return 'summarization';
+        return 'chat';
+    };
+
+    // Same TaskType collision guard for parallel tasks
+    const parallelTasks = finalTasks.filter(t => t.mode === 'parallel');
+    const typeCounts = new Map<string, number>();
+    for (const t of parallelTasks) {
+        const type = inferTaskType(t.text);
+        typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
     }
 
-    return combined.length > 0 ? combined : [goal];
+    return finalTasks.map(t => {
+        let mode = t.mode;
+        if (mode === 'parallel' && (typeCounts.get(inferTaskType(t.text)) || 0) > 1) {
+            mode = 'sequential';
+        }
+        if (mode) {
+            return `[${mode}] ${t.text}`;
+        }
+        return t.text;
+    });
 }
 
 
@@ -1507,6 +1562,10 @@ export class AgenticMiddleware implements Middleware {
                     }
                 }
             }
+        }
+
+        if (q.nowQueue.length === 0) {
+            await persistState(sessionId, projectDir);
         }
 
         if (!context.response) {

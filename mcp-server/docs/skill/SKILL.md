@@ -43,14 +43,33 @@ Perform chat completion with optional fallback and workspace memory.
 > [!IMPORTANT]
 > **MANDATORY PROJECT RULE**: For any workspace task, you MUST set `"agentic": true` AND provide `"workspace_root"`. This enables session memory and grounding.
 
+#### ⚡ Task Decomposition & Planning
+When `"agentic": true` is enabled, the pipeline decomposes the user's goal into subtasks. You can control this in two ways:
+1. **Automatic Planning (Recommended)**: Leave the prompt as plain prose. The system will use a reasoning/planning model to automatically decompose the goal and determine dependencies.
+2. **Explicit DSL Steering**: Manually prefix your task list using:
+   - `>` for **parallel** tasks (e.g. `> read auth.ts`). Tasks of the same middleware `TaskType` are automatically downgraded to sequential to avoid race conditions.
+   - `-` or `*` or `1.` for **sequential** tasks.
+
 **Example:**
 ```json
 {
-  "messages": [{ "role": "user", "content": "Implement auth in auth.ts" }],
+  "messages": [{ "role": "user", "content": "> read auth.ts\n> search for API keys\n- implement new middleware" }],
   "agentic": true,
   "workspace_root": "c:/Users/mahes/project"
 }
 ```
+
+---
+
+### `load_skill_prompt` [NEW]
+Search for or load a dynamic skill from the remote awesome-antigravity-skills index and save it locally.
+
+- **Parameters**:
+  - `type` (required): `"load"` to download/load a specific skill, or `"search"` to find skills.
+  - `name` (required if type is `"load"`): The name or ID of the skill to load.
+  - `keywords` (required if type is `"search"`): Array of string keywords to search for.
+  - `workspaceDir` (optional): Absolute path to the workspace directory for local storage.
+- **How it Works**: If type is `"search"`, queries the local index of skills matching keywords. If type is `"load"`, fetches all files of the target skill from GitHub, saves them to the local config/workspace directory, and returns the parsed `SKILL.md` system prompt ready for injection.
 
 ---
 

@@ -16,6 +16,37 @@ interface CompressionStat {
   timestamp: number;
 }
 
+const MAX_LINES = 500;
+
+export function selectAmplitudeLines(lines: string[]): string[] {
+  if (lines.length <= MAX_LINES) return lines.filter(l => l.trim().length > 0);
+
+  // Structural keyword bonus — "Hamiltonian" energy
+  const STRUCTURAL = /\b(function|class|const|let|var|export|import|def|return|async|interface|type|enum)\b/i;
+  const HEADING    = /^#+\s/;
+
+  const scored = lines
+      .map((line, i) => {
+          const trimmed = line.trim();
+          if (!trimmed) return { i, line, amp: 0 };       // zero amplitude for empty
+          let amp = 1 + trimmed.length / 120;             // base amplitude ∝ content density
+          if (STRUCTURAL.test(trimmed)) amp += 3;         // structural bonus
+          if (HEADING.test(trimmed))    amp += 2;         // heading bonus
+          return { i, line, amp };
+      })
+      .filter(e => e.amp > 0);
+
+  // Born-rule: normalize then sort descending, take top MAX_LINES, restore order
+  const totalAmp = scored.reduce((s, e) => s + e.amp, 0) || 1;
+  const selected = scored
+      .map(e => ({ ...e, prob: (e.amp / totalAmp) }))
+      .sort((a, b) => b.prob - a.prob)
+      .slice(0, MAX_LINES)
+      .sort((a, b) => a.i - b.i);    // restore original order
+
+  return selected.map(e => e.line);
+}
+
 export class MemoryManager {
   shortTerm: ShortTermMemory;
   longTerm: LongTermMemory;
@@ -182,8 +213,13 @@ export class MemoryManager {
     isSimilar: boolean;
     summary: string;
   } {
-    const linesA = fileAContent.split('\n');
-    const linesB = fileBContent.split('\n');
+    const rawLinesA = fileAContent.split('\n');
+    const rawLinesB = fileBContent.split('\n');
+    
+    // Quantum amplitude-weighted line sampling to prevent O(N*M) event loop blocking
+    const linesA = selectAmplitudeLines(rawLinesA);
+    const linesB = selectAmplitudeLines(rawLinesB);
+
     const docFreq = new Map<string, number>();
     const allLines = [...linesA, ...linesB];
 

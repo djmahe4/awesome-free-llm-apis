@@ -45,22 +45,38 @@ export async function buildExecutionPlan(
     }
 
     // Limit to max 3 subtasks as per constraints
-    const activeTasks = tasks.slice(0, 3);
-    if (activeTasks.length === 0) {
+    const rawActiveTasks = tasks.slice(0, 3);
+    if (rawActiveTasks.length === 0) {
         return {
             userBrief: 'No tasks to plan.',
             phase1: []
         };
     }
 
+    // Parse user-specified modes from task prefixes
+    const parsedTasks = rawActiveTasks.map(t => {
+        if (t.startsWith('[parallel] ')) {
+            return { raw: t, task: t.substring(11), userHint: 'parallel' as const };
+        }
+        if (t.startsWith('[sequential] ')) {
+            return { raw: t, task: t.substring(13), userHint: 'sequential' as const };
+        }
+        return { raw: t, task: t, userHint: undefined };
+    });
+
+    const activeTasks = parsedTasks.map(p => p.task);
+
     // Extract files referenced by each task
     const taskFiles = activeTasks.map(t => extractFiles(t));
 
     // Determine dependencies between tasks.
-    // Task B depends on Task A if:
-    // 1. Task B text explicitly mentions depending on Task A or doing something "after" or "then"
-    // 2. Task B files import/reference Task A files (or vice versa, i.e., shared data dependency)
     const hasDependency = (idxA: number, idxB: number): boolean => {
+        // If user explicitly marked either as sequential/parallel, that overrides heuristics
+        const hintA = parsedTasks[idxA].userHint;
+        const hintB = parsedTasks[idxB].userHint;
+        if (hintA === 'parallel' && hintB === 'parallel') return false;
+        if (hintA === 'sequential' || hintB === 'sequential') return true;
+
         if (idxA >= idxB) return false;
 
         const taskA = activeTasks[idxA].toLowerCase();
@@ -101,7 +117,7 @@ export async function buildExecutionPlan(
     if (activeTasks.length === 1) {
         phase1.push({
             task: activeTasks[0],
-            lane: 'sequential',
+            lane: parsedTasks[0].userHint || 'sequential',
             slot: 1
         });
     } else if (activeTasks.length === 2) {
@@ -109,20 +125,20 @@ export async function buildExecutionPlan(
         if (dep1_2) {
             phase1.push({
                 task: activeTasks[0],
-                lane: 'sequential',
+                lane: parsedTasks[0].userHint || 'sequential',
                 slot: 1
             });
             phase2.push({
                 task: activeTasks[1],
-                lane: 'sequential',
+                lane: parsedTasks[1].userHint || 'sequential',
                 slot: 2,
                 dependsOn: [activeTasks[0]]
             });
         } else {
             // Independent, run in parallel in Phase 1
             phase1.push(
-                { task: activeTasks[0], lane: 'parallel', slot: 1 },
-                { task: activeTasks[1], lane: 'parallel', slot: 2 }
+                { task: activeTasks[0], lane: parsedTasks[0].userHint || 'parallel', slot: 1 },
+                { task: activeTasks[1], lane: parsedTasks[1].userHint || 'parallel', slot: 2 }
             );
         }
     } else { // Exactly 3 tasks
@@ -216,6 +232,18 @@ export async function buildExecutionPlan(
             });
         }
     }
+
+    // Override lanes based on user-specified hints
+    const overrideLanes = (list: ClassifiedTask[]) => {
+        list.forEach(t => {
+            const parsed = parsedTasks.find(p => p.task === t.task);
+            if (parsed && parsed.userHint) {
+                t.lane = parsed.userHint;
+            }
+        });
+    };
+    overrideLanes(phase1);
+    overrideLanes(phase2);
 
     // Build the user brief plan description
     const planBriefLines = ['🔍 Task Plan:'];

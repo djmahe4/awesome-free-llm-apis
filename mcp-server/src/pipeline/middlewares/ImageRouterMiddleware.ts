@@ -35,20 +35,20 @@ export class ImageRouterMiddleware implements Middleware {
         return totalSize;
     }
 
-    public async processImageMessages(messages: any[]): Promise<any[]> {
+    public async processImageMessages(messages: any[], workspaceRoot?: string): Promise<any[]> {
         if (!messages || !Array.isArray(messages)) return messages;
 
         const processed: any[] = [];
         for (const msg of messages) {
             if (typeof msg.content === 'string') {
-                processed.push(await this.processStringContent(msg.content, msg));
+                processed.push(await this.processStringContent(msg.content, msg, workspaceRoot));
             } else if (Array.isArray(msg.content)) {
                 const newContent: any[] = [];
                 for (const item of msg.content) {
                     if (item && typeof item === 'object' && item.type === 'image_url' && item.image_url?.url) {
                         const imgUrl = item.image_url.url;
                         if (imgUrl.startsWith('file:///')) {
-                            const base64Url = await this.convertFileUrlToBase64(imgUrl);
+                            const base64Url = await this.convertFileUrlToBase64(imgUrl, workspaceRoot);
                             if (base64Url) {
                                 newContent.push({
                                     type: 'image_url',
@@ -72,7 +72,7 @@ export class ImageRouterMiddleware implements Middleware {
         return processed;
     }
 
-    private async processStringContent(content: string, msg: any): Promise<any> {
+    private async processStringContent(content: string, msg: any, workspaceRoot?: string): Promise<any> {
         const fileRegex = /file:\/\/\/\S+/g;
         const matches = [...content.matchAll(fileRegex)];
 
@@ -91,7 +91,7 @@ export class ImageRouterMiddleware implements Middleware {
                 newContent.push({ type: 'text', text: content.substring(lastIndex, matchIndex) });
             }
 
-            const base64Url = await this.convertFileUrlToBase64(fileUrl);
+            const base64Url = await this.convertFileUrlToBase64(fileUrl, workspaceRoot);
             if (base64Url) {
                 newContent.push({
                     type: 'image_url',
@@ -111,12 +111,23 @@ export class ImageRouterMiddleware implements Middleware {
         return { ...msg, content: newContent };
     }
 
-    private async convertFileUrlToBase64(imgUrl: string): Promise<string | null> {
+    private async convertFileUrlToBase64(imgUrl: string, workspaceRoot?: string): Promise<string | null> {
         let decodedPath = decodeURIComponent(imgUrl.replace(/^file:\/\//, ''));
         if (process.platform === 'win32' && decodedPath.startsWith('/') && /^\/[A-Za-z]:/.test(decodedPath)) {
             decodedPath = decodedPath.substring(1);
         }
         const imageFsPath = path.resolve(decodedPath);
+
+        // Path Traversal and Arbitrary File Read protection
+        if (workspaceRoot) {
+            const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+            const relative = path.relative(resolvedWorkspaceRoot, imageFsPath);
+            const isInside = relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+            if (!isInside && imageFsPath !== resolvedWorkspaceRoot) {
+                console.warn(`[ImageRouterMiddleware] Security alert: Rejected file read outside workspace root: ${imageFsPath}`);
+                return null;
+            }
+        }
 
         try {
             const buffer = await fs.readFile(imageFsPath);
@@ -174,7 +185,8 @@ export class ImageRouterMiddleware implements Middleware {
         console.debug('[ImageRouter] Intercepted vision request. Selecting vision models...');
 
         // Dynamic base64 image path resolution before forwarding to LLM execution
-        context.request.messages = await this.processImageMessages(context.request.messages);
+        const workspaceRoot = context.workspaceRoot || (context.request as any)?.workspace_root;
+        context.request.messages = await this.processImageMessages(context.request.messages, workspaceRoot);
 
         // Standalone testing mode: resolve paths but skip routing overrides to allow direct targeting of individual models
         if (context.bypassImageRouter) {

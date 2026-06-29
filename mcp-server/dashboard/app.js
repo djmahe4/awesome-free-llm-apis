@@ -59,16 +59,17 @@ async function renderMarkdown(text) {
       return `<pre class="code-block" style="font-size:.78rem;">${esc(definition)}</pre>`;
     }
     // Regular markdown
-    return part
+    const safePart = esc(part);
+    return safePart
       // Fenced code blocks (non-mermaid)
       .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
-        `<pre class="code-block" style="font-size:.78rem;overflow-x:auto;"><code>${esc(code.trim())}</code></pre>`)
+        `<pre class="code-block" style="font-size:.78rem;overflow-x:auto;"><code>${code.trim()}</code></pre>`)
       // Inline code
-      .replace(/`([^`]+)`/g, (_, c) => `<code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:.85em;">${esc(c)}</code>`)
+      .replace(/`([^`]+)`/g, (_, c) => `<code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:.85em;">${c}</code>`)
       // Bold
-      .replace(/\*\*([^*]+)\*\*/g, (_, t) => `<strong>${esc(t)}</strong>`)
+      .replace(/\*\*([^*]+)\*\*/g, (_, t) => `<strong>${t}</strong>`)
       // Italic
-      .replace(/\*([^*]+)\*/g, (_, t) => `<em>${esc(t)}</em>`)
+      .replace(/\*([^*]+)\*/g, (_, t) => `<em>${t}</em>`)
       // H1-H3
       .replace(/^### (.+)$/gm, '<h3 style="font-size:.85rem;color:var(--text-primary);margin:10px 0 4px;">$1</h3>')
       .replace(/^## (.+)$/gm, '<h2 style="font-size:.95rem;color:var(--text-primary);margin:12px 0 6px;">$1</h2>')
