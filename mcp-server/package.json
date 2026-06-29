@@ -1,6 +1,6 @@
 {
   "name": "free-llm-mcp-server",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "type": "module",
   "description": "MCP server for free LLM APIs",
   "bin": {
@@ -15,6 +15,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "smoke-test": "tsx --env-file=.env scripts/verification/smoke-test.ts",
+    "smoke-test:vision": "tsx --env-file=.env scripts/verification/vision-smoke-test.ts",
+    "smoke:suite": "tsx --env-file=.env scripts/smoke/run-smoke-suite.ts",
     "samples": "tsx --env-file=.env benchmarks/generate-live-samples.ts",
     "dashboard": "tsx --env-file=.env src/server.ts --sse",
     "report": "tsx --env-file=.env scripts/evaluation/model-report.ts"
@@ -25,12 +27,14 @@
     "cohere-ai": "^7.21.0",
     "cors": "^2.8.6",
     "express": "^4.21.2",
+    "firebase": "^12.14.0",
     "fs-extra": "^11.3.4",
     "helmet": "^8.1.0",
     "ignore": "^7.0.5",
     "js-tiktoken": "^1.0.21",
     "lru-cache": "^11.0.0",
     "node-fetch": "^3.3.2",
+    "node-localstorage": "^3.0.5",
     "quickjs-emscripten": "^0.29.0",
     "remark": "^15.0.1",
     "remark-parse": "^11.0.0",
@@ -52,5 +56,8 @@
     "tsx": "^4.19.0",
     "typescript": "^5.4.5",
     "vitest": "^4.1.2"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.60.0"
   }
 }

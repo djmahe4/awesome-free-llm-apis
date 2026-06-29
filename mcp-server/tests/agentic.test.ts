@@ -1,45 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock FS module
-vi.mock('node:fs', () => {
-    const mockPromises = {
-        writeFile: vi.fn(),
-        mkdir: vi.fn(),
-        access: vi.fn(),
-        readFile: vi.fn(),
-        stat: vi.fn(async () => ({ mtimeMs: 1000 })),
-    };
-    return {
-        promises: mockPromises,
-        default: {
-            promises: mockPromises,
-        },
-    };
-});
-
-vi.mock('fs', () => {
-    const mockPromises = {
-        writeFile: vi.fn(),
-        mkdir: vi.fn(),
-        access: vi.fn(),
-        readFile: vi.fn(),
-        stat: vi.fn(async () => ({ mtimeMs: 1000 })),
-    };
-    return {
-        promises: mockPromises,
-        default: {
-            promises: mockPromises,
-        },
-    };
-});
+// fs is spied in beforeEach to prevent global mock leak to other test files
 
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
-import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/agentic/prompts.js';
+import { AgenticMiddleware } from '../src/pipeline/middlewares/AgenticMiddleware.js';
+import { getIntelligentSystemPrompt, resetPromptCache } from '../src/pipeline/middlewares/prompts.js';
 import type { PipelineContext } from '../src/pipeline/middleware.js';
 import { promises as fsp } from 'node:fs';
 import * as fs from 'node:fs';
+import { LLMExecutor } from '../src/utils/LLMExecutor.js';
 
 // Mock debounce to be immediate
 vi.mock('../src/utils/debounce.js', () => ({
@@ -95,25 +65,32 @@ describe('Agentic Intelligence & Middleware', () => {
     };
 
     beforeEach(() => {
-        vi.resetAllMocks();
         vi.stubEnv('ENABLE_AGENTIC_MIDDLEWARE', 'true');
         resetPromptCache();
 
-        // Setup default mock behaviors (Async)
-        (vi.mocked(fsp.access) as any).mockImplementation(async (path: string) => {
-            if (path.endsWith('prompt.json') || path.endsWith('system-prompt-raw.md') || path.endsWith('README.md')) return undefined;
+        vi.spyOn(LLMExecutor.prototype, 'prompt').mockResolvedValue({
+            id: 'mock-subtask-resp',
+            choices: [{ message: { role: 'assistant', content: 'Subtask completed successfully.' } }]
+        } as any);
+
+        // Spy on fsp promises instead of global mocks to prevent leakage
+        vi.spyOn(fsp, 'writeFile').mockResolvedValue(undefined as any);
+        vi.spyOn(fsp, 'mkdir').mockResolvedValue(undefined as any);
+        vi.spyOn(fsp, 'rename').mockResolvedValue(undefined as any);
+        vi.spyOn(fsp, 'access').mockImplementation(async (path: any) => {
+            if (typeof path === 'string' && (path.endsWith('prompt.json') || path.endsWith('system-prompt-raw.md') || path.endsWith('README.md'))) return undefined;
             throw new Error('File not found');
         });
-        (vi.mocked(fsp.stat) as any).mockImplementation(async () => ({ mtimeMs: Date.now() }));
-        (vi.mocked(fsp.readFile) as any).mockImplementation(async (path: string) => {
-            if (path.endsWith('prompt.json')) return JSON.stringify(mockPromptData);
-            if (path.endsWith('README.md')) return "Tier 2 Fallback (README) [Context-aware fallback content for agentic testing]";
+        vi.spyOn(fsp, 'stat').mockResolvedValue({ mtimeMs: 1000 } as any);
+        vi.spyOn(fsp, 'readFile').mockImplementation(async (path: any) => {
+            if (typeof path === 'string' && path.endsWith('prompt.json')) return JSON.stringify(mockPromptData);
+            if (typeof path === 'string' && path.endsWith('README.md')) return "Tier 2 Fallback (README) [Context-aware fallback content for agentic testing]";
             return "";
         });
+    });
 
-        vi.mocked(fsp.mkdir).mockResolvedValue(undefined);
-        vi.mocked(fsp.writeFile).mockResolvedValue(undefined);
-        (vi.mocked(fsp.stat) as any).mockResolvedValue({ mtimeMs: 1000 });
+    afterEach(() => {
+        vi.restoreAllMocks();
     });
 
     describe('getIntelligentSystemPrompt (Async)', () => {
@@ -201,7 +178,7 @@ describe('Agentic Intelligence & Middleware', () => {
             const context: PipelineContext = {
                 request: {
                     model: 'test',
-                    messages: [{ role: 'user', content: 'momentum' }]
+                    messages: [{ role: 'user', content: 'implement momentum' }]
                 },
                 sessionId: 'session-1'
             } as any;
@@ -258,7 +235,7 @@ describe('Agentic Intelligence & Middleware', () => {
             const context: PipelineContext = {
                 request: {
                     model: 'test',
-                    messages: [{ role: 'user', content: 'momentum' }]
+                    messages: [{ role: 'user', content: 'implement momentum' }]
                 },
                 agentic: true,
                 sessionId: 'explicit-session'
@@ -276,7 +253,7 @@ describe('Agentic Intelligence & Middleware', () => {
             const context: PipelineContext = {
                 request: {
                     model: 'test',
-                    messages: [{ role: 'user', content: 'momentum' }]
+                    messages: [{ role: 'user', content: 'run momentum' }]
                 }
                 // No sessionId
             } as any;

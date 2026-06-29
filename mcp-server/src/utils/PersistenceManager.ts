@@ -1,6 +1,7 @@
 import fs from 'fs-extra';
 import path from 'path';
 import os from 'os';
+import { encrypt, decrypt } from './encryption.js';
 
 /**
  * Tracks usage data that needs to be persisted across sessions and processes.
@@ -11,6 +12,15 @@ export interface PersistentUsage {
   dailyTotalTokens: number;
   lifetimeTotalRequests: number;
   lifetimeTotalTokens: number;
+  userId?: string;
+  username?: string;
+  sessionToken?: string;
+  sessionExpiresAt?: number;
+  lastSyncTime?: number;
+  optOutTelemetry?: boolean;
+  firebaseUid?: string;
+  firebaseRefreshToken?: string;
+  fallbackUid?: string;
   providers: Record<string, {
     lastSyncTime: number;
     localTotalRequests: number;
@@ -89,13 +99,15 @@ export class PersistenceManager {
 
     try {
       if (await fs.pathExists(this.filePath)) {
-        const data = await fs.readJson(this.filePath);
+        const rawContent = await fs.readFile(this.filePath, 'utf8');
+        const decryptedContent = await decrypt(rawContent);
+        const data = JSON.parse(decryptedContent);
         const resetData = this.handleDailyReset(data);
         this.lastSavedState = JSON.parse(JSON.stringify(resetData));
         return resetData;
       }
     } catch (e) {
-      console.error('Error loading usage stats:', e);
+      console.warn('[PersistenceManager] Telemetry/Usage file tampered or corrupted! resetting state...');
     }
 
     this.lastSavedState = JSON.parse(JSON.stringify(emptyState));
@@ -129,7 +141,13 @@ export class PersistenceManager {
       // Read current disk state for merging
       let diskState: PersistentUsage;
       try {
-        diskState = await fs.readJson(this.filePath);
+        if (await fs.pathExists(this.filePath)) {
+          const raw = await fs.readFile(this.filePath, 'utf8');
+          const decrypted = await decrypt(raw);
+          diskState = JSON.parse(decrypted);
+        } else {
+          throw new Error('File does not exist');
+        }
       } catch (e) {
         diskState = {
           lastResetDate: today,
@@ -143,9 +161,11 @@ export class PersistenceManager {
 
       const merged = this.merge(diskState, memoryState);
       
-      // Atomic write: write to tmp, then rename
+      // Atomic write: encrypt merged data, write to tmp, then rename
       const tmpPath = `${this.filePath}.tmp`;
-      await fs.writeJson(tmpPath, merged, { spaces: 2 });
+      const serialized = JSON.stringify(merged);
+      const encrypted = await encrypt(serialized);
+      await fs.writeFile(tmpPath, encrypted, 'utf8');
       await fs.rename(tmpPath, this.filePath);
 
       // Update baseline for next delta calculation
@@ -187,6 +207,15 @@ export class PersistenceManager {
       dailyTotalTokens: base.dailyTotalTokens + deltaDailyTok,
       lifetimeTotalRequests: base.lifetimeTotalRequests + deltaLifetimeReq,
       lifetimeTotalTokens: base.lifetimeTotalTokens + deltaLifetimeTok,
+      userId: memory.userId || base.userId,
+      username: memory.username || base.username,
+      sessionToken: memory.sessionToken || base.sessionToken,
+      sessionExpiresAt: memory.sessionExpiresAt || base.sessionExpiresAt,
+      lastSyncTime: Math.max(base.lastSyncTime || 0, memory.lastSyncTime || 0),
+      optOutTelemetry: memory.optOutTelemetry !== undefined ? memory.optOutTelemetry : base.optOutTelemetry,
+      firebaseUid: memory.firebaseUid || base.firebaseUid,
+      firebaseRefreshToken: memory.firebaseRefreshToken || base.firebaseRefreshToken,
+      fallbackUid: memory.fallbackUid || base.fallbackUid,
       providers: { ...base.providers }
     };
 

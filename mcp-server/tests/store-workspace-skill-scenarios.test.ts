@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { storeWorkspaceSkill } from '../src/tools/store-workspace-skill.js';
+import { normalizeScriptFilename, addScriptMetadataHeader } from '../src/tools/store-workspace-skill.js';
 import { useFreeLLM } from '../src/tools/use-free-llm.js';
 import { memoryManager } from '../src/memory/index.js';
-import { ContextGatherer } from '../src/middleware/agentic/context-gatherer.js';
+import { ContextGatherer } from '../src/pipeline/middlewares/context-gatherer.js';
 import fs from 'node:fs/promises';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import path from 'node:path';
@@ -19,7 +20,7 @@ vi.mock('../src/memory/index.js', () => ({
     }
 }));
 
-vi.mock('../src/middleware/agentic/context-gatherer.js', () => ({
+vi.mock('../src/pipeline/middlewares/context-gatherer.js', () => ({
     ContextGatherer: {
         gatherContext: vi.fn()
     }
@@ -103,7 +104,7 @@ describe('storeWorkspaceSkill Scenarios', () => {
 
     it('should extract code correctly even without markdown blocks if necessary', async () => {
         (useFreeLLM as any).mockResolvedValue({
-            choices: [{ message: { content: 'echo "raw-code-output"' } }]
+            choices: [{ message: { content: '```bash\necho "raw-code-output"\n```' } }]
         });
 
         const result = await storeWorkspaceSkill({
@@ -122,7 +123,9 @@ describe('storeWorkspaceSkill Scenarios', () => {
         // Verify file content
         const scriptPath = path.join(root, '.free-llm-mcp', 'skills', 'raw-extract', 'scripts', 'raw.sh');
         const content = await fs.readFile(scriptPath, 'utf-8');
-        expect(content).toBe('echo "raw-code-output"');
+        expect(content).toContain('skill: raw-extract');
+        expect(content).toContain('version: 1.0.6');
+        expect(content).toContain('echo "raw-code-output"');
     });
 
     it('should handle large context injections by joining them (potential overflow check)', async () => {
@@ -173,5 +176,60 @@ describe('storeWorkspaceSkill Scenarios', () => {
         const content = await fs.readFile(scriptPath, 'utf-8');
         expect(result.success).toBe(true);
         expect(content).toContain('```bash'); // Falls back to raw because closing block is missing
+    });
+});
+
+describe('Internal Utility Functions', () => {
+    describe('normalizeScriptFilename', () => {
+        it('should handle files with .py extension', () => {
+            expect(normalizeScriptFilename('test.py')).toBe('test.py');
+        });
+
+        it('should handle files with _py suffix', () => {
+            expect(normalizeScriptFilename('test_py')).toBe('test.py');
+        });
+
+        it('should NOT force .py for files with extensions', () => {
+            expect(normalizeScriptFilename('test.sh')).toBe('test.sh');
+            expect(normalizeScriptFilename('test.js')).toBe('test.js');
+            expect(normalizeScriptFilename('test.yaml')).toBe('test.yaml');
+        });
+
+        it('should not force .py for files without extensions (fixing bug)', () => {
+            expect(normalizeScriptFilename('test')).toBe('test');
+        });
+
+    });
+
+    describe('addScriptMetadataHeader', () => {
+        const skillName = 'test-skill';
+        const version = '1.0.6';
+
+        it('should use # for shell and python files', () => {
+            const content = 'print("hello")';
+            const header = addScriptMetadataHeader(content, skillName, version, 'test.py');
+            expect(header).toContain('# skill: test-skill');
+            expect(header).toContain('# version: 1.0.6');
+        });
+
+        it('should use # for yaml files', () => {
+            const content = 'key: value';
+            const header = addScriptMetadataHeader(content, skillName, version, 'test.yaml');
+            expect(header).toContain('# skill: test-skill');
+        });
+
+        it('should use // for javascript files', () => {
+            const content = 'console.log("hello")';
+            const header = addScriptMetadataHeader(content, skillName, version, 'test.js');
+            expect(header).toContain('// skill: test-skill');
+            expect(header).toContain('// version: 1.0.6');
+        });
+
+        it('should handle protocol-relative URLs in content correctly', () => {
+            const content = '//cdn.example.com/script.js';
+            const header = addScriptMetadataHeader(content, skillName, version, 'test.js');
+            expect(header).toContain('// skill: test-skill');
+            expect(header).toContain('//cdn.example.com/script.js');
+        });
     });
 });

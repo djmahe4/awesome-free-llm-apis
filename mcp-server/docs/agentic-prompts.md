@@ -48,10 +48,16 @@ When reference sections are injected, the system automatically appends the `REFE
 
 ## Post-Build Synchronization
 
-The system is designed to be highly maintainable. Developers should only edit the `README.md`. The `prompt.json` is automatically updated during the build process:
-
-```bash
-npm run build
-```
-
 This triggers `scripts/postbuild.js`, which runs a Python utility (`update_prompt_json.py`) to re-index the README content and keywords.
+
+---
+
+## 📋 AGENTS.md Workspace Rules Integration
+
+In addition to dynamically scored prompts, the pipeline looks for a local `AGENTS.md` file in the workspace customizations root (`.agents/AGENTS.md` or the workspace root).
+
+### Integration Mechanics:
+1. **Detection**: During the `WorkspaceContextMiddleware` execution, the server checks if `AGENTS.md` exists.
+2. **Inlining**: If found, the entire content of `AGENTS.md` is parsed and appended to the system prompt under a dedicated `## Project-Scoped Steering Rules` section.
+3. **Precedence**: These rules act as hard constraints. Because they are appended directly to the system prompt at runtime, they override general routing guidelines, forcing the model to align with project-specific preferences (e.g., TDD workflows or specific design patterns).
+

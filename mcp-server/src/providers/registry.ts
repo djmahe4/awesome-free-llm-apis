@@ -7,13 +7,13 @@ import { CloudflareProvider } from './cloudflare.js';
 import { GitHubModelsProvider } from './github-models.js';
 import { GroqProvider } from './groq.js';
 import { HuggingFaceProvider } from './huggingface.js';
-import { KlusterProvider } from './kluster.js';
 import { LLM7Provider } from './llm7.js';
 import { NvidiaProvider } from './nvidia.js';
 import { OllamaCloudProvider } from './ollama-cloud.js';
 import { OpenRouterProvider } from './openrouter.js';
 import { SiliconFlowProvider } from './siliconflow.js';
 import { KiloCodeProvider } from './kilocode.js';
+import { ModelScopeProvider } from './modelscope.js';
 import type { Provider, ProviderModel } from './types.js';
 
 export class ProviderRegistry {
@@ -31,13 +31,13 @@ export class ProviderRegistry {
       new GitHubModelsProvider(),
       new GroqProvider(),
       new HuggingFaceProvider(),
-      new KlusterProvider(),
       new LLM7Provider(),
       new NvidiaProvider(),
       new OllamaCloudProvider(),
       new OpenRouterProvider(),
       new SiliconFlowProvider(),
-      new KiloCodeProvider()
+      new KiloCodeProvider(),
+      new ModelScopeProvider()
     ];
     for (const p of allProviders) {
       this.providers.set(p.id, p);

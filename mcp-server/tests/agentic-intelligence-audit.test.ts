@@ -23,7 +23,7 @@ vi.mock('../src/memory/indexer.js', () => ({
 }));
 
 // Mock ContextGatherer and others for Middleware test
-vi.mock('../src/middleware/agentic/context-gatherer.js', () => ({
+vi.mock('../src/pipeline/middlewares/context-gatherer.js', () => ({
     ContextGatherer: {
         gatherContext: vi.fn().mockResolvedValue([])
     }
@@ -55,7 +55,7 @@ describe('Agentic Intelligence Audit', () => {
                 id: 'gemini',
                 models: [
                     { id: 'deepseek-ai/DeepSeek-V3' },
-                    { id: 'gemini-3.1-flash-lite-preview' },
+                    { id: 'gemini-3.1-flash-lite' },
                     { id: 'gemini-2.5-flash' },
                     { id: 'llama-3.3-70b-versatile' }
                 ],
@@ -78,9 +78,9 @@ describe('Agentic Intelligence Audit', () => {
             // We can check which model was passed to the chat call
             await executor.prompt([{ role: 'user', content: 'test' }], 'any', { google_search: true });
 
-            // With the update, gemini-3.1-flash-lite-preview is prioritized for google_search (highest RPD)
+            // With the update, gemini-3.1-flash-lite is prioritized for google_search (highest RPD)
             expect(mockProvider.chat).toHaveBeenCalledWith(expect.objectContaining({
-                model: 'gemini-3.1-flash-lite-preview',
+                model: 'gemini-3.1-flash-lite',
                 google_search: true
             }));
         });

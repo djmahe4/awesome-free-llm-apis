@@ -1,262 +1,445 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="dark">
-
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>⚡ Free LLM APIs Dashboard</title>
-  <!-- Bootstrap 5 CSS -->
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <!-- Bootstrap Icons -->
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-  <!-- Custom Styles -->
-  <link href="/style.css" rel="stylesheet">
-
+  <title>⚡ Free LLM APIs — Dashboard</title>
+  <meta name="description" content="Real-time monitoring and tool playground for the Free LLM APIs MCP Server. View provider quotas, memory state, and call any tool live.">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+    window.__mermaid = mermaid;
+  </script>
 </head>
-
 <body>
 
-  <!-- Navbar -->
-  <nav class="navbar navbar-expand-lg border-bottom border-secondary-subtle py-3">
-    <div class="container">
-      <a class="navbar-brand" href="#">⚡ FREE-LLM-MCP</a>
-      <div class="ms-auto d-flex align-items-center">
-        <span id="connection-status" class="badge rounded-pill bg-dark border border-danger text-danger px-3 py-2">
-          <i class="bi bi-broadcast me-2"></i>Disconnected
-        </span>
+  <!-- ─── Hero Header ─────────────────────────────────────────── -->
+  <header class="hero-header">
+    <div class="hero-strip"></div>
+    <div class="hero-inner">
+      <div>
+        <div class="logo">⚡ FREE-LLM-MCP</div>
+        <div class="logo-sub">v1.0.6 · Orchestration Dashboard</div>
+      </div>
+      <div class="header-spacer"></div>
+      <div id="status-pill" class="status-pill offline">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-label">Connecting…</span>
       </div>
     </div>
-  </nav>
+  </header>
 
-  <div class="container mt-4 mb-5">
+  <!-- ─── Main Content ─────────────────────────────────────────── -->
+  <main class="container">
 
     <!-- Tabs Navigation -->
-    <ul class="nav nav-tabs mb-4" id="dashboardTabs" role="tablist">
-      <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview" type="button"
-          role="tab"><i class="bi bi-speedometer2 me-2"></i>Overview</button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="providers-tab" data-bs-toggle="tab" data-bs-target="#providers" type="button"
-          role="tab"><i class="bi bi-cpu me-2"></i>Provider Tracking</button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="config-tab" data-bs-toggle="tab" data-bs-target="#config" type="button"
-          role="tab"><i class="bi bi-gear-fill me-2"></i>Quick Start</button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="cache-tab" data-bs-toggle="tab" data-bs-target="#cache" type="button" role="tab"><i
-            class="bi bi-database-fill me-2"></i>Cache & Memory</button>
-      </li>
-    </ul>
+    <nav class="tabs-bar" role="tablist" aria-label="Dashboard sections">
+      <button class="tab-btn active" data-tab="overview" role="tab" aria-selected="true" id="tab-overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Overview
+      </button>
+      <button class="tab-btn" data-tab="providers" role="tab" aria-selected="false" id="tab-providers">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+        Providers
+      </button>
+      <button class="tab-btn" data-tab="playground" role="tab" aria-selected="false" id="tab-playground">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Tool Playground
+      </button>
+      <button class="tab-btn" data-tab="memory" role="tab" aria-selected="false" id="tab-memory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
+        Memory
+      </button>
+      <button class="tab-btn" data-tab="profile" role="tab" aria-selected="false" id="tab-profile">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Profile & Leaderboard
+      </button>
+      <button class="tab-btn" data-tab="quickstart" role="tab" aria-selected="false" id="tab-quickstart">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+        Quick Start
+      </button>
+    </nav>
 
-    <!-- Tab Content -->
-    <div class="tab-content" id="dashboardTabsContent">
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 1: OVERVIEW
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel active" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
 
-      <!-- Tab 1: Overview -->
-      <div class="tab-pane fade show active" id="overview" role="tabpanel">
-        <div class="row g-4 mb-4">
-          <div class="col-md-3">
-            <div class="card p-3 h-100 border-primary-subtle">
-              <div class="text-primary small text-uppercase fw-bold mb-2"><i class="bi bi-cpu me-2"></i>Active Providers</div>
-              <div id="active-providers" class="stat-value text-primary">--</div>
-              <div class="small text-muted">Ready for routing</div>
-            </div>
+      <!-- Stat Cards -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label c-purple">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            Active Providers
           </div>
-          <div class="col-md-3">
-            <div class="card p-3 h-100 border-warning-subtle">
-              <div class="text-warning small text-uppercase fw-bold mb-2"><i class="bi bi-calendar-check me-2"></i>Today's Requests</div>
-              <div id="global-daily-requests" class="stat-value text-warning">0</div>
-              <div class="small text-muted">System-wide daily total</div>
-            </div>
-          </div>
-          <div class="col-md-3">
-            <div class="card p-3 h-100 border-info-subtle">
-              <div class="text-info small text-uppercase fw-bold mb-2"><i class="bi bi-lightning-charge me-2"></i>Today's Tokens</div>
-              <div id="global-daily-tokens" class="stat-value text-info">0</div>
-              <div class="small text-muted">Aggregated usage today</div>
-            </div>
-          </div>
-          <div class="col-md-3">
-            <div class="card p-3 h-100 border-success-subtle">
-              <div class="text-success small text-uppercase fw-bold mb-2"><i class="bi bi-infinity me-2"></i>Lifetime Requests</div>
-              <div id="global-lifetime-requests" class="stat-value text-success">0</div>
-              <div class="small text-muted">Total since installation</div>
-            </div>
-          </div>
+          <div class="stat-value c-purple" id="stat-providers">--</div>
+          <div class="stat-sub">Ready for routing</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-label c-amber">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+            Today's Requests
+          </div>
+          <div class="stat-value c-amber" id="stat-daily-req">0</div>
+          <div class="stat-sub">System-wide daily total</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label c-cyan">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Today's Tokens
+          </div>
+          <div class="stat-value c-cyan" id="stat-daily-tok">0</div>
+          <div class="stat-sub">Aggregated usage today</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label c-green">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+            Lifetime Requests
+          </div>
+          <div class="stat-value c-green" id="stat-lifetime">0</div>
+          <div class="stat-sub">Total since install</div>
+        </div>
+      </div>
 
-        <div class="card p-4">
-          <h5 class="mb-3">Intelligent Orchestration Status</h5>
-          <p class="text-muted">The system is currently routing tasks (Coding, Chat, etc.) to the most cost-effective
-            models while managing local token caches.</p>
-          <div class="list-group list-group-flush">
-            <div
-              class="list-group-item bg-transparent border-secondary-subtle py-3 d-flex justify-content-between align-items-center">
-              <div>
-                <h6 class="mb-0">Token Estimation</h6>
-                <small class="text-muted">Proactive counting using js-tiktoken</small>
-              </div>
-              <span class="badge bg-success">Active</span>
+      <!-- System Features -->
+      <div class="card">
+        <div class="card-header">
+          <span class="section-title" style="margin:0;font-size:.9rem;">Intelligent Orchestration — Active Features</span>
+        </div>
+        <div class="card-body">
+          <div class="feature-list">
+            <div class="feature-row">
+              <div><div class="feature-name">Token Estimation</div><div class="feature-sub">Proactive counting via js-tiktoken before each call</div></div>
+              <span class="badge badge-green">Active</span>
             </div>
-            <div
-              class="list-group-item bg-transparent border-secondary-subtle py-3 d-flex justify-content-between align-items-center">
-              <div>
-                <h6 class="mb-0">Header Sync</h6>
-                <small class="text-muted">Real-time quota updates from API headers</small>
-              </div>
-              <span class="badge bg-success">Active</span>
+            <div class="feature-row">
+              <div><div class="feature-name">Quantum Scoring</div><div class="feature-sub">Probabilistic model selection with deepseek-r1 baseline (1.0)</div></div>
+              <span class="badge badge-purple">Active</span>
             </div>
-            <div
-              class="list-group-item bg-transparent border-secondary-subtle py-3 d-flex justify-content-between align-items-center">
-              <div>
-                <h6 class="mb-0">Auto-Fallback</h6>
-                <small class="text-muted">Cascading retry logic across tiers</small>
-              </div>
-              <span class="badge bg-primary">Operational</span>
+            <div class="feature-row">
+              <div><div class="feature-name">Circuit Breaker</div><div class="feature-sub">Adaptive cooldown (15s rate-limit · 60s server errors)</div></div>
+              <span class="badge badge-cyan">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Header Sync</div><div class="feature-sub">Real-time quota drift correction from API response headers</div></div>
+              <span class="badge badge-green">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Subtask Visual Grounding</div><div class="feature-sub">file:/// → base64 image conversion for TDD agentic runs</div></div>
+              <span class="badge badge-purple">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Auto-Fallback Cascade</div><div class="feature-sub">2-pass routing across all healthy → cooling providers</div></div>
+              <span class="badge badge-green">Active</span>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Tab 2: Provider Tracking -->
-      <div class="tab-pane fade" id="providers" role="tabpanel">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <h5>Real-time Quota Status</h5>
-          <button id="refresh-btn" class="btn btn-sm btn-outline-primary"><i
-              class="bi bi-arrow-clockwise me-1"></i>Refresh Now</button>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 2: PROVIDERS
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-providers" role="tabpanel" aria-labelledby="tab-providers">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div class="section-title">Real-time Provider Quotas</div>
+          <div class="section-sub">Auto-refreshes every 5 seconds · Click Verify to health-check credentials</div>
         </div>
-        <div class="row g-3" id="provider-cards-container">
-          <div class="col-12 text-center py-5 text-muted">
-            <div class="spinner-border spinner-border-sm me-2" role="status"></div>
-            Connecting to MCP Server...
-          </div>
+        <button class="btn btn-outline btn-sm" id="refresh-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.43"/></svg>
+          Refresh Now
+        </button>
+      </div>
+      <div class="providers-grid" id="providers-grid">
+        <div style="grid-column:1/-1;text-align:center;padding:60px 0;color:var(--text-muted);">
+          <div class="spinner" style="width:24px;height:24px;margin:0 auto 12px;"></div>
+          Connecting to MCP server…
         </div>
       </div>
+    </section>
 
-      <!-- Tab 3: Quick Start -->
-      <div class="tab-pane fade" id="config" role="tabpanel">
-        <div class="card p-4">
-          <h5>Installation & Setup</h5>
-          <pre><code class="text-info"># Install dependencies
-npm install
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 3: TOOL PLAYGROUND
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-playground" role="tabpanel" aria-labelledby="tab-playground">
 
-# Setup env
-cp .env.example .env
-# Edit .env and enter your API keys
+      <div class="pg-chat-layout">
 
-# Start Dashboard Server
-npm run dashboard</code></pre>
+        <!-- LEFT: Tool Selector + Param Panel -->
+        <div class="pg-sidebar" id="pg-sidebar">
+          
+          <!-- Conversations Card -->
+          <div class="card" style="margin-bottom:12px; display:flex; flex-direction:column; max-height:280px; min-height:160px;">
+            <div class="card-header" style="padding:10px 16px; flex-shrink:0;">
+              <span class="card-title" style="font-size:.82rem; display:flex; align-items:center; gap:6px;">
+                <span>🗂</span> Conversations
+              </span>
+            </div>
+            <div class="card-body" style="padding:8px; display:flex; flex-direction:column; overflow:hidden; flex:1; min-height:0;">
+              <input type="text" id="pg-conv-search" placeholder="Search sessions..." style="font-size:.75rem; padding:6px 10px; margin-bottom:8px; border-radius:6px; flex-shrink:0; width:100%; border:1px solid var(--glass-border); background:rgba(255,255,255,0.03); color:var(--text-primary);">
+              <div id="pg-conv-list" class="conv-list" style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:4px;">
+                <div class="conv-empty">Loading conversations...</div>
+              </div>
+            </div>
+          </div>
 
-          <h5 class="mt-4">Integration Code</h5>
-          <p class="text-muted">Example of calling the orchestration tool from another MCP client:</p>
-          <pre><code class="text-success">const result = await client.callTool("use_free_llm", {
-  prompt: "Write a high-performance HTTP server in Go",
-  task: "coding" // Triggers DeepSeek-R1 / Gemini Pro routing
-});</code></pre>
-        </div>
-      </div>
+          <div class="card" style="margin-bottom:12px;">
+            <div class="card-header" style="padding:12px 16px;">
+              <span class="card-title" style="font-size:.82rem;">Select Tool</span>
+            </div>
+            <div class="card-body" style="padding:8px;">
+              <div class="tool-selector-list" id="tool-list"></div>
+            </div>
+          </div>
 
-      <!-- Tab 4: Cache & Memory -->
-      <div class="tab-pane fade" id="cache" role="tabpanel">
-
-        <!-- Session selector -->
-        <div class="card p-4 mb-4">
-          <h5 class="mb-3"><i class="bi bi-brain me-2 text-warning"></i>Short-Term Memory Buffers</h5>
-          <p class="text-muted small mb-3">
-            Live content of the active session's <code>knowledge.md</code> and momentum queues (now / next / blocked),
-            as written by <code>AgenticMiddleware</code>. Auto-refreshes every 3 seconds when a session is selected.
-          </p>
-          <div class="d-flex gap-2 align-items-center flex-wrap">
-            <label class="text-muted small text-nowrap" for="memory-session-input">Session ID</label>
-            <input id="memory-session-input" type="text" class="form-control form-control-sm font-monospace"
-              placeholder="e.g. ws-abc123 or my-project" />
-            <button id="memory-load-btn" class="btn btn-sm btn-outline-warning">
-              <i class="bi bi-play-fill me-1"></i>Load
-            </button>
-            <select id="memory-session-select" class="form-select form-select-sm">
-              <option value="">— pick active session —</option>
-            </select>
-            <span id="memory-last-updated" class="text-muted small ms-auto"></span>
+          <!-- Params card -->
+          <div class="card" id="pg-params-card">
+            <div class="card-header" style="padding:10px 16px;cursor:pointer;" id="pg-params-toggle">
+              <span class="card-title" id="pg-tool-title" style="font-size:.82rem;">use_free_llm</span>
+              <svg id="pg-params-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .2s;margin-left:auto;"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div id="pg-params-body" class="card-body" style="padding:12px;">
+              <div id="pg-form" class="playground-form"></div>
+            </div>
           </div>
         </div>
 
-        <!-- Knowledge.md preview -->
-        <div class="row g-3 mb-3">
-          <div class="col-12">
-            <div class="card p-3">
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <h6 class="mb-0"><i class="bi bi-journal-text me-2 text-info"></i>knowledge.md
-                  <span class="text-muted small font-monospace" id="memory-session-label"></span>
-                </h6>
-                <button id="memory-refresh-btn" class="btn btn-sm btn-link text-primary p-0 text-decoration-none">
-                  <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+        <!-- RIGHT: Chat Log + Send Bar -->
+        <div class="pg-chat-main">
+
+          <!-- Chat header -->
+          <div class="pg-chat-header">
+            <div style="display:flex;flex-direction:column;gap:2px;">
+              <span id="pg-chat-session-label" style="font-size:.8rem;color:var(--text-muted);">No workspace — one-shot mode</span>
+              <span id="pg-chat-mode-badge" class="badge badge-amber" style="width:fit-content;font-size:.65rem;">⚡ One-shot</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <!-- Workspace input inline -->
+              <div style="display:flex;gap:6px;align-items:center;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);flex-shrink:0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <input type="text" id="pg-workspace" placeholder="workspace path (enables agentic)" style="width:220px;font-size:.78rem;" title="Set workspace root — saved automatically. Changing this starts a new conversation.">
+                <button type="button" id="pg-folder-btn" class="btn btn-outline btn-sm" title="Pick workspace folder" style="padding:3px 7px;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                 </button>
               </div>
-              <textarea id="memory-knowledge" class="form-control font-monospace"
-                readonly placeholder="Select a session above to view knowledge.md…"></textarea>
+              <button class="btn btn-outline btn-sm" id="pg-clear-btn" title="Clear conversation">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+              </button>
             </div>
+          </div>
+
+          <!-- Chat log -->
+          <div class="pg-chat-log" id="pg-chat-log" aria-live="polite">
+            <div class="chat-empty-state" id="pg-chat-empty">
+              <div style="font-size:2rem;margin-bottom:8px;">🛠</div>
+              <div style="font-weight:600;color:var(--text-primary);margin-bottom:4px;">Tool Playground</div>
+              <div style="font-size:.8rem;color:var(--text-muted);max-width:320px;text-align:center;">Fill in params on the left and send a message. Set a workspace root above to enable agentic multi-step execution.</div>
+            </div>
+          </div>
+
+          <!-- Send bar -->
+          <div class="pg-send-bar">
+            <span id="pg-status" style="font-size:.72rem;color:var(--text-muted);"></span>
+            <span id="pg-latency" class="latency-badge" style="display:none;"></span>
+            <button class="btn btn-primary" id="pg-run-btn" style="margin-left:auto;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              Send
+            </button>
           </div>
         </div>
 
-        <!-- Momentum queues -->
-        <div class="row g-3">
-          <div class="col-md-4">
-            <div class="card p-3 h-100">
-              <h6 class="mb-2 text-success"><i class="bi bi-play-circle me-1"></i>Now Queue</h6>
-              <ul id="queue-now" class="list-unstyled mb-0 small text-muted">
-                <li class="text-muted fst-italic">—</li>
-              </ul>
-            </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 4: MEMORY
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-memory" role="tabpanel" aria-labelledby="tab-memory">
+      <div class="section-title">🧠 Session Memory Buffers</div>
+      <div class="section-sub">Live content of <code>knowledge.md</code> and momentum queues for a selected agentic session.</div>
+
+      <!-- Session selector -->
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-body">
+          <div class="session-controls">
+            <label class="field-label" style="margin:0;white-space:nowrap;" for="mem-session-input">Session ID</label>
+            <input type="text" id="mem-session-input" class="session-input" placeholder="e.g. ws-abc123 or my-project">
+            <button class="btn btn-primary btn-sm" id="mem-load-btn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Load
+            </button>
+            <select id="mem-session-select" class="session-select">
+              <option value="">— pick active session —</option>
+            </select>
+            <span id="mem-updated" style="font-size:.72rem;color:var(--text-muted);margin-left:auto;"></span>
+            <button class="btn btn-outline btn-sm" id="mem-refresh-btn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.43"/></svg>
+            </button>
           </div>
-          <div class="col-md-4">
-            <div class="card p-3 h-100">
-              <h6 class="mb-2 text-info"><i class="bi bi-skip-forward me-1"></i>Next Queue</h6>
-              <ul id="queue-next" class="list-unstyled mb-0 small text-muted">
-                <li class="text-muted fst-italic">—</li>
-              </ul>
-            </div>
+        </div>
+      </div>
+
+      <!-- Knowledge.md -->
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-header">
+          <span class="card-title">knowledge.md <span id="mem-session-label" style="font-family:'JetBrains Mono',monospace;font-weight:400;color:var(--text-muted);"></span></span>
+        </div>
+        <div class="card-body">
+          <textarea id="mem-knowledge" class="knowledge-box" readonly placeholder="Select a session above to view knowledge.md…"></textarea>
+        </div>
+      </div>
+
+      <!-- Momentum Queues -->
+      <div class="memory-grid">
+        <div class="card">
+          <div class="card-header"><span class="card-title c-green" style="color:var(--accent-green);">▶ Now Queue</span></div>
+          <div class="card-body"><div class="queue-list" id="queue-now"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title" style="color:var(--accent-cyan);">⏭ Next Queue</span></div>
+          <div class="card-body"><div class="queue-list" id="queue-next"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title" style="color:var(--accent-red);">⛔ Blocked</span></div>
+          <div class="card-body"><div class="queue-list" id="queue-blocked"></div></div>
+        </div>
+      </div>
+
+      <!-- Subtask History -->
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header">
+          <span class="card-title" style="color:var(--accent-purple);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:middle;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Subtask Execution History
+          </span>
+        </div>
+        <!-- Filter bar — always visible, full-width -->
+        <div style="display:flex;gap:8px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,.02);">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="history-filter" placeholder="Search subtask history…" style="flex:1;font-size:.8rem;padding:4px 8px;background:transparent;border:none;outline:none;color:var(--text-primary);" autocomplete="off">
+          <button class="btn btn-outline btn-sm" id="history-toggle-all" style="white-space:nowrap;flex-shrink:0;">Expand All</button>
+        </div>
+        <div class="card-body">
+          <div id="queue-history" style="display:flex;flex-direction:column;gap:8px;">
+            <div class="queue-empty">Select a session above to view history…</div>
           </div>
-          <div class="col-md-4">
-            <div class="card p-3 h-100">
-              <h6 class="mb-2 text-danger"><i class="bi bi-slash-circle me-1"></i>Blocked Queue</h6>
-              <ul id="queue-blocked" class="list-unstyled mb-0 small text-muted">
-                <li class="text-muted fst-italic">—</li>
-              </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 6: PROFILE & LEADERBOARD
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-profile" role="tabpanel" aria-labelledby="tab-profile">
+      <div style="display:grid;grid-template-columns: 1fr 1fr; gap:20px;margin-bottom:28px;" class="profile-grid">
+        
+        <!-- Profile Config -->
+        <div class="card">
+          <div class="card-header"><span class="card-title">👤 Telemetry Profile Settings</span></div>
+          <div class="card-body">
+            <form id="profile-form" class="playground-form" onsubmit="event.preventDefault();">
+              <div>
+                <label class="field-label" for="profile-username">Username</label>
+                <input type="text" id="profile-username" placeholder="e.g. dev-hero">
+                <div class="stat-sub" style="margin-top:4px;">3-20 alphanumeric characters, underscores or hyphens.</div>
+              </div>
+              <div class="toggle-row" style="margin-top:14px;">
+                <label class="toggle">
+                  <input type="checkbox" id="profile-telemetry">
+                  <span class="toggle-slider"></span>
+                </label>
+                <span style="font-size:.8rem;color:var(--text-secondary);">Opt out of anonymous telemetry & Firestore sync</span>
+              </div>
+              <div style="margin-top:18px;">
+                <button class="btn btn-primary btn-sm" id="profile-save-btn">Save Settings</button>
+                <span id="profile-status" style="font-size:.78rem;margin-left:10px;"></span>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Leaderboard -->
+        <div class="card">
+          <div class="card-header"><span class="card-title">🏆 Global Leaderboard (Lifetime Tokens)</span></div>
+          <div class="card-body">
+            <div class="feature-list" id="leaderboard-list">
+              <div style="text-align:center;padding:20px 0;color:var(--text-muted);">Loading leaderboard…</div>
             </div>
           </div>
         </div>
 
       </div>
+    </section>
 
-    </div>
-  </div>
+    <style>
+      .profile-grid { @media (max-width:768px) { grid-template-columns: 1fr !important; } }
+    </style>
 
-  <!-- Toast Container -->
-  <div class="toast-container position-fixed bottom-0 end-0 p-3">
-    <div id="liveToast" class="toast bg-dark border-secondary" role="alert" aria-live="assertive" aria-atomic="true">
-      <div class="toast-header bg-dark border-bottom border-secondary text-light">
-        <i class="bi bi-info-circle me-2 text-primary" id="toast-icon"></i>
-        <strong class="me-auto" id="toast-title">Notification</strong>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 5: QUICK START
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-quickstart" role="tabpanel" aria-labelledby="tab-quickstart">
+      <div class="section-title">⚙️ Quick Start</div>
+      <div class="section-sub">Get the server running and integrated in minutes.</div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px;" class="qs-grid">
+        <div class="card">
+          <div class="card-header"><span class="card-title">Installation</span></div>
+          <div class="card-body" style="position:relative;">
+            <div class="code-block" id="install-block">npm install
+
+cp .env.example .env
+# Edit .env — add your API keys
+
+npm run dashboard   # Start dashboard server
+npm run dev         # Start MCP server (stdio)</div>
+            <button class="copy-btn" data-target="install-block">Copy</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Tool Call Example</span></div>
+          <div class="card-body" style="position:relative;">
+            <div class="code-block" id="call-block">const result = await client.callTool("use_free_llm", {
+  messages: [{ role: "user", content: "Write auth.ts" }],
+  agentic: true,
+  workspace_root: "/abs/path/to/project",
+  keywords: ["security", "jwt"]
+});</div>
+            <button class="copy-btn" data-target="call-block">Copy</button>
+          </div>
+        </div>
       </div>
-      <div class="toast-body" id="toast-body"></div>
-    </div>
-  </div>
 
-  <footer class="mt-auto py-4 border-top border-secondary-subtle">
-    <div class="container text-center small text-muted">
-      Free LLM APIs MCP Dashboard &bull; Built with Bootstrap 5 &bull; <a
-        href="https://github.com/djmahe4/awesome-free-llm-apis" class="text-decoration-none text-primary">GitHub
-        Repo</a>
-    </div>
+      <style>.qs-grid { @media (max-width:768px) { grid-template-columns: 1fr; } }</style>
+
+      <div class="section-title" style="margin-bottom:14px;">Pipeline Phases</div>
+      <div class="pipeline-phases">
+        <div class="phase-row">
+          <div class="phase-num">1</div>
+          <div><div class="phase-name">Request & Cache</div><div class="phase-desc">StructuralMarkdown resolves <code>file://</code> URIs · ResponseCache checks workspace-aware cache</div></div>
+        </div>
+        <div class="phase-row">
+          <div class="phase-num">2</div>
+          <div><div class="phase-name">Context & Agentic Planning</div><div class="phase-desc">WorkspaceContext injects vector memory · AgenticMiddleware decomposes goals, processes subtask images, runs quantum-weighted execution loop</div></div>
+        </div>
+        <div class="phase-row">
+          <div class="phase-num">3</div>
+          <div><div class="phase-name">Routing & LLM Execution</div><div class="phase-desc">ImageRouter handles VLM · TextRouter classifies task type · Quantum scorer collapses to best provider · LLMExecutor dispatches with circuit breaker</div></div>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    Free LLM APIs MCP Dashboard &bull; Built with ❤️ &bull;
+    <a href="https://github.com/djmahe4/awesome-free-llm-apis" target="_blank" rel="noopener">GitHub Repo</a>
   </footer>
 
-  <!-- Bootstrap JS Bundle -->
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-
-  <!-- MCP Interaction Logic -->
   <script src="/app.js"></script>
 </body>
-
 </html>

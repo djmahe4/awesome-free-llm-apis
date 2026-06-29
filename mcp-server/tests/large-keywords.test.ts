@@ -34,7 +34,7 @@ vi.mock('fs', () => {
 
 import { promises as fsp } from 'node:fs';
 import * as fs from 'node:fs';
-import { getIntelligentSystemPrompt, resetPromptCache } from '../src/middleware/agentic/prompts.js';
+import { getIntelligentSystemPrompt, resetPromptCache } from '../src/pipeline/middlewares/prompts.js';
 
 describe('Large Keywords & Budget Hardening', () => {
     beforeEach(() => {

@@ -92,14 +92,16 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
         const executor = new LLMExecutor();
         const router = new IntelligentRouterMiddleware(executor);
 
-        // Prov1: 50% used
+        // Prov1: Low tokens (Worse)
         const prov1 = new MockProvider('prov1', [{ id: 'm1', name: 'M1' }], 100);
-        vi.spyOn(prov1, 'getUsageStats').mockReturnValue({ requestCountMinute: 50, requestCountDay: 50, tokenCountMinute: 0, tokenCountDay: 0 });
-
-
-        // Prov2: 10% used (Better)
+        
+        // Prov2: High tokens (Better)
         const prov2 = new MockProvider('prov2', [{ id: 'm1', name: 'M1' }], 100);
-        vi.spyOn(prov2, 'getUsageStats').mockReturnValue({ requestCountMinute: 10, requestCountDay: 10, tokenCountMinute: 0, tokenCountDay: 0 });
+
+        vi.spyOn(executor, 'getTokenState').mockReturnValue({
+            'prov1': { remainingTokens: 1000 },
+            'prov2': { remainingTokens: 100000 }
+        } as any);
 
 
         registry.registerProvider(prov1);
@@ -167,8 +169,10 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
         const provB_Low = new MockProvider('provB_Low', [{ id: 'model-b', name: 'M-B' }], 100);
         const provB_High = new MockProvider('provB_High', [{ id: 'model-b', name: 'M-B' }], 100);
 
-        vi.spyOn(provB_Low, 'getUsageStats').mockReturnValue({ requestCountMinute: 90, requestCountDay: 90, tokenCountMinute: 0, tokenCountDay: 0 });
-        vi.spyOn(provB_High, 'getUsageStats').mockReturnValue({ requestCountMinute: 0, requestCountDay: 0, tokenCountMinute: 0, tokenCountDay: 0 });
+        vi.spyOn(executor, 'getTokenState').mockReturnValue({
+            'provB_Low': { remainingTokens: 1000 },
+            'provB_High': { remainingTokens: 100000 }
+        } as any);
 
 
         registry.registerProvider(provA);

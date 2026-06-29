@@ -20,4 +20,5 @@ mcp-server/demo-verify.log
 mcp-server/extended_demo_out.log
 mcp-server/out.log
 mcp-server/scratch/
-.free-llm-mcp/
+**/.free-llm-mcp/
+mcp-server/scripts/secrets/

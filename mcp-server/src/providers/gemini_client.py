@@ -45,13 +45,34 @@ async def main():
 
         config = types.GenerateContentConfig(**config_kwargs)
 
-        # Convert simple messages to SDK format
-        # [{ "role": "user", "content": "..." }] -> [{ "role": "user", "parts": [{"text": "..."}] }]
+        # Convert simple messages to SDK format supporting text and image_url parts
+        import base64
         sdk_messages = []
         for m in messages:
+            content = m["content"]
+            parts = []
+            if isinstance(content, list):
+                for item in content:
+                    if item.get("type") == "text":
+                        parts.append(types.Part(text=item.get("text")))
+                    elif item.get("type") == "image_url":
+                        img_url = item.get("image_url", {}).get("url", "")
+                        if img_url.startswith("data:"):
+                            try:
+                                header, data_str = img_url.split(";base64,")
+                                mime_type = header.replace("data:", "")
+                                img_bytes = base64.b64decode(data_str)
+                                parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime_type))
+                            except Exception as parse_err:
+                                raise ValueError(f"Failed to parse base64 image: {str(parse_err)}")
+                        else:
+                            raise ValueError("Gemini Python client expects base64 data URLs for image inputs")
+            else:
+                parts.append(types.Part(text=content))
+
             sdk_messages.append(types.Content(
                 role=m["role"],
-                parts=[types.Part(text=m["content"])]
+                parts=parts
             ))
 
         if stream:

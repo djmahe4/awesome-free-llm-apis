@@ -52,7 +52,7 @@ describe('Router Fallback Fix - Multiple next() Calls Bug', () => {
         };
         await router.execute(chatContext, async () => { });
         // Chat should try DeepSeek-R1 first (High Performance Free)
-        expect(firstModelAttempted).toBe('DeepSeek-R1');
+        expect(firstModelAttempted).toBe('deepseek/deepseek-r1');
     });
 
     it('should call next() exactly once even with multiple fallback attempts', async () => {
@@ -294,18 +294,20 @@ describe('Router Fallback Fix - Multiple next() Calls Bug', () => {
         });
 
         const context: PipelineContext = {
-            request: { model: 'gemini-3.1-flash-lite-preview', messages: [{ role: 'user', content: 'test' }] },
+            request: { model: 'gemini-3.1-flash-lite', messages: [{ role: 'user', content: 'test' }] },
             taskType: TaskType.Chat
         };
 
         await router.execute(context, async () => { });
 
         // First attempted model should be the explicitly requested one
-        expect(attemptedModels[0]).toBe('gemini-3.1-flash-lite-preview');
+        expect(attemptedModels[0]).toBe('gemini-3.1-flash-lite');
     });
 
     it('should handle case when no providers are available', async () => {
-        // Don't stub any API keys - no providers available
+        // Mock registry to return no available providers
+        vi.spyOn(ProviderRegistry.getInstance(), 'getAvailableProviders').mockReturnValue([]);
+
         const executor = new LLMExecutor();
         const router = new IntelligentRouterMiddleware(executor);
 

@@ -1,12 +1,12 @@
 import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
-import { LOCAL_SKILLS_DIR } from '../middleware/agentic/constants.js';
+import { resolveConfigDir } from '../utils/config-path.js';
 import { useFreeLLM } from './use-free-llm.js';
 import { memoryManager } from '../memory/index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
-import { getIntelligentSystemPrompt } from '../middleware/agentic/prompts.js';
-import { ContextGatherer } from '../middleware/agentic/context-gatherer.js';
+import { getIntelligentSystemPrompt } from '../pipeline/middlewares/prompts.js';
+import { ContextGatherer } from '../pipeline/middlewares/context-gatherer.js';
 
 export interface StoreWorkspaceSkillInput {
     name: string;
@@ -22,6 +22,33 @@ export interface StoreWorkspaceSkillInput {
 export type StoreWorkspaceSkillResponse = 
     | { success: true; message: string; path: string; scripts: string[] }
     | { success: false; error: string };
+
+const SKILL_SCRIPT_START = '@@@SKILL_SCRIPT_START@@@';
+const SKILL_SCRIPT_END = '@@@SKILL_SCRIPT_END@@@';
+
+export function normalizeScriptFilename(filename: string): string {
+    const base = path.basename(filename.trim());
+    if (base.endsWith('_py')) {
+        return `${base.slice(0, -3)}.py`;
+    }
+    if (!path.extname(base)) {
+        return base;
+    }
+    return base;
+}
+
+export function addScriptMetadataHeader(content: string, skillName: string, version: string, filename: string): string {
+    const ext = path.extname(filename).toLowerCase();
+    const commentPrefix = ['.py', '.sh', '.yaml', '.yml', '.toml'].includes(ext) ? '#' : '//';
+    const timestamp = new Date().toISOString();
+    const header = [
+        `${commentPrefix} skill: ${skillName}`,
+        `${commentPrefix} version: ${version}`,
+        `${commentPrefix} generated_at: ${timestamp}`,
+        ''
+    ].join('\n');
+    return `${header}${content}`;
+}
 
 /**
  * store_workspace_skill: Explicitly harvests structured knowledge into the workspace.
@@ -42,7 +69,8 @@ export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput): Prom
 
     // Sanitize name for filesystem
     const skillSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50);
-    const skillDir = path.join(workspace_root, LOCAL_SKILLS_DIR, skillSlug);
+    const configDir = resolveConfigDir(workspace_root);
+    const skillDir = path.join(configDir, 'skills', skillSlug);
     const scriptsDir = path.join(skillDir, 'scripts');
 
     const generatedScripts: Record<string, string> = {};
@@ -103,7 +131,11 @@ export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput): Prom
 
                     const systemPrompt = `${baseSystemPrompt}${grepContextStr}\n\n## 🛠️ TASK: SCRIPT GENERATION\nYou are generating a script named '${filename}' for the current workspace. 
 Use the workspace memory and context snippets provided above to ensure the script follows established patterns and correctly interfaces with existing modules.
-Output ONLY the raw code inside a single markdown code block. No explanation.`;
+Output ONLY script content between delimiters:
+${SKILL_SCRIPT_START}
+# code here
+${SKILL_SCRIPT_END}
+No explanation.`;
 
                     const response = await useFreeLLM({
                         messages: [
@@ -118,16 +150,19 @@ Output ONLY the raw code inside a single markdown code block. No explanation.`;
                     });
 
                     const raw = response.choices[0].message.content || '';
-                    const codeMatch = raw.match(/```[\w-]*\n([\s\S]*?)```/);
-                    const content = codeMatch ? codeMatch[1].trim() : raw.trim();
+                    const delimitedMatch = raw.match(new RegExp(`${SKILL_SCRIPT_START}\\s*([\\s\\S]*?)\\s*${SKILL_SCRIPT_END}`));
+                    const fencedMatch = raw.match(/```[\w-]*\n([\s\S]*?)```/);
+                    const content = (delimitedMatch?.[1] || fencedMatch?.[1] || raw).trim();
 
                     if (content) {
-                        const scriptPath = path.join(scriptsDir, path.basename(filename));
-                        await fs.writeFile(scriptPath, content, 'utf-8');
-                        generatedScripts[filename] = content;
+                        const normalizedFilename = normalizeScriptFilename(filename);
+                        const scriptPath = path.join(scriptsDir, path.basename(normalizedFilename));
+                        const withMetadata = addScriptMetadataHeader(content, skillSlug, '1.0.6', normalizedFilename);
+                        await fs.writeFile(scriptPath, withMetadata, 'utf-8');
+                        generatedScripts[normalizedFilename] = withMetadata;
 
                         // Make shell scripts executable
-                        if (filename.endsWith('.sh')) {
+                        if (normalizedFilename.endsWith('.sh')) {
                             await fs.chmod(scriptPath, 0o755);
                         }
                     }

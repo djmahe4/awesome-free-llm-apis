@@ -12,6 +12,10 @@ export class CohereProvider extends BaseProvider {
     { id: 'command-a-03-2025', name: 'Command A 03 2025' },
     { id: 'command-r-plus-08-2024', name: 'Command R+ 08 2024' },
     { id: 'c4ai-aya-expanse-32b', name: 'Aya Expanse 32B' },
+    { id: 'command-a-plus-05-2026', name: 'Command A+ 05 2026' },
+    { id: 'command-r7b-12-2024', name: 'Command R7B' },
+    { id: 'command-a-reasoning-08-2025', name: 'Command A Reasoning' },
+    { id: 'c4ai-aya-vision-32b', name: 'Aya Vision 32B' },
   ];
 
   private getClient(): CohereClientV2 {

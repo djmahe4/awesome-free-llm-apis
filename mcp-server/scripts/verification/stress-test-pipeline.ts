@@ -5,7 +5,7 @@
  */
 import path from 'node:path';
 import fs from 'fs-extra';
-import { StructuralMarkdownMiddleware } from '../../src/middleware/agentic/structural-middleware.js';
+import { StructuralMarkdownMiddleware } from '../../src/pipeline/middlewares/StructuralMiddleware.js';
 import { ResponseCacheMiddleware } from '../../src/pipeline/middlewares/ResponseCacheMiddleware.js';
 import { TokenManagerMiddleware } from '../../src/pipeline/middlewares/TokenManagerMiddleware.js';
 import { IntelligentRouterMiddleware } from '../../src/pipeline/middlewares/IntelligentRouterMiddleware.js';
@@ -14,6 +14,7 @@ import { ProviderRegistry } from '../../src/providers/registry.js';
 import { LLMExecutor } from '../../src/utils/LLMExecutor.js';
 import { WorkspaceScanner } from '../../src/cache/workspace.js';
 import { resolveFileRefs, summarizeTextLocally } from '../../src/tools/use-free-llm.js';
+import { PROJECTS_DIR } from '../../src/pipeline/middlewares/constants.js';
 
 
 let lastCapturedRequest: any = null;
@@ -24,7 +25,7 @@ let lastCapturedRequest: any = null;
 function hasInjectedContext(request: any): boolean {
     if (!request?.messages?.[0]?.content) return false;
     const content = request.messages[0].content;
-    const marker = '# TASK CONTEXT';
+    const marker = '## MCP INTERNAL SESSION STATE';
 
     if (typeof content === 'string') return content.includes(marker);
     if (Array.isArray(content)) {
@@ -41,8 +42,8 @@ async function setupMocks() {
     (registry as any).providers = new Map(); // Clear real ones
 
     const mockModels = [
-        { id: 'gemini-2.5-flash', name: 'Gemini Flash', contextWindow: 1000000 },
-        { id: 'claude-3-haiku', name: 'Haiku', contextWindow: 200000 }
+        { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite', contextWindow: 1000000 },
+        { id: 'gemma-4-26b-a4b-it', name: 'Gemma 4 26B', contextWindow: 1000000 }
     ];
 
     ['mock-p1', 'mock-p2'].forEach(id => {
@@ -61,6 +62,13 @@ async function setupMocks() {
                 lastCapturedRequest = req;
                 // Simulate network latency
                 await new Promise(r => setTimeout(r, 50));
+
+                const lastMsg = req.messages?.[req.messages.length - 1]?.content || '';
+                const contentStr = typeof lastMsg === 'string' ? lastMsg : JSON.stringify(lastMsg);
+                const responseContent = contentStr.includes('JSON array of strings')
+                    ? '["Mocked subtask 1", "Mocked subtask 2"]'
+                    : 'PROCESSED';
+
                 return {
                     id: 'mock-resp-' + Date.now(),
                     object: 'chat.completion',
@@ -68,7 +76,7 @@ async function setupMocks() {
                     model: req.model || 'mock-model',
                     choices: [{
                         index: 0,
-                        message: { role: 'assistant', content: 'PROCESSED' },
+                        message: { role: 'assistant', content: responseContent },
                         finish_reason: 'stop'
                     }],
                     usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 },
@@ -89,7 +97,7 @@ async function main() {
 
     const sessionId = 'full-stress-session-' + Date.now();
     const workspaceScanner = new WorkspaceScanner(process.cwd());
-    const projectDir = path.join(process.cwd(), 'data', 'projects', sessionId);
+    const projectDir = path.join(PROJECTS_DIR, sessionId);
     const knowledgePath = path.join(projectDir, 'knowledge.md');
 
     await fs.ensureDir(projectDir);
@@ -296,19 +304,17 @@ async function main() {
     // --- CASE 11: Full State Injection (Plan + Tasks + Queue + Knowledge) ---
     console.error('\nTest Case 11: Full State Ingestion Cycle...');
     const sessionId11 = 'stress-session-full-state-' + Date.now();
-    const projectDir11 = path.join(process.cwd(), 'data', 'projects', sessionId11);
+    const projectDir11 = path.join(PROJECTS_DIR, sessionId11);
     await fs.ensureDir(projectDir11);
 
     // Write all state files (simulating what AgenticMiddleware would produce)
-    await fs.writeFile(path.join(projectDir11, 'plan.md'), '# Plan\n\n1. Analyse the input\n2. Generate the output\n3. Validate the result\n4. Report summary');
-    await fs.writeFile(path.join(projectDir11, 'tasks.md'), '# Tasks\n\n- [x] Kickoff meeting\n- [ ] Implement feature\n- [ ] Write tests');
-    await fs.writeFile(path.join(projectDir11, 'queues.json'), JSON.stringify({
+    await fs.writeFile(path.join(projectDir11, 'state.json'), JSON.stringify({
         nowQueue: ['Implement feature'],
         nextQueue: ['Write tests'],
         blockedQueue: ['Deploy to prod'],
         improveQueue: []
     }, null, 2));
-    await fs.writeFile(path.join(projectDir11, 'knowledge.md'), '# Knowledge\n\nThe API uses Bearer tokens. Base URL is https://api.example.com.');
+    await fs.writeFile(path.join(projectDir11, 'knowledge.md'), '# Knowledge\n\nThis is a long session knowledge file content to ensure that it has more than 50 characters and successfully passes the structural-middleware extraction length threshold check.');
 
     pipeline.flush();
     lastCapturedRequest = null;
@@ -323,11 +329,11 @@ async function main() {
     // before next() is called, so ctx11.request is the authoritative source regardless of router.
     const injected11 = ctx11.request.messages[0].content as string;
     const has = (marker: string) => injected11.includes(marker);
-    const pass11 = has('MISSION PLAN') && has('TASK QUEUE') && has('ACTIVE TASKS') && has('SESSION KNOWLEDGE');
+    const pass11 = has('QUEUE DIAGNOSTICS') && has('SESSION DISTILLATION');
     if (pass11) {
-        console.error('  [✓] All 4 state sections injected: MISSION PLAN, TASK QUEUE, ACTIVE TASKS, SESSION KNOWLEDGE.');
+        console.error('  [✓] All state sections injected: QUEUE DIAGNOSTICS, SESSION DISTILLATION.');
     } else {
-        const missing = ['MISSION PLAN', 'TASK QUEUE', 'ACTIVE TASKS', 'SESSION KNOWLEDGE'].filter(s => !has(s));
+        const missing = ['QUEUE DIAGNOSTICS', 'SESSION DISTILLATION'].filter(s => !has(s));
         throw new Error(`FAILED: Missing sections in prompt: ${missing.join(', ')}`);
     }
 
@@ -345,9 +351,9 @@ async function main() {
 
     // Subcase A: Only knowledge.md exists (legacy behaviour)
     const sessionId12a = 'stress-session-partial-a-' + Date.now();
-    const projectDir12a = path.join(process.cwd(), 'data', 'projects', sessionId12a);
+    const projectDir12a = path.join(PROJECTS_DIR, sessionId12a);
     await fs.ensureDir(projectDir12a);
-    await fs.writeFile(path.join(projectDir12a, 'knowledge.md'), '# Knowledge\n\nLegacy API: v1 endpoints only.');
+    await fs.writeFile(path.join(projectDir12a, 'knowledge.md'), '# Knowledge\n\nLegacy API: v1 endpoints only. This is a long content to pass the structural length check.');
 
     pipeline.flush();
     const ctx12a: PipelineContext = {
@@ -356,19 +362,18 @@ async function main() {
     };
     await pipeline.execute(ctx12a);
     const content12a = ctx12a.request.messages[0].content as string;
-    if (content12a.includes('SESSION KNOWLEDGE') && !content12a.includes('MISSION PLAN')) {
-        console.error('  [✓] Partial state (knowledge only): correct – no plan injected.');
+    if (content12a.includes('SESSION DISTILLATION') && !content12a.includes('QUEUE DIAGNOSTICS')) {
+        console.error('  [✓] Partial state (knowledge only): correct – no plan/queue injected.');
     } else {
         throw new Error('FAILED: Partial state (knowledge only) produced unexpected sections!');
     }
     await fs.remove(projectDir12a);
 
-    // Subcase B: Only plan.md + queues.json (no knowledge yet)
+    // Subcase B: Only state.json (no knowledge yet)
     const sessionId12b = 'stress-session-partial-b-' + Date.now();
-    const projectDir12b = path.join(process.cwd(), 'data', 'projects', sessionId12b);
+    const projectDir12b = path.join(PROJECTS_DIR, sessionId12b);
     await fs.ensureDir(projectDir12b);
-    await fs.writeFile(path.join(projectDir12b, 'plan.md'), '# Plan\n\n1. Draft\n2. Review\n3. Publish');
-    await fs.writeFile(path.join(projectDir12b, 'queues.json'), JSON.stringify({ nowQueue: ['Draft'], nextQueue: ['Review'], blockedQueue: [], improveQueue: [] }));
+    await fs.writeFile(path.join(projectDir12b, 'state.json'), JSON.stringify({ nowQueue: ['Draft'], nextQueue: ['Review'], blockedQueue: [], improveQueue: [] }));
 
     pipeline.flush();
     const ctx12b: PipelineContext = {
@@ -377,8 +382,8 @@ async function main() {
     };
     await pipeline.execute(ctx12b);
     const content12b = ctx12b.request.messages[0].content as string;
-    if (content12b.includes('MISSION PLAN') && content12b.includes('TASK QUEUE') && !content12b.includes('SESSION KNOWLEDGE')) {
-        console.error('  [✓] Partial state (plan + queue, no knowledge): correct – no knowledge injected.');
+    if (content12b.includes('QUEUE DIAGNOSTICS') && !content12b.includes('SESSION DISTILLATION')) {
+        console.error('  [✓] Partial state (queue only, no knowledge): correct – no knowledge injected.');
     } else {
         throw new Error('FAILED: Partial state (plan only) produced unexpected sections!');
     }
@@ -386,11 +391,10 @@ async function main() {
 
     // Subcase C: Empty scaffolds only (all files exist but are just the auto-generated templates)
     const sessionId12c = 'stress-session-partial-c-' + Date.now();
-    const projectDir12c = path.join(process.cwd(), 'data', 'projects', sessionId12c);
+    const projectDir12c = path.join(PROJECTS_DIR, sessionId12c);
     await fs.ensureDir(projectDir12c);
     // Exactly mimics what AgenticMiddleware.ensureProjectFiles() produces
-    await fs.writeFile(path.join(projectDir12c, 'plan.md'), '# Plan\n\n<!-- Auto-generated by Agentic Middleware -->');
-    await fs.writeFile(path.join(projectDir12c, 'tasks.md'), '# Tasks\n\n<!-- Auto-generated by Agentic Middleware -->');
+    await fs.writeFile(path.join(projectDir12c, 'state.json'), '{}');
     await fs.writeFile(path.join(projectDir12c, 'knowledge.md'), '# Knowledge\n\n<!-- Auto-generated by Agentic Middleware -->');
 
     pipeline.flush();
@@ -400,10 +404,10 @@ async function main() {
     };
     await pipeline.execute(ctx12c);
     const content12c = ctx12c.request.messages[0].content as string;
-    // Empty scaffolds (≤30 chars of real content) should be filtered out for plan, tasks and knowledge
-    const hasNoPlans = !content12c.includes('MISSION PLAN') && !content12c.includes('ACTIVE TASKS');
-    const hasNoKnowledge = !content12c.includes('SESSION KNOWLEDGE');
-    if (hasNoPlans && hasNoKnowledge) {
+    // Empty scaffolds (≤30 chars of real content) should be filtered out
+    const hasNoQueue = !content12c.includes('QUEUE DIAGNOSTICS');
+    const hasNoKnowledge = !content12c.includes('SESSION DISTILLATION');
+    if (hasNoQueue && hasNoKnowledge) {
         console.error('  [✓] All empty scaffolds suppressed (plan, tasks, knowledge filtered).');
     } else {
         throw new Error('FAILED: Empty scaffolds leaked into the prompt!');
@@ -414,11 +418,10 @@ async function main() {
     // --- CASE 13: Section Ordering ---
     console.error('\nTest Case 13: Section Order Verification...');
     const sessionId13 = 'stress-session-order-' + Date.now();
-    const projectDir13 = path.join(process.cwd(), 'data', 'projects', sessionId13);
+    const projectDir13 = path.join(PROJECTS_DIR, sessionId13);
     await fs.ensureDir(projectDir13);
-    await fs.writeFile(path.join(projectDir13, 'plan.md'), '# Plan\n\n1. Draft\n2. Ship');
-    await fs.writeFile(path.join(projectDir13, 'queues.json'), JSON.stringify({ nowQueue: ['Draft'], nextQueue: [], blockedQueue: [], improveQueue: [] }));
-    await fs.writeFile(path.join(projectDir13, 'knowledge.md'), '# Knowledge\n\nAPI key is ABC123.');
+    await fs.writeFile(path.join(projectDir13, 'state.json'), JSON.stringify({ nowQueue: ['Draft'] }));
+    await fs.writeFile(path.join(projectDir13, 'knowledge.md'), '# Knowledge\n\nAPI key is ABC123. This content must be long enough to pass the length threshold which has now been increased to 100 characters to prevent boilerplate leakage.');
 
     pipeline.flush();
     const ctx13: PipelineContext = {
@@ -427,14 +430,13 @@ async function main() {
     };
     await pipeline.execute(ctx13);
     const content13 = ctx13.request.messages[0].content as string;
-    const planIdx = content13.indexOf('MISSION PLAN');
-    const queueIdx = content13.indexOf('TASK QUEUE');
-    const knowledgeIdx = content13.indexOf('SESSION KNOWLEDGE');
+    const queueIdx = content13.indexOf('QUEUE DIAGNOSTICS');
+    const knowledgeIdx = content13.indexOf('SESSION DISTILLATION');
 
-    if (planIdx < queueIdx && queueIdx < knowledgeIdx) {
-        console.error('  [✓] Sections in correct order: MISSION PLAN → TASK QUEUE → SESSION KNOWLEDGE.');
+    if (queueIdx < knowledgeIdx) {
+        console.error('  [✓] Sections in correct order: QUEUE DIAGNOSTICS → SESSION DISTILLATION.');
     } else {
-        throw new Error(`FAILED: Section order wrong! planIdx=${planIdx} queueIdx=${queueIdx} knowledgeIdx=${knowledgeIdx}`);
+        throw new Error(`FAILED: Section order wrong! queueIdx=${queueIdx} knowledgeIdx=${knowledgeIdx}`);
     }
     await fs.remove(projectDir13);
 
@@ -480,6 +482,9 @@ async function main() {
     const testUri = `file://${testFilePath.replace(/\\/g, '/')}`;
     const userMessage = `Please review my plan in [test_plan.md](${testUri})`;
 
+    await fs.ensureDir(path.dirname(testFilePath));
+    await fs.writeFile(testFilePath, '# Research Module Standardization Plan\nSome test plan content.');
+
     const resolvedContent = await resolveFileRefs(userMessage, [], process.cwd());
 
     if (resolvedContent.includes('Research Module Standardization Plan') && resolvedContent.includes('```file:test_plan.md')) {
@@ -502,6 +507,7 @@ async function main() {
     // --- CLEANUP ---
     console.error('\nCleaning up stress test data...');
     await fs.remove(projectDir);
+    await fs.remove(testFilePath);
     console.error('🔥 --- Full Pipeline Stress Test Complete --- \n');
 }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'fs-extra';
 import path from 'path';
-import { StructuralMarkdownMiddleware } from '../src/middleware/agentic/structural-middleware.js';
+import { StructuralMarkdownMiddleware } from '../src/pipeline/middlewares/StructuralMiddleware.js';
 import type { PipelineContext } from '../src/pipeline/middleware.js';
 
 vi.mock('fs-extra', () => ({

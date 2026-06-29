@@ -1,6 +1,8 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { debounce } from '../utils/debounce.js';
+import { withFileLock } from '../utils/file-lock.js';
+import { writeFileAtomic } from '../utils/FileUtils.js';
 
 export class LongTermMemory {
   private storePath: string;
@@ -34,10 +36,7 @@ export class LongTermMemory {
 
     this.persistPromise = (async () => {
       try {
-        await fs.mkdir(path.dirname(this.storePath), { recursive: true });
-        const tmpPath = `${this.storePath}.${Date.now()}.${Math.random().toString(36).substring(7)}.tmp`;
-        await fs.writeFile(tmpPath, JSON.stringify(this.data, null, 2), 'utf-8');
-        await fs.rename(tmpPath, this.storePath);
+        await writeFileAtomic(this.storePath, JSON.stringify(this.data, null, 2));
       } finally {
         this.persistPromise = null;
       }
@@ -47,9 +46,12 @@ export class LongTermMemory {
   }
 
   async save(key: string, value: unknown): Promise<void> {
-    await this.ensureLoaded();
-    this.data[key] = value;
-    this.debouncedPersist();
+    await withFileLock(this.storePath, async () => {
+      this.loaded = false; // Force reloading from disk inside lock
+      await this.ensureLoaded();
+      this.data[key] = value;
+      await writeFileAtomic(this.storePath, JSON.stringify(this.data, null, 2));
+    }, 5000);
   }
 
   async load(key: string): Promise<unknown | undefined> {
@@ -58,9 +60,12 @@ export class LongTermMemory {
   }
 
   async delete(key: string): Promise<void> {
-    await this.ensureLoaded();
-    delete this.data[key];
-    this.debouncedPersist();
+    await withFileLock(this.storePath, async () => {
+      this.loaded = false; // Force reloading from disk inside lock
+      await this.ensureLoaded();
+      delete this.data[key];
+      await writeFileAtomic(this.storePath, JSON.stringify(this.data, null, 2));
+    }, 5000);
   }
 
   async flush(): Promise<void> {

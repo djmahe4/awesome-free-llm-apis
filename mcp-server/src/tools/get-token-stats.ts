@@ -1,8 +1,8 @@
-import { sharedRouter } from '../pipeline/instances.js';
+import { getSharedRouter } from '../pipeline/instances.js';
 import { ProviderRegistry } from '../providers/registry.js';
 
 export async function getTokenStats() {
-    const tracking = sharedRouter.getTokenState();
+    const tracking = getSharedRouter().getTokenState();
     const registry = ProviderRegistry.getInstance();
     const allProviders = registry.getAllProviders();
 

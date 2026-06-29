@@ -1,6 +1,6 @@
 # Agentic Architecture & Steering Mechanics
 
-This document provides a deep dive into the internal mechanics of the `@mcp:free-llm-apis` server, specifically the grounding protocols and the steering engine.
+This document provides a deep dive into the internal mechanics of the `@mcp:free-llm-apis` server, specifically the decoupled routing layers and the steering engine.
 
 ---
 
@@ -16,39 +16,61 @@ The pipeline injects a **Grounding Protocol** into the system prompt of every LL
 - **`[RETRIEVED]`** — fact is directly present in injected context blocks (e.g., resolved `file://` or `artifact://` URIs, session memory).
 - **`[NOT FOUND]`** — the file or context is mentioned but its content was not found or resolved. The model MUST stop and ask the user to provide it.
 
-### 🚪 Read-First Gate
-Triggered automatically when `workspace_root` contains a `README.md`. The pipeline injects a mandatory instruction forcing the model to verify all assertions against the provided context blocks **before** proposing any architecture or implementation.
+---
+
+## 🤖 Decoupled Routing & Centralized Classification
+
+The server features a **Context-Aware Steering Engine** (v1.0.6 Hardened) that manages stateful task execution via the `use_free_llm` tool. It splits routing responsibilities into specialized middlewares and centralizes task classification.
+
+```mermaid
+graph TD
+    Input[User Input] --> Struct[StructuralMarkdownMiddleware]
+    Struct --> Cache[ResponseCacheMiddleware]
+    Cache --> Workspace[WorkspaceContextMiddleware]
+    Workspace --> Agentic[AgenticMiddleware]
+    Agentic --> ImageRouter[ImageRouterMiddleware]
+    ImageRouter --> TextRouter[TextRouterMiddleware]
+    
+    subgraph Classification
+        TextRouter --> Classifier[TaskClassifier]
+    end
+```
+
+### 1. `ImageRouterMiddleware`
+* **Responsibility**: Detects and processes multi-modal inputs.
+* **Path Resolution**: Automatically scans messages for `file:///` URIs. If the URL points to a supported image format (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.avif`), it reads the file, converts it to base64, and routes the request to an available vision provider (e.g., Gemini or Llama-Vision). Text-only file references are ignored and passed down.
+
+### 2. `TextRouterMiddleware`
+* **Responsibility**: Routes text prompts to the most appropriate models.
+* **Integration**: Uses `TaskClassifier.autoClassify` to infer the task type. If the task is a complex multiline goal, it automatically triggers the **Task Decomposition** loop to break it down into sequential subtasks.
+
+### 3. `TaskClassifier`
+* **Responsibility**: Centralizes all task classification heuristics.
+* **Mechanics**: Uses single-pass compiled regexes with word boundaries (`\b`) and a keyword weighting map (`keywordTaskMap`) to classify the task type (e.g., `coding`, `reasoning`, `search`, `summarization`, `chat`) in under 0.05ms.
 
 ---
 
-## 🤖 Agentic Middleware v2 (Steering Engine)
+## 📂 Consolidated Pipeline Directory Layout
 
-The server features a **Context-Aware Steering Engine** (v1.0.5 Hardened) that manages stateful task execution via the `use_free_llm` tool. It transforms static documentation into a dynamic, token-efficient prompt pipeline.
+All core pipeline components and middlewares are consolidated under `src/pipeline/`:
 
-### 🧠 Intelligent Behaviors
-- **Stabilized Orchestration**: Circular dependencies eliminated, ensuring consistent middleware initialization across concurrent sessions.
-- **Semantic Prompt Resolution**: Automatically indexes relevant prompt sections. A stricter selection threshold (score >= 3) ensures instructions are mission-critical.
-- **Stateful Project Memory**: Persists architectural decisions and harvested skills in `.free-llm-mcp/skills/`.
-- **Automatic Task Decomposition**: Automatically splits complex goals into discrete, trackable steps (capped at 4 for stability).
-
-### 🧐 Observability
-The middleware implements **Research Validation Logging**:
-- **[RESEARCH-VALIDATION]** logs fire during pre-execution (detection) and post-execution (grounding check).
-- Provides an explicit audit trail for external knowledge lookups and architectural steering.
-
----
-
-## 🦾 Advanced Agentic Patterns
-
-### Pattern 1: Subagent Bootstrap with Memory
-1. `manage_memory search` → found prior plan?
-   - Yes: use as context for current task
-   - No: generate plan via `use_free_llm`, save output to file
-2. `list` → verify workspace hash matches expected state
-3. Execute subagent with plan as system context
-
-### Pattern 2: Terminal Task Completion (The Handshake)
-1. `finalize_task` → Generate final summary/artifact
-2. `store_workspace_skill` → Save structured summary + decisions as a skill
-3. `index_workspace` → Ground the new state in semantic memory
-4. [DONE] → Inform user and exit
+```
+mcp-server/src/
+├── config/
+│   └── models.ts             # Centralized model metadata & capabilities
+├── pipeline/
+│   ├── index.ts              # Pipeline exports
+│   ├── instances.ts          # Singleton registry for middlewares
+│   ├── middleware.ts         # Base PipelineExecutor & Middleware types
+│   └── middlewares/
+│       ├── AgenticMiddleware.ts       # Subtask decomposition & execution
+│       ├── ImageRouterMiddleware.ts   # Image detection & vision routing
+│       ├── TextRouterMiddleware.ts    # Text routing & task classification
+│       ├── StructuralMiddleware.ts    # Session history & grounding context
+│       ├── ResponseCacheMiddleware.ts # Cache lookup
+│       ├── TokenManagerMiddleware.ts  # Token tracking & quota gates
+│       └── WorkspaceContextMiddleware.ts # Workspace directory tree injection
+└── utils/
+    ├── FileUtils.ts          # Resilient atomic writes with retry-rename
+    └── TaskClassifier.ts     # Centralized task classification
+```

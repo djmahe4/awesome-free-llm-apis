@@ -3,7 +3,7 @@
  * for both full and subtask modes. The free LLM only gets workspace context —
  * NOT tool-usage instructions (the orchestrating agent handles that).
  */
-import { getIntelligentSystemPrompt } from '../../src/middleware/agentic/prompts.js';
+import { getIntelligentSystemPrompt } from '../../src/pipeline/middlewares/prompts.js';
 
 async function testAgenticPromptInjection() {
     console.log('--- Testing Agentic Prompt Assembly ---\n');
@@ -21,6 +21,7 @@ async function testAgenticPromptInjection() {
     console.log(`  - Has GROUNDING block: ${hasGrounding}`);
     console.log(`  - No tool-usage instructions (correct): ${hasNoToolProtocol}`);
     console.log(`  - Char length: ${fullPrompt.length}\n`);
+    console.log('Full prompt content:\n', fullPrompt, '\n');
 
     if (!hasGrounding || !hasNoToolProtocol) {
         throw new Error('Full prompt failed: unexpected content or missing grounding.');
@@ -39,6 +40,7 @@ async function testAgenticPromptInjection() {
     console.log(`  - Is shorter than full prompt: ${isShorter}`);
     console.log(`  - No tool-usage instructions (correct): ${subtaskNoToolProtocol}`);
     console.log(`  - Char length: ${subtaskPrompt.length}\n`);
+    console.log('Subtask prompt content:\n', subtaskPrompt, '\n');
 
     if (!subtaskNoToolProtocol) {
         throw new Error('Subtask prompt contains tool protocol — should not.');
@@ -54,6 +56,7 @@ async function testAgenticPromptInjection() {
     const hasMemoryBlock = promptWithMemory.includes('WORKSPACE MEMORY');
     console.log(`  - Has memory block: ${hasMemoryBlock}`);
     console.log(`  - Char length: ${promptWithMemory.length}\n`);
+    console.log('Prompt with memory content:\n', promptWithMemory, '\n');
 
     if (!hasMemoryBlock) {
         throw new Error('Memory context was not injected into prompt.');

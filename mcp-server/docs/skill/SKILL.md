@@ -1,16 +1,16 @@
 ---
 name: free-llms
-description: "Orchestrate multiple free LLM providers, manage persistent workspace memory, and utilize keyword-based steering for project-specific reference extraction."
+description: "Orchestrate multiple free LLM providers, manage persistent workspace memory, and utilize keyword-based steering for project-specific reference extraction and various agentic workflows."
 metadata:
   category: utility
-  triggers: free models, llm cost, fallback, routing, token tracking, workspace memory, context-aware steering, reference extractor, keyword classification, project discovery, gemini, groq, cohere, cloudflare, deepseek, qwen, compression
+  triggers: free models, llm cost, fallback, routing, token tracking, workspace memory, context-aware steering, reference extractor, keyword classification, project discovery, gemini, groq, cohere, cloudflare, deepseek, qwen, compression, execute skill, vision tool, agentic, reasoning, planning, subtask decomposition, pdf grounding, semantic wiki, adr tracking
 ---
 
 # Free LLM APIs — Usage Guide
 
 Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-apis` MCP server.
 
-> **79 models** across **15 providers** — optimized for FREE-first routing.
+> **v1.0.6 Update**: Decoupled routing layers, centralized task classification, and new `execute_skill` and `vision_tool` integrations.
 
 ---
 
@@ -28,13 +28,10 @@ Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-
 | Use Case | Model | Provider | Notes |
 |----------|-------|----------|-------|
 | Fast Chat | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | `cloudflare` | 100% success, ~1300ms ⚡ |
-| Fast Coding | `@cf/qwen/qwq-32b` | `cloudflare` | Reasoning-focused, FREE ⚡ |
-| Code Gen | `qwen/qwen3-coder-480b-a35b:free` | `openrouter` | 480B coder, FREE |
-| Deep Reasoning | `DeepSeek-R1` | `huggingface` / `kluster` | Chain-of-thought |
+| Coding | `qwen/qwen3-coder-480b-a35b:free` | `openrouter` | 480B coder, FREE |
+| Deep Reasoning | `deepseek-ai/DeepSeek-R1` | `openrouter` | Chain-of-thought |
+| High-Tier Reasoning | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia` | Planning/subtask planner |
 | Bulk Tasks | `Qwen/Qwen2.5-72B-Instruct` | `siliconflow` | 1,000 RPM — best for bulk |
-| High-Tier Reasoning | `Qwen/Qwen3-235B-A22B` | `nvidia` | Frontier free tier |
-
-> **v1.0.6 Update**: NVIDIA NIM (Qwen3 235B) for Coding. SiliconFlow (1000 RPM) for Search/Summarization/Extraction. Gemma 3 for Moderation/Classification.
 
 ---
 
@@ -46,24 +43,54 @@ Perform chat completion with optional fallback and workspace memory.
 > [!IMPORTANT]
 > **MANDATORY PROJECT RULE**: For any workspace task, you MUST set `"agentic": true` AND provide `"workspace_root"`. This enables session memory and grounding.
 
+#### ⚡ Task Decomposition & Planning
+When `"agentic": true` is enabled, the pipeline decomposes the user's goal into subtasks. You can control this in two ways:
+1. **Automatic Planning (Recommended)**: Leave the prompt as plain prose. The system will use a reasoning/planning model to automatically decompose the goal and determine dependencies.
+2. **Explicit DSL Steering**: Manually prefix your task list using:
+   - `>` for **parallel** tasks (e.g. `> read auth.ts`). Tasks of the same middleware `TaskType` are automatically downgraded to sequential to avoid race conditions.
+   - `-` or `*` or `1.` for **sequential** tasks.
+
 **Example:**
 ```json
 {
-  "messages": [{ "role": "user", "content": "Implement auth in auth.ts" }],
+  "messages": [{ "role": "user", "content": "> read auth.ts\n> search for API keys\n- implement new middleware" }],
   "agentic": true,
   "workspace_root": "c:/Users/mahes/project"
 }
 ```
 
-**Key Parameters:**
-- `keywords`: Explicit steering (e.g. `["api", "sql"]`). Bypasses fuzzy matching and forces specific documentation sections.
-- `google_search`: Enable Google Search (Gemini models only).
+---
 
-#### 📁 Advanced Context Steering
-The pipeline automatically injects project structure and file snippets:
-- **Directory Structural Awareness**: A 2-level directory tree is injected to help the LLM understand project layout.
-- **Precision Quoting**: Use `"double quotes"` around technical terms in your prompt (e.g., `"computer_networks"`) to force exact `grep` extraction.
-- **Gitignore Bypass**: If a required directory is gitignored (e.g., `data/`), include the keyword `override` or `gitignored` in your prompt to bypass the restriction safely.
+### `load_skill_prompt` [NEW]
+Search for or load a dynamic skill from the remote awesome-antigravity-skills index and save it locally.
+
+- **Parameters**:
+  - `type` (required): `"load"` to download/load a specific skill, or `"search"` to find skills.
+  - `name` (required if type is `"load"`): The name or ID of the skill to load.
+  - `keywords` (required if type is `"search"`): Array of string keywords to search for.
+  - `workspaceDir` (optional): Absolute path to the workspace directory for local storage.
+- **How it Works**: If type is `"search"`, queries the local index of skills matching keywords. If type is `"load"`, fetches all files of the target skill from GitHub, saves them to the local config/workspace directory, and returns the parsed `SKILL.md` system prompt ready for injection.
+
+---
+
+### `execute_skill` [NEW]
+Execute a prompt using a specific local skill's instructions and reference files.
+
+- **Parameters**:
+  - `skill` (required): Name of the skill directory under `.free-llm-mcp/skills/` or the global config.
+  - `input` (required): The prompt or instruction to run.
+  - `model` (optional): Specific model override.
+  - `workspace_root` (optional): Absolute path to the project root.
+- **How it Works**: Automatically extracts relative file paths referenced in `SKILL.md` (e.g., `references/*.md`, `resources/*`), loads their contents, and injects them as system context before executing the model.
+
+---
+
+### `vision_tool` [NEW]
+Analyze local images or remote image URLs.
+- **Parameters**:
+  - `image_path` (required): Absolute path or `file:///` URI to the local image.
+  - `prompt` (optional): Text prompt accompanying the image.
+- **How it Works**: Resolves Windows-specific paths (handling spaces and backslashes), converts the image to base64, and routes it to an available vision provider (e.g., Gemini or Llama-3.2-Vision).
 
 ---
 
@@ -72,88 +99,87 @@ Manage persistent, workspace-aware memory across sessions.
 - `search`: Find prior decisions or research findings.
 - `clear`: Flush all cached memory for a workspace.
 
-> **Rule:** Always `search` memory before starting any new research task to avoid redundant work.
-
 ---
 
 ### `store_workspace_skill`
-Explicitly save structured knowledge and scripts into the workspace.
+Save structured knowledge and scripts into the workspace.
 - `name`: Lowercase-hyphenated skill name.
 - `what`: List of key decisions or implementation details.
-
-> **Rule: Always call this upon task completion.** This ensures high-fidelity recall in future sessions.
 
 ---
 
 ### `index_workspace`
 Proactively index all relevant files in the workspace for semantic search.
-- **Rule:** Run this after significant code changes to keep the "source of truth" fresh.
 
 ---
 
-### Other Utility Tools
-- `get_token_stats`: Check consumption.
-- `validate_provider`: Health check.
+## ⚠️ Agentic Behavior & Limits
+
+- **Subtask cap**: The pipeline executes at most **3 subtasks** per request. For larger plans, break your request into multiple calls or use the `continue` resume command.
+- **Pipeline Pause**: If a subtask requires a terminal command, execution pauses and you will receive a `⚠️ Pipeline Paused` message. Reply with `continue <PROMPT_ID> <output>` to resume.
+- **Agentic gate**: Set `ENABLE_AGENTIC_MIDDLEWARE=true` in the server environment, or explicitly pass `"agentic": true` in your request to activate subtask decomposition.
+- **`AGENTS.md` Workspace Rules**: The pipeline automatically detects and loads the `AGENTS.md` file located at the workspace root or under `.agents/AGENTS.md`. Use this file to define project-specific coding standards, behavioral rules, and model routing preferences that the agent must follow.
+
+---
+
+### 1. PDF-Based Learning & Visual Grounding
+You can steer the agent to learn directly from local manuals, API specs, or datasheets by referencing specific pages using a `#page=N` hash:
+- **Steering Syntax**: `Read the specification in [manual.pdf](file:///c:/project/docs/manual.pdf#page=12)`
+- **Physical vs. Printed Offsets**: The server automatically manages a PDF Index Offset Cache (`pdf:index:<pdf_slug>`). If physical page 5 of the PDF corresponds to printed page 1, it caches an offset of `4`. The server will automatically translate your requested printed page number `12` to physical page `16` before extraction.
+- **Visual Grounding**: The server extracts the page text via `PyMuPDF` and renders the page to a base64 image. Both are injected directly into the LLM context.
+- **Offset Verification**: If a PDF's offset is incorrect, you can manually update the offset cache using `store_workspace_skill` with the key `pdf:index:<pdf_slug>` and value `{"offset": N}`.
+
+### 2. Semantic Wiki Maintenance & ADR Tracking
+The server maintains a structured wiki under `.free-llm-mcp/wiki/` containing markdown files with YAML frontmatter. This is your project's "truth engine" for architectural decisions.
+- **ADR Auto-Extraction**: The system scans all completed subtask outputs for decision patterns. When it detects phrases like `"decided to"`, `"chose X over Y"`, or `"decision:"`, it automatically extracts them into a structured Architecture Decision Record (ADR) file in the wiki (e.g., `adr_001.md`).
+- **Manual ADR Maintenance**: To ensure the agent respects architectural boundaries, you can manually write or update ADR files in `.free-llm-mcp/wiki/`. Use the following format:
+  ```markdown
+  ---
+  title: use_redis_session_store
+  tier: semantic
+  tags: [architecture, adr, database]
+  links: [session_id]
+  adr_ref: adr_001
+  ---
+  # ADR 001: Use Redis Session Store
+  We decided to use Redis for session management instead of JWT tokens because of performance overhead.
+  ```
+- **Attestation**: During workspace indexing, the agent reads these ADRs and cross-references them against your source files. If a code change violates an active ADR, the agent will flag a warning.
 
 ---
 
 ## 📚 Deep Dives & References
 
-For more detailed information on the inner workings or specific use cases, refer to the following documentation:
-
-- [**System Architecture**](references/architecture.md): Deep dive into grounding protocols, steering engine mechanics, and advanced agentic patterns.
-- [**Memory Usage Guide**](references/memory-usage.md): Architectural details of the persistent memory system and search optimization.
-- [**Tool Usage Matrix**](references/usages.md): Full test matrix with actual responses, token counts, and latency measurements for all tools.
-
----
-
-## 🦾 Steering Keywords
-
-| Category | Keywords | Impact |
-|----------|----------|--------|
-| **API/REST** | `api`, `endpoint`, `url`, `rest` | Prioritizes API documentation |
-| **Persistence**| `database`, `sql`, `cache` | Prioritizes DB/Redis schemas |
-| **Security** | `auth`, `jwt`, `token` | Prioritizes security protocols |
-| **DevOps** | `git`, `env`, `deploy` | Prioritizes config/CI/CD maps |
-| **Research** | `search`, `knowledge` | Activates deep-search optimization |
-| **Bypass** | `override`, `gitignored` | Bypasses .gitignore for extraction |
-| **Precision** | `"quoted term"` | Forces exact grep token extraction |
-| **File Pinning** | `"filename.ext"` | Pins context to that exact file only — **use when multiple files of the same type exist** |
+- [**System Architecture**](references/architecture.md): Deep dive into grounding protocols, decoupled routing mechanics, and advanced agentic patterns.
+- [**Skill & Sandbox Logic**](references/code-mode-logic.md): Guide to creating custom skills for `execute_skill` and how the internal QuickJS sandbox executes code.
+- [**Memory Usage Guide**](references/memory-usage.md): Architectural details of the persistent memory system, wiki structure, and PDF offset caching.
+- [**Documentation Maintainer**](references/doc-maintainer.md): Context-aware best practices for codebase documentation.
+- [**System Tool Usage Matrix**](references/usages.md): Full test matrix with actual responses and latency measurements.
 
 ---
 
-## 🔴 Usage Rules (Anti-Rationalization)
+## 🔍 Quick Agent Diagnostics
 
-- **NEVER** use `use_free_llm` for project work without `agentic: true` and `workspace_root`.
-- **NEVER** conclude a significant task without calling `store_workspace_skill`.
-- **ALWAYS** check `manage_memory` for prior findings before starting research.
-- **ALWAYS** run `index_workspace` when starting a new session to ground semantic memory.
-- **ALWAYS** use `keywords` to strictly control injected context and save tokens.
+If a tool call fails or returns an error, follow this sequence:
+1. **Verify Server Health**: Call `validate_provider` with the target provider (e.g., `groq`) to check connectivity.
+2. **Check Token Budgets**: Call `get_token_stats` to see if a provider is rate-limited or lacks credentials.
+3. **Monitor Visual Dashboard**: Inform the user they can view real-time latency and token statistics on the local dashboard at `http://localhost:3000` (if running in SSE mode).
 
----
-
-## 🚨 Anti-Hallucination: Grounding to a Specific File
-
-When a workspace contains **multiple files of the same type** (e.g., several `.json` workflow files, multiple SQL migration files), the steering engine may pull fragments from all of them and cause hallucination.
-
-**RULE — ALWAYS QUOTE THE EXACT FILENAME when the question is about a specific file:**
-
-```json
-{
-  "messages": [{ "role": "user", "content": "In \"daily-nday-pipeline.import.json\", does the Split in Batches node (typeVersion: 3) have a splitBy parameter?" }],
-  "keywords": ["daily-nday-pipeline.import.json", "splitInBatches"],
-  "agentic": true,
-  "workspace_root": "c:/path/to/project"
-}
-```
-
-- The quoted filename in the `content` triggers exact `grep` extraction from **only that file**.
-- The same filename in `keywords` ensures the steering engine also prioritizes it in semantic search.
-- **NEVER** send generic keywords like `n8n` or `workflow` alone when multiple workflow files exist — always add the exact filename.
-
-> **After resolving any finding, ALWAYS call `store_workspace_skill`** to persist the answer. If you skip this, the next session will re-hallucinate the same question.
-
----
-
-> [!NOTE]
-> The server handles internal grounding and task decomposition automatically. Focus on providing accurate `workspace_root` paths, **quoted filenames** for file-specific queries, and using `file:///` URIs in your messages.
+> [!WARNING]
+> **Consecutive Subtask Failures**: If the agent experiences consecutive failures during execution, it is likely due to:
+> 1. **Invalid or Missing API Keys** for the selected provider.
+> 2. **Lack of Active Reasoning/Planning Providers** configured in the server. Reasoning models are required to decompose goals into subtasks.
+>
+> Ensure at least one of the following reasoning/planning providers is active with valid credentials:
+> 
+> ```text
+> --- 5. REASONING / PLANNING PROVIDERS ---
+> (Crtical for agentic subtask decomposition)
+> 
+> huggingface
+> modelscope
+> github-models
+> gemini
+> openrouter
+> nvidia
+> ```

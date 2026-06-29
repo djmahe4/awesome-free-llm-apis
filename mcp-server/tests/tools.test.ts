@@ -3,7 +3,7 @@ import { listAvailableFreeModels } from '../src/tools/list-models.js';
 import { runCodeMode } from '../src/tools/code-mode.js';
 import { useFreeLLM } from '../src/tools/use-free-llm.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
-import { sharedResponseCache } from '../src/pipeline/instances.js';
+import { getSharedResponseCache } from '../src/pipeline/instances.js';
 
 // Mock debounce to be immediate
 vi.mock('../src/utils/debounce.js', () => ({
@@ -18,7 +18,7 @@ describe('list_available_free_models', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
     (ProviderRegistry as unknown as { instance: undefined }).instance = undefined;
-    sharedResponseCache.clear();
+    getSharedResponseCache().clear();
   });
 
   it('returns correct structure', async () => {
@@ -66,7 +66,7 @@ describe('code_mode', () => {
 
 describe('use_free_llm input validation', () => {
   it('throws when no provider available for model', async () => {
-    (ProviderRegistry as unknown as { instance: undefined }).instance = undefined;
+    vi.spyOn(ProviderRegistry.getInstance(), 'getAvailableProviders').mockReturnValue([]);
     await expect(
       useFreeLLM({
         model: 'nonexistent-model',
@@ -105,5 +105,40 @@ describe('use_free_llm input validation', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
     await useFreeLLM(JSON.parse(JSON.stringify(input)));
     expect(chatSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('appends token-efficient CLI diagnostics for debugger persona', async () => {
+    vi.stubEnv('GROQ_API_KEY', 'test-key-long-enough');
+    (ProviderRegistry as unknown as { instance: undefined }).instance = undefined;
+
+    const mockResponse = {
+      id: 'debug-test-id',
+      object: 'chat.completion',
+      created: Date.now(),
+      model: 'llama-3.3-70b-versatile',
+      choices: [{ index: 0, message: { role: 'assistant' as const, content: 'Base response' }, finish_reason: 'stop' }],
+    };
+
+    const registry = ProviderRegistry.getInstance();
+    const groq = registry.getProvider('groq');
+    if (!groq) return;
+
+    vi.spyOn(groq, 'chat').mockResolvedValue(mockResponse);
+
+    const result = await useFreeLLM({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: 'fix TypeError JSON error in my project' }],
+      workspace_root: process.cwd()
+    });
+
+    const content = result.choices[0].message.content || '';
+    expect(content).toContain('Token-Efficient CLI Diagnostics');
+    
+    // Since query has 'json' and 'error', it should contain JSON tips
+    if (process.platform === 'win32') {
+      expect(content).toContain('ConvertFrom-Json');
+    } else {
+      expect(content).toContain('jq');
+    }
   });
 });

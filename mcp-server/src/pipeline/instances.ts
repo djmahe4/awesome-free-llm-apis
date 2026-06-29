@@ -1,8 +1,9 @@
-import { IntelligentRouterMiddleware } from './middlewares/IntelligentRouterMiddleware.js';
-import { AgenticMiddleware } from '../middleware/agentic/agentic-middleware.js';
+import { TextRouterMiddleware } from './middlewares/TextRouterMiddleware.js';
+import { ImageRouterMiddleware } from './middlewares/ImageRouterMiddleware.js';
+import { AgenticMiddleware } from './middlewares/AgenticMiddleware.js';
 import { WorkspaceContextMiddleware } from './middlewares/WorkspaceContextMiddleware.js';
 import { ResponseCacheMiddleware } from './middlewares/ResponseCacheMiddleware.js';
-import { StructuralMarkdownMiddleware } from '../middleware/agentic/structural-middleware.js';
+import { StructuralMarkdownMiddleware } from './middlewares/StructuralMiddleware.js';
 
 /**
  * Pipeline Instance Registry (Hardened)
@@ -16,7 +17,8 @@ import { StructuralMarkdownMiddleware } from '../middleware/agentic/structural-m
 let _structuralMarkdownMiddleware: StructuralMarkdownMiddleware | null = null;
 let _sharedResponseCache: ResponseCacheMiddleware | null = null;
 let _workspaceContextMiddleware: WorkspaceContextMiddleware | null = null;
-let _sharedRouter: IntelligentRouterMiddleware | null = null;
+let _sharedRouter: TextRouterMiddleware | null = null;
+let _sharedImageRouter: ImageRouterMiddleware | null = null;
 let _agenticMiddleware: AgenticMiddleware | null = null;
 
 /**
@@ -52,11 +54,21 @@ export function getWorkspaceContextMiddleware(): WorkspaceContextMiddleware {
 /**
  * Gets the singleton instance of IntelligentRouterMiddleware.
  */
-export function getSharedRouter(): IntelligentRouterMiddleware {
+export function getSharedRouter(): TextRouterMiddleware {
     if (!_sharedRouter) {
-        _sharedRouter = new IntelligentRouterMiddleware();
+        _sharedRouter = new TextRouterMiddleware();
     }
     return _sharedRouter;
+}
+
+/**
+ * Gets the singleton instance of ImageRouterMiddleware.
+ */
+export function getSharedImageRouter(): ImageRouterMiddleware {
+    if (!_sharedImageRouter) {
+        _sharedImageRouter = new ImageRouterMiddleware();
+    }
+    return _sharedImageRouter;
 }
 
 /**
@@ -69,11 +81,6 @@ export function getAgenticMiddleware(): AgenticMiddleware {
     return _agenticMiddleware;
 }
 
-// Deprecated direct exports to be removed after full migration
-// Keeping them temporarily but initializing them lazily if accessed
-export const structuralMarkdownMiddleware = getStructuralMarkdownMiddleware();
-export const sharedResponseCache = getSharedResponseCache();
-export const workspaceContextMiddleware = getWorkspaceContextMiddleware();
-export const sharedRouter = getSharedRouter();
-export const agenticMiddleware = getAgenticMiddleware();
+// Deprecated direct exports have been removed. All callers should use getter functions.
+
 

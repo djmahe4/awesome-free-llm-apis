@@ -1,22 +1,23 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
 import { PipelineExecutor } from '../src/pipeline/index.js';
-import { AgenticMiddleware } from '../src/middleware/agentic/agentic-middleware.js';
-import { StructuralMarkdownMiddleware } from '../src/middleware/agentic/structural-middleware.js';
+import { AgenticMiddleware } from '../src/pipeline/middlewares/AgenticMiddleware.js';
+import { StructuralMarkdownMiddleware } from '../src/pipeline/middlewares/StructuralMiddleware.js';
 import { IntelligentRouterMiddleware } from '../src/pipeline/middlewares/IntelligentRouterMiddleware.js';
 import { LLMExecutor } from '../src/utils/LLMExecutor.js';
 import { WorkspaceScanner } from '../src/cache/workspace.js';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import { PROJECTS_DIR } from '../src/middleware/agentic/constants.js';
+import { PROJECTS_DIR } from '../src/pipeline/middlewares/constants.js';
 
 // Mock LLMExecutor to avoid actual API calls
 vi.mock('../src/utils/LLMExecutor.js', () => {
     return {
         LLMExecutor: vi.fn().mockImplementation(function (this: any) {
-            this.execute = vi.fn().mockImplementation(async (context: any) => {
-                const userMsg = context.messages?.find((m: any) => m.role === 'user')?.content || '';
-                const content = String(userMsg);
+            this.prompt = vi.fn().mockImplementation(async (messages: any) => {
+                const userMsg = messages?.find((m: any) => m.role === 'user')?.content || '';
+                const systemMsg = messages?.find((m: any) => m.role === 'system')?.content || '';
+                const content = String(userMsg) + " " + String(systemMsg);
 
                 if (content.includes('decomposition') || content.includes('Plan:')) {
                     return {
@@ -28,11 +29,21 @@ vi.mock('../src/utils/LLMExecutor.js', () => {
                     };
                 }
 
-                if (content.includes('Task 1')) {
+                if (content.includes('Analyze')) {
                     return {
                         choices: [{
                             message: {
-                                content: '## Result for Task 1\n**Decision:** Applied logic A.\n```file:src/logic.ts\nexport const logic = "A";\n```'
+                                content: '## Analysis Result\n**Decision:** The current logic is O(n^2).\n[RETRIEVED] `src/logic.ts`'
+                            }
+                        }]
+                    };
+                }
+
+                if (content.includes('Implement')) {
+                    return {
+                        choices: [{
+                            message: {
+                                content: '## Implementation Result\n**Decision:** Applied optimization A.\n```file:src/logic.ts\nexport const logic = "A";\n```\n- ✅ Task completed'
                             }
                         }]
                     };
@@ -41,10 +52,13 @@ vi.mock('../src/utils/LLMExecutor.js', () => {
                 return {
                     choices: [{
                         message: {
-                            content: '## Final Result\n**Status:** Task completed.\n[RETRIEVED] src/logic.ts'
+                            content: '## Verification Result\n**Status:** Verification passed.\n- ✅ All tests passed'
                         }
                     }]
                 };
+            });
+            this.execute = vi.fn().mockImplementation(async (context: any) => {
+                return await this.prompt(context.messages);
             });
             this.init = vi.fn().mockResolvedValue(undefined);
             this.persistStats = vi.fn().mockResolvedValue(undefined);

@@ -4,7 +4,7 @@
  * from prompt.json based on query context and keyword steering.
  * Usage: npx tsx scripts/verification/verify-explicit-steering.ts
  */
-import { getIntelligentSystemPrompt } from '../../src/middleware/agentic/prompts.js';
+import { getIntelligentSystemPrompt } from '../../src/pipeline/middlewares/prompts.js';
 
 async function verifySteering() {
     console.log('--- Verification: Section Scoring & Prompt Steering ---\n');

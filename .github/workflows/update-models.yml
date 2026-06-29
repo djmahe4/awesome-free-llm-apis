@@ -1,0 +1,73 @@
+name: Weekly Provider Models Scraper
+
+on:
+  schedule:
+    # Runs every Sunday at 00:00 UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    # Allows manual triggering from the Actions tab
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  scrape-models:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-dir: '.'
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'mcp-server/package-lock.json'
+
+      - name: Install Dependencies
+        run: |
+          cd mcp-server
+          npm ci --legacy-peer-deps
+
+      - name: Install Playwright Chromium
+        run: |
+          cd mcp-server
+          npx playwright install chromium
+
+      - name: Run Models Scraper
+        run: |
+          cd mcp-server
+          npx tsx scripts/update-models.ts
+          npx tsx scripts/update-models-vision.ts
+
+      - name: Create Pull Request for Updates
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check for changes in src/providers
+          git status --porcelain src/providers/
+          
+          if [ -n "$(git status --porcelain mcp-server/src/providers/)" ]; then
+            echo "Changes detected in provider files. Creating Pull Request..."
+            
+            BRANCH_NAME="automated/update-provider-models-$(date +'%Y-%m-%d')"
+            git config --global user.name "GitHub Actions Bot"
+            git config --global user.email "actions@github.com"
+            
+            git checkout -b "$BRANCH_NAME"
+            git add mcp-server/src/providers/
+            git commit -m "chore: automated weekly update of provider models"
+            git push origin "$BRANCH_NAME"
+            
+            # Use GitHub CLI to create the Pull Request
+            gh pr create \
+              --title "chore: automated weekly update of provider models" \
+              --body "This PR is automatically opened by the weekly scraper cron job to update model catalogs for providers, incorporating new releases, flagging deprecated models, and aligning compatibility with the Intelligent Router task mapping." \
+              --base main \
+              --head "$BRANCH_NAME"
+          else
+            echo "No model changes detected. Everything is up to date."
+          fi

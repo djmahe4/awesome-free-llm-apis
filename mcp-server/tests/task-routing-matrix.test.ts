@@ -52,14 +52,14 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         // Register a provider that has MOST models from our routing map
         // This allows us to verify if the router picks the TOP suggested model when available
         const prov = new MockProvider('gemini', [
-            { id: 'qwen/qwen3-coder:free', name: 'Qwen3 Coder' },
-            { id: 'DeepSeek-R1', name: 'DeepSeek R1' },
+            { id: 'qwen/qwen3-coder-480b-a35b:free', name: 'Qwen3 Coder' },
+            { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1' },
             { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3' },
             { id: 'google/gemma-3-27b-it:free', name: 'Gemma 3' },
-            { id: 'google/gemma-4-31B-it', name: 'Gemma 4' },
+            { id: 'google/gemma-4-31b-it:free', name: 'Gemma 4' },
             { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'Nemotron 3' },
             { id: 'qwen3.5', name: 'Qwen 3.5' },
-            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }
+            { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash' }
         ]);
         registry.registerProvider(prov);
         
@@ -86,7 +86,7 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await verifyRouting(
             'Write a high-performance Rust implementation of a priority queue.',
             TaskType.Coding,
-            'qwen/qwen3-coder:free'
+            'qwen/qwen3-coder-480b-a35b:free'
         );
     });
 
@@ -94,7 +94,7 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await verifyRouting(
             'Think step by step: if all bloops are bleeps and some bleeps are blops...',
             TaskType.Reasoning,
-            'DeepSeek-R1'
+            'deepseek/deepseek-r1'
         );
     });
 
@@ -102,7 +102,7 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await verifyRouting(
             'Check this comment for any policy violations or safety concerns.',
             TaskType.Moderation,
-            'llama-3.3-70b-versatile'
+            'google/gemma-4-31b-it:free'
         );
     });
 
@@ -110,7 +110,7 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await verifyRouting(
             'Summarize the key points of this research paper concisely.',
             TaskType.Summarization,
-            'google/gemma-4-31B-it'
+            'google/gemma-4-31b-it:free'
         );
     });
 
@@ -118,23 +118,24 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await verifyRouting(
             'Classify the following customer feedback as positive, neutral, or negative.',
             TaskType.Classification,
-            'google/gemma-4-31B-it'
+            'google/gemma-4-31b-it:free'
         );
     });
 
     it('should route Semantic Search tasks correctly', async () => {
         await verifyRouting(
-            'Find information about the latest advancements in quantum computing.',
+            'Search for recent breakthroughs in room-temperature superconductivity.',
             TaskType.SemanticSearch,
-            'nvidia/nemotron-3-super-120b-a12b:free'
+            'gemini-3.1-flash-lite'
         );
     });
+
 
     it('should route Entity Extraction tasks correctly', async () => {
         await verifyRouting(
             'Parse the following text and extract names, dates, and locations in JSON format.',
             TaskType.EntityExtraction,
-            'google/gemma-4-31B-it'
+            'google/gemma-4-31b-it:free'
         );
     });
 
@@ -142,7 +143,7 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await verifyRouting(
             'What are your main capabilities and how can you help me today?',
             TaskType.UserIntent,
-            'google/gemma-4-31B-it'
+            'google/gemma-4-31b-it:free'
         );
     });
 
@@ -150,7 +151,7 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await verifyRouting(
             'Hello! How is your day going?',
             TaskType.Chat,
-            'DeepSeek-R1'
+            'deepseek/deepseek-r1'
         );
     });
 
@@ -166,6 +167,6 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
         await router.execute(context, async () => { });
 
         expect(context.taskType).toBe(TaskType.Coding);
-        expect(trySpy).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'qwen/qwen3-coder:free', expect.any(Number));
+        expect(trySpy).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'qwen/qwen3-coder-480b-a35b:free', expect.any(Number));
     });
 });

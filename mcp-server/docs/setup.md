@@ -186,14 +186,14 @@ To install the skill so your AI agent can use it:
 
 ```bash
 # Linux / macOS
-mkdir -p ~/.gemini/antigravity/skills/free-llms
-cp -r mcp-server/docs/skill/* ~/.gemini/antigravity/skills/free-llms/
+mkdir -p ~/.gemini/config/skills/free-llms
+cp -r mcp-server/docs/skill/* ~/.gemini/config/skills/free-llms/
 ```
 
 ```powershell
 # Windows (PowerShell)
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini\antigravity\skills\free-llms\"
-Copy-Item -Recurse mcp-server\docs\skill\* "$env:USERPROFILE\.gemini\antigravity\skills\free-llms\"
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini\config\skills\free-llms\"
+Copy-Item -Recurse mcp-server\docs\skill\* "$env:USERPROFILE\.gemini\config\skills\free-llms\"
 ```
 
 Once copied, your agent will automatically detect the `@free-llms` skill and its associated reference documents for calling the `@mcp:free-llm-apis` tools. Just call the skill in prompts like:
