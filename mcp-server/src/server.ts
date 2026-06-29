@@ -39,7 +39,11 @@ import crypto from 'crypto';
 import { getTokenStats } from './tools/get-token-stats.js';
 import { listAvailableFreeModels } from './tools/list-models.js';
 import { validateProvider } from './tools/validate-provider.js';
-import { flushSystem } from './tools/use-free-llm.js';
+import { flushSystem, useFreeLLM } from './tools/use-free-llm.js';
+import { visionTool } from './tools/vision-tool.js';
+import { executeSkill } from './tools/execute-skill.js';
+import { manageMemory } from './tools/manage-memory.js';
+import { indexWorkspace } from './tools/index-workspace.js';
 import { getSharedRouter } from './pipeline/instances.js';
 import { execSync } from 'child_process';
 import fs, { promises as fsp } from 'fs';
@@ -98,15 +102,12 @@ async function initTelemetry() {
   try {
     const state = await persistence.load();
     
-    // Ensure userId is established (authenticate anonymously)
-    if (!state.userId) {
-      const uid = await initFirebase();
+    // Ensure userId is established (authenticate anonymously) and aligned with the active Firebase session
+    const uid = await initFirebase();
+    if (state.userId !== uid) {
       state.userId = uid;
       state.username = state.username || `anonymous-${uid.substring(0, 6)}`;
       await persistence.save(state);
-    } else {
-      // Restore connection/session
-      await initFirebase();
     }
     
     // Check if session has expired or is not set
@@ -282,6 +283,100 @@ async function main() {
           const { providerId } = req.body;
           const result = await validateProvider(providerId);
           res.json(result);
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // Generic tool proxy for the dashboard Tool Playground
+      app.post('/api/tool', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        const { tool, params = {} } = req.body || {};
+        if (!tool || typeof tool !== 'string') {
+          res.status(400).json({ error: 'Missing tool name' });
+          return;
+        }
+        const start = Date.now();
+        try {
+          let result: unknown;
+          switch (tool) {
+            case 'get_token_stats':
+              result = await getTokenStats();
+              break;
+            case 'validate_provider':
+              result = await validateProvider(params.providerId);
+              break;
+            case 'use_free_llm': {
+              const messages = Array.isArray(params.messages)
+                ? params.messages
+                : [{ role: 'user', content: String(params.messages || params.prompt || '') }];
+              const r = await useFreeLLM({
+                messages,
+                model: params.model,
+                keywords: params.keywords,
+                agentic: !!params.agentic,
+                workspace_root: params.workspace_root,
+              });
+              result = { content: r?.choices?.[0]?.message?.content ?? '' };
+              break;
+            }
+            case 'vision_tool':
+              result = await visionTool({
+                image_path: params.image_path,
+                prompt: params.prompt,
+                model: params.model,
+                workspace_root: params.workspace_root || process.cwd(),
+              });
+              break;
+            case 'execute_skill':
+              result = await executeSkill({
+                skill: params.skill,
+                input: params.input,
+                model: params.model,
+                workspace_root: params.workspace_root,
+              });
+              break;
+            case 'manage_memory':
+              result = await manageMemory({
+                action: params.action,
+                workspace_root: params.workspace_root,
+                query: params.query,
+                limit: params.limit,
+              });
+              break;
+            case 'index_workspace':
+              result = await indexWorkspace({
+                workspace_root: params.workspace_root,
+                force: !!params.force,
+              });
+              break;
+            case 'store_workspace_skill': {
+              const { storeWorkspaceSkill } = await import('./tools/store-workspace-skill.js');
+              result = await storeWorkspaceSkill({
+                name: params.name,
+                description: params.description,
+                what: Array.isArray(params.what) ? params.what : [params.what],
+                why: params.why,
+                files: params.files,
+                workspace_root: params.workspace_root,
+              });
+              break;
+            }
+            default:
+              res.status(400).json({ error: `Unknown tool: ${tool}` });
+              return;
+          }
+          res.json({ ok: true, latencyMs: Date.now() - start, result });
+        } catch (err: any) {
+          res.status(500).json({ ok: false, latencyMs: Date.now() - start, error: String(err?.message || err) });
+        }
+      });
+
+      // Expose available model IDs for the playground model picker
+      app.get('/api/models', async (_req, res) => {
+        try {
+          const data = await listAvailableFreeModels({});
+          res.json(data);
         } catch (err) {
           res.status(500).json({ error: String(err) });
         }

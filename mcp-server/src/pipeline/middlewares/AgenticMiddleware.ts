@@ -1031,6 +1031,11 @@ export class AgenticMiddleware implements Middleware {
 
     async execute(context: PipelineContext, next: NextFunction): Promise<void> {
         const startMs = Date.now();
+        if (context.isOnePass) {
+            await next();
+            return;
+        }
+
         const isAgenticExplicitlyRequested = context.agentic === true || context.request?.agentic === true;
         const sessionId: string | undefined = context.sessionId || (context.request as any)?.sessionId;
 

@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, signInAnonymously, UserCredential } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, collection, query, orderBy, limit, getDocs } from 'firebase/firestore/lite';
 import crypto from 'crypto';
 
 let app: FirebaseApp | null = null;
@@ -44,11 +44,14 @@ export async function initFirebase(): Promise<string> {
         } else {
             app = getApp();
         }
-        db = getFirestore(app);
         auth = getAuth(app);
         
         const credential = await signInAnonymously(auth);
         anonymousUser = credential.user;
+        
+        // Initialize Firestore only after Auth is fully completed
+        db = getFirestore(app);
+        
         isOffline = false;
         return anonymousUser.uid;
     } catch (error) {
@@ -61,6 +64,9 @@ export async function initFirebase(): Promise<string> {
 export async function syncStats(userId: string, data: any): Promise<boolean> {
     if (isOffline || !db) return false;
     try {
+        const currentUid = auth?.currentUser?.uid;
+        console.error(`[Firebase Debug] Syncing stats. Authenticated UID: "${currentUid}", Target Document ID: "${userId}"`);
+        
         const todayStr = new Date().toISOString().split('T')[0];
         const userDocRef = doc(db, 'users', userId);
         const dailyDocRef = doc(db, 'token_usage', `${userId}_${todayStr}`);
@@ -133,11 +139,12 @@ export async function getLeaderboard(currentUserId?: string): Promise<any[]> {
         
         querySnapshot.forEach((doc) => {
             const data = doc.data();
-            if (doc.id === currentUserId) {
+            const isCurrent = doc.id === currentUserId;
+            if (isCurrent) {
                 currentUserInTop10 = true;
             }
             list.push({ 
-                id: doc.id, 
+                isCurrentUser: isCurrent,
                 username: data.username || `anonymous-${doc.id.substring(0, 6)}`,
                 lifetimeTokens: data.lifetimeTokens || 0,
                 lifetimeRequests: data.lifetimeRequests || 0,
@@ -151,12 +158,11 @@ export async function getLeaderboard(currentUserId?: string): Promise<any[]> {
             if (userDoc.exists()) {
                 const data = userDoc.data();
                 list.push({ 
-                    id: userDoc.id, 
+                    isCurrentUser: true,
                     username: data.username || `anonymous-${userDoc.id.substring(0, 6)}`,
                     lifetimeTokens: data.lifetimeTokens || 0,
                     lifetimeRequests: data.lifetimeRequests || 0,
-                    lastSyncTime: data.lastSyncTime || 0,
-                    isCurrentUser: true 
+                    lastSyncTime: data.lastSyncTime || 0
                 });
             }
         }

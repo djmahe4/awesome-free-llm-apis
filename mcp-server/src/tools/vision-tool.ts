@@ -11,7 +11,7 @@ import {
 } from '../pipeline/instances.js';
 
 export interface VisionToolInput {
-  workspace_root: string;
+  workspace_root?: string;
   image_path: string; // file:/// absolute URI
   prompt?: string;
   model?: string;
@@ -20,8 +20,8 @@ export interface VisionToolInput {
 export async function visionTool(input: VisionToolInput): Promise<{ response: string; model: string }> {
   const { workspace_root, image_path, prompt, model = 'gemini-3.1-flash-lite' } = input;
 
-  if (!workspace_root || !image_path) {
-    throw new Error('vision_tool requires both workspace_root and image_path.');
+  if (!image_path) {
+    throw new Error('vision_tool requires image_path.');
   }
   if (!image_path.startsWith('file:///')) {
     throw new Error('image_path must use file:/// scheme.');
@@ -34,10 +34,12 @@ export async function visionTool(input: VisionToolInput): Promise<{ response: st
     }
   }
   const imageFsPath = path.resolve(decodedPath);
-  const ws = path.resolve(workspace_root);
 
-  if (!imageFsPath.startsWith(ws)) {
-    throw new Error('image_path must be inside workspace_root boundaries.');
+  if (workspace_root) {
+    const ws = path.resolve(workspace_root);
+    if (!imageFsPath.startsWith(ws)) {
+      throw new Error('image_path must be inside workspace_root boundaries.');
+    }
   }
 
   const stat = await fs.stat(imageFsPath);
