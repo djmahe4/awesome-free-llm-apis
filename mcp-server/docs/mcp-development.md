@@ -1,249 +1,139 @@
 # MCP Server Development Guide
-
-This guide provides a structured overview of the MCP server architecture and explains how to extend it with new tools and providers.
-
+ 
+This guide provides a structured overview of how to extend the `free-llm-apis` MCP server with new tools, providers, models, or custom middlewares.
+ 
 ## Table of Contents
 - [Adding New Tools](#adding-new-tools)
 - [Adding New Providers](#adding-new-providers)
-- [Configuration System](#configuration-system)
-- [Caching Mechanism](#caching-mechanism)
-- [Internal Workflow](#internal-workflow)
-- [Agentic Middleware](#agentic-middleware)
-
+- [Adding New Models](#adding-new-models)
+- [Updating the Text Router](#updating-the-text-router)
+- [Extending the Request Lifecycle (Adding Middlewares)](#extending-the-request-lifecycle-adding-middlewares)
+- [Best Practices: Non-Blocking I/O](#best-practices-non-blocking-io)
+- [Architectural References](#architectural-references)
+ 
 ---
-
+ 
 ## Adding New Tools
-
+ 
 To add a new tool to the MCP server, follow these steps:
-
+ 
 ### 1. Implement the Tool
 Create a file in `src/tools/` (e.g., `src/tools/my-tool.ts`).
-
+ 
 ```typescript
 export interface MyToolInput {
   text: string;
 }
-
+ 
 export async function myTool(input: MyToolInput) {
   return { result: `Processed: ${input.text}` };
 }
 ```
-
+ 
 ### 2. Export the Tool
 Export the function and types in `src/tools/index.ts`.
-
+ 
 ### 3. Register in MCP Server
 Update `src/mcp/index.ts`:
 - Add the definition to the `ListToolsRequestSchema` handler.
 - Add the execution logic to the `CallToolRequestSchema` handler.
-
+ 
 ---
-
+ 
 ## Adding New Providers
-
+ 
 Providers handle the actual LLM API calls. All providers inherit from `BaseProvider`.
-
+ 
 ### 1. Create Provider Class
 Create a file in `src/providers/` (e.g., `src/providers/new-provider.ts`).
-
+ 
 ```typescript
 import { BaseProvider } from './base.js';
-
+ 
 export class NewProvider extends BaseProvider {
   name = 'New AI';
   id = 'new-ai';
   baseURL = 'https://api.newai.com/v1/';
   envVar = 'NEW_AI_API_KEY';
-  models = [{ id: 'model-1', name: 'Model 1' }];
+  models = [{ id: 'model-1', name: 'Model 1', contextWindow: 8192 }];
   rateLimits = { rpm: 10, rpd: 500 };
 }
 ```
-
+ 
 ### 2. Register Provider
-Add your provider to the `ProviderRegistry` in `src/providers/registry.ts`.
-
+Add your provider to the `ProviderRegistry` in [registry.ts](../src/providers/registry.ts).
+ 
 ```typescript
-// src/providers/registry.ts
 import { NewProvider } from './new-provider.js';
-
+ 
 // Inside the constructor
 const allProviders: Provider[] = [
   // ... existing providers
   new NewProvider(),
 ];
 ```
-
+ 
 ---
-
-## Configuration System
-
-The configuration is centralized in `src/config/index.ts`. It manages:
-- **Environment Variables**: API keys and tokens are pulled from `process.env`.
-- **System Settings**: Port, log level, and data storage paths.
-
-To add a new API key, add it to the `providers` object in `src/config/index.ts` and ensure it's documented in `.env.example`.
-
+ 
+## Adding New Models
+ 
+To add new models to an existing or new provider:
+ 
+1. **Define the Model**: Open [models.ts](file:///c:/Users/mahes/OneDrive/Desktop/Python-Projects/awesome-free-llm-apis/mcp-server/src/config/models.ts) (or your custom provider file) and add the model definition to the provider's `models` array:
+   ```typescript
+   { id: 'provider/model-name:free', name: 'Model Name', contextWindow: 131072 }
+   ```
+2. **Assign Capability Score**:
+   - Every model has a `capability` score ranging from `0.0` to `1.0` defined in the `MODEL_METADATA` map in `models.ts`.
+   - The frontier reasoning model **`deepseek/deepseek-r1` (at `1.0`) is the baseline** for maximum reasoning capability. All other models are scored proportionally relative to this baseline (e.g., `nvidia/nemotron-3-ultra-550b-a55b` is scored at `0.88`).
+3. **Classify the Model**:
+   - If the model is a **reasoning/thinking** model, ensure it is registered or mapped in [TextRouterMiddleware.ts](../src/pipeline/middlewares/TextRouterMiddleware.ts) under the reasoning capabilities map so the router knows to use it for planning and subtask decomposition.
+   - If it is a **coding** model, ensure it is added to the coding capability list.
+ 
 ---
-
-## Caching Mechanism
-
-The `ResponseCache` (`src/cache/index.ts`) uses an LRU (Least Recently Used) cache to store LLM responses, providing both speed and cost-efficiency.
-
-### Key Features
-- **Workspace Awareness**: Cache keys are contextually aware of the project identity. A `WorkspaceScanner` generates a stable **Identity Hash** based on the absolute path of the workspace root.
-- **Persistence**: Responses are persisted to `data/cache.json`. This allows the server to maintain its cache across restarts.
-- **Stable Identity**: Unlike transient content hashes, the Identity Hash remains constant even as you edit code, ensuring your stored facts and cached responses persist throughout the development lifecycle.
-
-### Implementation Details
-The `WorkspaceScanner` uses `fs.existsSync` to validate that the provided `workspace_root` physically exists on disk, preventing "workspace poisoning" from hallucinated paths.
-
-```typescript
-const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
-const cacheKey = cache.generateKey(request, wsHash);
-const cachedResponse = cache.get(cacheKey);
-```
-
+ 
+## Updating the Text Router
+ 
+The [TextRouterMiddleware.ts](../src/pipeline/middlewares/TextRouterMiddleware.ts) manages task-based model selection and quantum scoring.
+- **Task Weights**: To adjust how tasks are classified, update the `keywordTaskMap` in `TextRouterMiddleware.ts` or add new keywords to influence the classification weight.
+- **Model Scoring**: If a new model requires a custom capability multiplier (e.g., prioritizing it for search or coding), update the scoring logic inside the `scoreModelForTask` method.
+ 
 ---
-
----
-
-## Workspace Awareness
-
-The MCP server is "space-aware," meaning it can scan the caller's specific workspace to generate a contextual state hash. This hash ensures that caching and memory are unique to the project you are currently working on.
-
-### Workspace Scanning
-Use the `workspace_root` parameter in tool calls to specify the directory to scan. The `WorkspaceScanner` will:
-- Generate a stable SHA-256 **Identity Hash** built strictly from the absolute directory path.
-- Detect and reject non-existent paths via `fs.existsSync` validation.
-- Guarantee memory stability: your architectural decisions and context persist even if you modify tool source code or configuration files.
-
-### Key Logic
-```typescript
-const wsHash = workspaceScanner.getWorkspaceHash(workspaceRoot);
-// This hash remains stable throughout the life of the project directory.
-```
-
----
-
-## Memory Management Tool
-
-The `manage_memory` tool provides a way to interact with the persistent memory system programmatically.
-
-### Actions
-- **search**: Retrieve past interactions or manual context for the workspace.
-- **list**: List workspace identifiers and physical path hashes.
-- **stats**: View compression and usage statistics.
-- **clear**: Wipe memory for a specific workspace namespace.
-
----
-
-## Workspace Persistence (`store_workspace_skill` & `index_workspace`)
-
-The system implements a structured persistence layer for capturing agent findings and indexing the workspace.
-
-### `store_workspace_skill`
-Explicitly harvest structured knowledge, architectural decisions, and scripts into the workspace. This is the primary mechanism for preserving high-fidelity information across sessions.
-
-### `index_workspace`
-Proactively index all files in the workspace root into the vector database. This ensures semantic search results are always grounded in the latest state of the source code.
-
----
-
-## Middleware Pipeline Architecture
-
-The system uses a flexible, Starlette-inspired middleware pipeline to handle LLM requests. This allows for clean separation of concerns like caching, routing, and token management.
-
-### Key Components
-- **PipelineExecutor**: Manages the chain of middlewares and the execution context.
-- **Middleware Interface**: Every middleware must implement an `execute(context, next)` method.
-- **PipelineContext**: A shared object that carries the request, response, and metadata (like estimated tokens or selected provider) through the stack.
-
-### Default Pipeline Stack
-1.  **StructuralMarkdownMiddleware**: Resolves `file://` and `artifact://` URIs with security boundary checks.
-2.  **ResponseCacheMiddleware**: Checks if a result exists in the persistent workspace-aware cache.
-3.  **WorkspaceContextMiddleware**: Injects vector-searched memory, grep context, and intelligent system prompts.
-4.  **AgenticMiddleware**: Decomposes tasks into sub-problems and manages the verification loop.
-5.  **IntelligentRouterMiddleware**: Maps task types to model tiers, handles fallback cascades, and manages token telemetry via the `LLMExecutor`.
-
----
-
-## Agentic Middleware
-
-The `AgenticMiddleware` (`src/middleware/agentic/agentic-middleware.ts`) provides high-level reasoning and task decomposition capabilities.
-
-### Trigger Logic
-The middleware operates in three modes:
-- **Global**: Enabled via `ENABLE_AGENTIC_MIDDLEWARE=true` in `.env`.
-- **Selective (Mandatory for Project Work)**: Triggered per-request by setting `agentic: true` in the context or request body along with a `workspace_root`.
-- **Bypass**: If no `sessionId` is available (either provided by the client or derived from a `workspace_root`), the middleware automatically steps out of the pipeline.
-
-> [!IMPORTANT]
-> To ensure memory injection and project-specific prompts, agents **MUST** set `agentic: true` and provide `workspace_root` for all tasks related to a repository or project.
-
-### Foolproof Session ID Derivation
-To provide a zero-config experience, the `useFreeLLM` tool automatically derives a deterministic `sessionId` if a `workspace_root` is provided but an explicit ID is missing.
-- **Precedence**: Client Override > Workspace Hash > None (Bypass).
-- **Format**: `ws-[sha256(path.resolve(workspaceRoot).replace(/\\/g, '/'))]`.
-- **Namespace**: The `ws-` prefix ensures these auto-generated IDs do not collide with manually provided strings.
-
-### Strict Session Enforcement
-To prevent data leakage and disk pollution, every agentic request **must** have an associated `sessionId`.
-- **Security**: Ensures that logs, memory, and intermediate state are strictly partitioned by project.
-- **Integrity**: Prevents "anonymous" agentic execution that could lead to untracked directory creation.
-
-### Dynamic Prompt Synchronization
-The `prompt.json` engine uses a non-blocking, asynchronous loading strategy with automatic cache invalidation.
-
-> [!NOTE]
-> For a deep dive into the scoring algorithm, categorization, and reference compression, see the [Agentic Prompt Injection](agentic-prompts.md) documentation.
-
-- **Efficiency**: Uses `fs.stat()` to check `mtime` before every use.
-- **Zero Restart**: Prompt updates are picked up instantly without requiring a server restart.
-- **Asynchronous**: Built entirely on `fs.promises` to keep the event loop free.
-
----
-
-## Adding New Middleware
-
-To extend the request life cycle, you can add new middleware components.
-
-### 1. Implement Middleware
-Create a class in `src/pipeline/middlewares/` that implements the `Middleware` interface.
-
+ 
+## Extending the Request Lifecycle (Adding Middlewares)
+ 
+To extend or modify the request lifecycle, you can add a new middleware component.
+ 
+### 1. Implement the Middleware
+Create a class in `src/pipeline/middlewares/` that implements the `Middleware` interface:
+ 
 ```typescript
 import { Middleware, PipelineContext, NextFunction } from '../middleware.js';
-
+ 
 export class LoggingMiddleware implements Middleware {
   name = 'LoggingMiddleware';
   async execute(context: PipelineContext, next: NextFunction): Promise<void> {
     console.log(`Executing request for: ${context.request.model}`);
-    await next(); // Pass to the next middleware
+    await next(); // Pass control to the next middleware in the chain
     console.log('Request completed');
   }
 }
 ```
-
+ 
+### 2. Register the Middleware
+Register your new middleware by adding it to the `PipelineExecutor` instantiation inside [instances.ts](../src/pipeline/instances.ts).
+ 
 ### 3. Best Practices: Non-Blocking I/O
-**CRITICAL**: Never perform synchronous file I/O or heavy computations at the module level (during import) or within a middleware without `await`. 
-
+**CRITICAL**: Never perform synchronous file I/O or heavy computations at the module level (during import) or within a middleware without `await`.
 - **Avoid Sync I/O**: Use `fs.promises` instead of `fs.readFileSync`.
-- **Memoization**: Cache expensive operations (like prompt loading) after the first execution to ensure subsequent requests are fast.
+- **Memoization**: Cache expensive operations (like prompt loading) after the first execution to ensure subsequent requests remain fast.
 - **Async Factories**: Prefer async functions that return values over module-level constants that require immediate initialization.
-
-### 2. Register Middleware
-Update the tool implementation (e.g., `src/tools/use-free-llm.ts`) to include your middleware in the `PipelineExecutor` constructor.
-
+ 
 ---
-
-## Internal Workflow
-
-1.  **Request Arrival**: A tool call (e.g., `use_free_llm`) is received via Unified HTTP/SSE (using `StreamableHTTPServerTransport`) or Stdio.
-2.  **Pipeline Initialization**: The tool creates a `PipelineExecutor` with the standard stack. If enabled via the **Dual-Mode Trigger** (global `.env` or per-request `agentic: true` flag), the **Agentic Middleware** is prepended to the chain.
-3.  **Middleware Chain**:
-    - **Agentic (Optional)**: Performs task decomposition and awaits dynamic/async prompt injection.
-    - **Cache**: Immediate return if a match is found.
-    - **Router**: Selects the best available model (ignoring placeholder keys).
-    - **Token Manager**: Ensures the request won't exceed remaining quotas.
-    - **Execution**: Performs the API call and captures response headers.
-4.  **Drift Correction**: The Token Manager updates the ground truth quota using `x-ratelimit-*` headers.
-5.  **Response**: The final result is returned to the client and stored in long-term memory.
+ 
+## 📖 Architectural References
+ 
+To avoid documentation drift, refer to the following single sources of truth:
+- For the full request lifecycle and routing design, see the [Workflow & Architecture Guide](guide.md).
+- For details on workspace-aware memory, caching, and ADR extraction, see the [Memory Usage Guide](references/memory-usage.md).
+- For prompt scoring and dynamic injection, see the [Agentic Prompt Injection Guide](agentic-prompts.md).

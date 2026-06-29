@@ -8,77 +8,84 @@ This guide explains the inner workings of the LLM Orchestration Pipeline, includ
 
 The system uses a middleware-based pipeline. Every request passes through a series of decoupled middleware layers before reaching the LLM provider.
 
-### 🔄 Decoupled Pipeline Architecture
-
-The pipeline consists of the following sequential layers:
-
+### 🔄 Decoupled Pipeline Architecture (Phased Breakdown)
+ 
+To make the pipeline execution easy to understand, it is broken down into three distinct phases:
+ 
+#### Phase 1: Request & Cache Checking
+In this phase, the server sanitizes the request and attempts to serve it from the local cache.
+ 
 ```mermaid
-sequenceDiagram
-    participant U as User / Tool Call
-    participant E as PipelineExecutor
-    participant C as CacheMiddleware
-    participant W as WorkspaceContextMiddleware
-    participant S as StructuralMiddleware
-    participant IR as ImageRouterMiddleware
-    participant TR as TextRouterMiddleware
-    participant A as AgenticMiddleware
-    participant TM as TokenManagerMiddleware
-    participant X as LLMExecutor
-    participant P as LLM Provider
-
-    U->>E: execute(request)
-    E->>C: Process
-    alt Cache Hit
-        C-->>U: Return Cached Response
-    else Cache Miss
-        C->>W: next()
-        W->>W: Pre-emptive Memory Indexing
-        W->>S: next()
-        S->>S: Prepend System Context & History
-        S->>IR: next()
-        alt Contains Images
-            IR->>X: tryProvider(visionModel)
-            X->>P: Call VLM
-            P-->>U: Return Vision Response
-        else Text Only
-            IR->>TR: next()
-            TR->>TR: Classify Task (TaskClassifier)
-            TR->>A: next()
-            alt Agentic Enabled
-                A->>A: Decompose Tasks & Run Loop
-            end
-            A->>TM: next()
-            TM->>TM: Check Token Quotas & Limits
-            TM->>X: execute(bestModel)
-            X->>P: Call LLM
-            P-->>U: Return Response
-        end
-    end
+graph TD
+    A["User Request / Tool Call"] --> B["1. StructuralMarkdownMiddleware<br/>(Resolves file:// & artifact:// URIs)"]
+    B --> C["2. ResponseCacheMiddleware<br/>(Checks workspace-aware cache)"]
+    C -->|Cache Hit| D["Return Cached Response<br/>(Saves tokens & time)"]
+    C -->|Cache Miss| E["Proceed to Phase 2"]
+```
+ 
+#### Phase 2: Context Gathering & Agentic Planning
+If the cache misses, the server gathers workspace context and, if enabled, runs the agentic subtask execution loop.
+ 
+```mermaid
+graph TD
+    A["Phase 2 Entry"] --> B["3. WorkspaceContextMiddleware<br/>(Injects vector memory & 2-level directory tree)"]
+    B --> C["4. AgenticMiddleware<br/>(Checks if agentic: true)"]
+    C -->|Agentic: false| D["Proceed to Phase 3"]
+    C -->|Agentic: true| E["Decompose Goal into Subtasks"]
+    E --> F["Execute Subtask via direct LLM calls"]
+    F --> G["Analyze Output for Data-Demands"]
+    G -->|Context Needed| H["Gather workspace context & refine"]
+    H --> F
+    G -->|Subtask Done| I["Auto-extract ADRs to Wiki"]
+    I --> J{"More Subtasks?"}
+    J -->|Yes| E
+    J -->|No| D
+```
+ 
+#### Phase 3: Routing & LLM Execution
+Finally, the request is routed depending on whether it contains images, scored using the quantum router, and dispatched to the LLM.
+ 
+```mermaid
+graph TD
+    A["Phase 3 Entry"] --> B["5. ImageRouterMiddleware<br/>(Checks for images/multimodal)"]
+    B -->|Contains Images| C["Route to Vision Model (VLM)<br/>via LLMExecutor"]
+    B -->|Text Only| D["6. TextRouterMiddleware<br/>(Classifies TaskType)"]
+    D --> E["Quantum Scoring<br/>(Scores models by capability & telemetry)"]
+    E --> F["State Collapse<br/>(Selects best available model)"]
+    F --> G["LLMExecutor<br/>(Dispatches request to LLM Provider)"]
+    C --> H["Return Final Response"]
+    G --> H
 ```
 
 ### Pipeline Order (v1.0.6)
-1. **`ResponseCacheMiddleware`**: Checks memory/disk cache for existing responses to save tokens.
-2. **`WorkspaceContextMiddleware`**: Handles pre-emptive indexing and injects the 2-level directory tree.
-3. **`StructuralMiddleware`**: Injects session history and grounding context (`knowledge.md`).
-4. **`ImageRouterMiddleware`**: Intercepts base64/local image files and routes them to VLMs.
-5. **`TextRouterMiddleware`**: Routes text prompts to the optimal model based on task type.
-6. **`AgenticMiddleware`**: Handles task decomposition, subtask execution, and verification loops.
-7. **`TokenManagerMiddleware`**: Enforces rate-limit tracking and quota gates.
+1. **`StructuralMarkdownMiddleware`**: Resolves `file://` and `artifact://` URIs with security boundary checks.
+2. **`ResponseCacheMiddleware`**: Checks if a result exists in the persistent workspace-aware cache.
+3. **`WorkspaceContextMiddleware`**: Injects vector-searched memory, grep context, and intelligent system prompts.
+4. **`AgenticMiddleware`**: Decomposes tasks into subtasks and manages the subtask execution and retrospection loop.
+5. **`ImageRouterMiddleware`**: Intercepts base64/local image files and routes them to VLMs.
+6. **`TextRouterMiddleware`**: Routes text prompts to the optimal model based on task type.
 
 ---
 
-## 2. Decoupled Routing & Classification
+## 2. Quantum-Inspired Routing & Model Scoring
+
+The `TextRouterMiddleware` uses a **probabilistic quantum scoring matrix** instead of static model routing. It treats model selection as a state vector that collapses based on real-time telemetry and task constraints.
 
 ### Task-Based Model Mapping
-The `TextRouterMiddleware` uses the centralized `TaskClassifier` to route the prompt to the optimal tier of models:
+The centralized `TaskClassifier` dynamically classifies the request into a `TaskType` and collapses the routing state to the optimal model tier:
 
 * **Coding**: `qwen/qwen3-coder-480b-a35b:free` -> `gemini-3.1-flash-lite`
-* **Reasoning**: `DeepSeek-R1` -> `qwen/qwq-32b`
-* **Search / Summarization**: `Qwen/Qwen2.5-72B-Instruct` -> `cohere/command-r-plus`
+* **Reasoning**: `deepseek/deepseek-r1` -> `nvidia/nemotron-3-ultra-550b-a55b`
+* **Search / Summarization**: `gemini-3.1-flash-lite` -> `cohere/command-r-plus`
 * **Chat / General**: `meta-llama/llama-3.3-70b-instruct`
 
+### State Collapse & Telemetry
+1. **Scoring**: Each model is scored based on the classified `TaskType`.
+2. **Modifiers**: Real-time RPM/RPD quotas and latency averages (from `get_token_stats`) modify the scores.
+3. **Collapse**: The system sorts models by collapse probability and sequentially attempts execution, falling back instantly if a provider fails.
+
 ### Centralized Task Classifier
-The `TaskClassifier` uses single-pass regex heuristics with word boundaries (`\b`) and a keyword weighting map (`keywordTaskMap`) to classify the task type (e.g., `coding`, `reasoning`, `search`, `summarization`, `chat`) in under 0.05ms, preventing any overhead.
+The `TaskClassifier` uses single-pass regex heuristics with word boundaries (`\b`) and a keyword weighting map (`keywordTaskMap`) to classify the task type in under 0.05ms, preventing any overhead.ad.
 
 ---
 
@@ -133,92 +140,3 @@ The optional **Agentic Middleware** (`src/pipeline/middlewares/AgenticMiddleware
 
 ### Enabling the middleware
 You can opt-in on a per-call basis by passing `"agentic": true` in the request body along with a **`workspace_root`** or **`sessionId`**.
-
----
-
-## 🛠️ Developer Guide: Extending the Server
-
-### 1. How to Add a New Middleware
-
-Middlewares are executed sequentially by the `PipelineExecutor` registry. To add a new one:
-
-#### Step A: Create the Middleware File
-Create a new file under `src/pipeline/middlewares/MyCustomMiddleware.ts` implementing the `Middleware` interface:
-
-```typescript
-import { Middleware, PipelineContext, NextFunction } from '../middleware.js';
-
-export class MyCustomMiddleware implements Middleware {
-  async execute(context: PipelineContext, next: NextFunction): Promise<void> {
-    // 1. Pre-execution logic (runs on the way down)
-    console.log("Pre-execution check...");
-
-    // 2. Pass control to the next middleware in the pipeline
-    await next();
-
-    // 3. Post-execution logic (runs on the way back up)
-    console.log("Post-execution cleanup...");
-  }
-}
-```
-
-#### Step B: Register the Middleware in the Pipeline
-Open [instances.ts](file:///c:/Users/mahes/OneDrive/Desktop/Python-Projects/awesome-free-llm-apis/mcp-server/src/pipeline/instances.ts) and add your new middleware instance to the `PipelineExecutor` array in the desired sequence:
-
-```typescript
-import { MyCustomMiddleware } from './middlewares/MyCustomMiddleware.js';
-
-const executor = new PipelineExecutor([
-  new ResponseCacheMiddleware(),
-  new WorkspaceContextMiddleware(),
-  new StructuralMiddleware(),
-  new ImageRouterMiddleware(),
-  new MyCustomMiddleware(), // <-- Injected here
-  new TextRouterMiddleware(),
-  new AgenticMiddleware(),
-  new TokenManagerMiddleware()
-]);
-```
-
----
-
-### 2. How to Add a New LLM Provider
-
-To add support for a new free provider in under 20 lines of code:
-
-#### Step A: Create the Provider Class
-Create a new file under `src/providers/my-provider.ts` inheriting from `BaseProvider`:
-
-```typescript
-import { BaseProvider } from './base.js';
-
-export class MyProvider extends BaseProvider {
-  name = 'My Free AI';
-  id = 'my-free-ai';
-  baseURL = 'https://api.myfreeai.com/v1/';
-  envVar = 'MY_FREE_AI_API_KEY'; // Env variable containing the API key
-  
-  models = [
-    { id: 'my-model-70b', name: 'My Model 70B', contextWindow: 32768 },
-    { id: 'my-vision-model', name: 'My Vision Model', contextWindow: 16384, isVision: true }
-  ];
-
-  rateLimits = {
-    rpm: 15,    // Requests per minute
-    rpd: 1000,  // Requests per day
-    tpm: 50000  // Tokens per minute (optional)
-  };
-}
-```
-
-#### Step B: Register in the Provider Registry
-Open [registry.ts](file:///c:/Users/mahes/OneDrive/Desktop/Python-Projects/awesome-free-llm-apis/mcp-server/src/providers/registry.ts), import your new provider class, and push it to the `allProviders` array in the constructor:
-
-```typescript
-import { MyProvider } from './my-provider.js';
-
-// Inside ProviderRegistry constructor:
-this.allProviders.push(new MyProvider());
-```
-
-The server's fallback routing, token interpolation, header synchronization, and diagnostic validation tools will now automatically pick up and manage your new provider!
