@@ -584,8 +584,19 @@ export class LLMExecutor {
             const taskKey = options.taskType ? options.taskType.toLowerCase() : 'chat';
             targetModels = taskModels[taskKey] || taskModels.chat;
             
+            // If the prompt contains an image, prioritize vision-capable models (e.g. Gemini 3.1, Gemma 4)
+            const hasImage = messages.some(m => 
+                Array.isArray(m.content) && m.content.some((item: any) => item.type === 'image_url')
+            );
+            if (hasImage) {
+                const visionModels = ['gemini-3.1-flash-lite', 'google/gemma-4-31b-it:free'];
+                targetModels = [
+                    ...visionModels,
+                    ...targetModels.filter(m => !visionModels.includes(m))
+                ];
+            }
             // If google search is enabled, prioritize gemini
-            if (options.google_search) {
+            else if (options.google_search) {
                 targetModels = ['gemini-3.1-flash-lite', ...targetModels.filter(m => m !== 'gemini-3.1-flash-lite')];
             }
         }

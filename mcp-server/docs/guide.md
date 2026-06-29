@@ -32,15 +32,21 @@ graph TD
     B --> C["4. AgenticMiddleware<br/>(Checks if agentic: true)"]
     C -->|Agentic: false| D["Proceed to Phase 3"]
     C -->|Agentic: true| E["Decompose Goal into Subtasks"]
-    E --> F["Execute Subtask via direct LLM calls"]
-    F --> G["Analyze Output for Data-Demands"]
-    G -->|Context Needed| H["Gather workspace context & refine"]
-    H --> F
-    G -->|Subtask Done| I["Auto-extract ADRs to Wiki"]
-    I --> J{"More Subtasks?"}
-    J -->|Yes| E
-    J -->|No| D
+    E --> F["Process Subtask Images<br/>(Converts file:/// to base64 via ImageRouter)"]
+    F --> G["Execute Subtask via direct LLM calls"]
+    G --> H["Analyze Output for Data-Demands"]
+    H -->|Context Needed| I["Gather workspace context & refine"]
+    I --> F
+    H -->|Subtask Done| J["Auto-extract ADRs to Wiki"]
+    J --> K{"More Subtasks?"}
+    K -->|Yes| E
+    K -->|No| D
 ```
+ 
+* **Subtask Visual Grounding**: To support visual TDD, if a subtask prompt references local images or artifacts (e.g. `file:///path/to/screenshot.png`), `AgenticMiddleware` automatically invokes `ImageRouterMiddleware`'s processing engine to convert the URLs to base64 before calling the LLM executor.
+* **Vision Model Prioritization**: When executing an image-bearing subtask, `LLMExecutor` automatically detects the image payload and **prioritizes vision-capable models** (such as `gemini-3.1-flash-lite` or `google/gemma-4-31b-it:free`) to prevent routing failures to text-only models.
+ 
+---
  
 #### Phase 3: Routing & LLM Execution
 Finally, the request is routed depending on whether it contains images, scored using the quantum router, and dispatched to the LLM.
@@ -140,3 +146,9 @@ The optional **Agentic Middleware** (`src/pipeline/middlewares/AgenticMiddleware
 
 ### Enabling the middleware
 You can opt-in on a per-call basis by passing `"agentic": true` in the request body along with a **`workspace_root`** or **`sessionId`**.
+
+## 6. Firebase for debugging and telemetry
+
+The firebase integration is used for telemetry and debugging purposes. It collects anonymized usage data, error logs, and performance metrics to help improve the system. You can view the collected data in the Firebase console.<br>
+
+You can disable Firebase telemetry by setting `FIREBASE_API_KEY` to an empty string in the `.env` file. The server will then skip telemetry initialization and logging.<br>

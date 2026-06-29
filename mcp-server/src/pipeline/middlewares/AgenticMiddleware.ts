@@ -856,7 +856,11 @@ async function executeSingleSubtask(
         }
 
         if (!handledProactively) {
-            const response = await executor.prompt(context.request.messages, context.request.model, {
+            const { ImageRouterMiddleware } = await import('./ImageRouterMiddleware.js');
+            const imageRouter = new ImageRouterMiddleware(executor);
+            const processedMessages = await imageRouter.processImageMessages(context.request.messages);
+
+            const response = await executor.prompt(processedMessages, context.request.model, {
                 taskType: context.taskType || 'coding',
                 google_search: context.request.google_search,
                 sessionId,

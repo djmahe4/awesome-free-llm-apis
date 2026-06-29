@@ -35,7 +35,7 @@ export class ImageRouterMiddleware implements Middleware {
         return totalSize;
     }
 
-    private async processImageMessages(messages: any[]): Promise<any[]> {
+    public async processImageMessages(messages: any[]): Promise<any[]> {
         if (!messages || !Array.isArray(messages)) return messages;
 
         const processed: any[] = [];
