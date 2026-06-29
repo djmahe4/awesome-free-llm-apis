@@ -99,6 +99,7 @@ Proactively index all relevant files in the workspace for semantic search.
 - **Subtask cap**: The pipeline executes at most **3 subtasks** per request. For larger plans, break your request into multiple calls or use the `continue` resume command.
 - **Pipeline Pause**: If a subtask requires a terminal command, execution pauses and you will receive a `⚠️ Pipeline Paused` message. Reply with `continue <PROMPT_ID> <output>` to resume.
 - **Agentic gate**: Set `ENABLE_AGENTIC_MIDDLEWARE=true` in the server environment, or explicitly pass `"agentic": true` in your request to activate subtask decomposition.
+- **`AGENTS.md` Workspace Rules**: The pipeline automatically detects and loads the `AGENTS.md` file located at the workspace root or under `.agents/AGENTS.md`. Use this file to define project-specific coding standards, behavioral rules, and model routing preferences that the agent must follow.
 
 ---
 
