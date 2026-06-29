@@ -28,4 +28,17 @@ describe('Hallucination Detector Unit Tests', () => {
         const report = detectHallucination(response2, response1);
         expect(report.status).toBe('LOOP_DETECTED');
     });
+
+    it('does not flag common coding comments like "as shown in the code" as hallucination', () => {
+        const responses = [
+            "Here is the updated function, as shown in the code below.",
+            "As described in the file, we need to export this function.",
+            "As seen in the source, the route uses JWT auth."
+        ];
+        for (const res of responses) {
+            const report = detectHallucination(res);
+            expect(report.status).toBe('PASS');
+        }
+    });
 });
+

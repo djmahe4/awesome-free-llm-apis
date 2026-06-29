@@ -52,12 +52,12 @@ const STOP_WORDS = new Set(['and', 'the', 'with', 'your', 'from', 'that', 'this'
 
 
 import {
-  sharedResponseCache,
-  sharedRouter,
-  sharedImageRouter,
-  agenticMiddleware,
-  workspaceContextMiddleware,
-  structuralMarkdownMiddleware
+  getSharedResponseCache,
+  getSharedRouter,
+  getSharedImageRouter,
+  getAgenticMiddleware,
+  getWorkspaceContextMiddleware,
+  getStructuralMarkdownMiddleware
 } from '../pipeline/instances.js';
 
 /**
@@ -531,12 +531,12 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
   // 2. ResponseCache - Check for cached responses
   // 3. AgenticMiddleware - Handle agentic/reasoning mode if enabled
   // 4. IntelligentRouter - Select provider/model and execute (includes token management and LLM execution)
-  pipeline.use(structuralMarkdownMiddleware);
-  pipeline.use(sharedResponseCache);
-  pipeline.use(workspaceContextMiddleware);
-  pipeline.use(agenticMiddleware);
-  pipeline.use(sharedImageRouter);
-  pipeline.use(sharedRouter);
+  pipeline.use(getStructuralMarkdownMiddleware());
+  pipeline.use(getSharedResponseCache());
+  pipeline.use(getWorkspaceContextMiddleware());
+  pipeline.use(getAgenticMiddleware());
+  pipeline.use(getSharedImageRouter());
+  pipeline.use(getSharedRouter());
 
   const wsHash = await workspaceScanner.getWorkspaceHash(workspaceRoot);
 
@@ -744,8 +744,8 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
 }
 
 export function flushSystem(): void {
-  sharedResponseCache.flush();
-  sharedRouter.flush();
+  getSharedResponseCache().flush();
+  getSharedRouter().flush();
 }
 
 interface ParsedToolCall {

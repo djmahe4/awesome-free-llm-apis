@@ -81,12 +81,6 @@ export function getAgenticMiddleware(): AgenticMiddleware {
     return _agenticMiddleware;
 }
 
-// Deprecated direct exports to be removed after full migration
-// Keeping them temporarily but initializing them lazily if accessed
-export const structuralMarkdownMiddleware = getStructuralMarkdownMiddleware();
-export const sharedResponseCache = getSharedResponseCache();
-export const workspaceContextMiddleware = getWorkspaceContextMiddleware();
-export const sharedRouter = getSharedRouter();
-export const sharedImageRouter = getSharedImageRouter();
-export const agenticMiddleware = getAgenticMiddleware();
+// Deprecated direct exports have been removed. All callers should use getter functions.
+
 

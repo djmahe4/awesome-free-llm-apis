@@ -1,9 +1,9 @@
 ---
 name: free-llms
-description: "Orchestrate multiple free LLM providers, manage persistent workspace memory, and utilize keyword-based steering for project-specific reference extraction."
+description: "Orchestrate multiple free LLM providers, manage persistent workspace memory, and utilize keyword-based steering for project-specific reference extraction and various agentic workflows."
 metadata:
   category: utility
-  triggers: free models, llm cost, fallback, routing, token tracking, workspace memory, context-aware steering, reference extractor, keyword classification, project discovery, gemini, groq, cohere, cloudflare, deepseek, qwen, compression, execute skill, vision tool
+  triggers: free models, llm cost, fallback, routing, token tracking, workspace memory, context-aware steering, reference extractor, keyword classification, project discovery, gemini, groq, cohere, cloudflare, deepseek, qwen, compression, execute skill, vision tool, agentic, reasoning, planning, subtask decomposition, pdf grounding, semantic wiki, adr tracking
 ---
 
 # Free LLM APIs — Usage Guide
@@ -29,9 +29,9 @@ Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-
 |----------|-------|----------|-------|
 | Fast Chat | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | `cloudflare` | 100% success, ~1300ms ⚡ |
 | Coding | `qwen/qwen3-coder-480b-a35b:free` | `openrouter` | 480B coder, FREE |
-| Deep Reasoning | `DeepSeek-R1` | `huggingface` | Chain-of-thought |
+| Deep Reasoning | `deepseek-ai/DeepSeek-R1` | `openrouter` | Chain-of-thought |
+| High-Tier Reasoning | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia` | Planning/subtask planner |
 | Bulk Tasks | `Qwen/Qwen2.5-72B-Instruct` | `siliconflow` | 1,000 RPM — best for bulk |
-| High-Tier Reasoning | `Qwen/Qwen3-235B-A22B` | `nvidia` | Frontier free tier |
 
 ---
 
@@ -94,16 +94,37 @@ Proactively index all relevant files in the workspace for semantic search.
 
 ---
 
-## 📁 Advanced Context & Media Steering
+## ⚠️ Agentic Behavior & Limits
 
-### 1. PDF Page Resolution & Visual Grounding [NEW]
-If you reference a PDF file path in your prompt containing a `#page=N` hash:
-- **Example**: `Check the diagram in [architecture.pdf](file:///c:/project/docs/architecture.pdf#page=4)`
-- **Behavior**: The server automatically uses `PyMuPDF` to render that specific page to an image, extracts its text, and passes both the **base64 image** and the **extracted text** directly to the LLM. It also auto-calculates page offsets (e.g. index vs physical pages) and caches them.
+- **Subtask cap**: The pipeline executes at most **3 subtasks** per request. For larger plans, break your request into multiple calls or use the `continue` resume command.
+- **Pipeline Pause**: If a subtask requires a terminal command, execution pauses and you will receive a `⚠️ Pipeline Paused` message. Reply with `continue <PROMPT_ID> <output>` to resume.
+- **Agentic gate**: Set `ENABLE_AGENTIC_MIDDLEWARE=true` in the server environment, or explicitly pass `"agentic": true` in your request to activate subtask decomposition.
 
-### 2. Semantic Wiki Memory & ADR Extraction [NEW]
-The workspace memory maintains a structured wiki under `.free-llm-mcp/wiki/` containing episodic and semantic pages.
-- **ADR Auto-Extraction**: The system automatically scans your responses for decision patterns (e.g., `"decided to"`, `"decision:"`, `"chose X over Y"`) and extracts them into structured **Architecture Decision Records (ADRs)** inside the wiki.
+---
+
+### 1. PDF-Based Learning & Visual Grounding
+You can steer the agent to learn directly from local manuals, API specs, or datasheets by referencing specific pages using a `#page=N` hash:
+- **Steering Syntax**: `Read the specification in [manual.pdf](file:///c:/project/docs/manual.pdf#page=12)`
+- **Physical vs. Printed Offsets**: The server automatically manages a PDF Index Offset Cache (`pdf:index:<pdf_slug>`). If physical page 5 of the PDF corresponds to printed page 1, it caches an offset of `4`. The server will automatically translate your requested printed page number `12` to physical page `16` before extraction.
+- **Visual Grounding**: The server extracts the page text via `PyMuPDF` and renders the page to a base64 image. Both are injected directly into the LLM context.
+- **Offset Verification**: If a PDF's offset is incorrect, you can manually update the offset cache using `store_workspace_skill` with the key `pdf:index:<pdf_slug>` and value `{"offset": N}`.
+
+### 2. Semantic Wiki Maintenance & ADR Tracking
+The server maintains a structured wiki under `.free-llm-mcp/wiki/` containing markdown files with YAML frontmatter. This is your project's "truth engine" for architectural decisions.
+- **ADR Auto-Extraction**: The system scans all completed subtask outputs for decision patterns. When it detects phrases like `"decided to"`, `"chose X over Y"`, or `"decision:"`, it automatically extracts them into a structured Architecture Decision Record (ADR) file in the wiki (e.g., `adr_001.md`).
+- **Manual ADR Maintenance**: To ensure the agent respects architectural boundaries, you can manually write or update ADR files in `.free-llm-mcp/wiki/`. Use the following format:
+  ```markdown
+  ---
+  title: use_redis_session_store
+  tier: semantic
+  tags: [architecture, adr, database]
+  links: [session_id]
+  adr_ref: adr_001
+  ---
+  # ADR 001: Use Redis Session Store
+  We decided to use Redis for session management instead of JWT tokens because of performance overhead.
+  ```
+- **Attestation**: During workspace indexing, the agent reads these ADRs and cross-references them against your source files. If a code change violates an active ADR, the agent will flag a warning.
 
 ---
 
@@ -120,6 +141,25 @@ The workspace memory maintains a structured wiki under `.free-llm-mcp/wiki/` con
 ## 🔍 Quick Agent Diagnostics
 
 If a tool call fails or returns an error, follow this sequence:
-1. **Verify Server Health**: Call `validate_provider` with the target provider (e.g., `gemini`, `groq`) to check connectivity.
+1. **Verify Server Health**: Call `validate_provider` with the target provider (e.g., `groq`) to check connectivity.
 2. **Check Token Budgets**: Call `get_token_stats` to see if a provider is rate-limited or lacks credentials.
 3. **Monitor Visual Dashboard**: Inform the user they can view real-time latency and token statistics on the local dashboard at `http://localhost:3000` (if running in SSE mode).
+
+> [!WARNING]
+> **Consecutive Subtask Failures**: If the agent experiences consecutive failures during execution, it is likely due to:
+> 1. **Invalid or Missing API Keys** for the selected provider.
+> 2. **Lack of Active Reasoning/Planning Providers** configured in the server. Reasoning models are required to decompose goals into subtasks.
+>
+> Ensure at least one of the following reasoning/planning providers is active with valid credentials:
+> 
+> ```text
+> --- 5. REASONING / PLANNING PROVIDERS ---
+> (Crtical for agentic subtask decomposition)
+> 
+> huggingface
+> modelscope
+> github-models
+> gemini
+> openrouter
+> nvidia
+> ```

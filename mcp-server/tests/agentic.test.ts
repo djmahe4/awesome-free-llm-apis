@@ -9,6 +9,7 @@ import { getIntelligentSystemPrompt, resetPromptCache } from '../src/pipeline/mi
 import type { PipelineContext } from '../src/pipeline/middleware.js';
 import { promises as fsp } from 'node:fs';
 import * as fs from 'node:fs';
+import { LLMExecutor } from '../src/utils/LLMExecutor.js';
 
 // Mock debounce to be immediate
 vi.mock('../src/utils/debounce.js', () => ({
@@ -66,6 +67,11 @@ describe('Agentic Intelligence & Middleware', () => {
     beforeEach(() => {
         vi.stubEnv('ENABLE_AGENTIC_MIDDLEWARE', 'true');
         resetPromptCache();
+
+        vi.spyOn(LLMExecutor.prototype, 'prompt').mockResolvedValue({
+            id: 'mock-subtask-resp',
+            choices: [{ message: { role: 'assistant', content: 'Subtask completed successfully.' } }]
+        } as any);
 
         // Spy on fsp promises instead of global mocks to prevent leakage
         vi.spyOn(fsp, 'writeFile').mockResolvedValue(undefined as any);

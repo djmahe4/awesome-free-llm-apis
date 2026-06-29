@@ -32,10 +32,23 @@ describe('AgenticMiddleware - Concurrency Stress Test', () => {
 
     it('should handle concurrent resume requests to the same session without corruption', async () => {
         const middleware = new AgenticMiddleware();
-        
+        // Mock LLMExecutor.prompt to bypass actual LLM provider calls
+        const { LLMExecutor } = await import('../src/utils/LLMExecutor.js');
+        vi.spyOn(LLMExecutor.prototype, 'prompt').mockResolvedValue({
+            id: 'mock-id',
+            object: 'chat.completion',
+            created: Date.now(),
+            model: 'mock-model',
+            choices: [{
+                index: 0,
+                message: { role: 'assistant', content: 'mocked subtask response' },
+                finish_reason: 'stop'
+            }]
+        } as any);
+
         // Mock sharedRouter.execute to bypass actual LLM provider calls
-        const { sharedRouter } = await import('../src/pipeline/instances.js');
-        sharedRouter.execute = async (ctx, next) => {
+        const { getSharedRouter } = await import('../src/pipeline/instances.js');
+        getSharedRouter().execute = async (ctx, next) => {
             ctx.response = {
                 id: 'mock-id',
                 object: 'chat.completion',

@@ -61,7 +61,7 @@ Execute a prompt grounded in a specific skill's instructions.
 
 ## 🛡️ Internal QuickJS Sandbox
 
-While the user-facing `code_mode` tool is deprecated, the `AgenticMiddleware` internally utilizes a secure QuickJS sandbox ([executor.ts](file:///c:/Users/mahes/OneDrive/Desktop/Python-Projects/awesome-free-llm-apis/mcp-server/src/sandbox/executor.ts)) to validate code, parse logs, or run algorithmic transformations during subtask execution.
+While the user-facing `code_mode` tool is deprecated, the `AgenticMiddleware` internally utilizes a secure QuickJS sandbox to validate code, parse logs, or run algorithmic transformations during subtask execution.
 
 ### Sandbox Constraints
 - **Isolation**: No access to `fs`, `net`, `os`, or `child_process`. It is a pure JavaScript execution context.

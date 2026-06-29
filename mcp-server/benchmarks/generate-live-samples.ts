@@ -12,6 +12,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { getEncoding } from 'js-tiktoken';
 import type { Message } from '../src/providers/types.js';
+import type { PipelineContext } from '../src/pipeline/middleware.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,10 +24,11 @@ const countTokens = (text: string) => enc.encode(text).length;
 const benchmarkExecutor = new LLMExecutor();
 
 // Mock prompt
-benchmarkExecutor.prompt = async (messages: any[], modelOverride?: string) => {
+benchmarkExecutor.prompt = async (messages: Message[], modelOverride?: string, options?: any) => {
     return {
         id: 'mock-prompt-response',
         choices: [{
+            index: 0,
             message: {
                 role: 'assistant',
                 content: JSON.stringify([
@@ -34,28 +36,31 @@ benchmarkExecutor.prompt = async (messages: any[], modelOverride?: string) => {
                     "Task 2: Build JWT helper.",
                     "Task 3: Deploy to Vercel."
                 ])
-            }
+            },
+            finish_reason: 'stop'
         }],
         model: modelOverride || 'mock-model',
         object: 'chat.completion',
         created: Date.now()
-    };
+    } as any;
 };
 
 // Mock tryProvider to prevent any real API/network calls
-benchmarkExecutor.tryProvider = async (context: any, providerId: string, modelId: string) => {
+benchmarkExecutor.tryProvider = async (context: PipelineContext, providerId: string, modelId: string, timeoutMs?: number) => {
     return {
         id: 'mock-try-provider-response',
         choices: [{
+            index: 0,
             message: {
                 role: 'assistant',
                 content: 'Mocked vision response content.'
-            }
+            },
+            finish_reason: 'stop'
         }],
         model: modelId,
         object: 'chat.completion',
         created: Date.now()
-    };
+    } as any;
 };
 
 async function generate() {

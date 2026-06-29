@@ -34,6 +34,15 @@ describe('Agentic Middleware Feedback Loop Tests', () => {
     });
 
     it('writes subtask prompts and responses to agentic-debug.log', async () => {
+        const { LLMExecutor } = await import('../src/utils/LLMExecutor.js');
+        const promptSpy = vi.spyOn(LLMExecutor.prototype, 'prompt').mockResolvedValue({
+            choices: [{
+                message: {
+                    content: 'I need more context regarding auth.ts'
+                }
+            }]
+        } as any);
+
         const middleware = new AgenticMiddleware();
         const context: PipelineContext = {
             request: {
@@ -45,18 +54,6 @@ describe('Agentic Middleware Feedback Loop Tests', () => {
 
         // Spy on ContextGatherer.gatherContext
         const gatherSpy = vi.spyOn(ContextGatherer, 'gatherContext').mockResolvedValue([]);
-
-        // Mock sharedRouter to return a context request
-        const instances = await import('../src/pipeline/instances.js');
-        const routerSpy = vi.spyOn(instances.sharedRouter, 'execute').mockImplementation(async (ctx, next) => {
-            ctx.response = {
-                choices: [{
-                    message: {
-                        content: 'I need more context regarding auth.ts'
-                    }
-                }]
-            } as any;
-        });
 
         await middleware.execute(context, async () => {});
 
@@ -70,6 +67,29 @@ describe('Agentic Middleware Feedback Loop Tests', () => {
     });
 
     it('injects CONTEXT-UNAVAILABLE when entity is not found in the workspace', async () => {
+        const { LLMExecutor } = await import('../src/utils/LLMExecutor.js');
+        let callCount = 0;
+        const promptSpy = vi.spyOn(LLMExecutor.prototype, 'prompt').mockImplementation(async () => {
+            callCount++;
+            if (callCount === 1) {
+                return {
+                    choices: [{
+                        message: {
+                            content: 'I need more context regarding auth.ts'
+                        }
+                    }]
+                } as any;
+            } else {
+                return {
+                    choices: [{
+                        message: {
+                            content: 'Proceeding without auth.ts.'
+                        }
+                    }]
+                } as any;
+            }
+        });
+
         const middleware = new AgenticMiddleware();
         const context: PipelineContext = {
             request: {
@@ -81,29 +101,6 @@ describe('Agentic Middleware Feedback Loop Tests', () => {
 
         // Mock no context found
         const gatherSpy = vi.spyOn(ContextGatherer, 'gatherContext').mockResolvedValue([]);
-
-        const instances = await import('../src/pipeline/instances.js');
-        let callCount = 0;
-        const routerSpy = vi.spyOn(instances.sharedRouter, 'execute').mockImplementation(async (ctx, next) => {
-            callCount++;
-            if (callCount === 1) {
-                ctx.response = {
-                    choices: [{
-                        message: {
-                            content: 'I need more context regarding auth.ts'
-                        }
-                    }]
-                } as any;
-            } else {
-                ctx.response = {
-                    choices: [{
-                        message: {
-                            content: 'Proceeding without auth.ts.'
-                        }
-                    }]
-                } as any;
-            }
-        });
 
         await middleware.execute(context, async () => {});
 
@@ -134,4 +131,66 @@ describe('Agentic Middleware Feedback Loop Tests', () => {
         expect(cues).toContain('JWT_SECRET');
         expect(cues).toContain('authMiddleware');
     });
+
+    it('uses LLMExecutor.prompt directly for subtask execution instead of sharedRouter.execute', async () => {
+        const { LLMExecutor } = await import('../src/utils/LLMExecutor.js');
+        const promptSpy = vi.spyOn(LLMExecutor.prototype, 'prompt').mockResolvedValue({
+            id: 'mock-subtask-resp',
+            choices: [{ message: { role: 'assistant', content: 'Subtask done.' } }]
+        } as any);
+
+        const { TextRouterMiddleware } = await import('../src/pipeline/middlewares/TextRouterMiddleware.js');
+        const routerSpy = vi.spyOn(TextRouterMiddleware.prototype, 'execute');
+
+        const middleware = new AgenticMiddleware();
+        const context: PipelineContext = {
+            request: {
+                messages: [{ role: 'user', content: 'Step 1: Do task A' }]
+            },
+            agentic: true,
+            sessionId: 'test-session-executor-direct'
+        } as any;
+
+        await middleware.execute(context, async () => {});
+
+        expect(promptSpy).toHaveBeenCalled();
+        expect(routerSpy).not.toHaveBeenCalled();
+    });
+
+    it('applies a sliding window to prune old messages when they grow too large during subtasks', async () => {
+        const { LLMExecutor } = await import('../src/utils/LLMExecutor.js');
+        const promptSpy = vi.spyOn(LLMExecutor.prototype, 'prompt').mockResolvedValue({
+            id: 'mock-subtask-resp',
+            choices: [{ message: { role: 'assistant', content: 'Subtask done.' } }]
+        } as any);
+
+        const middleware = new AgenticMiddleware();
+        const initialMessages = [
+            { role: 'system', content: 'System prompt' },
+            { role: 'user', content: 'Step 1: Create a file\nStep 2: Fix a bug' },
+            { role: 'assistant', content: 'Msg 2' },
+            { role: 'user', content: 'Msg 3' },
+            { role: 'assistant', content: 'Msg 4' },
+            { role: 'user', content: 'Msg 5' },
+            { role: 'assistant', content: 'Msg 6' },
+            { role: 'user', content: 'Msg 7' },
+            { role: 'assistant', content: 'Msg 8' },
+            { role: 'user', content: 'Msg 9' },
+        ];
+        const context: PipelineContext = {
+            request: {
+                messages: [...initialMessages]
+            },
+            agentic: true,
+            sessionId: 'test-session-sliding-window'
+        } as any;
+
+        await middleware.execute(context, async () => {});
+
+        const systemMsg = context.request.messages.find(m => m.role === 'system');
+        expect(systemMsg).toBeDefined();
+        // Since we prune to keep only the last 6 non-system messages, plus new subtask messages:
+        expect(context.request.messages.length).toBeLessThan(initialMessages.length + 3);
+    });
 });
+

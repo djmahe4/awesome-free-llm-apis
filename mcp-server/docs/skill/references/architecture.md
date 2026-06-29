@@ -24,11 +24,12 @@ The server features a **Context-Aware Steering Engine** (v1.0.6 Hardened) that m
 
 ```mermaid
 graph TD
-    Input[User Input] --> Context[WorkspaceContextMiddleware]
-    Context --> Struct[StructuralMiddleware]
-    Struct --> ImageRouter[ImageRouterMiddleware]
+    Input[User Input] --> Struct[StructuralMarkdownMiddleware]
+    Struct --> Cache[ResponseCacheMiddleware]
+    Cache --> Workspace[WorkspaceContextMiddleware]
+    Workspace --> Agentic[AgenticMiddleware]
+    Agentic --> ImageRouter[ImageRouterMiddleware]
     ImageRouter --> TextRouter[TextRouterMiddleware]
-    TextRouter --> Agentic[AgenticMiddleware]
     
     subgraph Classification
         TextRouter --> Classifier[TaskClassifier]

@@ -60,7 +60,7 @@ graph TD
 | `get_token_stats` | Real-time per-provider usage and quota stats | *(none)* | — |
 | `validate_provider` | Health-check and credential validation | `providerId` | — |
 | `manage_memory` | Workspace-scoped memory: search/list/stats/clear | `action` | `workspace_root`, `query`, `limit` |
-| `store_workspace_skill` | Explicitly capture structured findings and decisions | `name`, `what` | `workspace_root` |
+| `store_workspace_skill` | Explicitly save structured knowledge and generated scripts | `name`, `what` | `workspace_root` |
 | `index_workspace` | Proactively index workspace files for semantic search | `workspace_root` | `force` |
 
 ---

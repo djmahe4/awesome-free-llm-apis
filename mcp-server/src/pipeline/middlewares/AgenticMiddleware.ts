@@ -11,6 +11,7 @@ import { withFileLock } from '../../utils/file-lock.js';
 import { WorkspaceIndexer } from '../../memory/indexer.js';
 import { writeFileAtomic } from '../../utils/FileUtils.js';
 // Removed top-level import of instances.js to break circular dependency
+import { LLMExecutor } from '../../utils/LLMExecutor.js';
 
 import {
     PROJECTS_DIR,
@@ -39,6 +40,7 @@ interface QueueState {
     paused?: boolean;
     promptId?: string;
     pausedSubtaskIndex?: number;
+    retrospectionInjections?: number;
 }
 
 /**
@@ -357,11 +359,10 @@ export function detectHallucination(content: string, lastResponse?: string): Hal
 
     // Extended pattern library
     const phantomCitations = [
-        /\baccording to the (documentation|docs|readme|spec|file)\b/i,
-        /\bas (shown|seen|mentioned|stated|described) in the (code|file|docs|source)\b/i
+        /\baccording to the (documentation|docs|readme|spec)\b/i
     ];
     const inventedState = [
-        /\bthe (file|function|class|method|module) (is|are|was|were) (defined|located|found|placed) (in|at|under)\b/i
+        /\bthe (?:file|function|class|method|module) (?:is|are|was|were) (?:defined|located|found|placed) (?:in|at|under) (?:[a-zA-Z0-9_\-\/\\.]+\.[a-zA-Z0-9]+)\b/i
     ];
 
     if (phantomCitations.some(p => p.test(content))) {
@@ -659,12 +660,8 @@ export function compareTaskScope(originalTask: string, newResponse: string): boo
     const originalFiles = new Set(originalTask.match(filePattern) || []);
     const newFiles = new Set(newResponse.match(filePattern) || []);
 
-    for (const f of newFiles) {
-        if (!originalFiles.has(f)) return true;
-    }
-
-    const actionVerbs = /\b(also|additionally|furthermore|moreover|we should also|this requires)\b/i;
-    return actionVerbs.test(newResponse);
+    const newUnseenFiles = [...newFiles].filter(f => !originalFiles.has(f));
+    return newUnseenFiles.length >= 2;
 }
 
 function cleanSubtaskContent(content: string): string {
@@ -733,7 +730,8 @@ async function executeSingleSubtask(
     projectDir: string,
     workspaceRoot: string | undefined,
     subtaskIteration: number,
-    history: SubtaskHistoryEntry[]
+    history: SubtaskHistoryEntry[],
+    executor: LLMExecutor
 ): Promise<boolean> {
     let enrichmentCycleCount = 0;
     const MAX_ENRICHMENT_CYCLES = 2;
@@ -829,8 +827,12 @@ async function executeSingleSubtask(
 
                     if (exists) {
                         const content = await fs.readFile(fullPath, 'utf8');
+                        const MAX_FILE_INJECT_BYTES = 50_000;
+                        const truncated = content.length > MAX_FILE_INJECT_BYTES
+                            ? content.slice(0, MAX_FILE_INJECT_BYTES) + '\n... [truncated]'
+                            : content;
                         const extension = path.extname(filename).slice(1) || 'text';
-                        const proactiveMsg = `[PROACTIVE-CONTEXT] Content of \`${filename}\`:\n\n\`\`\`${extension}\n${content}\n\`\`\``;
+                        const proactiveMsg = `[PROACTIVE-CONTEXT] Content of \`${filename}\`:\n\n\`\`\`${extension}\n${truncated}\n\`\`\``;
                         context.request.messages.push({ role: 'user', content: proactiveMsg });
                         await logAgenticDebug(sessionId, {
                             type: 'proactive_context_injected',
@@ -841,7 +843,7 @@ async function executeSingleSubtask(
                             choices: [{
                                 message: {
                                     role: 'assistant',
-                                    content: `Successfully read and inspected the file contents:\n\n\`\`\`${extension}\n${content}\n\`\`\``
+                                    content: `Successfully read and inspected the file contents:\n\n\`\`\`${extension}\n${truncated}\n\`\`\``
                                 }
                             }]
                         } as any;
@@ -854,8 +856,13 @@ async function executeSingleSubtask(
         }
 
         if (!handledProactively) {
-            const instances = await import('../../pipeline/instances.js');
-            await instances.sharedRouter.execute(context, async () => { });
+            const response = await executor.prompt(context.request.messages, context.request.model, {
+                taskType: context.taskType || 'coding',
+                google_search: context.request.google_search,
+                sessionId,
+                agentic: false
+            });
+            context.response = response;
         }
 
         const responseContent = getResponseContent(context);
@@ -945,20 +952,27 @@ async function executeSingleSubtask(
                     const recoveryMsg = `[RECOVERY-CONTEXT] We noticed a potential hallucination or missing info. Here is the gathered recovery context:\n\n${recoveryAnswers.join('\n')}`;
                     context.request.messages.push({ role: 'user', content: recoveryMsg });
                     
-                    const instances = await import('../../pipeline/instances.js');
-                    await instances.sharedRouter.execute(context, async () => { });
+                    const recoveryResponse = await executor.prompt(context.request.messages, context.request.model, {
+                        taskType: context.taskType || 'coding',
+                        google_search: context.request.google_search,
+                        sessionId,
+                        agentic: false
+                    });
+                    context.response = recoveryResponse;
                     
-                    const recoveryResponse = getResponseContent(context);
                     if (recoveryResponse) {
-                        const secondVerify = detectHallucination(recoveryResponse);
-                        const isSecondFail = secondVerify.status === 'FAIL' || secondVerify.status === 'LOOP_DETECTED';
-                        if (isSecondFail) {
-                            context.request.messages.push({ role: 'assistant', content: recoveryResponse });
-                        } else {
-                            const summarized = summarizeResponse(recoveryResponse);
-                            context.request.messages.push({ role: 'assistant', content: summarized });
-                            if (context.wsHash) {
-                                await appendKnowledge(projectDir, sessionId, recoveryResponse);
+                        const recoveryResponseContent = getResponseContent(context);
+                        if (recoveryResponseContent) {
+                            const secondVerify = detectHallucination(recoveryResponseContent);
+                            const isSecondFail = secondVerify.status === 'FAIL' || secondVerify.status === 'LOOP_DETECTED';
+                            if (isSecondFail) {
+                                context.request.messages.push({ role: 'assistant', content: recoveryResponseContent });
+                            } else {
+                                const summarized = summarizeResponse(recoveryResponseContent);
+                                context.request.messages.push({ role: 'assistant', content: summarized });
+                                if (context.wsHash) {
+                                    await appendKnowledge(projectDir, sessionId, recoveryResponseContent);
+                                }
                             }
                         }
                     }
@@ -994,6 +1008,11 @@ function getOriginalUserContent(content: string): string {
 
 export class AgenticMiddleware implements Middleware {
     name = 'AgenticMiddleware';
+    private executor: LLMExecutor;
+
+    constructor(executor?: LLMExecutor) {
+        this.executor = executor || new LLMExecutor();
+    }
 
     private limitSubtasks(steps: string[]): string[] {
         if (steps.length > 3) {
@@ -1107,15 +1126,15 @@ export class AgenticMiddleware implements Middleware {
                     console.error(`[AgenticMiddleware] Failed to inject system prompt: ${err}`);
                 }
 
-                const instances = await import('../../pipeline/instances.js');
-                await instances.sharedRouter.execute(context, async () => { });
+                const { getSharedRouter } = await import('../../pipeline/instances.js');
+                await getSharedRouter().execute(context, async () => { });
                 return;
             }
         }
 
         if (userContent && detectResearchIntent(userContent)) {
             logResearchValidation(sessionId, userContent, 'pre-execution-research-detection');
-            if (!context.request.google_search) {
+            if (context.request.google_search === undefined) {
                 context.request.google_search = true;
                 console.error(`[AgenticMiddleware] Research intent detected, auto-enabling google_search for session=${sessionId}`);
             }
@@ -1144,6 +1163,17 @@ export class AgenticMiddleware implements Middleware {
 
         while (q.nowQueue.length > 0 && subtaskIteration < MAX_SUBTASKS) {
             subtaskIteration++;
+            
+            // Prune old messages in context.request.messages to avoid context bloat
+            const KEEP_LAST_N_MESSAGES = 6;
+            const systemMsgs = context.request.messages.filter(m => m.role === 'system');
+            const nonSystemMsgs = context.request.messages.filter(m => m.role !== 'system');
+            if (nonSystemMsgs.length > KEEP_LAST_N_MESSAGES) {
+                context.request.messages = [
+                    ...systemMsgs,
+                    ...nonSystemMsgs.slice(-KEEP_LAST_N_MESSAGES)
+                ];
+            }
             
             const plan = await buildExecutionPlan(q.nowQueue, workspaceRoot || process.cwd());
             const phase1Tasks = plan.phase1;
@@ -1179,7 +1209,7 @@ export class AgenticMiddleware implements Middleware {
                         }
                     } as any;
                     
-                    await executeSingleSubtask(t.task, clonedCtx, sessionId, projectDir, workspaceRoot, subtaskIteration, q.history || []);
+                    await executeSingleSubtask(t.task, clonedCtx, sessionId, projectDir, workspaceRoot, subtaskIteration, q.history || [], this.executor);
                     return clonedCtx;
                 });
 
@@ -1298,7 +1328,7 @@ export class AgenticMiddleware implements Middleware {
                     await new Promise(r => setTimeout(r, 500));
                 }
 
-                const success = await executeSingleSubtask(currentTask, context, sessionId, projectDir, workspaceRoot, subtaskIteration, q.history || []);
+                const success = await executeSingleSubtask(currentTask, context, sessionId, projectDir, workspaceRoot, subtaskIteration, q.history || [], this.executor);
                 
                 const responseContent = getResponseContent(context);
 
@@ -1348,22 +1378,31 @@ export class AgenticMiddleware implements Middleware {
                         });
 
                         if (gathered && gathered.length > 0) {
-                            const limited = gathered.slice(0, 10);
+                            const limited = gathered.slice(0, 5);
                             const enrichmentMsg = `[CONTEXT-ENRICHMENT] Here is the gathered context from the workspace:\n\n${limited.join('\n')}`;
                             context.request.messages.push({ role: 'user', content: enrichmentMsg });
 
-                            const instances = await import('../../pipeline/instances.js');
-                            await instances.sharedRouter.execute(context, async () => { });
+                            const newResponse = await this.executor.prompt(context.request.messages, context.request.model, {
+                                taskType: context.taskType || 'coding',
+                                google_search: context.request.google_search,
+                                sessionId,
+                                agentic: false
+                            });
+                            context.response = newResponse;
 
-                            const newResponse = getResponseContent(context);
                             if (newResponse) {
-                                const scopeChanged = compareTaskScope(currentTask, newResponse);
-                                if (scopeChanged) {
-                                    console.error(`[AgenticMiddleware] Subtask scope expansion detected. Mutating queue.`);
-                                    const newSubtask = `Address expanded scope from retrospection: ${newResponse.slice(0, 80)}...`;
-                                    q.nowQueue.splice(1, 0, newSubtask);
-                                }
-                            }
+                                 const newResponseContent = getResponseContent({ response: newResponse } as any);
+                                 if (newResponseContent) {
+                                     const scopeChanged = compareTaskScope(currentTask, newResponseContent);
+                                     if (!q.retrospectionInjections) q.retrospectionInjections = 0;
+                                     if (scopeChanged && q.retrospectionInjections < 1) {
+                                         q.retrospectionInjections++;
+                                         console.error(`[AgenticMiddleware] Subtask scope expansion detected. Mutating queue.`);
+                                         const newSubtask = `Address expanded scope from retrospection: ${newResponseContent.slice(0, 80)}...`;
+                                         q.nowQueue.splice(1, 0, newSubtask);
+                                     }
+                                 }
+                             }
                         }
                     }
                 }

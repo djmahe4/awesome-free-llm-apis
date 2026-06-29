@@ -83,8 +83,8 @@ Line two description
             wsHash: 'dummy-hash'
         } as any;
 
-        const instances = await import('../src/pipeline/instances.js');
-        const routerSpy = vi.spyOn(instances.sharedRouter, 'execute');
+        const { getSharedRouter } = await import('../src/pipeline/instances.js');
+        const routerSpy = vi.spyOn(getSharedRouter(), 'execute');
 
         try {
             await middleware.execute(context, async () => {});

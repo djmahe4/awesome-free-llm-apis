@@ -3,7 +3,7 @@ import { listAvailableFreeModels } from '../src/tools/list-models.js';
 import { runCodeMode } from '../src/tools/code-mode.js';
 import { useFreeLLM } from '../src/tools/use-free-llm.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
-import { sharedResponseCache } from '../src/pipeline/instances.js';
+import { getSharedResponseCache } from '../src/pipeline/instances.js';
 
 // Mock debounce to be immediate
 vi.mock('../src/utils/debounce.js', () => ({
@@ -18,7 +18,7 @@ describe('list_available_free_models', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
     (ProviderRegistry as unknown as { instance: undefined }).instance = undefined;
-    sharedResponseCache.clear();
+    getSharedResponseCache().clear();
   });
 
   it('returns correct structure', async () => {

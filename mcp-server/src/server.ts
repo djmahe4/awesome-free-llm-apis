@@ -40,7 +40,7 @@ import { getTokenStats } from './tools/get-token-stats.js';
 import { listAvailableFreeModels } from './tools/list-models.js';
 import { validateProvider } from './tools/validate-provider.js';
 import { flushSystem } from './tools/use-free-llm.js';
-import { sharedRouter } from './pipeline/instances.js';
+import { getSharedRouter } from './pipeline/instances.js';
 import { execSync } from 'child_process';
 import fs, { promises as fsp } from 'fs';
 import { persistence } from './utils/PersistenceManager.js';
@@ -131,12 +131,14 @@ async function initTelemetry() {
   }
 }
 
+
+
 async function main() {
   try {
     await validateSandboxDependencies();
     
     // Initialize persistent tracking
-    await sharedRouter.init();
+    await getSharedRouter().init();
     
     // Initialize telemetry / session manager
     await initTelemetry();
@@ -259,7 +261,7 @@ async function main() {
 
       app.get('/api/provider-stats', async (req, res) => {
         try {
-          const stats = sharedRouter.getExecutor().getProviderStats();
+          const stats = getSharedRouter().getExecutor().getProviderStats();
           res.json(stats);
         } catch (err) {
           res.status(500).json({ error: String(err) });

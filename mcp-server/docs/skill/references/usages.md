@@ -135,17 +135,20 @@
 ---
 
 ## TC-07 — `store_workspace_skill`
-
-**Purpose:** Harvest structured knowledge and generated scripts into the workspace memory.
-
+ 
+**Purpose:** Create or register a custom helper skill, debugging utility, or reference script under the workspace customizations root.
+ 
 ### Invocation
 ```json
 {
-  "name": "redis-queue-setup",
-  "description": "Architectural decision and script for Redis-based queue management.",
-  "what": ["Decision: Use Redis for in-memory queues due to required low latency."],
-  "why": "Redis provides sub-millisecond latency compared to database polling.",
-  "files": ["src/queue.ts"],
+  "name": "db-migration-helper",
+  "description": "Database migration verification utility and rollback script wrapper.",
+  "what": [
+    "Added verify-migrations.sh script to validate DB schemas post-migration.",
+    "Integrated schema diff checks before executing prisma migrate deploy."
+  ],
+  "why": "Prevent schema drift during rapid deployment cycles.",
+  "files": ["scripts/verify-migrations.sh"],
   "workspace_root": "/abs/path/to/project"
 }
 ```
