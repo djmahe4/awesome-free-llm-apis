@@ -16,6 +16,8 @@
 - Updated Hugging Face routing behavior to treat it as credit-based and deprioritize it versus fully-free alternatives.
 - Added `execute_skill` tool for executing prompts grounded in local skill instructions and reference files.
 - Added `vision_tool` for analyzing local images or remote image URLs and pdf files with optional text prompts.
+- Refactored providers and added 'modelscope' provider for free LLM access with dynamic model selection.
+- Firebase telemetry integration for error monitoring, usage tracking, and alerting on anomalous patterns and dashboard setup to run all the tools as a chat interface. (Chat interface and conversation history is ther but tool call history is lacking and needs to be implemented in the next update.)
 
 ### 🔄 Refactoring & Robustness (Phases 1–5)
 
@@ -27,8 +29,9 @@
 
 ### Next updates
 - **URL Context**: Planned support for direct URL consumption in the LLM pipeline by google or other llms if supported.
-- **Firebase Stats**: Implement a session-based Firebase stats logging mechanism for error monitoring and usage tracking in the middleware with leaderboards(needs the usage stats to be encrypted and updated) , with alerting for critical failures or anomalous patterns. (For usage tracking we need the user to add a username in the dashboard and not manually update the usage-stats.json as it is encrypted)
+- Dashboard refactors to include tool call history and conversation history in a single view with filtering and search capabilities.
 - Assess migration to stream mode for supported providers to reduce latency and token wastage on long responses.
+- Reassess our architecture and apply fixes if required to make the system more robust and resilient to failures and also to make it more scalable and maintainable.
 
 ---
 
