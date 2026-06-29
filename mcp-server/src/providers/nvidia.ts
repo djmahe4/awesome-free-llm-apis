@@ -12,6 +12,8 @@ export class NvidiaProvider extends BaseProvider {
     { id: 'meta/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick 17B' },
     { id: 'minimaxai/minimax-m2.7', name: 'MiniMax M2.7' },
     { id: 'stepfun-ai/step-3.5-flash', name: 'Step 3.5 Flash' },
+    { id: 'stepfun-ai/step-3.7-flash', name: 'Step 3.7 Flash' },
+    { id: 'nvidia/nemotron-3-ultra-550b-a55b', name: 'Nemotron 3 Ultra 550B' },
     { id: 'mistralai/mistral-nemotron', name: 'Mistral Nemotron' },
     { id: 'qwen/qwen3-coder-480b-a35b-instruct', name: 'Qwen3 Coder 480B' },
     { id: 'mistralai/mistral-large-3-675b-instruct-2512', name: 'Mistral Large 3' },

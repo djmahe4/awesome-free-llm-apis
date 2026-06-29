@@ -13,7 +13,7 @@ export class GeminiProvider extends BaseProvider {
   id = 'gemini';
   baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
   envVar = 'GEMINI_API_KEY';
-  rateLimits: RateLimits = { rpm: 15, rpd: 1000 };
+  rateLimits: RateLimits = { rpm: 15, rpd: 1500 };
   models: ProviderModel[] = [
     { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite Preview' },
     { id: 'gemma-4-31b-it', name: 'Gemma 4 31B' },

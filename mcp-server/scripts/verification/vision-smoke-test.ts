@@ -2,7 +2,6 @@ import 'dotenv/config';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { ProviderRegistry } from '../../src/providers/registry.js';
-import { ImageRouterMiddleware } from '../../src/pipeline/middlewares/IntelligentRouterMiddleware.js';
 import { getModelCapability } from '../../src/config/models.js';
 
 async function runVisionSmokeTest() {

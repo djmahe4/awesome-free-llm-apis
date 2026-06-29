@@ -9,7 +9,9 @@ export class MistralProvider extends BaseProvider {
   rateLimits: RateLimits = { rps: 1, tokensPerMonth: 1_000_000_000 };
   models: ProviderModel[] = [
     { id: 'mistral-large-latest', name: 'Mistral Large' },
+    {id: 'mistral-medium-latest', name: 'Mistral Medium' },
     { id: 'mistral-small-latest', name: 'Mistral Small' },
+    {id: 'open-mistral-nemo', name: 'Mistral Nemotron' },
     { id: 'ministral-8b-latest', name: 'Ministral 8B' },
   ];
 }

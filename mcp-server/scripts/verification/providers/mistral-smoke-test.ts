@@ -1,38 +1,38 @@
 /**
- * @file ollama-smoke-test.ts
- * @description Verifies all models defined in the Ollama Cloud provider and identifies which are free.
- * Usage: tsx scripts/verification/ollama-smoke-test.ts
+ * @file mistral-smoke-test.ts
+ * @description Verifies all models defined in the Mistral provider and identifies which are free.
+ * Usage: tsx scripts/verification/mistral-smoke-test.ts
  */
 import 'dotenv/config';
-import { ProviderRegistry } from '../../src/providers/registry.js';
-import { OllamaCloudProvider } from '../../src/providers/ollama-cloud.js';
+import { ProviderRegistry } from '../../../src/providers/registry.js';
+import { MistralProvider } from '../../../src/providers/mistral.js';
 
-async function runOllamaSmokeTest() {
+async function runMistralSmokeTest() {
     const registry = ProviderRegistry.getInstance();
-    const ollama = registry.getProvider('ollama-cloud') as OllamaCloudProvider;
+    const mistral = registry.getProvider('mistral') as MistralProvider;
 
-    if (!ollama) {
-        console.error('Ollama Cloud provider not found in registry.');
+    if (!mistral) {
+        console.error('Mistral provider not found in registry.');
         process.exit(1);
     }
 
-    if (!ollama.isAvailable()) {
-        console.error('Ollama Cloud provider is not available (check OLLAMA_API_KEY in your env).');
+    if (!mistral.isAvailable()) {
+        console.error('Mistral provider is not available (check MISTRAL_API_KEY in your env).');
         process.exit(1);
     }
 
-    console.error(`\n=== Ollama Cloud Model Smoke Test ===`);
-    console.error(`Testing ${ollama.models.length} models...\n`);
+    console.error(`\n=== Mistral     Model Smoke Test ===`);
+    console.error(`Testing ${mistral.models.length} models...\n`);
 
     const freeModels: { id: string; name: string }[] = [];
     const paidModels: { id: string; name: string }[] = [];
     const failedModels: { id: string; name: string; error: string }[] = [];
 
-    for (const model of ollama.models) {
+    for (const model of mistral.models) {
         console.error(`[>] Testing Model: ${model.id} (${model.name})`);
         try {
             const start = Date.now();
-            const res = await ollama.chat({
+            const res = await mistral.chat({
                 model: model.id,
                 messages: [{ role: 'user', content: 'Say "OK"' }],
                 max_tokens: 5
@@ -77,7 +77,7 @@ async function runOllamaSmokeTest() {
     console.log(`\n=== Test Completed ===\n`);
 }
 
-runOllamaSmokeTest().catch(error => {
-    console.error('Fatal error during Ollama Cloud smoke test:', error);
+runMistralSmokeTest().catch(error => {
+    console.error('Fatal error during Mistral smoke test:', error);
     process.exit(1);
 });

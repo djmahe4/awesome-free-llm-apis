@@ -4,8 +4,8 @@
  * Usage: tsx scripts/verification/gemini-smoke-test.ts
  */
 import 'dotenv/config';
-import { ProviderRegistry } from '../../src/providers/registry.js';
-import { GeminiProvider } from '../../src/providers/gemini.js';
+import { ProviderRegistry } from '../../../src/providers/registry.js';
+import { GeminiProvider } from '../../../src/providers/gemini.js';
 
 async function runGeminiSmokeTest() {
     const registry = ProviderRegistry.getInstance();

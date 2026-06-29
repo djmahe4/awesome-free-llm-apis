@@ -4,8 +4,8 @@
  * Usage: tsx scripts/verification/github-models-smoke-test.ts [model-id]
  */
 import 'dotenv/config';
-import { ProviderRegistry } from '../../src/providers/registry.js';
-import { GitHubModelsProvider } from '../../src/providers/github-models.js';
+import { ProviderRegistry } from '../../../src/providers/registry.js';
+import { GitHubModelsProvider } from '../../../src/providers/github-models.js';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 

@@ -88,6 +88,37 @@ async function run() {
         console.error(row);
     });
 
+    console.error('\n--- 4. MODEL TASK ASSIGNMENTS ---');
+    console.error('(List of all registered models and the tasks they are assigned to)\n');
+    
+    [...registeredModels].sort().forEach(m => {
+        const tasks: string[] = [];
+        for (const [task, models] of Object.entries(routerMap)) {
+            if (models.includes(m)) {
+                tasks.push(task);
+            }
+        }
+        if (isVisionSupported(m)) {
+            tasks.push('IMAGE_ROUTING');
+        }
+        const taskStr = tasks.length > 0 ? tasks.join(', ') : '[UNASSIGNED]';
+        console.error(`  - ${m.padEnd(50)} : ${taskStr}`);
+    });
+
+    console.error('\n--- 5. REASONING / PLANNING MODELS ---');
+    console.error('(Models specialized for reasoning/thinking and their providers)\n');
+    
+    Object.keys(MODEL_METADATA)
+        .filter(mId => (MODEL_METADATA as any)[mId]?.isReasoning)
+        .sort()
+        .forEach(m => {
+            const providers = allProviders
+                .filter(p => p.models.some(pm => pm.id === m) || p.visionModels.some(vm => vm.id === m))
+                .map(p => p.id);
+            const providerStr = providers.length > 0 ? providers.join(', ') : 'None (Orphaned)';
+            console.error(`  - ${m.padEnd(50)} : Provider(s): ${providerStr}`);
+        });
+
     console.error('\nLegend:');
     taskTypes.forEach(t => {
         console.error(`  ${t.substring(0, 4).toUpperCase()}: ${t}`);
