@@ -34,9 +34,13 @@ function alignTable(header, rows) {
 	return [formatRow(header), separator, ...rows.map(formatRow)].join('\n');
 }
 
+function formatModelName(name) {
+	return /[/:]/.test(name) ? `\`${name}\`` : name;
+}
+
 function buildTable(models) {
 	const header = ['Model Name', 'Context', 'Max Output', 'Modality', 'Rate Limit'];
-	const rows = models.map(m => [m.name, m.context, m.maxOutput, m.modality, m.rateLimit]);
+	const rows = models.map(m => [formatModelName(m.name), m.context, m.maxOutput, m.modality, m.rateLimit]);
 	return alignTable(header, rows);
 }
 
