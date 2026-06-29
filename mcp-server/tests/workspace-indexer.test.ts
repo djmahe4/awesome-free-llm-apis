@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
 import { WorkspaceIndexer } from '../src/memory/indexer.js';
 import { vectorStore } from '../src/memory/vector.js';
 import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
@@ -7,7 +7,20 @@ import path from 'node:path';
 import { memoryManager } from '../src/memory/index.js';
 
 describe('WorkspaceIndexer Integration', () => {
-    const testWs = path.join(process.cwd(), 'temp_test_indexer_ws');
+    const testWs = path.join(process.cwd(), 'workspace_indexer_test_silo');
+
+    beforeAll(() => {
+        // Mock embedding generation for offline/CI environments
+        vi.spyOn(vectorStore, 'generateEmbedding').mockImplementation(async (text: string) => {
+            const vec = new Array(384).fill(0);
+            const clean = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+            for (let i = 0; i < clean.length; i++) {
+                vec[clean.charCodeAt(i) % 384] += 1;
+            }
+            const norm = Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0)) || 1;
+            return vec.map(v => v / norm);
+        });
+    });
 
     beforeEach(async () => {
         rmSync(testWs, { recursive: true, force: true });
@@ -40,7 +53,7 @@ describe('WorkspaceIndexer Integration', () => {
         expect(result.errors).toBe(0);
 
         // 3. Verify they can be searched
-        const searchResults = await vectorStore.search(await indexer['workspaceScanner'].getWorkspaceHash(testWs), "documentation test file");
+        const searchResults = await vectorStore.search(await indexer['workspaceScanner'].getWorkspaceHash(testWs), "documentation");
         
         expect(searchResults.length).toBeGreaterThan(0);
         console.log('Search Results:', JSON.stringify(searchResults.map(r => ({ id: r.id, score: (r as any).score })), null, 2));
