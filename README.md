@@ -18,31 +18,7 @@
 
 - [Provider APIs](#provider-apis)
 - [Inference providers](#inference-providers)
-- [Agentic Infrastructure](#agentic-infrastructure)
 - [Glossary](#glossary)
-
-## Agentic Infrastructure
-
-This repository is powered by an integrated **MCP (Model Context Protocol)** server and a dual-agentic skill set designed for autonomous, cost-efficient research and development.
-
-### 🤖 Agentic Skills
-
-| Skill | Focus | Trigger |
-|-------|-------|---------|
-| [**`free-llm-apis`**](free-llm-apis/SKILL.md) | **Provider Discovery & Onboarding** | Use for finding the best free provider, obtaining API keys, and initial configuration. |
-| [**`free-llms`**](mcp-server/docs/skill/SKILL.md) | **Advanced Orchestration & Memory** | Use for complex project-scoped tasks, persistent workspace memory, and grounded research. |
-
-### 🚀 Integrated MCP Server
-
-The [`mcp-server`](mcp-server/) directory contains a production-grade MCP server (`@mcp:free-llm-apis`) that provides:
-- **Universal Chat Pipeline**: Deterministic routing across 60+ providers with automatic failover.
-- **Persistent Workspace Memory**: Long-term memory and skill harvesting rooted to your project workspace.
-- **Structural Grounding**: Automatic injection of directory trees and source code snippets via keyword-steered `grep`.
-- **Vision module**: Integrated image understanding tool call.
-
-> [!TIP]
-> To enable full agentic capabilities in your IDE (Claude Desktop, Cursor, Windsurf), follow the [MCP Setup Guide](mcp-server/README.md#client-configurations).
-
 
 ## Provider APIs
 
