@@ -569,10 +569,11 @@ export class TextRouterMiddleware implements Middleware {
             }
         }
 
+        const effectiveTokens = context.estimatedTokens || estimatedTokens;
         const quantumProbabilities = this.calculateQuantumModelProbabilities(
             finalTierModels,
             taskType,
-            estimatedTokens,
+            effectiveTokens,
             availableProviders
         );
 
@@ -828,6 +829,11 @@ export class TextRouterMiddleware implements Middleware {
                 capacityFactor = 0.1;
             } else if (estimatedTokens > maxContextWindow * 0.7) {
                 capacityFactor = 0.5;
+            }
+
+            // Penalize small/weak models (< 8B or cap < 0.6) for heavy prompts (> 8000 tokens)
+            if (estimatedTokens > 8000 && cap < 0.7) {
+                capacityFactor *= 0.3;
             }
 
             return {

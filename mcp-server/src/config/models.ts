@@ -35,6 +35,7 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'gemma4:31b': { capability: 0.90, contextWindow: 300000 },
 
     // Coder Models
+    'qwen/qwen3-coder-480b-a35b-instruct': { capability: 0.96, contextWindow: 128000, isCoder: true },
     'qwen/qwen3-coder-480b-a35b:free': { capability: 0.96, contextWindow: 128000, isCoder: true },
     'Qwen/Qwen2.5-Coder-7B-Instruct': { capability: 0.78, contextWindow: 32000, isCoder: true },
     'Qwen/Qwen3-Coder-30B-A3B-Instruct': { capability: 0.88, contextWindow: 128000, isCoder: true },
