@@ -579,7 +579,19 @@ async function ensureModels() {
 }
 
 function renderToolForm(tool) {
-  pgToolTitle.textContent = tool.label;
+  pgToolTitle.innerHTML = `${tool.label} <button id="tool-info-btn" title="View tool docs" style="background:none;border:none;cursor:pointer;font-size:0.9rem;color:var(--text-muted);margin-left:8px;">ⓘ</button>`;
+  const infoBtn = document.getElementById('tool-info-btn');
+  if (infoBtn) {
+    infoBtn.onclick = async () => {
+      try {
+        const r = await fetch(`/api/tool-docs/${tool.id}`);
+        const d = await r.json();
+        alert(d.markdown || 'No documentation found');
+      } catch (err) {
+        alert('Failed to load documentation');
+      }
+    };
+  }
   pgForm.innerHTML = '';
 
   if (!tool.fields.length) {

@@ -634,6 +634,37 @@ export function createExpressApp(): express.Express {
         }
       });
 
+      // Expose per-tool reference docs for Dashboard info button
+      app.get('/api/tool-docs/:name', async (req, res) => {
+        try {
+          const toolName = req.params.name?.replace(/[^a-zA-Z0-9_-]/g, '');
+          if (!toolName) {
+            res.status(400).json({ error: 'Tool name required' });
+            return;
+          }
+          const candidatePaths = [
+            path.resolve(process.cwd(), 'docs', 'skill', 'references', `${toolName}.md`),
+            path.resolve(process.cwd(), '..', 'docs', 'skill', 'references', `${toolName}.md`),
+            path.resolve(process.cwd(), 'docs', `${toolName}.md`)
+          ];
+          let docContent = '';
+          for (const p of candidatePaths) {
+            try {
+              if (await fs.pathExists(p)) {
+                docContent = await fs.readFile(p, 'utf-8');
+                break;
+              }
+            } catch {}
+          }
+          if (!docContent) {
+            docContent = `# ${toolName}\n\nDocumentation reference for \`${toolName}\`.\n\n*Execute tool via standard MCP JSON-RPC protocol.*`;
+          }
+          res.json({ tool: toolName, markdown: docContent });
+        } catch (err: any) {
+          res.status(500).json({ error: String(err?.message || err) });
+        }
+      });
+
       // Expose available model IDs for the playground model picker
       app.get('/api/models', async (_req, res) => {
         try {
