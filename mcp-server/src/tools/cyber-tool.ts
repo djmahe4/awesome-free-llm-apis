@@ -9,10 +9,13 @@ import { promises as fs, existsSync } from 'node:fs';
 
 export interface CyberToolInput {
     action: 'list_tools' | 'get_tool' | 'register_tool' | 'wiki_lookup'
-        | 'learn' | 'coach' | 'save_graph' | 'load_graph' | 'tool_memory';
+        | 'learn' | 'coach' | 'save_graph' | 'load_graph' | 'tool_memory' | 'osint';
     toolName?: string;
     githubUrl?: string;
     sessionId?: string;
+    // osint
+    target?: string;
+    osintType?: 'domain' | 'ip' | 'username' | 'all';
     // learn / coach
     goal?: string;
     level?: 'beginner' | 'intermediate' | 'advanced';
@@ -610,6 +613,64 @@ export async function cyberTool(input: CyberToolInput) {
                     reliability: stats || null
                 };
             }
+        } else if (action === 'osint') {
+            if (!input.target) throw new Error('target is required for osint action');
+            const target = input.target.trim();
+            const dns = await import('node:dns/promises');
+
+            const dnsReport: Record<string, any> = {};
+            const resolvedIps: string[] = [];
+
+            try {
+                const a = await dns.resolve4(target).catch(() => []);
+                if (a.length) { dnsReport.A = a; resolvedIps.push(...a); }
+            } catch {}
+
+            try {
+                const aaaa = await dns.resolve6(target).catch(() => []);
+                if (aaaa.length) { dnsReport.AAAA = aaaa; resolvedIps.push(...aaaa); }
+            } catch {}
+
+            try {
+                const mx = await dns.resolveMx(target).catch(() => []);
+                if (mx.length) dnsReport.MX = mx;
+            } catch {}
+
+            try {
+                const txt = await dns.resolveTxt(target).catch(() => []);
+                if (txt.length) dnsReport.TXT = txt;
+            } catch {}
+
+            try {
+                const ns = await dns.resolveNs(target).catch(() => []);
+                if (ns.length) dnsReport.NS = ns;
+            } catch {}
+
+            const recommendedDorks = [
+                `site:${target} filetype:pdf`,
+                `site:${target} inurl:admin | inurl:login`,
+                `site:github.com "${target}"`,
+                `site:linkedin.com/in/ "${target}"`,
+                `site:crt.sh/?q=${target}`
+            ];
+
+            const wiki = new WikiMemory(CYBER_WIKI_NAMESPACE);
+            const wikiContent = `# OSINT Report for ${target}\n\n`
+                + `**Timestamp**: ${new Date().toISOString()}\n\n`
+                + `## Resolved IPs\n${resolvedIps.map(ip => `- ${ip}`).join('\n') || '- None'}\n\n`
+                + `## DNS Records\n\`\`\`json\n${JSON.stringify(dnsReport, null, 2)}\n\`\`\`\n\n`
+                + `## Recommended Google / Recon Dorks\n${recommendedDorks.map(d => `- \`${d}\``).join('\n')}\n`;
+
+            await safeWikiWrite(wiki, `osint/${target.replace(/[^\w.-]/g, '_')}`, wikiContent, ['cyber', 'osint']);
+
+            result = {
+                success: true,
+                target,
+                resolvedIps,
+                dns: dnsReport,
+                recommendedDorks,
+                timestamp: new Date().toISOString()
+            };
         } else {
             throw new Error(`Unsupported cyber_tool action: ${action}`);
         }

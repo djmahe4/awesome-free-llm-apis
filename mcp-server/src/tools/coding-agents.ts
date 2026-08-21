@@ -39,6 +39,16 @@ export interface LspActionRequest {
   query?: string;
 }
 
+export interface AstEditOp {
+  pat: string; // e.g. "console.log($$$)" or "legacyFn($$$ARGS)"
+  out: string; // e.g. "" or "newFn($$$ARGS)"
+}
+
+export interface ResolveAction {
+  action: 'apply' | 'discard';
+  reason?: string;
+}
+
 export interface CodingAgentsInput {
   goal: string;
   workspaceRoot?: string;
@@ -47,6 +57,8 @@ export interface CodingAgentsInput {
   sessionId?: string;
   verifyLspDiagnostics?: boolean;
   lspAction?: LspActionRequest;
+  astEditOps?: AstEditOp[];
+  resolve?: ResolveAction;
 }
 
 export interface CodingAgentsResult {
@@ -59,6 +71,7 @@ export interface CodingAgentsResult {
   patchSummary: string;
   diagnostics: DiagnosticResult[];
   applied: boolean;
+  astRewritesCount?: number;
   error?: string;
 }
 
@@ -136,7 +149,20 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       };
       anchors.push(anchor);
 
-      // Step 4: Construct Line-Anchored Diff Plan
+      // Step 4: Construct Line-Anchored Diff Plan or AST structural rewrite
+      let patchedSnippet = lines.slice(0, Math.min(lines.length, 10)).join('\n');
+      let rewrites = 0;
+
+      if (input.astEditOps && input.astEditOps.length > 0) {
+        for (const op of input.astEditOps) {
+          const patRegex = new RegExp(op.pat.replace(/\$\$\$[A-Z0-9_]*/g, '.*?').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+          if (patRegex.test(patchedSnippet)) {
+            patchedSnippet = patchedSnippet.replace(patRegex, op.out);
+            rewrites++;
+          }
+        }
+      }
+
       const previewLines = Math.min(lines.length, 5);
       const patch: LineAnchoredPatch = {
         filePath: relPath,
@@ -144,11 +170,12 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
         startLine: 1,
         endLine: Math.min(lines.length, 10),
         originalSnippet: lines.slice(0, Math.min(lines.length, 10)).join('\n'),
-        replacementSnippet: lines.slice(0, Math.min(lines.length, 10)).join('\n'),
-        unifiedDiff: `--- ${relPath} ${hashTag}\n+++ ${relPath} (proposed)\n@@ -1,${previewLines} +1,${previewLines} @@\n`
+        replacementSnippet: patchedSnippet,
+        unifiedDiff: `--- ${relPath} ${hashTag}\n+++ ${relPath} (proposed)\n@@ -1,${previewLines} +1,${previewLines} @@\n${patchedSnippet}\n`
       };
       patches.push(patch);
       summaryDiffs += `${patch.unifiedDiff}\n`;
+      result.astRewritesCount = (result.astRewritesCount || 0) + rewrites;
     }
 
     result.anchors = anchors;
