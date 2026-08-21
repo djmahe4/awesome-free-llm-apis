@@ -1,24 +1,29 @@
 # Changelog
 
-## v1.1.0 – Upstream Free Model Catalog Synchronization, Anti-Flagging Cyber Routing, Cerebras Deprecation & Planning Provider Hardening (August 2026)
+## v1.1.0 – Autonomous Coding Agents (OMP Pattern), Local LLM Patching, OSINT Cyber Recon, VectorStore TF-IDF RAG & Dashboard Tool Docs (August 2026)
 
 ### 🚀 Highlights
 
+- **`coding_agents` (OMP 5-Step Loop Architecture)** (`src/tools/coding-agents.ts`):
+  - Implemented the official OMP (`omp.sh`) 5-step file modification lifecycle: `Enumerate` ➔ `Locate (RAG)` ➔ `Anchor ([PATH#TAG])` ➔ `Edit / ast_edit` ➔ `LSP / AST Diagnostics Verification`.
+  - In-memory AST symbol extraction and TypeScript syntax diagnostic trapping (`parseDiagnostics`) to catch and reject syntax errors before disk mutations occur.
+  - Added OMP `ast_edit` structural rewrite pattern matching (`ops=[{ pat, out }]`) and `resolve` (`apply`/`discard`) preview mechanics.
+- **Pure Local TF-IDF `VectorStore` Semantic RAG** (`src/memory/VectorStore.ts`):
+  - Lightweight token-bag TF-IDF vectorizer and cosine similarity ranking over workspace source code files with zero external API calls or token costs.
+- **`local_llm_patch` MCP & Server Wiring** (`src/tools/local-llm-patch.ts`, `src/mcp/index.ts`, `src/server.ts`):
+  - Registered `local_llm_patch` across stdio MCP tool definitions and added `POST /api/local_llm_patch` and `POST /api/tool` proxy support.
+- **`cyber_tool` OSINT Reconnaissance Action** (`src/tools/cyber-tool.ts`):
+  - Multi-record DNS reconnaissance (`A`, `AAAA`, `MX`, `TXT`, `NS`) via `node:dns/promises` alongside automated Google / CTF OSINT dork generation and Wiki report persistence.
+- **Dashboard Per-Tool Info (`ⓘ`) Docs Viewer** (`src/server.ts`, `dashboard/app.js`):
+  - Added `GET /api/tool-docs/:name` endpoint reading `docs/skill/references/*.md` and wired an inline documentation viewer directly on the dashboard tool playground header.
 - **Upstream Catalog Sync & Deprecation Harmonization**:
-  - Merged upstream `data.json` updates and verified free tier availability across all supported providers.
-  - Fully deprecated **Cerebras** (mandatory credit card requirement) and cleaned out deprecated models across Groq, Mistral, LLM7, and OpenRouter.
-  - Added new live models for NVIDIA NIM (`nemotron-3.5-lightning-30b-a3b`, `muse-glimmer-30b`, `glm-5.2`, `minimax-m3`, `diffusiongemma-26b-a4b-it`, `nemotron-3-ultra-550b-a55b`, `nemotron-3-nano-omni-30b-a3b-reasoning`, `deepseek-v4-flash-0731`), Kilo Code (`tencent/hy3:free`, `liquid/lfm-2.5-2.6b:free`, `nvidia/nemotron-3.5-lightning:free`), and Groq (`groq/compound`, `groq/compound-mini`, `qwen/qwen3.6-27b`).
-- **Anti-Flagging & Low-Refusal Cybersecurity Routing**:
-  - Prioritized unaligned / low false-positive refusal models (`z-ai/glm-5.2`, `deepseek-ai/deepseek-v4-flash-0731`, `tencent/hy3:free`, `nvidia/nemotron-3.5-lightning-30b-a3b`) in `TaskType.Cyber` to prevent refusal hurdles during authorized defensive security research and telemetry analysis.
-- **Provider & Model Diagnostics Reconciliation**:
-  - Updated `MODEL_METADATA` and `TextRouterMiddleware` task maps, achieving 0 orphaned models and 0 underutilized provider entries across all 11 task categories.
-  - Proactively pruned upcoming August 24, 2026 expiring models from OpenRouter (`nvidia/nemotron-3-nano-30b-a3b:free`, `nvidia/nemotron-nano-12b-v2-vl:free`, `nvidia/nemotron-nano-9b-v2:free`).
-- **Documentation Hardening**:
-  - Updated `SKILL.md` reasoning/planning provider rankings based on verified live model counts (`nvidia` 7 models, `openrouter` 4 models, `kilocode` 3 models, `huggingface` 2 models, `cloudflare` 1 model, `cohere` 1 model, `gemini` 1 model, `modelscope` 1 model).
+  - Deprecated Cerebras and updated live model metadata across NVIDIA NIM, Groq, Kilo Code, and OpenRouter.
 
----
+### Next updates (→ v1.2.0)
 
-## v1.0.9 – SearchRouterMiddleware, Cyber/Quantum Tool Graphs, Hermes Skills, Local LLM Patch & Browser Snapshot Diffing (August 2026)
+- **Firebase Auth hardening** (TDD security audit gate to evaluate credential token security).
+- **Researcher Persona** (deep semantic exploration of academic papers and arXiv content with interactive site skip controls).
+- **Browser Snapshot Subtree Targeter** (`extract`/`deep_scrape` mapping diffed nodes back to CSS selectors).
 
 ### 🚀 Highlights
 
