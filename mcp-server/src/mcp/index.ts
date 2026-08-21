@@ -544,6 +544,20 @@ export async function createMCPServer(): Promise<Server> {
           },
           required: ['action', 'sessionId']
         }
+      },
+      {
+        name: 'local_llm_patch',
+        description: 'Single-file code patching tool using a locally running Ollama instance. Ranks installed local coding models, enriches the request with local workspace context, and returns a single-file replacement patch.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            filePath: { type: 'string', description: 'Relative or absolute path to the file to be patched' },
+            instruction: { type: 'string', description: 'Instruction explaining what edits or additions to make' },
+            workspace_root: { type: 'string', description: 'Optional root workspace directory for context enrichment' },
+            sessionId: { type: 'string', description: 'Optional session identifier for audit logging' }
+          },
+          required: ['filePath', 'instruction']
+        }
       }
     ],
   }));
@@ -638,6 +652,13 @@ export async function createMCPServer(): Promise<Server> {
       } else if (name === 'quantum_tool') {
         const { quantumTool } = await import('../tools/quantum-tool.js');
         const result = await quantumTool(args as any);
+        response = {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          isError: !result.success,
+        };
+      } else if (name === 'local_llm_patch') {
+        const { localLlmPatch } = await import('../tools/local-llm-patch.js');
+        const result = await localLlmPatch(args as any);
         response = {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
           isError: !result.success,
