@@ -506,6 +506,27 @@ const TOOLS = [
     ]
   },
   {
+    id: 'local_llm_patch', label: 'local_llm_patch', icon: '🩹',
+    tag: 'Local Code Patching',
+    fields: [
+      { id: 'filePath', label: 'File Path', type: 'text', placeholder: 'src/server.ts' },
+      { id: 'instruction', label: 'Patch Instruction', type: 'textarea', placeholder: 'Add a new request-id header middleware' },
+      { id: 'workspace_root', label: 'Workspace Root (optional)', type: 'text', placeholder: 'C:/path/to/project' },
+      { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'patch-session-1' },
+    ]
+  },
+  {
+    id: 'coding_agents', label: 'coding_agents', icon: '🤖',
+    tag: 'Autonomous Multi-File Coding',
+    fields: [
+      { id: 'goal', label: 'Refactoring / Coding Goal', type: 'textarea', placeholder: 'Add rate limiting to express endpoints' },
+      { id: 'workspaceRoot', label: 'Workspace Root (optional)', type: 'text', placeholder: 'C:/path/to/workspace' },
+      { id: 'dryRun', label: 'Dry Run Mode (simulate only)', type: 'toggle', default: true },
+      { id: 'topKFiles', label: 'Candidate Files Count (RAG)', type: 'number', placeholder: '5' },
+      { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'coding-session-1' },
+    ]
+  },
+  {
     id: 'get_token_stats', label: 'get_token_stats', icon: '📊',
     tag: 'Monitoring',
     fields: []

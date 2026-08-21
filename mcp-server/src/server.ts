@@ -160,54 +160,30 @@ async function initTelemetry(force = false) {
 
 
 
-async function main() {
-  try {
-    await validateSandboxDependencies();
-    
-    // Initialize persistent tracking
-    await getSharedRouter().init();
-    
-    // Initialize telemetry / session manager
-    await initTelemetry(true);
+export function createExpressApp(): express.Express {
+  const app = express();
 
-    // Periodically check/sync telemetry every hour (supports continuous server runs)
-    const telemetryInterval = setInterval(async () => {
-      try {
-        await initTelemetry();
-      } catch (err) {
-        // Silent warning
-      }
-    }, 60 * 60 * 1000);
-    if (typeof telemetryInterval.unref === 'function') {
-      telemetryInterval.unref();
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        "script-src": ["'self'", "https://cdn.jsdelivr.net", "'unsafe-inline'"],
+        "style-src": ["'self'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com", "'unsafe-inline'"],
+        "font-src": ["'self'", "https://fonts.gstatic.com"],
+        "img-src": ["'self'", "data:", "https:*"],
+        "connect-src": ["'self'", "https://cdn.jsdelivr.net"],
+      },
+    },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true
     }
-    
-    const isSse = process.argv.includes('--sse');
-    if (isSse) {
-      const app = express();
-      const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+  }));
+  app.use(cors());
+  app.use(express.json());
 
-      app.use(helmet({
-        contentSecurityPolicy: {
-          directives: {
-            ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-            "script-src": ["'self'", "https://cdn.jsdelivr.net", "'unsafe-inline'"],
-            "style-src": ["'self'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com", "'unsafe-inline'"],
-            "font-src": ["'self'", "https://fonts.gstatic.com"],
-            "img-src": ["'self'", "data:", "https:*"],
-            "connect-src": ["'self'", "https://cdn.jsdelivr.net"],
-          },
-        },
-        hsts: {
-          maxAge: 31536000,
-          includeSubDomains: true,
-          preload: true
-        }
-      }));
-      app.use(cors());
-      app.use(express.json());
-
-      // API endpoints for dashboard
+  // API endpoints for dashboard
 
       // Long-term session-less rate limiting using TTL cache to prevent memory leaks
       const rateLimitCache = new LRUCache<string, { count: number; resetAt: number }>({
@@ -524,6 +500,16 @@ async function main() {
               result = await quantumTool(params);
               break;
             }
+            case 'local_llm_patch': {
+              const { localLlmPatch } = await import('./tools/local-llm-patch.js');
+              result = await localLlmPatch(params);
+              break;
+            }
+            case 'coding_agents': {
+              const { CodingAgentsHandler } = await import('./tools/coding-agents.js');
+              result = await CodingAgentsHandler(params);
+              break;
+            }
             default:
               res.status(400).json({ error: `Unknown tool: ${tool}` });
               return;
@@ -531,6 +517,50 @@ async function main() {
           res.json({ ok: true, latencyMs: Date.now() - start, result });
         } catch (err: any) {
           res.status(500).json({ ok: false, latencyMs: Date.now() - start, error: String(err?.message || err) });
+        }
+      });
+
+      app.post('/api/coding_agents', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { goal, workspaceRoot, dryRun, topKFiles, sessionId, verifyLspDiagnostics } = req.body || {};
+          if (!goal) {
+            res.status(400).json({ error: 'goal is required' });
+            return;
+          }
+          const { CodingAgentsHandler } = await import('./tools/coding-agents.js');
+          const result = await CodingAgentsHandler({
+            goal,
+            workspaceRoot: workspaceRoot ?? process.cwd(),
+            dryRun: dryRun ?? true,
+            topKFiles: topKFiles ?? 5,
+            sessionId,
+            verifyLspDiagnostics: verifyLspDiagnostics ?? true
+          });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ error: err?.message || String(err) });
+        }
+      });
+
+      app.post('/api/local_llm_patch', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { filePath, instruction, workspace_root, sessionId } = req.body || {};
+          if (!filePath || !instruction) {
+            res.status(400).json({ error: 'filePath and instruction are required' });
+            return;
+          }
+          const { localLlmPatch } = await import('./tools/local-llm-patch.js');
+          const result = await localLlmPatch({
+            filePath,
+            instruction,
+            workspace_root,
+            sessionId
+          });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ error: err?.message || String(err) });
         }
       });
 
@@ -1106,6 +1136,34 @@ async function main() {
       // Serve dashboard static files
       const dashboardPath = path.join(__dirname, '../dashboard');
       app.use(express.static(dashboardPath));
+
+      return app;
+}
+
+async function main() {
+  try {
+    // Validate dependencies for code execution (Python sandbox)
+    await validateSandboxDependencies();
+
+    // Initialize telemetry / session manager
+    await initTelemetry(true);
+
+    // Periodically check/sync telemetry every hour (supports continuous server runs)
+    const telemetryInterval = setInterval(async () => {
+      try {
+        await initTelemetry();
+      } catch (err) {
+        // Silent warning
+      }
+    }, 60 * 60 * 1000);
+    if (typeof telemetryInterval.unref === 'function') {
+      telemetryInterval.unref();
+    }
+
+    const isSse = process.argv.includes('--sse');
+    if (isSse) {
+      const app = createExpressApp();
+      const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
       // Auto-deploy/check SearXNG Docker container if docker is available
       import('./search/searxng-deploy.js').then(({ ensureSearxngContainer }) => {

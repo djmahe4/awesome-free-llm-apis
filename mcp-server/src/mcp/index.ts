@@ -558,6 +558,22 @@ export async function createMCPServer(): Promise<Server> {
           },
           required: ['filePath', 'instruction']
         }
+      },
+      {
+        name: 'coding_agents',
+        description: 'OMP-pattern autonomous multi-file coding agent: performs workspace enumeration, VectorStore TF-IDF RAG file discovery, line-anchored [PATH#TAG] snapshot diff generation, AST symbol extraction, and TypeScript/LSP syntax diagnostics verification.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            goal: { type: 'string', description: 'The refactoring, feature addition, or bugfix goal' },
+            workspaceRoot: { type: 'string', description: 'Workspace root path (defaults to current working directory)' },
+            dryRun: { type: 'boolean', description: 'Whether to return the line-anchored patch plan without mutating disk (default true)' },
+            topKFiles: { type: 'number', description: 'Maximum candidate files to locate with VectorStore RAG (default 5)' },
+            sessionId: { type: 'string', description: 'Session identifier for audit logging and snapshot caching' },
+            verifyLspDiagnostics: { type: 'boolean', description: 'Verify syntactic/AST diagnostics before completing plan (default true)' }
+          },
+          required: ['goal']
+        }
       }
     ],
   }));
@@ -662,6 +678,13 @@ export async function createMCPServer(): Promise<Server> {
         response = {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
           isError: !result.success,
+        };
+      } else if (name === 'coding_agents') {
+        const { CodingAgentsHandler } = await import('../tools/coding-agents.js');
+        const result = await CodingAgentsHandler(args as any);
+        response = {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          isError: !result.applied && !!result.error,
         };
       } else {
         throw new Error(`Unknown tool: ${name}`);
