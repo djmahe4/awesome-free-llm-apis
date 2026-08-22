@@ -83,25 +83,64 @@ graph TD
 
 ---
 
-## 2. Quantum-Inspired Routing & Model Scoring
+## 2. Quantum Scoring & Probabilistic Model Selection Mechanism
 
-The `TextRouterMiddleware` uses a **probabilistic quantum scoring matrix** instead of static model routing. It treats model selection as a state vector that collapses based on real-time telemetry and task constraints.
+The `TextRouterMiddleware` uses a **probabilistic quantum scoring matrix** instead of static model routing. It models all eligible candidate models as a normalized state vector $|\Psi\rangle$ that collapses onto the optimal available model based on task alignment, provider health, token context capacity, and real-time rate limits.
 
-### Task-Based Model Mapping
-The centralized `TaskClassifier` dynamically classifies the request into a `TaskType` and collapses the routing state to the optimal model tier:
+```mermaid
+flowchart LR
+    A["Incoming Request (TaskType, Tokens)"] --> B["Compute Raw Amplitudes α_i"]
+    B --> C["Apply Health Factor H_i (Circuit Breakers)"]
+    C --> D["Apply Context Capacity C_i (Window Limits)"]
+    D --> E["Calculate Normalized State Vector |Ψ⟩"]
+    E --> F["State Collapse: Sort by Probability P_i"]
+    F --> G["Sequential Fallback Execution"]
+```
 
-* **Coding**: `qwen/qwen3-coder-480b-a35b:free` -> `gemini-3.1-flash-lite`
-* **Reasoning**: `deepseek/deepseek-r1` -> `nvidia/nemotron-3-ultra-550b-a55b`
-* **Search / Summarization**: `gemini-3.1-flash-lite` -> `cohere/command-r-plus`
-* **Chat / General**: `meta-llama/llama-3.3-70b-instruct`
+### 🧮 The State Vector Probability Equation
 
-### State Collapse & Telemetry
-1. **Scoring**: Each model is scored based on the classified `TaskType`.
-2. **Modifiers**: Real-time RPM/RPD quotas and latency averages (from `get_token_stats`) modify the scores.
-3. **Collapse**: The system sorts models by collapse probability and sequentially attempts execution, falling back instantly if a provider fails.
+For a set of $N$ candidate models $\{M_1, M_2, \dots, M_N\}$, the quantum state vector is defined as:
 
-### Centralized Task Classifier
-The `TaskClassifier` uses single-pass regex heuristics with word boundaries (`\b`) and a keyword weighting map (`keywordTaskMap`) to classify the task type in under 0.05ms, preventing any overhead.ad.
+$$|\Psi\rangle = \sum_{i=1}^{N} \alpha_i |M_i\rangle$$
+
+Where the unnormalized amplitude $\alpha_i$ for model $M_i$ is given by:
+
+$$\alpha_i = \text{Alignment}(M_i, \text{TaskType}) \times \text{HealthFactor}(M_i) \times \text{CapacityFactor}(M_i)$$
+
+The normalized probability $P(M_i)$ of collapsing to model $M_i$ is:
+
+$$P(M_i) = \frac{\alpha_i}{\sum_{j=1}^{N} \alpha_j}$$
+
+---
+
+### 🔬 Amplitude Weighting Parameters
+
+#### 1. Task Alignment Factor
+Calculated from the base model capability score ($\text{Cap} \in [0.5, 1.0]$) and specialized model architecture tags:
+- **Coding Task**: $\text{Cap} \times 2.0$ (if specialized coder model), $\text{Cap} \times 1.5$ (if reasoning model), $\text{Cap} \times 0.8$ (general).
+- **Reasoning Task**: $\text{Cap} \times 2.5$ (if deepseek-r1 / o1 / reasoning model), $\text{Cap} \times 0.6$ (general).
+- **Vision Task**: $\text{Cap} \times 2.0$ (if VLM / multimodal), $0.01$ (if text-only).
+- **Summarization Task**: $\text{Cap} \times 1.2$.
+
+#### 2. Provider Health Factor ($\text{HealthFactor}$)
+Tracks circuit breaker statuses across all active providers exposing model $M_i$:
+
+$$\text{HealthFactor} = \frac{\text{Active Healthy Providers for } M_i}{\text{Total Providers for } M_i}$$
+
+If all providers for $M_i$ are cooling down or hitting rate limits, $\text{HealthFactor}$ drops to $0.1$, safely deprioritizing the model without removing it from fallback options.
+
+#### 3. Context Capacity Factor ($\text{CapacityFactor}$)
+Prevents context truncation errors by checking the estimated input tokens against the model's physical context window ($W$):
+- If $\text{Tokens} > 0.90 \times W \implies \text{CapacityFactor} = 0.1$
+- If $\text{Tokens} > 0.70 \times W \implies \text{CapacityFactor} = 0.5$
+- If $\text{Tokens} > 8,000$ and $\text{Cap} < 0.70 \implies \text{CapacityFactor} \times= 0.3$ (protects weak $<8\text{B}$ models from context bloat).
+
+---
+
+### 📉 Confused-User Inversion
+When the `TaskClassifier` detects a confused user state (e.g. empty prompt or naked file upload without clear instructions), the sorting order is deliberately **inverted**:
+- The router selects the cheapest / highest-throughput model first (e.g. `gemini-3.1-flash-lite`) to ask for clarification, conserving expensive reasoning quotas.
+- Automatically appends a `[System Note: Guide the user]` prompt modifier.
 
 ---
 
