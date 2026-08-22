@@ -138,6 +138,19 @@ Interface for the persistent, workspace-aware memory system.
 - **`store_workspace_skill`**: Explicitly save structured research and decisions following the `@skill-writer` schema.
 - **`index_workspace`**: Proactively index all workspace files into the vector database for high-fidelity semantic recall.
 
+### 6. `local_llm_patch` [NEW]
+Single-file code patching tool using a locally running Ollama instance. Ranks local coding models, enriches the prompt with neighborhood context, and returns a clean replacement patch without mutating disk.
+
+### 7. `coding_agents` [NEW]
+OMP-pattern (`oh-my-pi`) autonomous multi-file refactoring engine:
+- **VectorStore TF-IDF RAG**: Discovers top candidate files matching the user's goal.
+- **`[PATH#SHA8]` Snapshot Anchors**: Protects against concurrent multi-agent edits and drift.
+- **Polyglot LSP & Subprocess Diagnostics**: Verifies code with `ts-morph` (TS/JS), Python `ast.parse`, Go `go vet`, and Rust `rustc --error-format json`.
+- **Zero-Waste CAS Checkpointing**: Snapshots pre-apply states in a content-addressable store for instant rollback (`resolve: { action: 'rollback' }`).
+- **Atomic Batch Commits**: Applies changes across multiple files transactionally on `resolve: { action: 'apply' }`.
+
+See [skill/references/coding_agents.md](skill/references/coding_agents.md) for the complete reference and usage guide.
+
 ---
 
 ## 5. Agentic Middleware & State Management
@@ -296,4 +309,25 @@ To ensure workspace isolation without polluting project trees:
   $$S = S_0 \cdot \left(1 + 0.5 \cdot (\text{sourceCount} - 1)\right)$$
   $$\text{Decay Multiplier} = e^{-\frac{\Delta t}{S}}$$
 - **Test Telemetry Sandboxing**: All test runners and CI suites sandbox telemetry under `os.tmpdir()`, preventing test runs from modifying user stats or triggering Firebase resets.
+
+---
+
+## 12. OMP Architecture, CAS Checkpointing & Polyglot LSP (v1.1.0)
+
+`coding_agents` implements the core architecture of **OMP (`oh-my-pi`)**:
+
+### 🎯 Hash-Anchored Line Edits (Hashline)
+Instead of fragile line numbers or ambiguous regex matches, edits use `[PATH#SHA8]` content snapshot anchors. If a file is modified externally or by concurrent subagents, the anchor hash check prevents stale overwrites.
+
+### 📦 Content-Addressable Storage (CAS) Checkpointing
+Pre-apply workspace states are stored in an in-memory and disk-backed CAS store (`src/memory/ContentAddressableCheckpoint.ts`):
+- **Zero-Waste Deduplication**: Checkpoints store lightweight manifests (`{ filePath -> sha256_hash }`). Unchanged files across revisions consume zero additional storage bytes.
+- **Transactional Rollback**: Instantly restores previous checkpoints via `resolve: { action: 'rollback', checkpointId?: string }`.
+
+### 🌐 Polyglot Compiler Diagnostics
+Before applying proposed diffs, the pipeline executes syntax and semantic checks per language:
+- **TypeScript / JavaScript**: `ts-morph` in-memory `getPreEmitDiagnostics()` with AST descendant symbol mapping.
+- **Python**: Subprocess `python3 -c "import ast, sys..."` parser returning exact 1-based line/col errors.
+- **Go**: Subprocess `go vet` with structured error regex capture.
+- **Rust**: Subprocess `rustc --error-format json` compiler diagnostic engine.
 

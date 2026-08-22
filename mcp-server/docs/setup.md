@@ -7,7 +7,8 @@ This guide covers the necessary steps to set up the MCP server and its provider 
 - **Node.js** (v18 or higher; **v20+ required** if you'll use `browser_tool` — see below)
 - **Python 3** (v3.9 or higher)
 - **npm** (comes with Node.js)
-- **Chrome/Chromium** — only needed for `browser_tool`. It spawns [`chrome-devtools-mcp`](https://www.npmjs.com/package/chrome-devtools-mcp) on demand via `npx -y chrome-devtools-mcp` (no separate install step; the first call is slower while `npx` fetches it). If Chrome isn't auto-discovered, set `CHROME_PATH` to its executable. See [browser_tool.md](browser_tool.md) for the full action reference.
+- **Chrome/Chromium** — only needed for `browser_tool`. It spawns [`chrome-devtools-mcp`](https://www.npmjs.com/package/chrome-devtools-mcp) on demand via `npx -y chrome-devtools-mcp` (no separate install step; the first call is slower while `npx` fetches it). If Chrome isn't auto-discovered, set `CHROME_PATH` to its executable. See [skill/references/browser_tool.md](skill/references/browser_tool.md) for the full action reference.
+- **Docker** (optional) — recommended for running **SearXNG** locally as an unlimited, self-hosted terminal search fallback.
 
 ## Installation
 
@@ -40,6 +41,33 @@ python -m venv venv
 pip install -U google-genai python-dotenv
 ```
 
+### 3. Docker & SearXNG Setup (Self-Hosted Search Fallback)
+
+The server features `SearchRouterMiddleware` with an automatic fallback cascade (`Parallel AI` → `Tavily` → `Jina` → `Brave` → `SearXNG`). SearXNG serves as the terminal zero-cost self-hosted search fallback.
+
+#### Automated Deployment (Postbuild / Script)
+The postbuild lifecycle (`scripts/utils/postbuild.js` & `src/search/searxng-deploy.ts`) checks for Docker and automatically configures a background SearXNG container on `http://localhost:8080` with JSON format enabled. You can run the smoke test directly:
+```bash
+npm run smoke-test:searxng
+```
+
+#### Manual Docker Deployment
+If you prefer running SearXNG manually via Docker CLI:
+```bash
+docker run -d \
+  --name searxng-awesome-free-llm \
+  -p 127.0.0.1:8080:8080 \
+  -e "SEARXNG_BASE_URL=http://localhost:8080" \
+  -e "SEARXNG_SECRET_KEY=$(openssl rand -hex 32)" \
+  searxng/searxng
+```
+
+Configure `.env` with:
+```env
+SEARXNG_URL=http://localhost:8080
+SEARXNG_BASE_URL=http://localhost:8080
+```
+
 > [!NOTE]
 > **`code_mode` is deprecated and not registered as an MCP tool** (`src/mcp/index.ts`). The sandbox runners it used (Python/Go/Rust isolated script execution) still exist under `scripts/sandboxes/` for reference, but there's nothing to install here for a normal setup — skip straight to Configuration below.
 
@@ -66,13 +94,15 @@ Fill in your API keys for the providers you wish to use.
 - **SILICONFLOW_API_KEY**: Required for SiliconFlow.
 - (See `.env.example` for all supported providers).
 
-### Feature Flags
+### Feature Flags & Tool Configurations
 
 - **ENABLE_AGENTIC_MIDDLEWARE**: Set to `true` to enable the agentic middleware globally for all requests. 
 - **AGENT_PROMPT_PATH**: Path to the directory containing `prompt.json` and `README.md` (default: `../external/agent-prompt`).
     > [!IMPORTANT]
     > **Session IDs**: When this flag is enabled, every request **must** include a `sessionId` (either in the context or the request body). Requests without a `sessionId` will bypass the middleware to ensure data safety.
 - **MCP_SUBTASK_BUDGET_MS**: Wall-clock budget (ms, default `20000`) for a single agentic `use_free_llm` call before it yields a partial result and keeps executing remaining subtasks in the background. Keep this under your MCP client's tool-call timeout (many code editors default to ~30s). See [Architecture & Workflow Guide § 5](guide.md#5-agentic-middleware--state-management).
+- **OLLAMA_LOCAL_BASE_URL**: Optional URL to local Ollama instance (default: `http://localhost:11434`). Used by `local_llm_patch` and `coding_agents` for zero-cost offline code patches (`qwen2.5-coder`, etc.).
+- **BROWSER_MAX_SESSIONS**: Max concurrent live pooled browser sessions before LRU eviction (default: `2`). See [browser_tool.md](browser_tool.md).
 
 ## Running the Server
 
@@ -102,6 +132,16 @@ Then visit `http://localhost:3000` to view the visual dashboard for provider hea
 | `skill` | optional | Load a specific skill by id/name from the remote skill index. |
 | `action` | optional | Control an in-progress/paused agentic run for `sessionId`: `run` (default), `status` (poll progress, no LLM call), `continue` (resume a paused queue), `abort` (cancel a background run). |
 | `resume_input` | optional | For `action: 'continue'` — extra input appended to the subtask being resumed. |
+
+## Additional Specialized MCP Tools
+
+Besides `use_free_llm`, the server exposes specialized tools for autonomous development and diagnostics:
+
+- **`coding_agents`**: OMP-style multi-file refactoring engine with VectorStore TF-IDF RAG, `[PATH#SHA8]` snapshot anchors, Polyglot LSP diagnostics (TS/Python/Go/Rust), and zero-waste CAS checkpointing. See [skill/references/coding_agents.md](skill/references/coding_agents.md).
+- **`local_llm_patch`**: Fast, single-file offline code patching via local Ollama models (`qwen2.5-coder`, `deepseek-coder`). See [skill/references/local_llm_patch.md](skill/references/local_llm_patch.md).
+- **`browser_tool`**: Real Chrome DevTools session automation for DOM exploration, API capture/replay, and strict scraping. See [skill/references/browser_tool.md](skill/references/browser_tool.md).
+- **`cyber_tool`**: Educational CTF coaching, security tool registry, and persistent decision graphs. See [skill/references/cyber_tool.md](skill/references/cyber_tool.md).
+- **`quantum_tool`**: Multi-branch reasoning framework with parameterized quantum circuit rotations. See [skill/references/quantum_tool.md](skill/references/quantum_tool.md).
 
 > [!IMPORTANT]
 > **When performing any task scoped to a project or workspace, you MUST pass both `workspace_root` (absolute path) and `agentic: true`.** Omitting either disables memory injection, context enrichment, and session persistence — the response will be blind to prior work. A bare call with only `messages` is for one-off queries that don't need project context.

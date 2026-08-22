@@ -291,6 +291,7 @@ preferred persona: coder
   - [`cyber_tool`](references/cyber_tool.md)
   - [`quantum_tool`](references/quantum_tool.md)
   - [`local_llm_patch`](references/local_llm_patch.md)
+  - [`coding_agents`](references/coding_agents.md)
   - [`manage_memory`](references/manage_memory.md)
   - [`store_workspace_skill`](references/store_workspace_skill.md)
 
