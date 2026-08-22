@@ -579,20 +579,140 @@ async function ensureModels() {
 }
 
 const TOOL_WHEN_TO_USE = {
-  use_free_llm: '<strong>When to use:</strong> General LLM chat, conversational Q&A, research syntheses, single-step tasks, and multi-step agentic planning with memory recall.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> <code>action: "run"</code> (start task), <code>"continue"</code> (resume after human-in-the-loop input), <code>"status"</code> (poll long-running background run), <code>"abort"</code> (cancel active execution). Set <code>agentic: true</code> for multi-step DAG planning.</span>',
-  vision_tool: '<strong>When to use:</strong> Visual UI testing, screenshot analysis, diagram parsing, and multimodal inspection using vision-capable free models.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> <code>action: "analyze_ui"</code> (extract buttons/inputs & coordinates), <code>"extract_diagram"</code> (parse architectural flowcharts to text), <code>"compare_diff"</code> (visual regression diffing between two images), <code>"inspect_image"</code> (general VLM inspection).</span>',
-  coding_agents: '<strong>When to use:</strong> Multi-file refactoring, autonomous feature implementation, VectorStore RAG repo discovery, and AST/polyglot compiler checks (OMP-pattern).<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> <code>action: "run"</code> (dispatches <code>ast_edit</code> hashline patches, <code>diagnostics</code> LSP checks, and <code>resolve: "apply" | "discard" | "rollback"</code>). Supports CAS checkpoints.</span>',
-  local_llm_patch: '<strong>When to use:</strong> Targeted single-file edits and bugfixes powered completely offline by local Ollama coding models with 0 API cost.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> <code>apply_patch</code> (generate & apply diff via local Ollama), <code>revert_patch</code> (restore previous backup snapshot), <code>audit_ast</code> (syntax verification).</span>',
-  browser_tool: '<strong>When to use:</strong> Real browser automation, DOM exploration, private API discovery & replay, interactive clicking, and strict tabular data extraction.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> <code>navigate</code>, <code>snapshot</code> (accessibility tree), <code>click</code>, <code>scroll</code>, <code>wait</code>, <code>evaluate</code> (JS execution), <code>network</code>, <code>api_replay</code>, <code>extract</code>, <code>deep_scrape</code>, <code>screenshot</code>, <code>checkpoint</code>, <code>session</code>.</span>',
-  cyber_tool: '<strong>When to use:</strong> Educational CTF coaching, security tool registry lookups, and persistent decision-graph building during authorized lab exercises.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> <code>lookup</code> (tool syntax), <code>suggest</code> (next test steps), <code>session</code>, <code>graph_action</code> (add/update hypothesis nodes), <code>decision_graph</code>, <code>export_report</code>.</span>',
-  quantum_tool: '<strong>When to use:</strong> Multi-branch reasoning, exploring diverging hypotheses with parameterized quantum rotation gates and state collapse.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> <code>setup</code> (init circuit or preset), <code>step</code> (advance gates column-by-column), <code>pause</code>, <code>continue</code>, <code>modify</code> (inject gates dynamically), <code>reset</code>, <code>status</code>, <code>get_state</code>, <code>analyze</code> (collapse state & synthesize via LLM).</span>',
-  execute_skill: '<strong>When to use:</strong> Running grounded prompts specialized with full SKILL.md rules, references, and operational constraints.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> <code>run</code> (loads SKILL.md context and executes targeted prompt).</span>',
-  load_skill_prompt: '<strong>When to use:</strong> Dynamically searching and loading skill system prompts from the local repository or bundled Hermes catalog.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> <code>type: "skill"</code> (load specific skill prompt), <code>type: "persona"</code> (load persona system prompt), <code>search</code> (keyword lookup).</span>',
-  manage_memory: '<strong>When to use:</strong> Inspecting, querying, searching, and managing long-term workspace vector memory, ADRs, and persistent wiki notes.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> <code>search</code> (semantic vector query), <code>save</code>, <code>delete</code>, <code>list</code>, <code>read_adr</code> / <code>write_adr</code> (architectural decision records), <code>wiki_list</code> / <code>wiki_read</code> / <code>wiki_write</code> (workspace wiki pages).</span>',
-  index_workspace: '<strong>When to use:</strong> Proactively building or refreshing the local vector database index across all code and documentation files.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> <code>workspace_root</code> (path to index), <code>force: true</code> (bypass timestamp cache and rebuild vector embeddings).</span>',
-  store_workspace_skill: '<strong>When to use:</strong> Explicitly saving new architectural skills and workflow records following the skill-writer schema.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> Saves validated SKILL.md documents to <code>.agents/</code> or custom skill folders.</span>',
-  validate_provider: '<strong>When to use:</strong> Verifying API keys, connection latency, and health status for individual LLM providers.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> <code>provider: "gemini" | "groq" | "openrouter" | "ollama" | "cohere" | "cerebras" | "sambanova" | "github_models"</code>.</span>',
-  get_token_stats: '<strong>When to use:</strong> Auditing quota limits, remaining daily requests, and real-time RPM/RPD telemetry across all providers.<br/><span style="color:var(--accent-cyan);font-size:0.75rem;"><strong>Subcommands / Actions:</strong> Returns live in-memory rate limit trackers merged with durable disk persistence.</span>'
+  use_free_llm: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Your primary AI Swiss Army Knife for asking questions, writing code, research, and running multi-step background tasks without paying for tokens.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "run"</code> (Default) — Start a direct chat turn or multi-step agentic plan (set <code>agentic: true</code>).</li>
+      <li><code>action: "status"</code> — Check the progress of a long-running background task.</li>
+      <li><code>action: "continue"</code> — Resume after human-in-the-loop terminal action (pass <code>resume_input: "continue <ID> <result>"</code>).</li>
+      <li><code>action: "abort"</code> — Cancel an active execution.</li>
+    </ul>`,
+
+  vision_tool: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Vision Language Model (VLM) inspector for reading images, comparing UI screenshots, and parsing flowchart diagrams.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "analyze_ui"</code> — Extract clickable buttons, text inputs, and pixel coordinates from UI screenshots.</li>
+      <li><code>action: "extract_diagram"</code> — Convert architectural diagrams and flowcharts into readable structured text.</li>
+      <li><code>action: "compare_diff"</code> — Compare two screenshots to detect visual regression differences (requires <code>compare_image_path</code>).</li>
+      <li><code>action: "inspect_image"</code> — General OCR and image Q&A using free vision models.</li>
+    </ul>`,
+
+  coding_agents: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Autonomous multi-file software engineer based on the OMP (oh-my-pi) pattern. Searches your codebase, writes hash-anchored patches, verifies compiler diagnostics, and commits or rolls back changes.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "run"</code> — Executes full refactoring pipeline (Vector RAG grep &rarr; Hashline diffs &rarr; Polyglot LSP checks).</li>
+      <li><code>resolve: "apply"</code> — Confirms and saves patched files to disk.</li>
+      <li><code>resolve: "discard"</code> — Rejects staged changes without writing to disk.</li>
+      <li><code>resolve: "rollback"</code> — Instantly restores previous state using Content-Addressable Storage (CAS) snapshots.</li>
+    </ul>`,
+
+  local_llm_patch: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>100% offline code patcher that runs on your machine via local Ollama. Zero network requests, 0 API cost.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "apply_patch"</code> — Generate and apply targeted unified diff to a single file.</li>
+      <li><code>action: "revert_patch"</code> — Restore the original file from the automatic backup snapshot.</li>
+      <li><code>action: "audit_ast"</code> — Check syntax trees for compilation errors before applying.</li>
+    </ul>`,
+
+  browser_tool: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Headless Playwright web browser for scraping dynamic sites, clicking buttons, extracting tables, and capturing network calls.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "navigate"</code> & <code>"snapshot"</code> — Load URL and return the clean accessibility tree (low token cost).</li>
+      <li><code>action: "click"</code>, <code>"scroll"</code>, <code>"wait"</code> — Interact with dynamic single-page applications (SPAs).</li>
+      <li><code>action: "network"</code> & <code>"api_replay"</code> — Intercept private backend JSON APIs and replay them directly without browser overhead.</li>
+      <li><code>action: "deep_scrape"</code> & <code>"extract"</code> — Extract structured tables into clean JSON/CSV with anti-bot stealth.</li>
+    </ul>`,
+
+  cyber_tool: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Security coaching assistant and decision-graph tracker for authorized CTF challenges and educational penetration testing.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "lookup"</code> — Query CLI flags and syntax for security tools (nmap, sqlmap, gobuster, etc.).</li>
+      <li><code>action: "suggest"</code> — Receive strategic next test steps based on target recon findings.</li>
+      <li><code>action: "graph_action"</code> — Create or link hypothesis nodes on the persistent investigation graph.</li>
+      <li><code>action: "export_report"</code> — Generate complete Markdown penetration testing report.</li>
+    </ul>`,
+
+  quantum_tool: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Multi-branch reasoning tool that explores diverging hypotheses using quantum-inspired gates and state collapse synthesis.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "setup"</code> — Initialize circuit with a preset (<code>"adversarial_debate"</code>, <code>"superposition_exploration"</code>, etc.).</li>
+      <li><code>action: "step"</code> — Execute gate columns (Hadamard reset, Pauli-X flip, RY rotation, CNOT entanglement).</li>
+      <li><code>action: "analyze"</code> — Collapse the quantum state and generate synthesized LLM conclusions.</li>
+    </ul>`,
+
+  execute_skill: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Runs specialized agent workflows loaded with strict SKILL.md rules, examples, and domain guardrails.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "run"</code> — Provide <code>skill_name</code> (e.g. <code>"vibe-code-auditor"</code>, <code>"tdd-workflow"</code>) and your user prompt.</li>
+    </ul>`,
+
+  load_skill_prompt: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Search and load ready-to-use system prompts from the local repository or bundled Hermes catalog without running the LLM.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>type: "skill"</code> — Load a specific skill's system instructions.</li>
+      <li><code>type: "persona"</code> — Load a specialized persona prompt (e.g., Coder, Security Auditor, Researcher).</li>
+    </ul>`,
+
+  manage_memory: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Manage persistent long-term memory, project architectural decision records (ADRs), and workspace wiki documentation.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "search"</code> / <code>"save"</code> / <code>"delete"</code> — Vector semantic search across long-term facts.</li>
+      <li><code>action: "read_adr"</code> / <code>"write_adr"</code> — Maintain architectural decisions in <code>.free-llm-mcp/wiki/adr/</code>.</li>
+      <li><code>action: "wiki_read"</code> / <code>"wiki_write"</code> / <code>"wiki_list"</code> — Maintain technical wiki guides.</li>
+    </ul>`,
+
+  index_workspace: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Proactively scans and embeds all files in your project into the local vector database for fast semantic search.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>workspace_root</code> — Target directory path to index.</li>
+      <li><code>force: true</code> — Force re-indexing all files, bypassing timestamp caches.</li>
+    </ul>`,
+
+  store_workspace_skill: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Save custom reusable AI skills and workflow guides directly into your repository's <code>.agents/</code> folder.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li>Provide <code>skill_name</code>, <code>description</code>, and Markdown <code>content</code> following the Agent Skills spec.</li>
+    </ul>`,
+
+  validate_provider: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Diagnose LLM provider connectivity, check API keys, and test latency.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>provider</code> — Select provider (e.g. <code>"gemini"</code>, <code>"groq"</code>, <code>"openrouter"</code>, <code>"ollama"</code>, <code>"cohere"</code>).</li>
+    </ul>`,
+
+  get_token_stats: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Inspect your real-time rate limit meters, remaining requests, and lifetime tokens across all providers.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li>No parameters required — returns live memory counters synchronized with disk storage.</li>
+    </ul>`
 };
 
 async function showToolDocsModal(tool) {
