@@ -25,12 +25,23 @@
 | `save_graph` | `graphNode`, `sessionId` | `edge` | Appends a structured decision node (`hypothesis` \| `action` \| `finding` \| `deadend`) to the engagement tree. |
 | `load_graph` | `sessionId` | — | Loads the full decision graph for visualization in the Dashboard Wiki tab. |
 | `tool_memory` | `memoryOp` (`read` \| `write`) | `note`, `toolName` | Reads or appends persistent tactical notes associated with a tool or engagement. |
+| `osint` | `target` | `osintType` (`domain` \| `ip` \| `username` \| `all`) | Performs passive DNS/infrastructure recon (A, AAAA, MX, TXT, NS), suggests tailored search dorks, and automatically saves Markdown OSINT reports to the cyber wiki. |
 
 ---
 
 ## 🛠️ Invocation Examples
 
-### 1. Coach Next Steps Given Nmap Scan Results
+### 1. Passive Domain OSINT & Recon Dork Generation
+```json
+{
+  "action": "osint",
+  "target": "example.com",
+  "osintType": "domain"
+}
+```
+*Returns resolved IPv4/IPv6 addresses, full DNS record map, certificate transparency/dork queries, and creates wiki note `osint/example_com`.*
+
+### 2. Coach Next Steps Given Nmap Scan Results
 ```json
 {
   "action": "coach",
@@ -40,7 +51,7 @@
 }
 ```
 
-### 2. Save Decision-Graph Hypothesis Node
+### 3. Save Decision-Graph Hypothesis Node
 ```json
 {
   "action": "save_graph",

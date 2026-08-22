@@ -635,13 +635,14 @@ const TOOL_WHEN_TO_USE = {
 
   cyber_tool: `
     <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
-    <div>Security coaching assistant and decision-graph tracker for authorized CTF challenges and educational penetration testing.</div>
+    <div>Security coaching assistant, passive OSINT reconnaissance engine, and decision-graph tracker for authorized CTF challenges and educational penetration testing.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
-      <li><code>action: "lookup"</code> — Query CLI flags and syntax for security tools (nmap, sqlmap, gobuster, etc.).</li>
-      <li><code>action: "suggest"</code> — Receive strategic next test steps based on target recon findings.</li>
-      <li><code>action: "graph_action"</code> — Create or link hypothesis nodes on the persistent investigation graph.</li>
-      <li><code>action: "export_report"</code> — Generate complete Markdown penetration testing report.</li>
+      <li><code>action: "osint"</code> — Passive DNS & infrastructure reconnaissance (A, AAAA, MX, TXT, NS), search dork generation, and automatic Markdown report creation in the cyber wiki.</li>
+      <li><code>action: "lookup"</code> / <code>"get_tool"</code> — Query CLI flags and syntax for security tools (nmap, sqlmap, gobuster, etc.).</li>
+      <li><code>action: "coach"</code> — Receive strategic next test steps based on target recon findings.</li>
+      <li><code>action: "save_graph"</code> & <code>"load_graph"</code> — Create or visualize hypothesis nodes on the persistent engagement graph.</li>
+      <li><code>action: "tool_memory"</code> — Read or persist tactical execution notes.</li>
     </ul>`,
 
   quantum_tool: `

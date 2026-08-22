@@ -619,11 +619,13 @@
           </table>
         </details>
         <details class="qs-tool-card">
-          <summary><span class="qs-tool-name">cyber_tool</span><span class="qs-tool-desc">Security tool registry, interactive CTF coaching, and persistent decision-graph builder</span></summary>
+          <summary><span class="qs-tool-name">cyber_tool</span><span class="qs-tool-desc">Security tool registry, passive OSINT reconnaissance, CTF coaching, and decision-graph builder</span></summary>
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>list_tools | get_tool | register_tool | wiki_lookup | learn | coach | save_graph | load_graph | tool_memory</td></tr>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>osint | list_tools | get_tool | register_tool | wiki_lookup | learn | coach | save_graph | load_graph | tool_memory</td></tr>
+              <tr><td><code>target</code></td><td>string</td><td>for osint</td><td>Target domain/host to analyze (e.g. <code>example.com</code>)</td></tr>
+              <tr><td><code>osintType</code></td><td>enum</td><td></td><td><code>domain</code> | <code>ip</code> | <code>username</code> | <code>all</code></td></tr>
               <tr><td><code>toolName</code></td><td>string</td><td>for get_tool/register</td><td>Security binary name (e.g. <code>sqlmap</code>, <code>nmap</code>)</td></tr>
               <tr><td><code>observation</code></td><td>string</td><td>for coach</td><td>Observed port/service outputs to analyze</td></tr>
               <tr><td><code>graphNode</code></td><td>object</td><td>for save_graph</td><td>Decision node ({ id, type, label, from })</td></tr>
