@@ -97,6 +97,24 @@ flowchart LR
     F --> G["Sequential Fallback Execution"]
 ```
 
+### 🎯 Task-Based Model Mapping
+The centralized `TaskClassifier` dynamically classifies the request into a `TaskType` and collapses the routing state to the optimal model tier:
+* **Coding**: `qwen/qwen3-coder-480b-a35b:free` &rarr; `gemini-3.1-flash-lite` &rarr; `codestral-latest`
+* **Reasoning**: `deepseek/deepseek-r1` &rarr; `nvidia/nemotron-3-ultra-550b-a55b` &rarr; `z-ai/glm-5.2`
+* **Search / Summarization**: `gemini-3.1-flash-lite` &rarr; `cohere/command-r-plus` &rarr; `mistral-small-latest`
+* **Vision / Multimodal**: `qwen/qwen3.6-27b` &rarr; `meta/llama-3.2-90b-vision-instruct` &rarr; `gemini-3.1-flash-lite`
+* **Chat / General**: `meta-llama/llama-3.3-70b-instruct` &rarr; `gemma4:31b`
+
+### ⚡ State Collapse & Telemetry Lifecycle
+1. **Scoring**: Each model is assigned an initial capability amplitude based on the classified `TaskType`.
+2. **Modifiers**: Real-time RPM/RPD quotas, context window boundaries, and latency averages (from `get_token_stats`) scale the amplitudes.
+3. **Collapse**: The system sorts models by collapse probability and sequentially attempts execution, falling back instantly if a provider fails or hits a rate limit.
+
+### 🧠 Centralized Task Classifier
+The `TaskClassifier` uses single-pass regex heuristics with word boundaries (`\b`) and a keyword weighting map (`keywordTaskMap`) to classify the task type in under 0.05ms, preventing any runtime latency overhead.
+
+---
+
 ### 🧮 The State Vector Probability Equation
 
 For a set of $N$ candidate models $\{M_1, M_2, \dots, M_N\}$, the quantum state vector is defined as:
