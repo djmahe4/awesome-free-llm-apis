@@ -1,29 +1,95 @@
 # `use_free_llm`
 
-**Purpose:** Send chat messages to any model with fallback support.
+**Purpose:** Send conversational, reasoning, or coding requests to free AI models with automatic provider fallback, rate-limit recovery, and agentic workspace grounding.
 
-**Required params:** `messages`
-**Key optional params:** `model`, `keywords`, `agentic`, `workspace_root`
+---
 
-### Invocation (project-scoped task)
+## 🎯 When to Use
+- **Conversational Queries & Code Generation**: Standard multi-turn chat and coding assistance.
+- **Agentic Planning & Multi-Step Execution**: Breaking complex goals into subtasks with full workspace memory grounding.
+- **Background Task Control**: Monitoring or resuming ongoing autonomous runs without blocking clients or timing out.
+- **Grounded Reference Retrieval**: Automatically reading local code files, `.pdf` pages, and image attachments.
+
+---
+
+## 📋 Full Parameter Reference
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `messages` | `Array<{role: string, content: string | Array}>` | **Yes** | OpenAI-compatible message history. |
+| `model` | `string` | No | Explicit model override (e.g., `gemini-2.5-flash`, `deepseek-r1`, `qwen3-coder`). Defaults to auto-routing. |
+| `workspace_root` | `string` | No | Absolute path to the active codebase. Enables workspace context and memory. |
+| `agentic` | `boolean` | No | Activates task decomposition, subtask planning, and iterative reasoning. |
+| `sessionId` | `string` | No | Unique session key to maintain conversational continuity and memory. Defaults to `ws-<hash>` if `workspace_root` is provided. |
+| `action` | `'run' | 'continue' | 'status' | 'abort'` | No | **Background execution & control action**. Defaults to `'run'`. |
+| `resume_input` | `string` | No | Context / instructions appended when resuming a paused task via `action: 'continue'`. |
+| `skipIndexing` | `boolean` | No | Skips pre-emptive full workspace re-indexing. Recommended for fast single-file queries. |
+| `keywords` | `string[]` | No | Semantic keywords prioritizing specific reference documents or memory items. |
+| `skill` | `string` | No | Name of a specialized skill to load before executing (e.g. `tdd-workflow`, `api-patterns`). |
+| `google_search` | `boolean` | No | Triggers automated web grounding via search provider cascade. |
+
+---
+
+## ⚡ Background Execution & Subcommands
+
+When executing long-running agentic tasks, `use_free_llm` provides non-blocking lifecycle controls:
+
+### 1. Check Background Run Status (`action: 'status'`)
+Check if a background agentic run is active, paused, or completed for a session without invoking any LLM provider:
 ```json
 {
-  "messages": [{ "role": "user", "content": "Implement auth in auth.ts" }],
-  "agentic": true,
-  "workspace_root": "/abs/path/to/project",
-  "keywords": ["security", "jwt"]
+  "messages": [],
+  "sessionId": "ws-a1b2c3d4e5f60718",
+  "action": "status"
+}
+```
+*Returns instantaneous JSON summary of completed vs queued subtasks.*
+
+### 2. Resume a Paused Task (`action: 'continue'`)
+Resume an agentic run that was paused for user input or rate-limiting:
+```json
+{
+  "messages": [],
+  "sessionId": "ws-a1b2c3d4e5f60718",
+  "action": "continue",
+  "resume_input": "Approved. Proceed with writing the unit tests."
 }
 ```
 
-### Response
-- Content: `"Here is the JWT authentication implementation..."`
-- Automatically injects directory structure, relevant grep snippets, and session memory context.
+### 3. Cancel / Abort Background Job (`action: 'abort'`)
+Instantly cancel an in-progress autonomous run:
+```json
+{
+  "messages": [],
+  "sessionId": "ws-a1b2c3d4e5f60718",
+  "action": "abort"
+}
+```
 
-### Routing pipeline
+---
 
-`use_free_llm` runs through the pipeline defined in `src/pipeline/instances.ts`:
-`StructuralMarkdownMiddleware → ResponseCacheMiddleware → WorkspaceContextMiddleware → AgenticMiddleware → ImageRouterMiddleware → SearchRouterMiddleware → TextRouterMiddleware`.
+## 🛠️ Practical Invocation Examples
 
-- **`ImageRouterMiddleware`** scans messages for `file:///` URIs; supported image formats (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.avif`) are base64-encoded and routed to a vision provider. Text-only references pass through.
-- **`SearchRouterMiddleware`** (`src/pipeline/middlewares/SearchRouterMiddleware.ts`, added v1.0.9) intercepts search-classified tasks before the general text router, falling back through Parallel AI → Tavily → Jina → Brave → SearXNG. Each provider implements `BaseProvider`'s circuit-breaker (`isAvailable()`/`recordFailure()`/`getPenaltyScore()` — 429 → flat 60s cooldown, 5xx → exponential backoff 10s/20s/40s capped at 60s). Results are normalized into `UnifiedSearchResult[]` and logged via `ChatLogger.logToolCall` + `logSearchQuery` (Firestore `search_logs` collection, rendered on the dashboard's Providers tab with a full-result `<details>` dropdown per query).
-- **`TextRouterMiddleware`** uses `TaskClassifier.autoClassify` to infer task type (coding/reasoning/search/summarization/chat) via compiled regexes and a keyword-weight map, and triggers task decomposition for complex multiline goals.
+### Standard Grounded Coding Request
+```json
+{
+  "messages": [{ "role": "user", "content": "Refactor error handling in src/server.ts" }],
+  "workspace_root": "C:/Projects/my-app",
+  "agentic": true,
+  "keywords": ["express", "middleware"]
+}
+```
+
+### Fast Single-File Query with Image Attachment
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Explain the architecture diagram in file:///C:/Projects/my-app/architecture.png"
+    }
+  ],
+  "skipIndexing": true
+}
+```
+

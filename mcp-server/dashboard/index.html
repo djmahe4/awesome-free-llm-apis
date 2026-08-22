@@ -558,29 +558,161 @@
       <div class="section-title" style="margin-bottom:14px;">🛠️ MCP Tool Schemas</div>
       <div class="section-sub" style="margin-bottom:14px;">Every tool exposed by this MCP server, with its parameters as actually defined in the server's tool schema.</div>
       <div class="qs-tool-list" id="qs-tool-list">
-        <details class="qs-tool-card">
-          <summary><span class="qs-tool-name">use_free_llm</span><span class="qs-tool-desc">Chat completion with optional agentic workspace grounding</span></summary>
+        <details class="qs-tool-card" open>
+          <summary><span class="qs-tool-name">use_free_llm</span><span class="qs-tool-desc">Chat completion with agentic grounding & background lifecycle execution</span></summary>
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
               <tr><td><code>messages</code></td><td>array&lt;{role, content}&gt;</td><td>✓</td><td>Chat history, OpenAI-style</td></tr>
               <tr><td><code>model</code></td><td>string</td><td></td><td>Explicit model override (default: auto-routed)</td></tr>
-              <tr><td><code>keywords</code></td><td>string[]</td><td></td><td>Steers which reference-doc sections get prioritized</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Absolute path — enables codebase context, memory, and indexing</td></tr>
               <tr><td><code>agentic</code></td><td>boolean</td><td></td><td>Enables subtask decomposition + workspace memory</td></tr>
-              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Absolute path — required alongside <code>agentic</code></td></tr>
-              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Resume a specific conversation/session</td></tr>
-              <tr><td><code>google_search</code></td><td>boolean</td><td></td><td>Gemini-only web grounding</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session identifier (defaults to stable <code>ws-&lt;hash&gt;</code>)</td></tr>
+              <tr><td><code>action</code></td><td>enum: run | continue | status | abort</td><td></td><td>Background lifecycle control for long-running agentic tasks</td></tr>
+              <tr><td><code>resume_input</code></td><td>string</td><td></td><td>Instructions appended when resuming a paused task (<code>action: continue</code>)</td></tr>
+              <tr><td><code>skipIndexing</code></td><td>boolean</td><td></td><td>Skip pre-emptive workspace re-indexing pass for fast single-file queries</td></tr>
+              <tr><td><code>keywords</code></td><td>string[]</td><td></td><td>Steers which reference-doc sections get prioritized</td></tr>
               <tr><td><code>skill</code></td><td>string</td><td></td><td>Load a named skill's instructions before executing</td></tr>
-              <tr><td><code>skipIndexing</code></td><td>boolean</td><td></td><td>Skip the pre-emptive full-workspace re-index + wiki-maintenance pass agentic mode normally runs every call — use for requests narrowly about one file/PDF</td></tr>
+              <tr><td><code>google_search</code></td><td>boolean</td><td></td><td>Triggers web grounding cascade across search providers</td></tr>
             </tbody>
           </table>
         </details>
         <details class="qs-tool-card">
-          <summary><span class="qs-tool-name">get_token_stats</span><span class="qs-tool-desc">Real-time per-provider token/request usage</span></summary>
+          <summary><span class="qs-tool-name">coding_agents</span><span class="qs-tool-desc">Autonomous multi-file refactoring, VectorStore TF-IDF RAG, AST rewrites & LSP verification</span></summary>
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td colspan="4">No parameters. Returns <code>[{ id, name, isAvailable, rateLimits:{rpm,rpd,tpm}, usage:{tokens,requests} }]</code> — counters reset on server restart.</td></tr>
+              <tr><td><code>goal</code></td><td>string</td><td>✓</td><td>Refactoring or feature implementation objective</td></tr>
+              <tr><td><code>workspaceRoot</code></td><td>string</td><td></td><td>Target workspace directory (default: CWD)</td></tr>
+              <tr><td><code>dryRun</code></td><td>boolean</td><td></td><td>Default <code>true</code>. Simulate patch plan and LSP checks without writing to disk</td></tr>
+              <tr><td><code>topKFiles</code></td><td>number</td><td></td><td>Candidate files count to retrieve via TF-IDF vector index (default: 5)</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session identifier for CAS checkpointing and history</td></tr>
+              <tr><td><code>astEditOps</code></td><td>array&lt;{pat, out}&gt;</td><td></td><td>OMP-style <code>$$$VAR</code> structural AST rewriting operations</td></tr>
+              <tr><td><code>verifyLspDiagnostics</code></td><td>boolean</td><td></td><td>Run polyglot LSP pre-emit diagnostics (ts-morph, Python AST, go vet, rustc)</td></tr>
+              <tr><td><code>resolve</code></td><td>{action: 'apply' | 'discard'}</td><td></td><td>Commit staged patch plan with atomic CAS checkpoint or rollback</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">local_llm_patch</span><span class="qs-tool-desc">Offline single-file patching powered by local Ollama coding models with 0 API cost</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>filePath</code></td><td>string</td><td>✓</td><td>Target file path relative to workspace or absolute</td></tr>
+              <tr><td><code>instruction</code></td><td>string</td><td>✓</td><td>Code edit or bugfix instruction for local model</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace boundary for path traversal security check</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session key for chat logging</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">browser_tool</span><span class="qs-tool-desc">Headless Chrome DevTools automation: dynamic exploration, API replay & structured scraping</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>navigate | snapshot | click | scroll | wait | evaluate | network | api_replay | extract | deep_scrape | screenshot | checkpoint | session</td></tr>
+              <tr><td><code>url</code></td><td>string</td><td>for navigate/deep_scrape</td><td>Target webpage URL</td></tr>
+              <tr><td><code>userInstructions</code></td><td>string</td><td>for extract/deep_scrape</td><td>Extraction prompt to structure into JSON</td></tr>
+              <tr><td><code>selector</code> / <code>text</code></td><td>string</td><td>for click/scroll</td><td>Target DOM CSS selector or visible text</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Browser session pool key</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">cyber_tool</span><span class="qs-tool-desc">Security tool registry, interactive CTF coaching, and persistent decision-graph builder</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>list_tools | get_tool | register_tool | wiki_lookup | learn | coach | save_graph | load_graph | tool_memory</td></tr>
+              <tr><td><code>toolName</code></td><td>string</td><td>for get_tool/register</td><td>Security binary name (e.g. <code>sqlmap</code>, <code>nmap</code>)</td></tr>
+              <tr><td><code>observation</code></td><td>string</td><td>for coach</td><td>Observed port/service outputs to analyze</td></tr>
+              <tr><td><code>graphNode</code></td><td>object</td><td>for save_graph</td><td>Decision node ({ id, type, label, from })</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Engagement identifier</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">quantum_tool</span><span class="qs-tool-desc">Multi-branch/persona reasoning aid with parameterized quantum rotation gates and state collapse</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>setup | step | pause | continue | modify | reset | status | get_state | analyze</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td>✓</td><td>Quantum session identifier</td></tr>
+              <tr><td><code>presetCircuit</code></td><td>enum</td><td>for setup</td><td>superposition_exploration | adversarial_debate | consensus_alignment | grover_amplification | entangled_verification</td></tr>
+              <tr><td><code>gates</code></td><td>array&lt;{qubit, column, gate, param}&gt;</td><td>for modify</td><td>Custom quantum rotation operations (H, X, Y, Z, RY, RZ, CNOT, CZ, SWAP, MEASURE)</td></tr>
+              <tr><td><code>query</code></td><td>string</td><td>for analyze</td><td>Hypothesis synthesis question</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">vision_tool</span><span class="qs-tool-desc">Analyze a local image or screenshot via a vision-capable free model</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>image_path</code></td><td>string</td><td>✓</td><td><code>file:///</code> URI to local image file</td></tr>
+              <tr><td><code>prompt</code></td><td>string</td><td></td><td>Analysis prompt accompanying the image</td></tr>
+              <tr><td><code>model</code></td><td>string</td><td></td><td>Explicit vision model override</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace boundary check</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">execute_skill</span><span class="qs-tool-desc">Execute a prompt using a specialized local skill's instructions + reference files</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>skill</code></td><td>string</td><td>✓</td><td>Skill directory name under <code>.free-llm-mcp/skills/</code></td></tr>
+              <tr><td><code>input</code></td><td>string</td><td>✓</td><td>Task prompt/instruction to run</td></tr>
+              <tr><td><code>model</code></td><td>string</td><td></td><td>Explicit model override</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace root directory</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">load_skill_prompt</span><span class="qs-tool-desc">Search or dynamically load skill system prompts from catalog</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>type</code></td><td>enum: load | search</td><td>✓</td><td>Action type</td></tr>
+              <tr><td><code>name</code></td><td>string</td><td>if load</td><td>Skill name/ID to load</td></tr>
+              <tr><td><code>keywords</code></td><td>string[]</td><td>if search</td><td>Search terms against skills catalog</td></tr>
+              <tr><td><code>workspaceDir</code></td><td>string</td><td></td><td>Target workspace directory</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">manage_memory</span><span class="qs-tool-desc">Search, list, query, or clear long-term workspace vector memory & wiki notes</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum: search | list | stats | clear</td><td>✓</td><td>Action operation</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace directory root</td></tr>
+              <tr><td><code>query</code></td><td>string</td><td>for search</td><td>Search terms for semantic lookup</td></tr>
+              <tr><td><code>limit</code></td><td>number</td><td></td><td>Maximum returned items (default 10)</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">store_workspace_skill</span><span class="qs-tool-desc">Persist structured knowledge, decisions, and scripts into workspace</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>name</code></td><td>string</td><td>✓</td><td>Lowercase-hyphenated skill name</td></tr>
+              <tr><td><code>description</code></td><td>string</td><td>✓</td><td>Summary description</td></tr>
+              <tr><td><code>what</code></td><td>string[]</td><td>✓</td><td>Key decisions / implementation details</td></tr>
+              <tr><td><code>why</code></td><td>string</td><td></td><td>Design rationale</td></tr>
+              <tr><td><code>files</code></td><td>string[]</td><td></td><td>Referenced file paths</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace root directory</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">index_workspace</span><span class="qs-tool-desc">Proactively index workspace files for vector embeddings and TF-IDF search</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>workspace_root</code></td><td>string</td><td>✓</td><td>Target workspace directory</td></tr>
+              <tr><td><code>force</code></td><td>boolean</td><td></td><td>Re-index even if an existing index cache is present</td></tr>
             </tbody>
           </table>
         </details>
@@ -589,103 +721,16 @@
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td><code>providerId</code></td><td>string</td><td>✓</td><td>e.g. <code>"groq"</code>, <code>"gemini"</code>, <code>"openrouter"</code></td></tr>
+              <tr><td><code>providerId</code></td><td>string</td><td>✓</td><td>e.g. <code>"groq"</code>, <code>"gemini"</code>, <code>"openrouter"</code>, <code>"cerebras"</code></td></tr>
             </tbody>
           </table>
         </details>
         <details class="qs-tool-card">
-          <summary><span class="qs-tool-name">vision_tool</span><span class="qs-tool-desc">Analyze a local image via a vision-capable model</span></summary>
+          <summary><span class="qs-tool-name">get_token_stats</span><span class="qs-tool-desc">Real-time per-provider token/request usage and global server totals</span></summary>
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td><code>workspace_root</code></td><td>string</td><td>✓</td><td>Image path is validated to stay inside this boundary</td></tr>
-              <tr><td><code>image_path</code></td><td>string</td><td>✓</td><td><code>file:///</code> URI to a local image</td></tr>
-              <tr><td><code>prompt</code></td><td>string</td><td></td><td>Text prompt accompanying the image</td></tr>
-              <tr><td><code>model</code></td><td>string</td><td></td><td>Explicit vision model override</td></tr>
-            </tbody>
-          </table>
-        </details>
-        <details class="qs-tool-card">
-          <summary><span class="qs-tool-name">execute_skill</span><span class="qs-tool-desc">Run a prompt using a local skill's instructions + reference files</span></summary>
-          <table class="qs-table">
-            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
-            <tbody>
-              <tr><td><code>skill</code></td><td>string</td><td>✓</td><td>Skill directory name under <code>.free-llm-mcp/skills/</code></td></tr>
-              <tr><td><code>input</code></td><td>string</td><td>✓</td><td>The prompt/instruction to run</td></tr>
-              <tr><td><code>model</code></td><td>string</td><td></td><td>Explicit model override</td></tr>
-              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Absolute path to the project root</td></tr>
-              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Resume a specific session</td></tr>
-            </tbody>
-          </table>
-        </details>
-        <details class="qs-tool-card">
-          <summary><span class="qs-tool-name">load_skill_prompt</span><span class="qs-tool-desc">Search or download a skill from the remote skills index</span></summary>
-          <table class="qs-table">
-            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
-            <tbody>
-              <tr><td><code>type</code></td><td>enum: load | search</td><td>✓</td><td></td></tr>
-              <tr><td><code>name</code></td><td>string</td><td>if <code>load</code></td><td>Skill name/ID to download</td></tr>
-              <tr><td><code>keywords</code></td><td>string[]</td><td>if <code>search</code></td><td>Search terms against the skills index</td></tr>
-              <tr><td><code>workspaceDir</code></td><td>string</td><td></td><td>Where to save the skill locally</td></tr>
-            </tbody>
-          </table>
-        </details>
-        <details class="qs-tool-card">
-          <summary><span class="qs-tool-name">manage_memory</span><span class="qs-tool-desc">Search, list, or clear persistent workspace memory / wiki</span></summary>
-          <table class="qs-table">
-            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
-            <tbody>
-              <tr><td><code>action</code></td><td>enum: search | list | stats | clear</td><td>✓</td><td></td></tr>
-              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Absolute path to the workspace</td></tr>
-              <tr><td><code>query</code></td><td>string</td><td>for search</td><td></td></tr>
-              <tr><td><code>limit</code></td><td>number</td><td></td><td>Default 10, for search</td></tr>
-            </tbody>
-          </table>
-        </details>
-        <details class="qs-tool-card">
-          <summary><span class="qs-tool-name">store_workspace_skill</span><span class="qs-tool-desc">Persist structured knowledge/scripts into the workspace</span></summary>
-          <table class="qs-table">
-            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
-            <tbody>
-              <tr><td><code>name</code></td><td>string</td><td>✓</td><td>Lowercase-hyphenated skill name</td></tr>
-              <tr><td><code>description</code></td><td>string</td><td>✓</td><td></td></tr>
-              <tr><td><code>what</code></td><td>string[]</td><td>✓</td><td>Key decisions/implementation details</td></tr>
-              <tr><td><code>workspace_root</code></td><td>string</td><td>✓</td><td></td></tr>
-              <tr><td><code>why</code></td><td>string</td><td></td><td>Rationale</td></tr>
-              <tr><td><code>files</code></td><td>string[]</td><td></td><td>Referenced file paths</td></tr>
-            </tbody>
-          </table>
-        </details>
-        <details class="qs-tool-card">
-          <summary><span class="qs-tool-name">index_workspace</span><span class="qs-tool-desc">Proactively index workspace files for semantic search</span></summary>
-          <table class="qs-table">
-            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
-            <tbody>
-              <tr><td><code>workspace_root</code></td><td>string</td><td>✓</td><td></td></tr>
-              <tr><td><code>force</code></td><td>boolean</td><td></td><td>Re-index even if a cache is present</td></tr>
-            </tbody>
-          </table>
-        </details>
-        <details class="qs-tool-card">
-          <summary><span class="qs-tool-name">browser_tool</span><span class="qs-tool-desc">100% Dynamic browser scraper with pausable checkpoints, 0-token script memory & flat schema exports</span></summary>
-          <table class="qs-table">
-            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
-            <tbody>
-              <tr><td><code>action</code></td><td>string</td><td></td><td>scrape | list_checkpoints</td></tr>
-              <tr><td><code>url</code></td><td>string</td><td>✓</td><td>Target website URL (or list_checkpoints)</td></tr>
-              <tr><td><code>userInstructions</code></td><td>string</td><td></td><td>Dynamic extraction prompt</td></tr>
-              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Unique session identifier for checkpointing</td></tr>
-            </tbody>
-          </table>
-        </details>
-        <details class="qs-tool-card">
-          <summary><span class="qs-tool-name">cyber_tool</span><span class="qs-tool-desc">Isolated security tool registry & wiki manager for security binaries (sqlmap, nmap, ffuf)</span></summary>
-          <table class="qs-table">
-            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
-            <tbody>
-              <tr><td><code>action</code></td><td>string</td><td>✓</td><td>list_tools | get_tool | register_tool | wiki_lookup</td></tr>
-              <tr><td><code>toolName</code></td><td>string</td><td></td><td>Security tool name (e.g. sqlmap)</td></tr>
-              <tr><td><code>githubUrl</code></td><td>string</td><td></td><td>GitHub URL for registration</td></tr>
+              <tr><td colspan="4">No parameters required. Returns detailed live and persisted metrics across all registered providers.</td></tr>
             </tbody>
           </table>
         </details>
@@ -851,6 +896,26 @@
     </section>
 
   </main>
+
+  <!-- ─── Tool Documentation Modal ──────────────────────────────── -->
+  <div id="tool-docs-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-tool-title" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span id="modal-tool-icon" style="font-size:1.4rem;">📖</span>
+          <div>
+            <h3 id="modal-tool-title" class="modal-title">Tool Documentation</h3>
+            <span id="modal-tool-tag" class="badge badge-purple" style="font-size:0.65rem;">Reference</span>
+          </div>
+        </div>
+        <button id="modal-close-btn" class="modal-close-btn" aria-label="Close modal">&times;</button>
+      </div>
+      <div class="modal-when-to-use" id="modal-when-to-use"></div>
+      <div class="modal-body" id="modal-tool-body">
+        <div class="conv-empty">Loading documentation…</div>
+      </div>
+    </div>
+  </div>
 
   <footer class="footer">
     Free LLM APIs MCP Dashboard &bull; Built with ❤️ &bull;

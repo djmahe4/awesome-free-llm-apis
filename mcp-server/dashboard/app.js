@@ -578,18 +578,75 @@ async function ensureModels() {
   } catch {}
 }
 
+const TOOL_WHEN_TO_USE = {
+  use_free_llm: '<strong>When to use:</strong> General LLM chat, conversational Q&A, research syntheses, single-step tasks, and multi-step agentic planning with memory recall.',
+  vision_tool: '<strong>When to use:</strong> Visual UI testing, screenshot analysis, diagram parsing, and multimodal inspection using vision-capable free models.',
+  coding_agents: '<strong>When to use:</strong> Multi-file refactoring, autonomous feature implementation, VectorStore RAG repo discovery, and AST/polyglot compiler checks (OMP-pattern).',
+  local_llm_patch: '<strong>When to use:</strong> Targeted single-file edits and bugfixes powered completely offline by local Ollama coding models with 0 API cost.',
+  browser_tool: '<strong>When to use:</strong> Real browser automation, DOM exploration, private API discovery & replay, interactive clicking, and strict tabular data extraction.',
+  cyber_tool: '<strong>When to use:</strong> Educational CTF coaching, security tool registry lookups, and persistent decision-graph building during authorized lab exercises.',
+  quantum_tool: '<strong>When to use:</strong> Multi-branch reasoning, exploring diverging hypotheses with parameterized quantum rotation gates and state collapse.',
+  execute_skill: '<strong>When to use:</strong> Running grounded prompts specialized with full SKILL.md rules, references, and operational constraints.',
+  load_skill_prompt: '<strong>When to use:</strong> Dynamically searching and loading skill system prompts from the local repository or bundled Hermes catalog.',
+  manage_memory: '<strong>When to use:</strong> Inspecting, querying, searching, and managing long-term workspace vector memory, ADRs, and persistent wiki notes.',
+  index_workspace: '<strong>When to use:</strong> Proactively building or refreshing the local vector database index across all code and documentation files.',
+  store_workspace_skill: '<strong>When to use:</strong> Explicitly saving new architectural skills and workflow records following the skill-writer schema.',
+  validate_provider: '<strong>When to use:</strong> Verifying API keys, connection latency, and health status for individual LLM providers.',
+  get_token_stats: '<strong>When to use:</strong> Auditing quota limits, remaining daily requests, and real-time RPM/RPD telemetry across all providers.'
+};
+
+async function showToolDocsModal(tool) {
+  const modal = document.getElementById('tool-docs-modal');
+  const title = document.getElementById('modal-tool-title');
+  const icon = document.getElementById('modal-tool-icon');
+  const tag = document.getElementById('modal-tool-tag');
+  const whenToUse = document.getElementById('modal-when-to-use');
+  const body = document.getElementById('modal-tool-body');
+  const closeBtn = document.getElementById('modal-close-btn');
+
+  if (!modal) return;
+
+  title.textContent = tool.label;
+  icon.textContent = tool.icon || '📖';
+  tag.textContent = tool.tag || 'Tool Reference';
+  whenToUse.innerHTML = TOOL_WHEN_TO_USE[tool.id] || `<strong>When to use:</strong> Specialized automation tool for ${tool.label}.`;
+  body.innerHTML = '<div class="conv-empty"><span class="spinner"></span> Loading documentation…</div>';
+
+  modal.style.display = 'flex';
+
+  const closeModal = () => {
+    modal.style.display = 'none';
+    document.removeEventListener('keydown', onKey);
+  };
+
+  const onKey = (e) => {
+    if (e.key === 'Escape') closeModal();
+  };
+
+  closeBtn.onclick = closeModal;
+  modal.onclick = (e) => {
+    if (e.target === modal) closeModal();
+  };
+  document.addEventListener('keydown', onKey);
+
+  try {
+    const r = await fetch(`/api/tool-docs/${tool.id}`);
+    const d = await r.json();
+    const md = d.markdown || `# ${tool.label}\n\nNo detailed documentation found for \`${tool.id}\`.`;
+    body.innerHTML = await renderMarkdown(md);
+  } catch (err) {
+    body.innerHTML = `<div style="color:var(--accent-red);padding:12px;">Failed to load documentation: ${esc(err.message)}</div>`;
+  }
+}
+
 function renderToolForm(tool) {
-  pgToolTitle.innerHTML = `${tool.label} <button id="tool-info-btn" title="View tool docs" style="background:none;border:none;cursor:pointer;font-size:0.9rem;color:var(--text-muted);margin-left:8px;">ⓘ</button>`;
+  pgToolTitle.innerHTML = `${tool.label} <button id="tool-info-btn" title="View tool docs & usage guide" style="background:none;border:none;cursor:pointer;font-size:0.95rem;color:var(--accent-cyan);margin-left:8px;transition:transform 0.15s ease;" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">ⓘ</button>`;
   const infoBtn = document.getElementById('tool-info-btn');
   if (infoBtn) {
-    infoBtn.onclick = async () => {
-      try {
-        const r = await fetch(`/api/tool-docs/${tool.id}`);
-        const d = await r.json();
-        alert(d.markdown || 'No documentation found');
-      } catch (err) {
-        alert('Failed to load documentation');
-      }
+    infoBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showToolDocsModal(tool);
     };
   }
   pgForm.innerHTML = '';
@@ -634,6 +691,12 @@ function renderToolForm(tool) {
       const ta = document.createElement('textarea');
       ta.id = `pg-field-${f.id}`;
       ta.placeholder = f.placeholder || '';
+      ta.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          pgRunBtn.click();
+        }
+      });
       wrap.appendChild(ta);
 
     } else if (f.type === 'select') {
@@ -1397,8 +1460,20 @@ pgRunBtn.addEventListener('click', async () => {
     }
   }
 
-  const userText = params.prompt || params.query || params.input
-    || `[${activeTool.label}] ${JSON.stringify(params).slice(0, 120)}`;
+  function extractHumanReadableUserText(toolId, p) {
+    if (p.prompt) return p.prompt;
+    if (p.goal) return `🎯 ${p.goal}`;
+    if (p.instruction) return `🩹 ${p.instruction}`;
+    if (p.input) return p.input;
+    if (p.query) return `🔍 ${p.query}`;
+    if (p.userInstructions) return `🌐 ${p.userInstructions}${p.url ? ` (${p.url})` : ''}`;
+    if (p.url) return `🌐 [${p.action || 'browse'}] ${p.url}`;
+    if (p.observation) return `🛡️ [Observation] ${p.observation}`;
+    if (p.action) return `⚡ Action: ${p.action}${p.toolName ? ` (${p.toolName})` : ''}${p.sessionId ? ` [${p.sessionId}]` : ''}`;
+    return `[${activeTool.label}] ${JSON.stringify(p).slice(0, 120)}`;
+  }
+
+  const userText = extractHumanReadableUserText(activeTool.id, params);
   const ts = Date.now();
   const userTurn = { role: 'user', tool: activeTool.id, content: userText, ts };
 
@@ -2107,9 +2182,12 @@ async function runSteeringEvaluation() {
   const workspaceRoot = (steeringWorkspaceInput?.value || '.').trim();
   const isAgentic = !!steeringAgenticToggle?.checked;
 
-  const userKeywords = rawKeywordsStr
-    ? rawKeywordsStr.split(',').map(k => k.trim().toLowerCase()).filter(Boolean)
-    : [];
+  let userKeywords = [];
+  if (rawKeywordsStr) {
+    // Sanitize bracketed array or quoted syntax: ["arxiv", "physics"] -> arxiv, physics
+    const cleaned = rawKeywordsStr.replace(/[\[\]"'`]/g, '');
+    userKeywords = cleaned.split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+  }
 
   if (btnRunSteeringEval) {
     btnRunSteeringEval.disabled = true;
@@ -2231,12 +2309,34 @@ async function runSteeringEvaluation() {
     if (isAgentic || st.subtaskContext) {
       if (steeringSubtaskView) {
         steeringSubtaskView.style.display = 'block';
-        const subId = st.subtaskContext?.id || 'subtask-eval-1';
+        const subId = st.subtaskContext?.id || 'subtask-1';
         const subTitle = st.subtaskContext?.title || (query ? `Execute task: ${query}` : 'System prompt steering subtask');
+        const plan = st.planDetails;
+        let planHtml = '';
+
+        if (plan && plan.phases && plan.phases.length > 0) {
+          const phasesList = plan.phases.map(p => `
+            <div style="font-size:.72rem;color:var(--text-secondary);display:flex;align-items:center;gap:6px;padding:3px 0;">
+              <span class="badge ${p.phase === 1 ? 'badge-purple' : 'badge-gray'}" style="font-size:.62rem;">Phase ${p.phase}</span>
+              <span><strong>${esc(p.id)}:</strong> ${esc(p.task)}</span>
+              <span class="badge badge-cyan" style="font-size:.6rem;margin-left:auto;">lane: ${esc(p.lane || 'sequential')}</span>
+            </div>
+          `).join('');
+
+          planHtml = `
+            <div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(236,72,153,.3);">
+              <div style="font-size:.7rem;font-weight:700;color:var(--text-muted);margin-bottom:4px;">DECOMPOSED TASK EXECUTION PLAN (${plan.phases.length} subtasks):</div>
+              ${phasesList}
+            </div>`;
+        }
+
         steeringSubtaskView.innerHTML = `
-          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(236,72,153,.12);border:1px solid rgba(236,72,153,.35);border-radius:6px;font-size:.76rem;color:#f472b6;">
-            <span class="badge" style="background:#ec4899;color:#fff;font-weight:700;font-size:.68rem;">AGENTIC SUBTASK ACTIVE</span>
-            <span>Subtask ID: <code>${esc(subId)}</code> &bull; <strong>${esc(subTitle)}</strong></span>
+          <div style="padding:10px 12px;background:rgba(236,72,153,.12);border:1px solid rgba(236,72,153,.35);border-radius:6px;font-size:.76rem;color:#f472b6;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="badge" style="background:#ec4899;color:#fff;font-weight:700;font-size:.68rem;">AGENTIC PLANNER ACTIVE</span>
+              <span>Active Subtask: <code>${esc(subId)}</code> &bull; <strong>${esc(subTitle)}</strong></span>
+            </div>
+            ${planHtml}
           </div>`;
       }
     } else {

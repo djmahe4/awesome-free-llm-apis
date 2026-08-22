@@ -650,8 +650,8 @@ export function createExpressApp(): express.Express {
           let docContent = '';
           for (const p of candidatePaths) {
             try {
-              if (await fs.pathExists(p)) {
-                docContent = await fs.readFile(p, 'utf-8');
+              if (fs.existsSync(p)) {
+                docContent = fs.readFileSync(p, 'utf-8');
                 break;
               }
             } catch {}
@@ -763,7 +763,7 @@ export function createExpressApp(): express.Express {
                 if (!stat.isDirectory()) return null;
                 let msgCount = 0; let lastTs = stat.mtimeMs;
                 try {
-                  const log: any[] = JSON.parse(await fsp.readFile(path.join(full, 'chat-log.json'), 'utf-8'));
+                  const log: any[] = await readNormalizedChatLog(full);
                   msgCount = log.length;
                   if (log.length) lastTs = Math.max(lastTs, log[log.length - 1].ts || 0);
                 } catch {}
@@ -777,7 +777,7 @@ export function createExpressApp(): express.Express {
           if (!sessions.some(s => s.id === '__no_ws__')) {
             let msgCount = 0; let lastTs = Date.now() - 365 * 24 * 60 * 60 * 1000; // 1 year ago default
             try {
-              const log: any[] = JSON.parse(await fsp.readFile(path.join(projectsBase, '__no_ws__', 'chat-log.json'), 'utf-8'));
+              const log: any[] = await readNormalizedChatLog(path.join(projectsBase, '__no_ws__'));
               msgCount = log.length;
               if (log.length) lastTs = log[log.length - 1].ts || Date.now();
             } catch {}
@@ -913,9 +913,16 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const { query = '', keywords = [], agentic = false, workspaceRoot = process.cwd(), sessionId = 'steering-eval-session', subtask } = req.body || {};
-          const userKeywords = Array.isArray(keywords)
-            ? keywords
-            : String(keywords).split(',').map((k: string) => k.trim()).filter(Boolean);
+          let rawKeywordsList: string[] = [];
+          if (Array.isArray(keywords)) {
+            rawKeywordsList = keywords.map(k => String(k));
+          } else if (typeof keywords === 'string') {
+            rawKeywordsList = keywords.split(',');
+          }
+
+          const userKeywords = rawKeywordsList
+            .map(k => k.replace(/[\[\]"'`]/g, '').trim().toLowerCase())
+            .filter(Boolean);
 
           const effectiveKeywords = userKeywords.length > 0
             ? userKeywords
@@ -945,16 +952,32 @@ export function createExpressApp(): express.Express {
           const { WorkspaceContextMiddleware } = await import('./pipeline/middlewares/WorkspaceContextMiddleware.js');
           const middleware = new WorkspaceContextMiddleware();
 
-          const hasValidSubtask = subtask && typeof subtask === 'object' && !Array.isArray(subtask) &&
-            ((typeof subtask.id === 'string' && subtask.id.trim().length > 0) ||
-             (typeof subtask.title === 'string' && subtask.title.trim().length > 0));
+          let planDetails: any = null;
+          let subtaskObj: any = null;
 
-          const subtaskObj = hasValidSubtask
-            ? {
-                id: (typeof subtask.id === 'string' && subtask.id.trim()) || 'subtask-eval-1',
-                title: (typeof subtask.title === 'string' && subtask.title.trim()) || `Execute task: ${query || 'System prompt steering test'}`
-              }
-            : (agentic ? { id: 'subtask-eval-1', title: `Execute task: ${query || 'System prompt steering test'}` } : null);
+          if (agentic) {
+            const { decomposeGoal } = await import('./pipeline/middlewares/AgenticMiddleware.js');
+            const { buildExecutionPlan } = await import('./pipeline/middlewares/task-classifier.js');
+            const { tasks: steps } = decomposeGoal(query || 'Execute multi-step task');
+            const plan = await buildExecutionPlan(steps, resolvedWsRoot);
+            planDetails = {
+              userBrief: plan.userBrief,
+              phases: [
+                ...(plan.phase1 || []).map((t: any) => ({ ...t, phase: 1 })),
+                ...((plan as any).phase2 || []).map((t: any) => ({ ...t, phase: 2 }))
+              ]
+            };
+            const firstTask = planDetails.phases[0];
+            subtaskObj = {
+              id: firstTask?.id || 'subtask-1',
+              title: firstTask?.task || query || 'Execute initial subtask'
+            };
+          } else if (subtask && typeof subtask === 'object' && !Array.isArray(subtask)) {
+            subtaskObj = {
+              id: (typeof subtask.id === 'string' && subtask.id.trim()) || 'subtask-eval-1',
+              title: (typeof subtask.title === 'string' && subtask.title.trim()) || `Execute task: ${query || 'System prompt steering test'}`
+            };
+          }
 
           const context: any = {
             request: {
@@ -974,15 +997,25 @@ export function createExpressApp(): express.Express {
           const steeringTelemetry = context.telemetry?.steeringTelemetry || {};
           steeringTelemetry.matchedSections = promptEval.matchedSections;
 
-          // Assemble the real subtask prompt if in agentic mode so users see exactly what the model receives
-          let assembledPrompt = promptEval.prompt;
+          // Assemble the complete 5-layer system prompt (including L2 ADR/Memory, L3 Wiki, L4 Grep/Workspace, L5 Prompts)
+          let assembledPrompt = await getIntelligentSystemPrompt({
+            context: agentic ? (subtaskObj?.title || query) : query,
+            keywords: effectiveKeywords,
+            memory: context.telemetry?.memoryContext,
+            workspace: context.telemetry?.grepContext,
+            workspaceRoot: resolvedWsRoot,
+            isSubtask: agentic
+          });
+
           if (agentic && subtaskObj) {
             const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${subtaskObj.title}\n- **Subtask ID**: ${subtaskObj.id}\n\nStrictly focus on this subtask using the tools provided.`;
-            assembledPrompt = `${promptEval.prompt}${taskHeader}`;
+            assembledPrompt = `${assembledPrompt}${taskHeader}`;
           }
           steeringTelemetry.fullAssembledSystemPrompt = assembledPrompt;
+          steeringTelemetry.planDetails = planDetails;
+          steeringTelemetry.subtaskContext = subtaskObj;
 
-          const sysTokens = promptEval.totalPromptTokens || steeringTelemetry.memoryLayers?.sysPromptTokens || Math.ceil(assembledPrompt.length / 3.8);
+          const sysTokens = Math.ceil(assembledPrompt.length / 3.8);
           if (!steeringTelemetry.memoryLayers) steeringTelemetry.memoryLayers = {};
           steeringTelemetry.memoryLayers.sysPromptTokens = sysTokens;
           steeringTelemetry.memoryLayers.totalContextTokens = (steeringTelemetry.memoryLayers.shortTermTokens || 0) + (steeringTelemetry.memoryLayers.longTermTokens || 0) + (steeringTelemetry.memoryLayers.wikiTokens || 0) + (steeringTelemetry.memoryLayers.grepTokens || 0) + (steeringTelemetry.memoryLayers.groundingTokens || 0) + sysTokens;

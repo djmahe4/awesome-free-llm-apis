@@ -165,8 +165,12 @@ function assertSafe(fullPath: string, workspaceRoot: string): void {
 //   TS/JS  → ts-morph getPreEmitDiagnostics (syntactic + semantic)
 
 function getPythonCmd(): string | null {
-  if (hasCommand('python3')) return 'python3';
-  if (hasCommand('python')) return 'python';
+  for (const cmd of ['python', 'python3']) {
+    try {
+      const res = spawnSync(cmd, ['--version'], { encoding: 'utf-8', timeout: 3000, windowsHide: true });
+      if (res.status === 0) return cmd;
+    } catch { /* try next */ }
+  }
   return null;
 }
 
@@ -174,16 +178,25 @@ function runPythonAstCheck(filePath: string, content: string): DiagnosticResult[
   const pyCmd = getPythonCmd();
   if (!pyCmd) return [];
 
-  const result = spawnSync(pyCmd, ['-c', `
+  const script = `
 import ast, sys, json
 try:
-    ast.parse(sys.stdin.read(), filename="${path.basename(filePath)}")
-    print(json.dumps([]))
+    ast.parse(sys.stdin.read(), filename=${JSON.stringify(path.basename(filePath))})
+    print("[]")
 except SyntaxError as e:
     print(json.dumps([{"line": e.lineno, "col": e.offset, "msg": str(e.msg)}]))
-`], { input: content, encoding: 'utf-8', timeout: 10_000 });
+except Exception as e:
+    print(json.dumps([{"line": 1, "col": 1, "msg": str(e)}]))
+`;
 
-  if (result.error || result.status === null) return [];
+  const result = spawnSync(pyCmd, ['-c', script], {
+    input: content,
+    encoding: 'utf-8',
+    timeout: 10_000,
+    windowsHide: true,
+  });
+
+  if (result.error || !result.stdout) return [];
 
   try {
     const parsed: Array<{ line?: number; col?: number; msg: string }> = JSON.parse(result.stdout || '[]');

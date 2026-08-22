@@ -125,11 +125,9 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'deepseek-ai/deepseek-v4-flash-0731': { capability: 0.90, contextWindow: 128000, isCoder: true },
     'z-ai/glm-5.2': { capability: 0.96, contextWindow: 128000, isReasoning: true, isCoder: true },
     'moonshotai/kimi-k3': { capability: 0.92, contextWindow: 128000, isReasoning: true },
-    'meta/llama-3.1-8b-instruct': { capability: 0.75, contextWindow: 128000 },
     'tencent/hy3:free': { capability: 0.88, contextWindow: 128000, isReasoning: true },
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free': { capability: 0.90, contextWindow: 256000, isVision: true, isReasoning: true },
-    'minimax-m2.7': { capability: 0.85, contextWindow: 128000 },
-    'groq/compound-mini': { capability: 0.84, contextWindow: 128000 },
+    'minimax-m2.7': { capability: 0.85, contextWindow: 128000 }
 };
 
 /**

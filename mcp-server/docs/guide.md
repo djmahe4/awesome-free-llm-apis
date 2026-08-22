@@ -331,3 +331,47 @@ Before applying proposed diffs, the pipeline executes syntax and semantic checks
 - **Go**: Subprocess `go vet` with structured error regex capture.
 - **Rust**: Subprocess `rustc --error-format json` compiler diagnostic engine.
 
+---
+
+## 13. Agentic vs. Single-Pass Prompt Steering & DAG Planner (v1.2.0)
+
+The Steering Studio in the web dashboard provides live simulation of the 5-layer composite system prompt and subtask decomposition DAG without consuming external LLM API tokens.
+
+### 🔄 Multi-Pass Agentic vs. Single-Pass Execution
+
+```mermaid
+flowchart TD
+    A[Incoming User Request] --> B{agentic: true?}
+    
+    B -- No: Single-Pass --> C[Broad System Prompt Engine]
+    C --> C1[12,000 char prompt budget]
+    C1 --> C2[Selects up to 7 prompt.json modular sections]
+    C2 --> C3[Includes meta-planning & architectural sections]
+    C3 --> C4[Injects full L1-L5 memory layers]
+    
+    B -- Yes: Multi-Pass Agentic --> D{Input Format}
+    D -- Structured DSL --> D1[Extract lines with >, -, 1.]
+    D -- Normal Unstructured Text --> D2[Decompose via SubtaskDecomposer]
+    D1 --> E[buildExecutionPlan DAG Classifier]
+    D2 --> E
+    E --> F[Partition into Phase 1 & Phase 2 Lanes]
+    F --> G[Scope System Prompt to Active Phase 1 Subtask]
+    G --> H[8,000 char prompt budget]
+    H --> I[Zero-out meta-planning sections: reader_contract, momentum_ratchets]
+    I --> J[Inject ## 📝 CURRENT SUBTASK execution boundary]
+```
+
+### 🧠 The 5-Layer System Memory Hierarchy
+
+The prompt assembler organizes context into five isolated, priority-ordered layers:
+1. **L1 — Short-Term Session Memory**: Recent conversation turns, immediate user instructions, and live subtask execution state.
+2. **L2 — Long-Term Memory & ADR Decisions**: Project preferences, verified technical rules, and architectural decision records located in `.free-llm-mcp/wiki/adr/`.
+3. **L3 — Workspace Wiki Knowledge**: Curated technical documentation, module catalogues, and domain guides in `.free-llm-mcp/wiki/`.
+4. **L4 — Dynamic Code Snippets (Born-Rule Grep)**: Relevance-scored directory trees, folder snippets, and symbol definitions extracted via Born-Rule keyword grep.
+5. **L5 — Modular Skill & Prompt Steering**: Targeted sections dynamically extracted from `prompt.json` based on TF-IDF relevance scoring.
+
+### 🛡️ Context Bloat Guard & Execution Guarantees
+- **Safe Phase Mapping**: `ExecutionPlan` phase arrays (`phase1`, `phase2`) are guarded with optional chaining to prevent runtime `TypeError` on single-task unstructured inputs.
+- **Zero LLM Leakage**: The steering simulation uses deterministic graph heuristics, regex parsing, and in-memory TF-IDF scoring — consuming **0 API tokens** and making **0 external model calls**.
+
+
