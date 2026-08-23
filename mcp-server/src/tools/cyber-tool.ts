@@ -712,10 +712,10 @@ export async function cyberTool(input: CyberToolInput) {
                         const topDorks = recommendedDorks.slice(0, 3);
                         for (const dork of topDorks) {
                             try {
-                                const res = await provider.search(dork, { limit: 3 });
+                                const res = await provider.search(dork, 3);
                                 searchResults.push({
                                     query: dork,
-                                    results: res.results || []
+                                    results: Array.isArray(res) ? res : []
                                 });
                             } catch (e: any) {
                                 searchResults.push({
