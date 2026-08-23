@@ -1437,6 +1437,7 @@ pgAgenticToggle?.addEventListener('change', updateWorkspaceUI);
 
 // ─── Conversation list panel ──────────────────────────────────────
 let _convSearchTimer = null;
+const pgNewConvBtn = document.getElementById('pg-new-conv-btn');
 
 async function refreshConvList(filter = '') {
   if (!convList) return;
@@ -1446,7 +1447,11 @@ async function refreshConvList(filter = '') {
     const { sessions } = await r.json();
     const list = Array.isArray(sessions) ? sessions : [];
     const q = filter.toLowerCase().trim();
-    const filtered = q ? list.filter(s => s.id.toLowerCase().includes(q)) : list;
+    const filtered = q ? list.filter(s => 
+      s.id.toLowerCase().includes(q) || 
+      (s.name && s.name.toLowerCase().includes(q)) || 
+      (s.workspace && s.workspace.toLowerCase().includes(q))
+    ) : list;
     renderConvList(filtered);
   } catch {}
 }
@@ -1459,12 +1464,12 @@ function renderConvList(sessions) {
   }
   convList.innerHTML = sessions.map(s => {
     const isActive = s.id === activeSessionId;
-    const label = s.id === '__no_ws__' ? '⚡ One-shot' : s.id;
+    const displayName = s.name || (s.id === '__no_ws__' ? '⚡ One-shot [none]' : s.id);
     const sub = s.msgCount ? `${s.msgCount} msgs` : 'empty';
     const ago = s.lastTs ? timeAgo(s.lastTs) : '';
-    return `<div class="conv-item${isActive ? ' active' : ''}" data-sid="${esc(s.id)}" title="${esc(s.id)}">
-      <div class="conv-item-label">${esc(label)}</div>
-      <div class="conv-item-meta"><span>${sub}</span><span>${ago}</span></div>
+    return `<div class="conv-item${isActive ? ' active' : ''}" data-sid="${esc(s.id)}" title="${esc(s.id)} — ${esc(displayName)}">
+      <div class="conv-item-label" style="font-weight:500; font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(displayName)}</div>
+      <div class="conv-item-meta" style="font-size:.68rem; opacity:.75;"><span>${sub}</span><span>${ago}</span></div>
     </div>`;
   }).join('');
 
@@ -1486,6 +1491,30 @@ function renderConvList(sessions) {
     });
   });
 }
+
+// ─── + New Conversation Handler ──────────────────────────────────
+pgNewConvBtn?.addEventListener('click', async () => {
+  const ws = pgWorkspace.value.trim();
+  try {
+    const r = await fetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace: ws })
+    });
+    if (r.ok) {
+      const d = await r.json();
+      activeSessionId = d.sessionId;
+      chatHistory = [];
+      rebuildChatLog();
+      refreshConvList();
+      pgStatus.textContent = '✓ New chat ready';
+      pgStatus.style.color = 'var(--accent-green)';
+      setTimeout(() => { pgStatus.textContent = ''; }, 2000);
+    }
+  } catch (err) {
+    console.error('Failed to create new session:', err);
+  }
+});
 
 function timeAgo(ts) {
   const diff = Date.now() - ts;
@@ -1569,16 +1598,12 @@ pgRunBtn.addEventListener('click', async () => {
   if (ws) {
     params.workspace_root = ws;
     params.sessionId = activeSessionId;
-    // Agentic is an explicit opt-in (see the checkbox next to the workspace input) —
-    // it used to be auto-enabled just because a workspace was set, which forced every
-    // grounded request (including simple pdf://file:// reference lookups, which already
-    // work via workspace memory/context alone) through subtask decomposition. That
-    // decomposition has no way to distinguish injected reference content from
-    // user-authored task lists, so it could shred a resolved PDF-context block into
-    // bogus one-line "subtasks".
     if (activeTool.id === 'use_free_llm' && pgAgenticToggle?.checked) {
       params.agentic = true;
     }
+  } else {
+    // Unify multi-tool retrospective session tracking even in one-shot / standalone sessions
+    params.sessionId = activeSessionId;
   }
 
   function extractHumanReadableUserText(toolId, p) {
@@ -1596,7 +1621,7 @@ pgRunBtn.addEventListener('click', async () => {
 
   const userText = extractHumanReadableUserText(activeTool.id, params);
   const ts = Date.now();
-  const userTurn = { role: 'user', tool: activeTool.id, content: userText, ts };
+  const userTurn = { role: 'user', tool: activeTool.id, content: userText, ts, workspaceRoot: ws || undefined };
 
   chatHistory.push(userTurn);
   saveTurn(activeSessionId, userTurn);
@@ -1617,11 +1642,6 @@ pgRunBtn.addEventListener('click', async () => {
       if (log.length !== chatHistory.length) {
         chatHistory = log;
         rebuildChatLog();
-        // rebuildChatLog() wipes chatLog.innerHTML, which destroys the spinner
-        // bubble appended below — without re-adding it, the spinner silently
-        // disappears (and the later spinnerEl.replaceWith() below becomes a
-        // no-op on a detached node) as soon as any mid-flight server-side turn
-        // (a tool call, an agentic subtask) lands before the final response.
         if (!requestDone) {
           spinnerEl = addSpinnerBubble(activeTool.id);
         }
@@ -1637,7 +1657,7 @@ pgRunBtn.addEventListener('click', async () => {
 
     if (data.ok === false || !r.ok) {
       const errMsg = data.error || 'Unknown error';
-      const errTurn = { role: 'error', tool: activeTool.id, content: errMsg, ts: replyTs };
+      const errTurn = { role: 'error', tool: activeTool.id, content: errMsg, ts: replyTs, workspaceRoot: ws || undefined };
       chatHistory.push(errTurn);
       saveTurn(activeSessionId, errTurn);
       spinnerEl.replaceWith(addErrorBubbleEl(errMsg, activeTool.id, replyTs));
@@ -1650,7 +1670,7 @@ pgRunBtn.addEventListener('click', async () => {
         : (typeof nestedText === 'string' ? nestedText : JSON.stringify(rawText, null, 2));
       const respModel = data.result?.model;
       const respProvider = data.result?.provider;
-      const assistantTurn = { role: 'assistant', tool: activeTool.id, content, latencyMs, ts: replyTs, model: respModel, provider: respProvider };
+      const assistantTurn = { role: 'assistant', tool: activeTool.id, content, latencyMs, ts: replyTs, model: respModel, provider: respProvider, workspaceRoot: ws || undefined };
       chatHistory.push(assistantTurn);
       saveTurn(activeSessionId, assistantTurn);
       replaceSpinnerWithResponse(spinnerEl, html, latencyMs, activeTool.id, replyTs, true, respModel, respProvider);
@@ -1663,7 +1683,7 @@ pgRunBtn.addEventListener('click', async () => {
     }
   } catch (err) {
     const errMsg = `Network error: ${err.message}`;
-    const errTurn = { role: 'error', tool: activeTool.id, content: errMsg, ts: Date.now() };
+    const errTurn = { role: 'error', tool: activeTool.id, content: errMsg, ts: Date.now(), workspaceRoot: ws || undefined };
     chatHistory.push(errTurn);
     saveTurn(activeSessionId, errTurn);
     spinnerEl.replaceWith(addErrorBubbleEl(errMsg, activeTool.id, Date.now()));
@@ -1678,7 +1698,7 @@ pgRunBtn.addEventListener('click', async () => {
     } catch {}
     pgRunBtn.disabled = false;
     pgRunBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send`;
-    refreshConvList(); // update message count in sidebar
+    refreshConvList(); // update message count and title in sidebar
     attachments = [];
     renderAttachments();
   }

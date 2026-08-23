@@ -1,9 +1,28 @@
 # Changelog
 
-## v1.1.0 – Autonomous Coding Agents (OMP Pattern), Local LLM Patching, OSINT Cyber Recon, VectorStore TF-IDF RAG & Dashboard Tool Docs (August 2026)
+## v1.1.0 – Autonomous Coding Agents (OMP Pattern), Intelligent Session Naming, Local LLM Patching, OSINT Cyber Recon, VectorStore TF-IDF RAG & Dashboard Tool Docs (August 2026)
 
 ### 🚀 Highlights
 
+- **Intelligent Conversation Auto-Naming (`extractIntelligentTitle`)** (`src/utils/ChatLogger.ts`, `src/server.ts`):
+  - Automatically extracts 3–6 word human-readable conversation titles from the first tool output or assistant response, stripping markdown headers, emojis, code blocks, and conversational filler (`"Sure! I can help you with that..."`).
+  - Appends the workspace unique identifier in brackets: `[<workspace-basename>]` or `[none]` (e.g. `"Vulnerability Assessment Report [awesome-free-llm-apis]"` or `"Quantum State Superposition [none]"`).
+  - Automatically writes title metadata to `name.txt` upon completing the first turn, or dynamically derives on-the-fly when reading logs.
+- **Multi-Tool Session Retrospection & Continuation**:
+  - Unified `sessionId` inheritance and tracking across all 14 tools (`use_free_llm`, `cyber_tool`, `quantum_tool`, `vision_tool`, `coding_agents`, `execute_skill`, `local_llm_patch`).
+  - Running different tools consecutively now threads into a coherent project timeline in the chat log rather than fragmented, isolated sessions.
+- **Explicit `+ New Chat` Creation & Renaming Endpoints** (`dashboard/index.html`, `dashboard/app.js`, `src/server.ts`):
+  - Added `+ New` button directly in the Conversations sidebar header (`#pg-new-conv-btn`) for starting isolated sessions on demand.
+  - Added `POST /api/sessions` (supports creating fresh sessions with workspace bindings) and `PATCH /api/sessions/:sessionId` (supports conversation renaming).
+  - Eliminates silent session orphaning caused by typing or modifying workspace path input strings.
+- **Human-Centric Conversation Sidebar & Multi-Field Fuzzy Search**:
+  - Conversation list displays real titles as the primary label with message count and relative timestamps (`just now`, `5m ago`).
+  - Search bar (`#pg-conv-search`) fuzzy-filters simultaneously across **title**, **workspace name**, and **session ID**.
+- **Probabilistic Quantum Scoring Matrix & Telemetry Model Routing** (`docs/guide.md`):
+  - Elevated `TextRouterMiddleware` model selection into a formalized state vector collapse model $|\Psi\rangle = \sum \alpha_i |M_i\rangle$ driven by provider health telemetry, task alignment weights, and context capacity thresholds.
+- **Complete 14-Tool Reference Suite & Beginner Overview**:
+  - Overhauled Dashboard Info (`ℹ️`) Modal with structured `🌟 Beginner Overview` + `🛠️ Subtools & Actions` guides.
+  - Fully synchronized OSINT passive DNS recon action across docs, tool schemas, and dashboard surfaces.
 - **`coding_agents` (OMP 5-Step Loop Architecture)** (`src/tools/coding-agents.ts`):
   - Implemented the official OMP (`omp.sh`) 5-step file modification lifecycle: `Enumerate` ➔ `Locate (RAG)` ➔ `Anchor ([PATH#TAG])` ➔ `Edit / ast_edit` ➔ `LSP / AST Diagnostics Verification`.
   - In-memory AST symbol extraction and TypeScript syntax diagnostic trapping (`parseDiagnostics`) to catch and reject syntax errors before disk mutations occur.

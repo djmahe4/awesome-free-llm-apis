@@ -207,10 +207,11 @@
           
           <!-- Conversations Card -->
           <div class="card" style="margin-bottom:12px; display:flex; flex-direction:column; max-height:280px; min-height:160px;">
-            <div class="card-header" style="padding:10px 16px; flex-shrink:0;">
+            <div class="card-header" style="padding:10px 16px; flex-shrink:0; display:flex; justify-content:space-between; align-items:center;">
               <span class="card-title" style="font-size:.82rem; display:flex; align-items:center; gap:6px;">
                 <span>🗂</span> Conversations
               </span>
+              <button id="pg-new-conv-btn" class="btn btn-primary btn-sm" style="padding:2px 8px; font-size:.7rem; display:flex; align-items:center; gap:3px;" title="Start a new conversation">+ New</button>
             </div>
             <div class="card-body" style="padding:8px; display:flex; flex-direction:column; overflow:hidden; flex:1; min-height:0;">
               <input type="text" id="pg-conv-search" placeholder="Search sessions..." style="font-size:.75rem; padding:6px 10px; margin-bottom:8px; border-radius:6px; flex-shrink:0; width:100%; border:1px solid var(--glass-border); background:rgba(255,255,255,0.03); color:var(--text-primary);">

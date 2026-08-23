@@ -736,56 +736,165 @@ export function createExpressApp(): express.Express {
         }
       });
 
-      // List all agentic sessions with chat-log metadata (msgCount, lastTs)
+      // In-memory cache for /api/sessions (5-second TTL) to eliminate O(N) readdir scans on rapid dashboard refreshes
+      let sessionsCache: { data: any; expiresAt: number } | null = null;
+
+      // Invalidation helper for session cache
+      const invalidateSessionsCache = () => { sessionsCache = null; };
+
+      // List all agentic sessions with chat-log metadata (name, workspace, msgCount, lastTs)
       app.get('/api/sessions', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
+          if (sessionsCache && Date.now() < sessionsCache.expiresAt) {
+            return res.json(sessionsCache.data);
+          }
+
           const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
           try { await fsp.access(projectsBase); } catch { return res.json({ sessions: [] }); }
 
-          // Denylist: exclude test/benchmark/fixture directories that pollute the sidebar
-          const DENYLIST_PREFIXES = ['test-', 'bench-', 'smoke-', 'stress-', 'full-stress-', 'e2e-', 'simulation-', 'study-'];
+          // Denylist: strictly exclude all test/benchmark/fixture/vitest/mock directories that pollute the dashboard
+          const DENYLIST_PREFIXES = [
+            'test-', 'bench-', 'smoke-', 'stress-', 'full-stress-', 'e2e-', 
+            'simulation-', 'study-', 'vitest-', 'fixture-', 'mock-', 'tmp-'
+          ];
 
           const entries = await fsp.readdir(projectsBase);
           const MAX_CONCURRENT = 20;
-          type SessionMeta = { id: string; msgCount: number; lastTs: number };
+          type SessionMeta = { id: string; name?: string; workspace?: string; msgCount: number; lastTs: number };
           const sessions: SessionMeta[] = [];
 
           for (let i = 0; i < entries.length; i += MAX_CONCURRENT) {
             const batch = entries.slice(i, i + MAX_CONCURRENT);
             const results = await Promise.all(batch.map(async d => {
               // Skip test/benchmark artifact directories
-              if (DENYLIST_PREFIXES.some(prefix => d.startsWith(prefix))) return null;
+              if (DENYLIST_PREFIXES.some(prefix => d.toLowerCase().startsWith(prefix))) return null;
               const full = path.resolve(projectsBase, d);
               if (path.dirname(full) !== path.resolve(projectsBase)) return null;
               try {
                 const stat = await fsp.stat(full);
                 if (!stat.isDirectory()) return null;
                 let msgCount = 0; let lastTs = stat.mtimeMs;
+                let sessionName: string | undefined = undefined;
+                let workspace: string | undefined = undefined;
+
+                try {
+                  const nameTxt = await fsp.readFile(path.join(full, 'name.txt'), 'utf-8');
+                  if (nameTxt.trim()) sessionName = nameTxt.trim();
+                } catch {}
+
+                try {
+                  const knowledgeContent = await fsp.readFile(path.join(full, 'knowledge.md'), 'utf-8');
+                  const match = knowledgeContent.match(/<!-- workspace: (.*?) -->/);
+                  if (match) workspace = match[1].trim();
+                } catch {}
+
                 try {
                   const log: any[] = await readNormalizedChatLog(full);
                   msgCount = log.length;
-                  if (log.length) lastTs = Math.max(lastTs, log[log.length - 1].ts || 0);
+                  if (log.length) {
+                    lastTs = Math.max(lastTs, log[log.length - 1].ts || 0);
+                    // If no explicit name.txt, derive from first assistant / tool turn
+                    if (!sessionName) {
+                      const firstResp = log.find((t: any) => t.role === 'assistant' || t.role === 'tool_call' || t.payload?.role === 'assistant');
+                      const contentToTitle = firstResp?.content || firstResp?.payload?.content || firstResp?.payload?.result;
+                      if (contentToTitle) {
+                        const { extractIntelligentTitle } = await import('./utils/ChatLogger.js');
+                        sessionName = extractIntelligentTitle(typeof contentToTitle === 'string' ? contentToTitle : JSON.stringify(contentToTitle), workspace);
+                      }
+                    }
+                  }
                 } catch {}
-                return { id: d, msgCount, lastTs } as SessionMeta;
+
+                return { id: d, name: sessionName, workspace, msgCount, lastTs } as SessionMeta;
               } catch { return null; }
             }));
             sessions.push(...results.filter((s): s is SessionMeta => s !== null));
           }
 
-          // Ensure __no_ws__ is always present in the list
+          // Ensure __no_ws__ is present in the list
           if (!sessions.some(s => s.id === '__no_ws__')) {
-            let msgCount = 0; let lastTs = Date.now() - 365 * 24 * 60 * 60 * 1000; // 1 year ago default
+            let msgCount = 0; let lastTs = Date.now();
+            let sessionName: string | undefined = undefined;
+            try {
+              const fullNoWs = path.join(projectsBase, '__no_ws__');
+              const nameTxt = await fsp.readFile(path.join(fullNoWs, 'name.txt'), 'utf-8');
+              if (nameTxt.trim()) sessionName = nameTxt.trim();
+            } catch {}
             try {
               const log: any[] = await readNormalizedChatLog(path.join(projectsBase, '__no_ws__'));
               msgCount = log.length;
               if (log.length) lastTs = log[log.length - 1].ts || Date.now();
             } catch {}
-            sessions.push({ id: '__no_ws__', msgCount, lastTs });
+            sessions.push({ id: '__no_ws__', name: sessionName || '⚡ One-shot [none]', msgCount, lastTs });
           }
 
           sessions.sort((a, b) => b.lastTs - a.lastTs);
-          res.json({ sessions });
+          const responsePayload = { sessions };
+          sessionsCache = { data: responsePayload, expiresAt: Date.now() + 5000 };
+          res.json(responsePayload);
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // POST /api/sessions — Explicitly create a new conversation session
+      app.post('/api/sessions', express.json({ limit: '16kb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          invalidateSessionsCache();
+          const { workspace = '', name = '' } = req.body || {};
+          const wsTrimmed = (workspace || '').toString().trim();
+          let baseHash = 'conv';
+          if (wsTrimmed) {
+            const hash = await new WorkspaceScanner(process.cwd()).getWorkspaceHash(wsTrimmed);
+            baseHash = `ws-${hash.substring(0, 12)}`;
+          } else {
+            baseHash = `session-${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`;
+          }
+
+          // Append random suffix so users can have multiple distinct sessions on the same workspace
+          const suffix = Math.random().toString(36).substring(2, 7);
+          const sessionId = `${baseHash}-${suffix}`;
+
+          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectDir = path.resolve(projectsBase, sessionId);
+          await fsp.mkdir(projectDir, { recursive: true });
+
+          const wsTag = wsTrimmed ? `[${path.basename(wsTrimmed.replace(/[/\\]+$/, '')) || 'ws'}]` : '[none]';
+          const defaultName = name ? `${name.trim()} ${wsTag}` : `New Conversation ${wsTag}`;
+          await fsp.writeFile(path.join(projectDir, 'name.txt'), defaultName, 'utf-8');
+
+          if (wsTrimmed) {
+            await fsp.writeFile(path.join(projectDir, 'knowledge.md'), `<!-- workspace: ${wsTrimmed} -->\n# Session Memory\n`, 'utf-8');
+          }
+
+          res.json({ success: true, sessionId, name: defaultName, workspace: wsTrimmed });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // PATCH /api/sessions/:sessionId — Rename conversation
+      app.patch('/api/sessions/:sessionId', express.json({ limit: '8kb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          invalidateSessionsCache();
+          const { sessionId } = req.params;
+          if (!/^(?!\.\.?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
+            return res.status(400).json({ error: 'Invalid sessionId' });
+          }
+          const { name = '' } = req.body || {};
+          if (!name || typeof name !== 'string') {
+            return res.status(400).json({ error: 'Name is required' });
+          }
+
+          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectDir = path.resolve(projectsBase, sessionId);
+          await fsp.mkdir(projectDir, { recursive: true });
+          await fsp.writeFile(path.join(projectDir, 'name.txt'), name.trim(), 'utf-8');
+
+          res.json({ success: true, sessionId, name: name.trim() });
         } catch (err) {
           res.status(500).json({ error: String(err) });
         }
@@ -1091,6 +1200,7 @@ export function createExpressApp(): express.Express {
       app.post('/api/chat-log/:sessionId', express.json({ limit: '512kb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
+          invalidateSessionsCache();
           const { sessionId } = req.params;
           if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
             return res.status(400).json({ error: 'Invalid sessionId' });
@@ -1111,6 +1221,7 @@ export function createExpressApp(): express.Express {
       app.delete('/api/chat-log/:sessionId', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
+          invalidateSessionsCache();
           const { sessionId } = req.params;
           if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
             return res.status(400).json({ error: 'Invalid sessionId' });
