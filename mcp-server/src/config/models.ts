@@ -47,6 +47,7 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'codestral-latest': { capability: 0.88, contextWindow: 128000, isCoder: true },
     'poolside/laguna-s-2.1:free': { capability: 0.82, contextWindow: 128000, isCoder: true },
     'kilo-auto/free': { capability: 0.85, contextWindow: 128000, isCoder: true },
+    'liquid/lfm-2.5-2.6b:free': { capability: 0.80, contextWindow: 32000 },
 
     // A-Tier & Multimodal Models
     'qwen/qwen3.6-27b': { capability: 0.88, contextWindow: 131072, isVision: true },
@@ -161,7 +162,10 @@ export function isCoderModel(modelId: string): boolean {
 /**
  * Check if a model supports vision/multimodal input
  */
-export function isVisionSupported(modelId: string): boolean {
+export function isVisionSupported(modelId: string, capabilities?: string[]): boolean {
+    if (Array.isArray(capabilities) && capabilities.includes('vision')) {
+        return true;
+    }
     const meta = MODEL_METADATA[modelId];
     if (meta?.isVision !== undefined) {
         return meta.isVision;

@@ -135,8 +135,13 @@ export class ContentAddressableStore {
     }
 
     const restoredFiles: string[] = [];
+    const resolvedRoot = path.resolve(workspaceRoot);
     for (const [relPath, content] of Object.entries(restoredMap)) {
-      const fullPath = path.resolve(workspaceRoot, relPath);
+      const fullPath = path.resolve(resolvedRoot, relPath);
+      // Path traversal guard: must stay within workspaceRoot
+      if (!fullPath.startsWith(resolvedRoot + path.sep) && fullPath !== resolvedRoot) {
+        throw new Error(`Security error: invalid relative path in CAS checkpoint: ${relPath}`);
+      }
       // Write atomically via temp file
       const tmpPath = `${fullPath}.cas-restore.tmp`;
       await fs.ensureDir(path.dirname(fullPath));

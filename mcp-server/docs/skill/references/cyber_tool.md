@@ -25,21 +25,32 @@
 | `save_graph` | `graphNode`, `sessionId` | `edge` | Appends a structured decision node (`hypothesis` \| `action` \| `finding` \| `deadend`) to the engagement tree. |
 | `load_graph` | `sessionId` | — | Loads the full decision graph for visualization in the Dashboard Wiki tab. |
 | `tool_memory` | `memoryOp` (`read` \| `write`) | `note`, `toolName` | Reads or appends persistent tactical notes associated with a tool or engagement. |
-| `osint` | `target` | `osintType` (`domain` \| `ip` \| `username` \| `all`) | Performs passive DNS/infrastructure recon (A, AAAA, MX, TXT, NS), suggests tailored search dorks, and automatically saves Markdown OSINT reports to the cyber wiki. |
+| `osint` | `target` | `osintType` (`domain` \| `ip` \| `username` \| `all`), `autoSearch`, `allowPrivateIps` | Performs passive DNS/infrastructure recon (A, AAAA, MX, TXT, NS), suggests tailored search dorks, optionally executes automated multi-step search recon via SearchProvider fallback, and persists reports to the cyber wiki with built-in SSRF guards. |
+
+---
+
+## 🔒 Security Policy & Target Scope Guidelines
+
+> [!NOTE]
+> **SSRF Protection & Restricted Target Scopes:**
+> - **ALWAYS** attempt reconnaissance or socket queries against internal cloud metadata endpoints (`http://169.254.169.254/latest/meta-data/`) or link-local addresses (`169.254.0.0/16`).
+> - Querying cloud instance metadata risks exposing temporary IAM credentials, secret tokens, bootstrap configurations, and private VPC parameters.
+> - `cyber_tool` strictly blocks `169.254.169.254`, loopback addresses (`localhost`, `127.0.0.1`, `::1`), and RFC1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) by default unless explicit authorization via `allowPrivateIps: true` is configured.
 
 ---
 
 ## 🛠️ Invocation Examples
 
-### 1. Passive Domain OSINT & Recon Dork Generation
+### 1. Passive Domain OSINT with Multi-Step Search Recon
 ```json
 {
   "action": "osint",
   "target": "example.com",
-  "osintType": "domain"
+  "osintType": "domain",
+  "autoSearch": true
 }
 ```
-*Returns resolved IPv4/IPv6 addresses, full DNS record map, certificate transparency/dork queries, and creates wiki note `osint/example_com`.*
+*Returns resolved IPv4/IPv6 addresses, full DNS record map, certificate transparency/dork queries, executes fallback search recon, and creates wiki note `osint/example_com`.*
 
 ### 2. Coach Next Steps Given Nmap Scan Results
 ```json

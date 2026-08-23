@@ -469,7 +469,11 @@ const TOOLS = [
     id: 'cyber_tool', label: 'cyber_tool', icon: '🛡️',
     tag: 'Cyber Security',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory'] },
+      { id: 'action', label: 'Action', type: 'select', options: ['osint', 'list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory'] },
+      { id: 'target', label: 'Target (for osint)', type: 'text', placeholder: 'example.com or johndoe' },
+      { id: 'osintType', label: 'OSINT Type (for osint)', type: 'select', options: ['all', 'domain', 'ip', 'username'] },
+      { id: 'autoSearch', label: 'Auto Search Recon Dorks (osint)', type: 'select', options: ['false', 'true'] },
+      { id: 'allowPrivateIps', label: 'Allow Private / Internal IPs (SSRF Bypass)', type: 'select', options: ['false', 'true'] },
       { id: 'toolName', label: 'Tool Name', type: 'text', placeholder: 'sqlmap' },
       { id: 'githubUrl', label: 'GitHub URL (for register)', type: 'text', placeholder: 'https://github.com/sqlmapproject/sqlmap' },
       { id: 'sessionId', label: 'Session / CTF ID', type: 'text', placeholder: 'ctf-challenge-1' },
@@ -638,12 +642,15 @@ const TOOL_WHEN_TO_USE = {
     <div>Security coaching assistant, passive OSINT reconnaissance engine, and decision-graph tracker for authorized CTF challenges and educational penetration testing.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
-      <li><code>action: "osint"</code> — Passive DNS & infrastructure reconnaissance (A, AAAA, MX, TXT, NS), search dork generation, and automatic Markdown report creation in the cyber wiki.</li>
+      <li><code>action: "osint"</code> — Passive DNS & infrastructure reconnaissance (A, AAAA, MX, TXT, NS), search dork generation, and automatic Markdown report creation in the cyber wiki. Supports <code>autoSearch: true</code> for automated multi-step search recon.</li>
       <li><code>action: "lookup"</code> / <code>"get_tool"</code> — Query CLI flags and syntax for security tools (nmap, sqlmap, gobuster, etc.).</li>
       <li><code>action: "coach"</code> — Receive strategic next test steps based on target recon findings.</li>
       <li><code>action: "save_graph"</code> & <code>"load_graph"</code> — Create or visualize hypothesis nodes on the persistent engagement graph.</li>
       <li><code>action: "tool_memory"</code> — Read or persist tactical execution notes.</li>
-    </ul>`,
+    </ul>
+    <div style="margin-top:6px;font-size:0.72rem;color:var(--accent-red,#ff5555);">
+      🛡️ <b>Security Boundary:</b> Requests to cloud metadata (<code>169.254.169.254</code>) and private subnets are blocked by default to prevent SSRF.
+    </div>`,
 
   quantum_tool: `
     <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>

@@ -831,7 +831,7 @@ export class TextRouterMiddleware implements Middleware {
                 capacityFactor = 0.5;
             }
 
-            // Penalize small/weak models (< 8B or cap < 0.6) for heavy prompts (> 8000 tokens)
+            // Penalize small/weak models (capability < 0.70) for heavy prompts (> 8000 tokens)
             if (estimatedTokens > 8000 && cap < 0.7) {
                 capacityFactor *= 0.3;
             }

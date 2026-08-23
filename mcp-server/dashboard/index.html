@@ -625,14 +625,19 @@
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
               <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>osint | list_tools | get_tool | register_tool | wiki_lookup | learn | coach | save_graph | load_graph | tool_memory</td></tr>
-              <tr><td><code>target</code></td><td>string</td><td>for osint</td><td>Target domain/host to analyze (e.g. <code>example.com</code>)</td></tr>
-              <tr><td><code>osintType</code></td><td>enum</td><td></td><td><code>domain</code> | <code>ip</code> | <code>username</code> | <code>all</code></td></tr>
+              <tr><td><code>target</code></td><td>string</td><td>for osint</td><td>Target domain, host, or username (e.g. <code>example.com</code>, <code>johndoe</code>)</td></tr>
+              <tr><td><code>osintType</code></td><td>enum</td><td></td><td><code>all</code> | <code>domain</code> | <code>ip</code> | <code>username</code></td></tr>
+              <tr><td><code>autoSearch</code></td><td>boolean</td><td></td><td>Execute top generated reconnaissance dorks via SearchProvider fallback</td></tr>
+              <tr><td><code>allowPrivateIps</code></td><td>boolean</td><td></td><td>Bypass SSRF link-local & private subnet filter for internal testing</td></tr>
               <tr><td><code>toolName</code></td><td>string</td><td>for get_tool/register</td><td>Security binary name (e.g. <code>sqlmap</code>, <code>nmap</code>)</td></tr>
               <tr><td><code>observation</code></td><td>string</td><td>for coach</td><td>Observed port/service outputs to analyze</td></tr>
               <tr><td><code>graphNode</code></td><td>object</td><td>for save_graph</td><td>Decision node ({ id, type, label, from })</td></tr>
               <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Engagement identifier</td></tr>
             </tbody>
           </table>
+          <div style="margin-top:8px;font-size:0.75rem;color:var(--accent-red,#ff5555);">
+            🛡️ <b>SSRF Policy:</b> Target resolution automatically blocks <code>169.254.169.254</code> (cloud metadata), <code>localhost</code>, and private RFC1918 subnets unless <code>allowPrivateIps: true</code>.
+          </div>
         </details>
         <details class="qs-tool-card">
           <summary><span class="qs-tool-name">quantum_tool</span><span class="qs-tool-desc">Multi-branch/persona reasoning aid with parameterized quantum rotation gates and state collapse</span></summary>

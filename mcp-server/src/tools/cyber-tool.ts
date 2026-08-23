@@ -16,6 +16,9 @@ export interface CyberToolInput {
     // osint
     target?: string;
     osintType?: 'domain' | 'ip' | 'username' | 'all';
+    autoSearch?: boolean;
+    autoScrape?: boolean;
+    allowPrivateIps?: boolean;
     // learn / coach
     goal?: string;
     level?: 'beginner' | 'intermediate' | 'advanced';
@@ -614,61 +617,154 @@ export async function cyberTool(input: CyberToolInput) {
                 };
             }
         } else if (action === 'osint') {
-            if (!input.target) throw new Error('target is required for osint action');
-            const target = input.target.trim();
+            const target = (input.target || '').trim();
+            if (!target) throw new Error('target is required and cannot be empty for osint action');
+            const osintType = input.osintType || 'all';
+
+            // SSRF & Target Scope Guard: Validate target is not private loopback / metadata / internal subnet unless explicitly allowed
+            const isPrivateOrLoopback = (host: string): boolean => {
+                let lower = host.toLowerCase().trim();
+                // Strip bracketed IPv6 e.g. [::1]:80 or [::1]
+                if (lower.startsWith('[') && lower.includes(']')) {
+                    lower = lower.substring(1, lower.indexOf(']'));
+                } else if (lower.includes(':') && !lower.includes('::') && lower.split(':').length === 2) {
+                    // Standard IPv4 with port e.g. 127.0.0.1:8080 or localhost:3000
+                    lower = lower.split(':')[0];
+                }
+                if (lower === 'localhost' || lower === '127.0.0.1' || lower === '::1' || lower === '::' || lower === '0.0.0.0' || lower === '169.254.169.254') return true;
+                if (/^(0|10|127|169\.254|172\.(1[6-9]|2[0-9]|3[0-1])|192\.168)\./.test(lower)) return true;
+                if (lower.startsWith('fe80:') || lower.startsWith('fc00:') || lower.startsWith('fd00:')) return true;
+                return false;
+            };
+
+            if (!input.allowPrivateIps && isPrivateOrLoopback(target)) {
+                throw new Error(`Security error: invalid or private target rejected to prevent SSRF: ${target}`);
+            }
+
             const dns = await import('node:dns/promises');
 
             const dnsReport: Record<string, any> = {};
             const resolvedIps: string[] = [];
 
-            try {
-                const a = await dns.resolve4(target).catch(() => []);
-                if (a.length) { dnsReport.A = a; resolvedIps.push(...a); }
-            } catch {}
+            const shouldQueryDns = osintType === 'domain' || osintType === 'ip' || osintType === 'all';
 
-            try {
-                const aaaa = await dns.resolve6(target).catch(() => []);
-                if (aaaa.length) { dnsReport.AAAA = aaaa; resolvedIps.push(...aaaa); }
-            } catch {}
+            // Helper to wrap DNS promise with timeout guard (default 3000ms)
+            const withDnsTimeout = <T>(p: Promise<T>, ms = 3000): Promise<T> =>
+                Promise.race([
+                    p,
+                    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('DNS Timeout')), ms))
+                ]);
 
-            try {
-                const mx = await dns.resolveMx(target).catch(() => []);
-                if (mx.length) dnsReport.MX = mx;
-            } catch {}
+            if (shouldQueryDns) {
+                try {
+                    const a = await withDnsTimeout(dns.resolve4(target)).catch(() => []);
+                    if (a.length) { dnsReport.A = a; resolvedIps.push(...a); }
+                } catch {}
 
-            try {
-                const txt = await dns.resolveTxt(target).catch(() => []);
-                if (txt.length) dnsReport.TXT = txt;
-            } catch {}
+                try {
+                    const aaaa = await withDnsTimeout(dns.resolve6(target)).catch(() => []);
+                    if (aaaa.length) { dnsReport.AAAA = aaaa; resolvedIps.push(...aaaa); }
+                } catch {}
 
-            try {
-                const ns = await dns.resolveNs(target).catch(() => []);
-                if (ns.length) dnsReport.NS = ns;
-            } catch {}
+                try {
+                    const mx = await withDnsTimeout(dns.resolveMx(target)).catch(() => []);
+                    if (mx.length) dnsReport.MX = mx;
+                } catch {}
 
-            const recommendedDorks = [
-                `site:${target} filetype:pdf`,
-                `site:${target} inurl:admin | inurl:login`,
-                `site:github.com "${target}"`,
-                `site:linkedin.com/in/ "${target}"`,
-                `site:crt.sh/?q=${target}`
-            ];
+                try {
+                    const txt = await withDnsTimeout(dns.resolveTxt(target)).catch(() => []);
+                    if (txt.length) dnsReport.TXT = txt;
+                } catch {}
+
+                try {
+                    const ns = await withDnsTimeout(dns.resolveNs(target)).catch(() => []);
+                    if (ns.length) dnsReport.NS = ns;
+                } catch {}
+            }
+
+            const recommendedDorks: string[] = [];
+            if (osintType === 'username') {
+                recommendedDorks.push(
+                    `site:github.com "${target}"`,
+                    `site:twitter.com "${target}" | site:x.com "${target}"`,
+                    `site:linkedin.com/in/ "${target}"`,
+                    `site:reddit.com/user/ "${target}"`
+                );
+            } else {
+                recommendedDorks.push(
+                    `site:${target} filetype:pdf`,
+                    `site:${target} inurl:admin | inurl:login`,
+                    `site:github.com "${target}"`,
+                    `site:linkedin.com/in/ "${target}"`,
+                    `site:crt.sh/?q=${target}`
+                );
+            }
+
+            // Multi-step Automated Reconnaissance: execute dorks via SearchProviderRegistry if requested
+            let searchResults: any[] = [];
+            if (input.autoSearch) {
+                try {
+                    const { SearchProviderRegistry } = await import('../search/registry.js');
+                    const searchRegistry = SearchProviderRegistry.getInstance();
+                    const available = searchRegistry.getAvailableProviders();
+                    const provider = available[0] || searchRegistry.getProviders()[0];
+                    if (provider) {
+                        const topDorks = recommendedDorks.slice(0, 3);
+                        for (const dork of topDorks) {
+                            try {
+                                const res = await provider.search(dork, { limit: 3 });
+                                searchResults.push({
+                                    query: dork,
+                                    results: res.results || []
+                                });
+                            } catch (e: any) {
+                                searchResults.push({
+                                    query: dork,
+                                    error: String(e?.message || e),
+                                    results: []
+                                });
+                            }
+                        }
+                    }
+                } catch {}
+            }
+
+            // Build high-level summary
+            const summaryParts: string[] = [];
+            if (shouldQueryDns) {
+                summaryParts.push(`Resolved ${resolvedIps.length} IP(s)`);
+                if (dnsReport.MX?.length) summaryParts.push(`${dnsReport.MX.length} Mail Server(s)`);
+                if (dnsReport.TXT?.length) summaryParts.push(`${dnsReport.TXT.length} TXT/SPF Record(s)`);
+                if (dnsReport.NS?.length) summaryParts.push(`${dnsReport.NS.length} Nameserver(s)`);
+            } else {
+                summaryParts.push(`Target type: ${osintType}`);
+            }
+            summaryParts.push(`${recommendedDorks.length} Recon Dorks formulated`);
+            if (input.autoSearch) {
+                summaryParts.push(`${searchResults.reduce((acc, s) => acc + (s.results?.length || 0), 0)} search result(s) gathered`);
+            }
+            const summary = summaryParts.join(' | ');
 
             const wiki = new WikiMemory(CYBER_WIKI_NAMESPACE);
             const wikiContent = `# OSINT Report for ${target}\n\n`
                 + `**Timestamp**: ${new Date().toISOString()}\n\n`
+                + `**Summary**: ${summary}\n\n`
                 + `## Resolved IPs\n${resolvedIps.map(ip => `- ${ip}`).join('\n') || '- None'}\n\n`
                 + `## DNS Records\n\`\`\`json\n${JSON.stringify(dnsReport, null, 2)}\n\`\`\`\n\n`
-                + `## Recommended Google / Recon Dorks\n${recommendedDorks.map(d => `- \`${d}\``).join('\n')}\n`;
+                + `## Recommended Google / Recon Dorks\n${recommendedDorks.map(d => `- \`${d}\``).join('\n')}\n\n`
+                + (input.autoSearch ? `## Automated Search Results\n\`\`\`json\n${JSON.stringify(searchResults, null, 2)}\n\`\`\`\n` : '');
 
             await safeWikiWrite(wiki, `osint/${target.replace(/[^\w.-]/g, '_')}`, wikiContent, ['cyber', 'osint']);
 
             result = {
                 success: true,
                 target,
+                osintType,
                 resolvedIps,
                 dns: dnsReport,
                 recommendedDorks,
+                summary,
+                ...(input.autoSearch ? { searchResults } : {}),
                 timestamp: new Date().toISOString()
             };
         } else {

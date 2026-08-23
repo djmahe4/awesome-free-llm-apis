@@ -59,7 +59,6 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
   },
   openrouter: {
     added: [
-      'nvidia/nemotron-3.5-content-safety:free',
       'nvidia/nemotron-3-ultra-550b-a55b:free',
       'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
       'nvidia/nemotron-3-super-120b-a12b:free',
