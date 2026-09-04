@@ -205,40 +205,63 @@ export async function loadSkillPrompt(input: LoadSkillPromptInput): Promise<Load
   }
 
     if (input.type === 'load') {
-      const name = input.name || '';
+      const name = input.name || input.skill || '';
+
+      // 1. Hermes check first: if bundled Hermes skill exists, load it immediately
+      if (input.source !== 'agentic-awesome') {
+        const hermesFound = await findHermesSkill(name);
+        if (hermesFound) {
+          const loaded = await loadHermesSkillContent(hermesFound.id);
+          if (loaded) {
+            return {
+              success: true,
+              skill: hermesFound.name,
+              description: hermesFound.description,
+              prompt: loaded.content,
+            };
+          }
+        }
+      }
+
+      // 2. Otherwise search and load from local/remote agentic-awesome index
       const index = await getLocalSkillsIndex(configDir);
       const found = index.find(e => normalize(e.name || '') === normalize(name) || normalize(e.id || '') === normalize(name));
 
       if (!found || !found.path) {
         const keywords = name.split(/\s+/).filter(k => k.length > 0);
         const results = await searchSkills(keywords, configDir);
-        return { success: true, skills: results };
+        if (results.length > 0) {
+          return { success: true, skills: results };
+        }
+        // Fallback to Hermes search if local index search yields no results
+        const hermesResults = await searchHermesSkills(keywords);
+        return { success: true, skills: hermesResults.map(s => ({ name: s.name, description: s.description })) };
       }
 
-       const skillDir = path.join(configDir, 'skills', found.id || found.name || name);
-       await fs.mkdir(skillDir, { recursive: true });
+      const skillDir = path.join(configDir, 'skills', found.id || found.name || name);
+      await fs.mkdir(skillDir, { recursive: true });
 
-       const skillPath = found.path.replace(/^\/+/, '');
-       const files = await fetchAllFiles(skillPath);
+      const skillPath = found.path.replace(/^\/+/, '');
+      const files = await fetchAllFiles(skillPath);
 
-       for (const file of files) {
-         const relativePath = file.path.replace(`${skillPath}/`, '');
-         const fullPath = path.join(skillDir, relativePath);
-         await fs.mkdir(path.dirname(fullPath), { recursive: true });
-         await fs.writeFile(fullPath, file.content);
-       }
+      for (const file of files) {
+        const relativePath = file.path.replace(`${skillPath}/`, '');
+        const fullPath = path.join(skillDir, relativePath);
+        await fs.mkdir(path.dirname(fullPath), { recursive: true });
+        await fs.writeFile(fullPath, file.content);
+      }
 
-       const skillMdPath = path.join(skillDir, 'SKILL.md');
-       const skillMdContent = await fs.readFile(skillMdPath, 'utf-8');
+      const skillMdPath = path.join(skillDir, 'SKILL.md');
+      const skillMdContent = await fs.readFile(skillMdPath, 'utf-8');
 
-       return { 
-         success: true, 
-         filePath: skillMdPath,
-         skill: found.name || found.id || name,
-         description: found.description || '',
-         prompt: skillMdContent
-       };
-     }
+      return { 
+        success: true, 
+        filePath: skillMdPath,
+        skill: found.name || found.id || name,
+        description: found.description || '',
+        prompt: skillMdContent
+      };
+    }
 
     return { success: false, error: 'Invalid type. Use "load" or "search".' };
   } catch (error: any) {

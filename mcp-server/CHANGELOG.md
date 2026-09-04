@@ -38,11 +38,14 @@
 - **Upstream Catalog Sync & Deprecation Harmonization**:
   - Deprecated Cerebras and updated live model metadata across NVIDIA NIM, Groq, Kilo Code, and OpenRouter.
 
-### Next updates (→ v1.2.0)
+### Next updates (→ v1.1.1)
 
 - **Firebase Auth hardening** (TDD security audit gate to evaluate credential token security).
 - **Researcher Persona** (deep semantic exploration of academic papers and arXiv content with interactive site skip controls).
 - **Browser Snapshot Subtree Targeter** (`extract`/`deep_scrape` mapping diffed nodes back to CSS selectors).
+- **Movie_tool** (new) — a multi-model pipeline with agentic capabilites ['music','lyrics','audio','video'] to generate movies from scratch. Need separate routers and integration pipelines with human creativity inputs.
+
+## v1.0.9 – Search Router, Cyber Tool Graph, Hermes Skills, Quantum Reasoning, Local LLM Patch & Browser Snapshot Diff (July 2026)
 
 ### 🚀 Highlights
 
