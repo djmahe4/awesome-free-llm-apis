@@ -33,7 +33,7 @@
 
 > [!NOTE]
 > **SSRF Protection & Restricted Target Scopes:**
-> - **ALWAYS** attempt reconnaissance or socket queries against internal cloud metadata endpoints (`http://169.254.169.254/latest/meta-data/`) or link-local addresses (`169.254.0.0/16`).
+> - **NEVER** attempt reconnaissance or socket queries against internal cloud metadata endpoints (`http://169.254.169.254/latest/meta-data/`) or link-local addresses (`169.254.0.0/16`).
 > - Querying cloud instance metadata risks exposing temporary IAM credentials, secret tokens, bootstrap configurations, and private VPC parameters.
 > - `cyber_tool` strictly blocks `169.254.169.254`, loopback addresses (`localhost`, `127.0.0.1`, `::1`), and RFC1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) by default unless explicit authorization via `allowPrivateIps: true` is configured.
 

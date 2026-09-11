@@ -17,10 +17,25 @@ describe('cyber_tool OSINT action', () => {
       'localhost',
       '127.0.0.1',
       '::1',
+      '0:0:0:0:0:0:0:1',
+      '0000:0000:0000:0000:0000:0000:0000:0001',
+      '::ffff:127.0.0.1',
+      '::ffff:169.254.169.254',
+      '::ffff:10.0.0.1',
+      '::ffff:192.168.1.1',
+      '::ffff:172.16.0.1',
+      '[::1]',
+      '[::1]:8080',
+      '[::ffff:127.0.0.1]:3000',
+      '[0000:0000:0000:0000:0000:0000:0000:0001]',
       '169.254.169.254',
+      '169.254.1.1',
       '10.0.0.1',
       '192.168.1.1',
-      '172.16.0.5'
+      '172.16.0.5',
+      'fe80::1',
+      'fc00::1',
+      'fd00::1'
     ];
 
     for (const target of invalidTargets) {
@@ -28,6 +43,16 @@ describe('cyber_tool OSINT action', () => {
         cyberTool({ action: 'osint' as any, target, sessionId: 'test-ssrf-guard' })
       ).rejects.toThrow(/invalid or private target/i);
     }
+  });
+
+  it('allows private target if allowPrivateIps is true', async () => {
+    const res: any = await cyberTool({
+      action: 'osint' as any,
+      target: '127.0.0.1',
+      allowPrivateIps: true,
+      sessionId: 'test-allow-private'
+    });
+    expect(res.success).toBe(true);
   });
 
   it('performs dns recon and dork generation for a valid domain target', async () => {
