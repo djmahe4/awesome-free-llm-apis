@@ -147,6 +147,83 @@ function applyPatternRewrite(content: string, pat: string, out: string): { conte
   return { content: replaced, matchCount: matches.length };
 }
 
+/**
+ * Multi-language structural AST rewrite:
+ * Dispatches TS/JS files to in-memory ts-morph AST, and falls back to regex for other formats.
+ */
+async function applyStructuralRewrite(
+  filePath: string,
+  content: string,
+  pat: string,
+  out: string
+): Promise<{ content: string; matchCount: number }> {
+  const ext = path.extname(filePath).toLowerCase();
+
+  // 1. TS/JS AST Structural Rewrites via ts-morph
+  if (/\.(ts|tsx|js|jsx)$/i.test(ext)) {
+    try {
+      const { Project } = await import('ts-morph');
+      const project = new Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true });
+      const src = project.createSourceFile(filePath, content, { overwrite: true });
+
+      // Pattern without wildcard for literal AST matching
+      const cleanPat = pat.replace(/\$\$\$[A-Z0-9_]*/g, '').trim();
+      let matchCount = 0;
+
+      if (cleanPat.length > 0) {
+        src.forEachDescendant(node => {
+          const text = node.getText();
+          if (text.includes(cleanPat)) {
+            const rewritten = applyPatternRewrite(text, pat, out);
+            if (rewritten.matchCount > 0 && rewritten.content !== text) {
+              try {
+                node.replaceWithText(rewritten.content);
+                matchCount += rewritten.matchCount;
+              } catch { /* skip node if non-replaceable */ }
+            }
+          }
+        });
+      }
+
+      if (matchCount > 0) {
+        return { content: src.getFullText(), matchCount };
+      }
+    } catch {
+      // Fallback to pattern regex on ts-morph error
+    }
+  }
+
+  // 2. Fallback to safe pattern regex
+  return applyPatternRewrite(content, pat, out);
+}
+
+/**
+ * Computes a target-anchored sliding window snippet instead of a naive slice(0, 10).
+ * Centers preview around the first modification line while preserving header context.
+ */
+function computeWindowedSnippet(
+  originalLines: string[],
+  patchedLines: string[],
+  windowSize = 12
+): { origSnippet: string; replSnippet: string; startLine: number } {
+  // Find first modified line (1-indexed)
+  let diffLine = 1;
+  const maxL = Math.max(originalLines.length, patchedLines.length);
+  for (let i = 0; i < maxL; i++) {
+    if (originalLines[i] !== patchedLines[i]) {
+      diffLine = i + 1;
+      break;
+    }
+  }
+
+  const half = Math.floor(windowSize / 2);
+  const startLine = Math.max(1, diffLine - half);
+  const origSnippet = originalLines.slice(startLine - 1, startLine - 1 + windowSize).join('\n');
+  const replSnippet = patchedLines.slice(startLine - 1, startLine - 1 + windowSize).join('\n');
+
+  return { origSnippet, replSnippet, startLine };
+}
+
 /** Assert path is inside workspaceRoot to prevent path traversal on writes. */
 function assertSafe(fullPath: string, workspaceRoot: string): void {
   const normalized = path.resolve(fullPath);
@@ -593,7 +670,7 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       // 4b. Structural AST rewrites (OMP-style $$$VAR patterns)
       if (input.astEditOps && input.astEditOps.length > 0) {
         for (const op of input.astEditOps) {
-          const { content: rewritten, matchCount } = applyPatternRewrite(patchedContent, op.pat, op.out);
+          const { content: rewritten, matchCount } = await applyStructuralRewrite(fullPath, patchedContent, op.pat, op.out);
           if (matchCount > 0) {
             patchedContent = rewritten;
             rewrites += matchCount;
@@ -601,20 +678,18 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
         }
       }
 
-      const previewLines = 10;
-      const originalSnippet = lines.slice(0, previewLines).join('\n');
       const replacementLines = patchedContent.split('\n');
-      const replacementSnippet = replacementLines.slice(0, previewLines).join('\n');
+      const { origSnippet, replSnippet, startLine: windowStartLine } = computeWindowedSnippet(lines, replacementLines, 12);
 
       patches.push({
         filePath: relPath,
         anchorTag: hashTag,
-        startLine: 1,
+        startLine: windowStartLine,
         endLine: lines.length,
-        originalSnippet,
-        replacementSnippet,
+        originalSnippet: origSnippet,
+        replacementSnippet: replSnippet,
         fullPatchedContent: patchedContent, // full content for diagnostics & writes
-        unifiedDiff: `--- ${relPath} ${hashTag}\n+++ ${relPath} (proposed)\n@@ -1,${previewLines} +1,${previewLines} @@\n${replacementSnippet}\n`,
+        unifiedDiff: `--- ${relPath} ${hashTag}\n+++ ${relPath} (proposed)\n@@ -${windowStartLine},12 +${windowStartLine},12 @@\n${replSnippet}\n`,
       });
 
       result.astRewritesCount = (result.astRewritesCount || 0) + rewrites;

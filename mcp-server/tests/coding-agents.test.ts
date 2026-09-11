@@ -101,17 +101,39 @@ describe('CodingAgentsHandler — astEditOps pattern replacement', () => {
       dryRun: true,
       topKFiles: 1,
       astEditOps: [
-        { pat: 'legacyLogger($$$ARGS)', out: 'logger.info($$$ARGS)' },
+        { pat: 'legacyLogger($$$MSG)', out: 'logger.info($$$MSG)' },
       ],
     });
 
     expect(result.astRewritesCount).toBe(2);
-    const patch = result.patchPlan[0];
+    const patch = result.patchPlan.find(p => p.filePath === 'src/app.ts');
     expect(patch).toBeDefined();
-    // The replacement snippet must reflect the substitution
-    expect(patch.replacementSnippet).toContain('logger.info("server started")');
-    expect(patch.replacementSnippet).toContain('logger.info("request received")');
-    expect(patch.replacementSnippet).not.toContain('legacyLogger("server started")');
+    expect(patch!.fullPatchedContent).toContain('logger.info("server started");');
+    expect(patch!.fullPatchedContent).toContain('logger.info("request received");');
+    expect(patch!.fullPatchedContent).not.toContain('legacyLogger("server started");');
+  });
+
+  it('centers preview snippet around modified lines using target-anchored sliding window', async () => {
+    const lines = Array.from({ length: 40 }, (_, i) => `const val_${i + 1} = ${i + 1};`);
+    lines[25] = 'console.log("target line to replace");';
+    ws = await makeTmpWorkspace({
+      'src/large.ts': lines.join('\n'),
+    });
+
+    const result = await CodingAgentsHandler({
+      goal: 'replace target log',
+      workspaceRoot: ws,
+      dryRun: true,
+      topKFiles: 1,
+      astEditOps: [
+        { pat: 'console.log("target line to replace")', out: 'logger.debug("target replaced")' },
+      ],
+    });
+
+    const patch = result.patchPlan.find(p => p.filePath === 'src/large.ts');
+    expect(patch).toBeDefined();
+    expect(patch!.startLine).toBeGreaterThan(1);
+    expect(patch!.replacementSnippet).toContain('logger.debug("target replaced")');
   });
 
   it('counts zero rewrites when pattern does not match', async () => {
