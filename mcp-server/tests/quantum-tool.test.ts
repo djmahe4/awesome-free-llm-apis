@@ -128,15 +128,59 @@ describe('quantum_tool', () => {
     expect(result.state.branches[0].confidence).toBe(0.5);
   });
 
-  it('analyze calls useFreeLLM and records the response', async () => {
+  it('analyze calls useFreeLLM and records the response with feedback report', async () => {
     await quantumTool({ action: 'setup', sessionId, numBranches: 2 });
-    const result = await quantumTool({ action: 'analyze', sessionId, query: 'What should we conclude?' });
+    const result = await quantumTool({ action: 'analyze', sessionId, query: 'Synthesized answer across branches.' });
     expect(result.success).toBe(true);
     expect(result.response.content).toBe('Synthesized answer across branches.');
-    expect(result.response.query).toBe('What should we conclude?');
+    expect(result.response.query).toBe('Synthesized answer across branches.');
+    expect(result.feedback).toBeDefined();
+    expect(result.feedback.driftScore).toBeGreaterThanOrEqual(0);
+    expect(result.feedback.crossBranchCorrelations).toHaveLength(1);
+    expect(Array.isArray(result.feedback.recommendedGates)).toBe(true);
 
     const state = await quantumTool({ action: 'get_state', sessionId });
     expect(state.state.llmResponses).toHaveLength(1);
+  });
+
+  it('analyze triggers autoCollapseOnDrift when response deviates significantly', async () => {
+    await quantumTool({ action: 'setup', sessionId, numBranches: 2 });
+    // query and mock response have zero token overlap => similarity < 0.15 => drift detected
+    const result = await quantumTool({
+      action: 'analyze',
+      sessionId,
+      query: 'completely unrelated query tokens alpha beta gamma',
+      autoCollapseOnDrift: true,
+    });
+    expect(result.success).toBe(true);
+    expect(result.feedback.isDrifted).toBe(true);
+    expect(result.feedback.decoheredQubits).toEqual([0, 1]);
+
+    const state = await quantumTool({ action: 'get_state', sessionId });
+    expect(state.state.branches[0].confidence).toBe(0);
+    expect(state.state.branches[0].stance).toBe('against');
+    expect(state.state.branches[0].evidence.some((e: string) => e.includes('[DECOHERENCE]'))).toBe(true);
+  });
+
+  it('recommends CNOT or RY gates based on branch metrics and correlation', async () => {
+    await quantumTool({ action: 'setup', sessionId, numBranches: 2 });
+    // Give branch 0 high confidence and branch 1 neutral confidence
+    await quantumTool({
+      action: 'modify',
+      sessionId,
+      gates: [{ qubit: 0, column: 0, gate: 'RY', param: 2.5 }],
+    });
+    await quantumTool({ action: 'step', sessionId });
+
+    const result = await quantumTool({
+      action: 'analyze',
+      sessionId,
+      query: 'test query recommendation',
+    });
+    expect(result.success).toBe(true);
+    const gateTypes = result.feedback.recommendedGates.map((g: any) => g.gate);
+    expect(gateTypes.length).toBeGreaterThan(0);
+    expect(gateTypes.includes('CNOT') || gateTypes.includes('RY')).toBe(true);
   });
 
   it('analyze requires a query', async () => {
