@@ -8,8 +8,9 @@ export class LLM7Provider extends BaseProvider {
   envVar = 'LLM7_API_KEY';
   rateLimits: RateLimits = { rpm: 30 };
   models: ProviderModel[] = [
-    { id: 'gpt-oss:20b', name: 'GPT-OSS 20B' },
-    { id: 'codestral-latest', name: 'Codestral Latest' },
+    { id: 'mistral-Nemo-Instruct-2407', name: 'Mistral Nemo Instruct 2407' },
     { id: 'minimax-m2.7', name: 'MiniMax M2.7' },
+    { id: 'codestral-latest', name: 'Codestral Latest' },
+    { id: 'gpt-oss:20b', name: 'GPT-OSS 20B' },
   ];
 }

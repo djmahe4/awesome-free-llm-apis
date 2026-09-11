@@ -8,15 +8,21 @@ export class NvidiaProvider extends BaseProvider {
   envVar = 'NVIDIA_API_KEY';
   rateLimits: RateLimits = { rpm: 40 };
   models: ProviderModel[] = [
-    // Free Endpoint Models (Catalog & Screenshots)
+    // Free Endpoint Models (Catalog & Live Preview)
+    { id: 'deepseek-ai/deepseek-v4-pro-0813', name: 'DeepSeek V4 Pro 0813 (262K MoE)' },
     { id: 'deepseek-ai/deepseek-v4-flash-0731', name: 'DeepSeek V4 Flash 0731' },
     { id: 'nvidia/nemotron-3.5-lightning-30b-a3b', name: 'Nemotron 3.5 Lightning 30B' },
     { id: 'meta/muse-glimmer-30b', name: 'Muse Glimmer 30B (Vision/Reasoning)' },
     { id: 'z-ai/glm-5.2', name: 'GLM 5.2' },
     { id: 'minimaxai/minimax-m3', name: 'MiniMax M3 (Vision)' },
     { id: 'google/diffusiongemma-26b-a4b-it', name: 'DiffusionGemma 26B' },
+    { id: 'google/gemma-4-31b-it', name: 'Gemma 4 31B Instruct' },
     { id: 'nvidia/nemotron-3-ultra-550b-a55b', name: 'Nemotron 3 Ultra 550B' },
+    { id: 'nvidia/nemotron-3-super-120b-a12b', name: 'Nemotron 3 Super 120B' },
     { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning', name: 'Nemotron 3 Nano Omni (Vision/Audio)' },
+    { id: 'nvidia/ising-calibration-1-35b-a3b', name: 'Ising Calibration 1 35B (Quantum VLM)' },
+    { id: 'nvidia/ising-calibration-1.5-31b', name: 'Ising Calibration 1.5 31B (Quantum VLM)' },
+    { id: 'nvidia/nemotron-3.5-content-safety', name: 'Nemotron 3.5 Content Safety' },
     { id: 'nvidia/nemotron-3-nano-30b-a3b', name: 'Nemotron 3 Nano 30B' },
     { id: 'nvidia/nemotron-mini-4b-instruct', name: 'Nemotron Mini 4B' },
     { id: 'nvidia/llama-3.3-nemotron-super-49b-v1', name: 'Nemotron Super 49B' },

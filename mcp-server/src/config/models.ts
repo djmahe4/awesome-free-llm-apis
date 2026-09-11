@@ -16,6 +16,7 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
 
     // S-Tier Generalists
     'gemma-4-31b-it': { capability: 0.95, contextWindow: 300000, isVision: true, isReasoning: true },
+    'google/gemma-4-31b-it': { capability: 0.95, contextWindow: 300000, isVision: true, isReasoning: true },
     'google/gemma-4-31B-it': { capability: 0.95, contextWindow: 300000, isVision: true },
     'google/gemma-4-31b-it:free': { capability: 0.95, contextWindow: 300000, isVision: true },
     'gemma-4-26b-a4b-it': { capability: 0.94, contextWindow: 150000, isVision: true },
@@ -128,7 +129,14 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'moonshotai/kimi-k3': { capability: 0.92, contextWindow: 128000, isReasoning: true },
     'tencent/hy3:free': { capability: 0.88, contextWindow: 128000, isReasoning: true },
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free': { capability: 0.90, contextWindow: 256000, isVision: true, isReasoning: true },
-    'minimax-m2.7': { capability: 0.85, contextWindow: 128000 }
+    'minimax-m2.7': { capability: 0.85, contextWindow: 128000 },
+    'deepseek-ai/deepseek-v4-pro-0813': { capability: 0.96, contextWindow: 262144, isCoder: true, isReasoning: true },
+    'nvidia/nemotron-3-super-120b-a12b': { capability: 0.93, contextWindow: 1000000, isReasoning: true },
+    'nvidia/ising-calibration-1-35b-a3b': { capability: 0.86, contextWindow: 64000, isVision: true },
+    'nvidia/ising-calibration-1.5-31b': { capability: 0.90, contextWindow: 128000, isVision: true, isReasoning: true },
+    'nvidia/nemotron-3.5-content-safety': { capability: 0.75, contextWindow: 32000 },
+    '@cf/zai-org/glm-4.7-flash': { capability: 0.86, contextWindow: 128000 },
+    'mistral-Nemo-Instruct-2407': { capability: 0.85, contextWindow: 128000 }
 };
 
 /**

@@ -32,6 +32,13 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
       'tencent/hy3:free',
       'nvidia/nemotron-3.5-lightning:free',
       'liquid/lfm-2.5-2.6b:free',
+      'cohere/north-mini-code:free',
+      'poolside/laguna-s-2.1:free',
+      'poolside/laguna-xs-2.1:free',
+      'stepfun/step-3.7-flash:free',
+      'nvidia/nemotron-3-ultra-550b-a55b:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
     ],
     removed: [
       'inclusionai/ling-3.0-flash:free',
@@ -40,6 +47,9 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
   mistral: {
     added: [
       'mistral-medium-3-5',
+      'ministral-8b-2512',
+      'ministral-3b-2512',
+      'ministral-14b-2512',
     ],
     removed: [
       'mistral-medium-2604',
@@ -62,9 +72,8 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
       'nvidia/nemotron-3-ultra-550b-a55b:free',
       'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
       'nvidia/nemotron-3-super-120b-a12b:free',
-      'google/gemma-4-31b-it:free',
-      'google/gemma-4-26b-a4b-it:free',
-      'openai/gpt-oss-20b:free',
+      'tencent/hy3:free',
+      'liquid/lfm-2.5-2.6b:free',
     ],
     removed: [
       'nvidia/nemotron-3-nano-30b-a3b:free',
@@ -88,13 +97,23 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
     ],
   },
   siliconflow: {
-    added: [],
+    added: [
+      'Qwen/Qwen3-8B',
+    ],
     removed: [
       'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B',
     ],
   },
+  modelscope: {
+    added: [
+      'Qwen/Qwen3.5-35B-A3B',
+      'Qwen/Qwen3.5-27B',
+    ],
+    removed: [],
+  },
   cloudflare: {
     added: [
+      '@cf/google/gemma-4-26b-a4b-it',
       '@cf/zai-org/glm-4.7-flash',
     ],
     removed: [

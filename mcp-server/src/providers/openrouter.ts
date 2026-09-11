@@ -20,6 +20,7 @@ export class OpenRouterProvider extends BaseProvider {
     { id: 'arcee-ai/trinity-mini:free', name: 'Trinity Mini' },
     { id: 'mistralai/mistral-small-3.1-24b:free', name: 'Mistral Small 3.1 24B' },
     { id: 'liquid/lfm2.5-1.2b-thinking:free', name: 'LFM 2.5 1.2B Thinking' },
+    { id: 'liquid/lfm-2.5-2.6b:free', name: 'LFM 2.5 2.6B' },
     { id: 'qwen/qwen3-coder-480b-a35b:free', name: 'Qwen 3 Coder 480B' },
     { id: 'meta-llama/llama-4-maverick:free', name: 'Llama 4 Maverick (Vision)' },
     { id: 'meta-llama/llama-4-scout:free', name: 'Llama 4 Scout (Vision)' },
