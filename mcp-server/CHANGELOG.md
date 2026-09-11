@@ -35,6 +35,15 @@
   - Multi-record DNS reconnaissance (`A`, `AAAA`, `MX`, `TXT`, `NS`) via `node:dns/promises` alongside automated Google / CTF OSINT dork generation and Wiki report persistence.
 - **Dashboard Per-Tool Info (`ⓘ`) Docs Viewer** (`src/server.ts`, `dashboard/app.js`):
   - Added `GET /api/tool-docs/:name` endpoint reading `docs/skill/references/*.md` and wired an inline documentation viewer directly on the dashboard tool playground header.
+- **`coding_agents` Optimizations & Multi-Language LSP Validation** (`src/tools/coding-agents.ts`):
+  - **Multi-Language Subprocess LSP Trapping**: Added proactive syntax verification for Python (`python -c "import ast; ..."`), Go (`go vet`), and Rust (`rustc --edition 2021 --error-format json`) in addition to TypeScript/JavaScript diagnostics, rejecting syntax-breaking edits before writing to disk.
+  - **Sliding Window Chunking & Context Management**: Replaced crude line-based file truncation with token/block sliding windowing with rolling overlap, preserving call sites, imports, and interface anchors across context shifts.
+  - **OMP Regex & Ast-Edit Robustness**: Hardened pattern regex matching against double-escaped metacharacters and prevented directory path traversal across staged patch scopes.
+- **`quantum_tool` Reasoning Feedback Loop & Hallucination Drift Guard** (`src/tools/quantum-tool.ts`):
+  - **Semantic Hallucination/Drift Guard (`computePromptDrift`)**: Evaluates Jaccard token similarity between the user's initial prompt and the synthesized LLM output; detects prompt divergence with an optional `autoCollapseOnDrift` flag that triggers quantum decoherence (collapses confidence to 0 and logs decoherence evidence).
+  - **Adaptive Gate Recommendation Engine (`generateAdaptiveGateSuggestions`)**: Continuously analyzes cross-branch stance agreement/conflict matrix to recommend optimal circuit actions (e.g. `CNOT` entanglement on consensus, `RY` phase rotations on adversarial divergence, Grover-style confidence amplification on unresolved ~0.50 branches).
+  - **Target-Anchored Sliding Window Evidence**: Compresses branch evidence history with sliding windows (retaining the 4 most recent assertions while collapsing older steps), preventing prompt bloat and context degradation during iterative reasoning loops.
+  - **Bounded LRU Circuit Cache**: Replaced unbounded module-level state `Map` with an LRU cache (capped at 200 sessions, 2-hour TTL) to guarantee leak-free memory characteristics under heavy multi-agent concurrency.
 - **Upstream Catalog Sync & Deprecation Harmonization**:
   - Deprecated Cerebras and updated live model metadata across NVIDIA NIM, Groq, Kilo Code, and OpenRouter.
 
