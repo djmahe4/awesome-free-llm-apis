@@ -12,9 +12,9 @@ function modelBadge(model, provider) {
 }
 
 function esc(str) {
-  if (!str) return '';
+  if (str == null || str === '') return '';
   const d = document.createElement('div');
-  d.textContent = str;
+  d.textContent = String(str);
   return d.innerHTML;
 }
 
@@ -103,13 +103,8 @@ async function renderMarkdown(text) {
 
     // Regular markdown
     let safePart = esc(noCode);
-    
-    // Restore code blocks (which are already escaped)
-    codeBlocks.forEach((cb, idx) => {
-      safePart = safePart.replace(`__CODE_BLOCK_${idx}__`, cb);
-    });
 
-    return safePart
+    let html = safePart
       // Inline code
       .replace(/`([^`]+)`/g, (_, c) => `<code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:.85em;">${c}</code>`)
       // Bold
@@ -134,6 +129,13 @@ async function renderMarkdown(text) {
       .replace(/\n\n+/g, '</p><p style="margin:6px 0;">')
       // Single newlines become <br>
       .replace(/\n/g, '<br>');
+
+    // Restore code blocks (which are already escaped) after inline markdown
+    codeBlocks.forEach((cb, idx) => {
+      html = html.replace(`__CODE_BLOCK_${idx}__`, cb);
+    });
+
+    return html;
   }));
   return `<div class="md-body" style="line-height:1.6;font-size:.82rem;color:var(--text-secondary);">${rendered.join('')}</div>`;
 }
@@ -156,14 +158,27 @@ function renderQuantumFeedback(fb) {
   html += `<div class="card-body" style="font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">`;
   
   if (fb.decoheredQubits && fb.decoheredQubits.length) {
-    html += `<div><strong>Decohered Qubits:</strong> ${fb.decoheredQubits.map(q => `<span class="badge badge-amber">${esc(q)}</span>`).join(' ')}</div>`;
+    html += `<div><strong>Decohered Qubits:</strong> ${fb.decoheredQubits.map(q => `<span class="badge badge-amber">q${esc(q)}</span>`).join(' ')}</div>`;
   }
   if (fb.crossBranchCorrelations && fb.crossBranchCorrelations.length) {
-    html += `<div><strong>Cross-Branch Correlations:</strong><ul style="margin-left:20px; list-style:circle;">${fb.crossBranchCorrelations.map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>`;
+    html += `<div><strong>Cross-Branch Correlations:</strong><ul style="margin-left:20px; list-style:circle;">`;
+    html += fb.crossBranchCorrelations.map(c => {
+      if (typeof c === 'string') return `<li>${esc(c)}</li>`;
+      let relBadge = 'badge-gray';
+      if (c.relation === 'consensus') relBadge = 'badge-green';
+      else if (c.relation === 'adversarial') relBadge = 'badge-red';
+      const sim = c.similarity != null ? ` (similarity: ${esc(c.similarity)})` : '';
+      const qA = c.qubitA != null ? `q${esc(c.qubitA)}` : 'A';
+      const qB = c.qubitB != null ? `q${esc(c.qubitB)}` : 'B';
+      const pA = c.personaA ? ` (${esc(c.personaA)})` : '';
+      const pB = c.personaB ? ` (${esc(c.personaB)})` : '';
+      return `<li>${qA}${pA} ↔ ${qB}${pB}: <span class="badge ${relBadge}">${esc(c.relation || 'neutral')}</span>${sim}</li>`;
+    }).join('');
+    html += `</ul></div>`;
   }
   if (fb.recommendedGates && fb.recommendedGates.length) {
     html += `<div><strong>Recommended Gates:</strong><div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;">`;
-    html += fb.recommendedGates.map(g => `<div style="border:1px solid var(--glass-border); padding:6px; border-radius:4px;"><span class="badge badge-purple">${esc(g.gate)}</span> Target: ${esc(g.target)} Col: ${esc(g.column)}<br><span style="color:var(--text-muted); font-size:0.7rem;">${esc(g.reason)}</span></div>`).join('');
+    html += fb.recommendedGates.map(g => `<div style="border:1px solid var(--glass-border); padding:6px; border-radius:4px;"><span class="badge badge-purple">${esc(g.gate)}</span> Target: ${g.target != null ? esc(g.target) : 'none'} Col: ${g.column != null ? esc(g.column) : 0}<br><span style="color:var(--text-muted); font-size:0.7rem;">${esc(g.reason)}</span></div>`).join('');
     html += `</div></div>`;
   }
   html += `</div></div>`;
@@ -174,16 +189,19 @@ function renderCodingAgentsCard(res) {
   if (!res) return '';
   let html = `<div class="card" style="margin-top:16px; border-color: var(--accent-cyan);">`;
   html += `<div class="card-header">🤖 Agent Pipeline: <span class="badge badge-cyan">${esc(res.pipelineStage || 'unknown')}</span>`;
-  if (res.status === 'rollback') {
-    html += ` <span class="badge badge-amber">Rollback</span>`;
-  } else if (res.status === 'applied' || res.status === 'success') {
+  if ((res.restoredFiles && res.restoredFiles.length > 0) || res.status === 'rollback' || res.pipelineStage === 'rollback') {
+    const count = res.restoredFiles?.length ? ` (${res.restoredFiles.length} files restored)` : '';
+    html += ` <span class="badge badge-amber">Rollback${count}</span>`;
+  } else if (res.applied || res.status === 'applied' || res.status === 'success') {
     html += ` <span class="badge badge-green">Applied</span>`;
+  } else {
+    html += ` <span class="badge badge-purple">Dry Run</span>`;
   }
   html += `</div>`;
   html += `<div class="card-body" style="font-size:0.8rem; display:flex; flex-direction:column; gap:12px;">`;
   
   if (res.anchors && res.anchors.length) {
-    html += `<div><strong>Anchors:</strong> ${res.anchors.map(a => `<code style="background:rgba(255,255,255,.08);padding:2px 4px;border-radius:3px;margin-right:4px;">${esc(a)}</code>`).join('')}</div>`;
+    html += `<div><strong>Anchors:</strong> ${res.anchors.map(a => `<code style="background:rgba(255,255,255,.08);padding:2px 4px;border-radius:3px;margin-right:4px;">${esc(typeof a === 'string' ? a : (a.hashTag || a.filePath || JSON.stringify(a)))}</code>`).join('')}</div>`;
   }
   
   if (res.diagnostics && res.diagnostics.length) {
@@ -193,7 +211,8 @@ function renderCodingAgentsCard(res) {
       if (d.severity === 'error') bClass = 'badge-red';
       else if (d.severity === 'warning') bClass = 'badge-amber';
       else if (d.severity === 'info') bClass = 'badge-blue';
-      return `<li style="background:rgba(255,255,255,.03); padding:4px 8px; border-radius:4px; border-left:2px solid ${bClass.includes('red')?'var(--accent-red)':(bClass.includes('amber')?'var(--accent-amber)':'#60a5fa')}"><span class="badge ${bClass}">${esc(d.severity)}</span> Line ${d.line}: ${esc(d.message)}</li>`;
+      const loc = d.filePath ? `[${d.filePath}${d.line != null ? ':' + d.line : ''}] ` : (d.line != null ? `Line ${d.line}: ` : '');
+      return `<li style="background:rgba(255,255,255,.03); padding:4px 8px; border-radius:4px; border-left:2px solid ${bClass.includes('red')?'var(--accent-red)':(bClass.includes('amber')?'var(--accent-amber)':'#60a5fa')}"><span class="badge ${bClass}">${esc(d.severity)}</span> ${esc(loc)}${esc(d.message)}</li>`;
     }).join('');
     html += `</ul></div>`;
   }
@@ -202,9 +221,10 @@ function renderCodingAgentsCard(res) {
     html += `<div><strong>File Patches:</strong><div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">`;
     html += res.patchPlan.map(p => {
       let diffHtml = '';
-      if (p.diff) {
-        const diffLines = p.diff.split('\n');
-        diffHtml = `<pre class="code-block diff-viewer" style="margin-top:4px; font-size:0.75rem; padding:8px;"><code>`;
+      const diffText = p.unifiedDiff || (p.replacementSnippet ? `@@ -${p.startLine} +${p.startLine} @@\n${p.replacementSnippet}` : '');
+      if (diffText) {
+        const diffLines = diffText.split('\n');
+        diffHtml = `<pre class="code-block diff-viewer" style="margin-top:4px; font-size:0.75rem; padding:8px; max-height:450px; overflow-y:auto;"><code>`;
         diffHtml += diffLines.map(l => {
           if (l.startsWith('+')) return `<span style="color:#4ade80">${esc(l)}</span>`;
           if (l.startsWith('-')) return `<span style="color:#f87171">${esc(l)}</span>`;
@@ -214,7 +234,7 @@ function renderCodingAgentsCard(res) {
         diffHtml += `</code></pre>`;
       }
       return `<div style="border:1px solid var(--glass-border); border-radius:6px; padding:8px;">
-        <div style="font-weight:bold; margin-bottom:4px; color:var(--text-primary);">📝 ${esc(p.file || p.path)}</div>
+        <div style="font-weight:bold; margin-bottom:4px; color:var(--text-primary);">📝 ${esc(p.filePath || 'file')}</div>
         ${diffHtml}
       </div>`;
     }).join('');
@@ -225,23 +245,49 @@ function renderCodingAgentsCard(res) {
   return html;
 }
 
+function renderLocalPatchCard(res) {
+  if (!res || !res.patch) return '';
+  let html = `<div class="card" style="margin-top:16px; border-color: var(--accent-purple);">`;
+  html += `<div class="card-header">🩹 Local LLM Patch: <span class="badge ${res.success ? 'badge-green' : 'badge-red'}">${res.success ? 'Success' : 'Failed'}</span>`;
+  if (res.modelUsed) {
+    html += ` <span class="badge badge-purple">${esc(res.modelUsed)}</span>`;
+  }
+  html += `</div>`;
+  html += `<div class="card-body" style="font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">`;
+  html += `<div><strong>Target File:</strong> <code>${esc(res.filePath || '')}</code></div>`;
+  if (res.patch) {
+    const diffLines = res.patch.split('\n');
+    html += `<div><strong>Patch Content:</strong>`;
+    html += `<pre class="code-block diff-viewer" style="margin-top:4px; font-size:0.75rem; padding:8px; max-height:450px; overflow-y:auto;"><code>`;
+    html += diffLines.map(l => {
+      if (l.startsWith('+')) return `<span style="color:#4ade80">${esc(l)}</span>`;
+      if (l.startsWith('-')) return `<span style="color:#f87171">${esc(l)}</span>`;
+      if (l.startsWith('@@')) return `<span style="color:#38bdf8">${esc(l)}</span>`;
+      return esc(l);
+    }).join('\n');
+    html += `</code></pre></div>`;
+  }
+  html += `</div></div>`;
+  return html;
+}
+
 async function renderResponse(data) {
   const result = data.result ?? data;
   let baseHtml = '';
-  if (typeof result === 'string') {
-    baseHtml = await renderMarkdown(result);
+
+  const mdText = typeof result === 'string'
+    ? result
+    : (result?.content || result?.response || result?.markdown);
+
+  if (typeof mdText === 'string' && mdText.trim()) {
+    baseHtml = await renderMarkdown(mdText);
   } else {
-    const nestedText = result?.content ?? result?.response;
-    if (typeof nestedText === 'string') {
-      baseHtml = await renderMarkdown(nestedText);
+    const SIZE_THRESHOLD = 100 * 1024;
+    const jsonStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+    if (jsonStr.length > SIZE_THRESHOLD) {
+      baseHtml = `<span style="color:var(--text-muted);font-size:.78rem;">Response too large to render (${(jsonStr.length/1024).toFixed(0)}KB). </span><button class="copy-raw-btn btn btn-outline btn-sm" data-v="${esc(jsonStr)}" style="margin-left:8px;">Copy Raw</button>`;
     } else {
-      const SIZE_THRESHOLD = 100 * 1024;
-      const jsonStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-      if (jsonStr.length > SIZE_THRESHOLD) {
-        baseHtml = `<span style="color:var(--text-muted);font-size:.78rem;">Response too large to render (${(jsonStr.length/1024).toFixed(0)}KB). </span><button class="copy-raw-btn btn btn-outline btn-sm" data-v="${esc(jsonStr)}" style="margin-left:8px;">Copy Raw</button>`;
-      } else {
-        baseHtml = highlightJSON(result);
-      }
+      baseHtml = highlightJSON(result);
     }
   }
 
@@ -252,6 +298,9 @@ async function renderResponse(data) {
     }
     if (result.patchPlan || result.diagnostics || result.pipelineStage) {
       extras += renderCodingAgentsCard(result);
+    }
+    if (result.patch && result.filePath) {
+      extras += renderLocalPatchCard(result);
     }
   }
   
@@ -1431,21 +1480,57 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
   try { if (typeof args === 'string') parsedArgs = JSON.parse(args); } catch {}
   try { if (typeof result === 'string') parsedResult = JSON.parse(result); } catch {}
 
-  const resultPreview = (() => {
-    let s = '';
-    if (parsedResult && typeof parsedResult === 'object' && Array.isArray(parsedResult.content) && parsedResult.content[0]?.text) {
-      s = parsedResult.content[0].text;
-    } else if (typeof result === 'string') {
-      s = result;
-    } else {
-      s = JSON.stringify(result ?? '');
+  const resultText = (() => {
+    if (parsedResult && typeof parsedResult === 'object') {
+      if (Array.isArray(parsedResult.content) && parsedResult.content[0]?.text) {
+        return parsedResult.content[0].text;
+      }
+      if (typeof parsedResult.content === 'string') return parsedResult.content;
+      if (typeof parsedResult.response === 'string') return parsedResult.response;
+      if (typeof parsedResult.markdown === 'string') return parsedResult.markdown;
+      if (typeof parsedResult.patch === 'string') return parsedResult.patch;
+      if (typeof parsedResult.patchSummary === 'string') return parsedResult.patchSummary;
     }
+    return typeof result === 'string' ? result : '';
+  })();
+
+  const resultPreview = (() => {
+    let s = resultText || (typeof result === 'string' ? result : JSON.stringify(result ?? ''));
     s = s.replace(/\s+/g, ' ').trim();
     return s.slice(0, 80) + (s.length > 80 ? '…' : '');
   })();
 
   const borderColor = isError ? 'var(--accent-red, #ef4444)' : 'var(--accent-cyan)';
   const icon = isError ? '⚠️' : '🔧';
+
+  const outputContainerId = `tool-out-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  let resultBodyHtml = '';
+  if (parsedResult && typeof parsedResult === 'object' && Array.isArray(parsedResult.patchPlan) && parsedResult.patchPlan.length) {
+    resultBodyHtml = parsedResult.patchPlan.map(p => {
+      const diffText = p.unifiedDiff || p.diff || (p.replacementSnippet ? `@@ -${p.startLine} +${p.startLine} @@\n${p.replacementSnippet}` : '');
+      const diffLines = diffText ? diffText.split('\n') : [];
+      return `<div style="margin-bottom:8px; border:1px solid var(--glass-border); border-radius:4px; padding:6px;">
+        <div style="font-weight:600; color:var(--text-primary); margin-bottom:4px;">📝 ${esc(p.filePath || p.file || 'file')}</div>
+        <pre class="code-block diff-viewer" style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:350px; font-size:.72rem; padding:6px; margin:0;"><code>` +
+        diffLines.map(l => {
+          if (l.startsWith('+')) return `<span style="color:#4ade80">${esc(l)}</span>`;
+          if (l.startsWith('-')) return `<span style="color:#f87171">${esc(l)}</span>`;
+          if (l.startsWith('@@')) return `<span style="color:#38bdf8">${esc(l)}</span>`;
+          return esc(l);
+        }).join('\n') + `</code></pre>
+      </div>`;
+    }).join('');
+  } else if (resultText) {
+    resultBodyHtml = `<div id="${outputContainerId}" class="tool-call-rendered-md" style="max-height:450px; overflow-y:auto;">` +
+      `<pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; font-size:.73rem; margin:0;">${esc(resultText)}</pre>` +
+      `</div>`;
+    renderMarkdown(resultText).then(mdHtml => {
+      const el = div.querySelector(`#${outputContainerId}`);
+      if (el) el.innerHTML = mdHtml;
+    }).catch(() => {});
+  } else {
+    resultBodyHtml = `<pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:450px; font-size:.73rem; margin:0;">${esc(JSON.stringify(parsedResult, null, 2))}</pre>`;
+  }
 
   div.innerHTML = `
     <div class="chat-bubble" style="padding:8px 12px; background:rgba(255,255,255,0.02); border-left:3px solid ${borderColor};">
@@ -1460,10 +1545,10 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
         </summary>
         <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); font-size:.73rem;">
           <div style="margin-bottom:6px; color:var(--text-muted);"><strong>Args:</strong><br>
-            <pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:120px;">${esc(JSON.stringify(parsedArgs, null, 2))}</pre>
+            <pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:200px; margin:4px 0;">${esc(JSON.stringify(parsedArgs, null, 2))}</pre>
           </div>
-          <div style="color:var(--text-muted);"><strong>Result:</strong><br>
-            <pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:120px;">${esc(JSON.stringify(parsedResult, null, 2))}</pre>
+          <div style="color:var(--text-muted);"><strong>Output:</strong><br>
+            ${resultBodyHtml}
           </div>
         </div>
       </details>

@@ -652,8 +652,10 @@ export async function createMCPServer(): Promise<Server> {
       } else if (name === 'execute_skill') {
         const input = args as any;
         const result = await executeSkill(input);
+        const text = result.success ? (result.response ?? '') : `Error: ${result.error}`;
         response = {
-          content: [{ type: 'text' as const, text: result.success ? result.response ?? '' : `Error: ${result.error}` }]
+          content: [{ type: 'text' as const, text: toMarkdownResponse(text) }],
+          isError: !result.success,
         };
       } else if (name === 'browser_tool') {
         const result = await dispatchBrowserAction(args);
@@ -678,14 +680,14 @@ export async function createMCPServer(): Promise<Server> {
         const { localLlmPatch } = await import('../tools/local-llm-patch.js');
         const result = await localLlmPatch(args as any);
         response = {
-          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          content: [{ type: 'text' as const, text: toMarkdownResponse(result.content || result.markdown || '') }],
           isError: !result.success,
         };
       } else if (name === 'coding_agents') {
         const { CodingAgentsHandler } = await import('../tools/coding-agents.js');
         const result = await CodingAgentsHandler(args as any);
         response = {
-          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          content: [{ type: 'text' as const, text: toMarkdownResponse(result.content || result.markdown || '') }],
           isError: !result.applied && !!result.error,
         };
       } else {

@@ -103,10 +103,66 @@ export interface CodingAgentsResult {
   patchSummary: string;
   diagnostics: DiagnosticResult[];
   applied: boolean;
+  status?: 'applied' | 'rollback' | 'dry_run';
   checkpointId?: string;
   restoredFiles?: string[];
   astRewritesCount?: number;
+  markdown?: string;
+  content?: string;
   error?: string;
+}
+
+export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
+  if (result.error) {
+    return `### 🤖 Coding Agent Error\n\n**Error:** ${result.error}\n\n${result.pipelineStage ? `_Pipeline Stage: \`${result.pipelineStage}\`_` : ''}`;
+  }
+
+  const lines: string[] = [];
+  const statusLabel = result.applied ? '✅ Changes Applied to Disk' : (result.patchPlan?.length ? '🔍 Proposed Plan (Dry Run)' : '⚡ Execution Completed');
+  lines.push(`### 🤖 Coding Agent: ${statusLabel}\n`);
+  lines.push(`- **Goal:** ${result.goal}`);
+  lines.push(`- **Pipeline Stage:** \`${result.pipelineStage || 'completed'}\``);
+  if (result.checkpointId) {
+    lines.push(`- **CAS Checkpoint:** \`${result.checkpointId}\``);
+  }
+  if (result.relevantFiles?.length) {
+    lines.push(`- **Target Files:** ${result.relevantFiles.map(f => `\`${f}\``).join(', ')}`);
+  }
+  if (result.anchors?.length) {
+    lines.push(`- **Anchors:** ${result.anchors.map(a => `\`${a.hashTag}\``).join(', ')}`);
+  }
+  if (result.astRewritesCount) {
+    lines.push(`- **AST Structural Rewrites:** ${result.astRewritesCount}`);
+  }
+
+  if (result.diagnostics?.length) {
+    lines.push(`\n#### 🩺 Diagnostics (${result.diagnostics.length})`);
+    for (const d of result.diagnostics) {
+      const icon = d.severity === 'error' ? '❌' : (d.severity === 'warning' ? '⚠️' : 'ℹ️');
+      const loc = d.filePath ? `\`${d.filePath}${d.line ? `:${d.line}` : ''}\`` : '';
+      lines.push(`- ${icon} **${d.severity.toUpperCase()}** ${loc}: ${d.message}`);
+    }
+  }
+
+  if (result.patchPlan?.length) {
+    lines.push(`\n#### 📝 Patches (${result.patchPlan.length} file${result.patchPlan.length > 1 ? 's' : ''})`);
+    for (const p of result.patchPlan) {
+      lines.push(`\n##### \`${p.filePath}\` (${p.anchorTag || 'diff'})`);
+      const diffContent = p.unifiedDiff || (p.replacementSnippet ? `@@ -${p.startLine} +${p.startLine} @@\n${p.replacementSnippet}` : '');
+      if (diffContent) {
+        lines.push('```diff');
+        lines.push(diffContent.trim());
+        lines.push('```');
+      }
+    }
+  } else if (result.patchSummary) {
+    lines.push('\n#### 📝 Patch Summary');
+    lines.push('```diff');
+    lines.push(result.patchSummary.trim());
+    lines.push('```');
+  }
+
+  return lines.join('\n');
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -588,6 +644,7 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
 
       result.pipelineStage = 'completed';
       result.applied = true;
+      result.status = 'rollback';
       result.checkpointId = targetCheckpoint;
       result.restoredFiles = files;
       result.patchSummary = `Rolled back ${restoredCount} file(s) from CAS checkpoint ${targetCheckpoint}`;
@@ -782,6 +839,13 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
   } catch (err: any) {
     result.error = err.message || String(err);
   }
+
+  result.status = (result.restoredFiles && result.restoredFiles.length > 0)
+    ? 'rollback'
+    : (result.applied ? 'applied' : 'dry_run');
+
+  result.content = formatCodingAgentsMarkdown(result);
+  result.markdown = result.content;
 
   await logToolCall(sessionId, 'coding_agents', input, result, Date.now() - start, !!result.error).catch(() => {});
   return result;

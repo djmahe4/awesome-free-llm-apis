@@ -80,6 +80,7 @@ export class TextRouterMiddleware implements Middleware {
             'meta-llama/llama-4-scout:free',
             'deepseek-ai/deepseek-v4-pro-0813',
             'deepseek-ai/DeepSeek-V4-Pro',
+            'mistral-medium-3-5',
             'Qwen/Qwen3.5-397B-A17B',
         ],
         [TaskType.Coding]: [
@@ -118,6 +119,8 @@ export class TextRouterMiddleware implements Middleware {
             'Qwen/Qwen3-Coder-30B-A3B-Instruct',
             'deepseek-ai/DeepSeek-V4-Pro',
             'poolside/laguna-s-2.1:free',
+            'mistral-medium-3-5',
+            'ministral-14b-2512',
             'microsoft/phi-4',
         ],
         [TaskType.Vision]: [
@@ -164,6 +167,8 @@ export class TextRouterMiddleware implements Middleware {
             'deepseek-ai/DeepSeek-V4-Flash',
             '@cf/zai-org/glm-4.7-flash',
             'zai-org/GLM-4.7-Flash',
+            'ministral-8b-2512',
+            'ministral-3b-2512',
         ],
         [TaskType.UserIntent]: [
             'google/gemma-4-31b-it:free',
@@ -184,6 +189,8 @@ export class TextRouterMiddleware implements Middleware {
             'deepseek-ai/DeepSeek-V4-Flash',
             '@cf/zai-org/glm-4.7-flash',
             'zai-org/GLM-4.7-Flash',
+            'ministral-8b-2512',
+            'ministral-3b-2512',
         ],
         [TaskType.SemanticSearch]: [
             'google/gemma-4-31b-it:free',
@@ -206,6 +213,7 @@ export class TextRouterMiddleware implements Middleware {
             'z-ai/glm-4.5-air:free',
             'gemma4:31b',
             'deepseek-ai/DeepSeek-V3.2',
+            'mistral-medium-3-5',
             'zai-org/GLM-5',
         ],
         [TaskType.Summarization]: [
@@ -234,6 +242,9 @@ export class TextRouterMiddleware implements Middleware {
             'zai-org/GLM-5',
             'deepseek-ai/DeepSeek-V4-Flash',
             'zai-org/GLM-4.7-Flash',
+            'ministral-14b-2512',
+            'ministral-8b-2512',
+            'ministral-3b-2512',
         ],
         [TaskType.EntityExtraction]: [
             'gpt-oss:120b',

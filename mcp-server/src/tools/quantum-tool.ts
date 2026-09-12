@@ -682,10 +682,20 @@ export async function quantumTool(input: QuantumToolInput) {
 
   if (!isError && result && result.state) {
     const s = result.state;
-    if (s.gates.length > 100) s.gates = s.gates.slice(-100);
+    let trimmed = false;
+    if (s.gates.length > 100) {
+      s.gates = s.gates.slice(-100);
+      trimmed = true;
+    }
     if (s.circuitModifications.length > 50) s.circuitModifications = s.circuitModifications.slice(-50);
     for (const branch of s.branches) {
       if (branch.evidence.length > 30) branch.evidence = branch.evidence.slice(-30);
+    }
+    if (trimmed) {
+      s.mermaid = renderMermaid(s);
+      if (result.telemetry) {
+        result.telemetry = calculateQuantumMetrics(s, Date.now() - start);
+      }
     }
   }
 

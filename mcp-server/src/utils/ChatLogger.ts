@@ -155,11 +155,12 @@ export async function logToolCall(
   latencyMs: number,
   isError = false
 ): Promise<void> {
+  const maxLimit = tool === 'vision_tool' ? 400 : 64000;
   await logChatTurn(sessionId, {
     role: 'tool_call',
     tool,
-    args: truncate(JSON.stringify(args ?? null), 400),
-    result: truncate(JSON.stringify(result ?? null), 400),
+    args: truncate(JSON.stringify(args ?? null), maxLimit),
+    result: truncate(JSON.stringify(result ?? null), maxLimit),
     latencyMs,
     isError,
   });

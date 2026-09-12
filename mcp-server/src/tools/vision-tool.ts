@@ -19,7 +19,14 @@ export interface VisionToolInput {
   model?: string;
 }
 
-export async function visionTool(input: VisionToolInput): Promise<{ response: string; model: string }> {
+export interface VisionToolResult {
+  response: string;
+  content?: string;
+  markdown?: string;
+  model: string;
+}
+
+export async function visionTool(input: VisionToolInput): Promise<VisionToolResult> {
   const { workspace_root, image_path, prompt, model = 'gemini-3.1-flash-lite' } = input;
 
   if (!image_path) {
@@ -121,8 +128,11 @@ export async function visionTool(input: VisionToolInput): Promise<{ response: st
   }
 
   const content = finalContext.response?.choices?.[0]?.message?.content || '';
+  const md = toMarkdownResponse(typeof content === 'string' ? content : JSON.stringify(content, null, 2));
   return {
-    response: toMarkdownResponse(typeof content === 'string' ? content : JSON.stringify(content, null, 2)),
+    response: md,
+    content: md,
+    markdown: md,
     model: finalContext.response.model || model
   };
 }

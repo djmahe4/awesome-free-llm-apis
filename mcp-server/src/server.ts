@@ -436,22 +436,26 @@ export function createExpressApp(): express.Express {
               result = { content: r?.choices?.[0]?.message?.content ?? '', model: r?.model, provider: r?._providerId };
               break;
             }
-            case 'vision_tool':
-              result = await visionTool({
+            case 'vision_tool': {
+              const r = await visionTool({
                 image_path: params.image_path,
                 prompt: params.prompt,
                 model: params.model,
                 workspace_root: params.workspace_root || process.cwd(),
               });
+              result = { ...r, content: r.response };
               break;
-            case 'execute_skill':
-              result = await executeSkill({
+            }
+            case 'execute_skill': {
+              const r = await executeSkill({
                 skill: params.skill,
                 input: params.input,
                 model: params.model,
                 workspace_root: params.workspace_root,
               });
+              result = { ...r, content: r.response };
               break;
+            }
             case 'manage_memory':
               result = await manageMemory({
                 action: params.action,

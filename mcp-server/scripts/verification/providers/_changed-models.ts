@@ -72,7 +72,6 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
       'nvidia/nemotron-3-ultra-550b-a55b:free',
       'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
       'nvidia/nemotron-3-super-120b-a12b:free',
-      'tencent/hy3:free',
       'liquid/lfm-2.5-2.6b:free',
     ],
     removed: [

@@ -19,6 +19,8 @@ export class ModelScopeProvider extends BaseProvider {
     { id: 'Qwen/Qwen3-8B', name: 'Qwen3 8B' },
     { id: 'stepfun-ai/Step-3.5-Flash', name: 'Step 3.5 Flash (199B)' },
     { id: 'Qwen/Qwen3.5-397B-A17B', name: 'Qwen3.5 397B (Vision)' },
+    { id: 'Qwen/Qwen3.5-35B-A3B', name: 'Qwen 3.5 35B A3B' },
+    { id: 'Qwen/Qwen3.5-27B', name: 'Qwen 3.5 27B' },
     { id: 'Qwen/Qwen3-VL-235B-A22B-Instruct', name: 'Qwen3 VL 235B (Vision)' },
   ];
 }
