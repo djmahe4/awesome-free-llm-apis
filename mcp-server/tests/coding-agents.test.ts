@@ -318,3 +318,79 @@ describe('CodingAgentsHandler — error handling', () => {
     expect(result.sessionId).toMatch(/^omp-/);
   });
 });
+
+describe('CodingAgentsHandler — issue fixes', () => {
+  let ws: string;
+  beforeEach(async () => {
+    ws = await makeTmpWorkspace({
+      'src/math.ts': 'export function calc() { return sum(a, b); }',
+    });
+  });
+  afterEach(async () => { if (ws) await fs.remove(ws); vi.restoreAllMocks(); });
+
+  it('handles multi-wildcard patterns that are mostly structural delimiters', async () => {
+    const result = await CodingAgentsHandler({
+      goal: 'rename sum to add',
+      workspaceRoot: ws,
+      dryRun: true,
+      topKFiles: 1,
+      astEditOps: [
+        { pat: 'sum($$$A, $$$B)', out: 'add($$$A, $$$B)' },
+      ],
+    });
+
+    const patch = result.patchPlan.find(p => p.filePath === 'src/math.ts');
+    expect(patch).toBeDefined();
+    expect(patch!.fullPatchedContent).toContain('add(a, b)');
+    expect(result.astRewritesCount).toBeGreaterThan(0);
+  });
+
+  it('uses dynamic windowSize for unified diff header', async () => {
+    const result = await CodingAgentsHandler({
+      goal: 'rename sum to add',
+      workspaceRoot: ws,
+      dryRun: true,
+      topKFiles: 1,
+      astEditOps: [
+        { pat: 'sum($$$A, $$$B)', out: 'add($$$A, $$$B)' },
+      ],
+    });
+
+    const patch = result.patchPlan.find(p => p.filePath === 'src/math.ts');
+    expect(patch).toBeDefined();
+    expect(patch!.unifiedDiff).toMatch(/@@ -\d+,12 \+\d+,12 @@/);
+  });
+
+  it('logs warning when ts-morph AST structural rewrite fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    
+    // Pass a directory as filePath, which ts-morph Project.createSourceFile will fail on
+    // Or we mock ts-morph's Project to throw
+    vi.doMock('ts-morph', () => {
+      return {
+        Project: class {
+          constructor() { throw new Error('Simulated ts-morph error'); }
+        }
+      };
+    });
+
+    // Re-import the module under test since ts-morph is dynamically imported
+    const { CodingAgentsHandler: MockedHandler } = await import('../src/tools/coding-agents.js?mock=' + Date.now());
+    
+    await MockedHandler({
+      goal: 'rename sum to add',
+      workspaceRoot: ws,
+      dryRun: true,
+      topKFiles: 1,
+      astEditOps: [
+        { pat: 'sum($$$A, $$$B)', out: 'add($$$A, $$$B)' },
+      ],
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[coding_agents] ts-morph AST structural rewrite failed'),
+      expect.any(Error)
+    );
+  });
+});
+

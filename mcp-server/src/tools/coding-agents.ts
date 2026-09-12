@@ -141,8 +141,9 @@ function applyPatternRewrite(content: string, pat: string, out: string): { conte
     return { content, matchCount: 0 };
   }
   regex.lastIndex = 0;
-  // If out has $$$ wildcard reference, replace it with $1
-  const targetOut = hasCapture ? out.replace(/\$\$\$[A-Z0-9_]*/g, '$1') : out;
+  // If out has $$$ wildcard reference, replace it with $1, $2, etc
+  let groupIndex = 1;
+  const targetOut = hasCapture ? out.replace(/\$\$\$[A-Z0-9_]*/g, () => `$${groupIndex++}`) : out;
   const replaced = content.replace(regex, targetOut);
   return { content: replaced, matchCount: matches.length };
 }
@@ -168,12 +169,13 @@ async function applyStructuralRewrite(
 
       // Pattern without wildcard for literal AST matching
       const cleanPat = pat.replace(/\$\$\$[A-Z0-9_]*/g, '').trim();
+      const isMostlyWildcards = cleanPat.replace(/[()[\]{},;.\s]/g, '').length === 0;
       let matchCount = 0;
 
-      if (cleanPat.length > 0) {
+      if (isMostlyWildcards || cleanPat.length > 0) {
         src.forEachDescendant(node => {
           const text = node.getText();
-          if (text.includes(cleanPat)) {
+          if (isMostlyWildcards || text.includes(cleanPat)) {
             const rewritten = applyPatternRewrite(text, pat, out);
             if (rewritten.matchCount > 0 && rewritten.content !== text) {
               try {
@@ -188,8 +190,8 @@ async function applyStructuralRewrite(
       if (matchCount > 0) {
         return { content: src.getFullText(), matchCount };
       }
-    } catch {
-      // Fallback to pattern regex on ts-morph error
+    } catch (err: any) {
+      console.warn('[coding_agents] ts-morph AST structural rewrite failed, falling back to regex:', err);
     }
   }
 
@@ -679,7 +681,8 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       }
 
       const replacementLines = patchedContent.split('\n');
-      const { origSnippet, replSnippet, startLine: windowStartLine } = computeWindowedSnippet(lines, replacementLines, 12);
+      const windowSize = 12;
+      const { origSnippet, replSnippet, startLine: windowStartLine } = computeWindowedSnippet(lines, replacementLines, windowSize);
 
       patches.push({
         filePath: relPath,
@@ -689,7 +692,7 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
         originalSnippet: origSnippet,
         replacementSnippet: replSnippet,
         fullPatchedContent: patchedContent, // full content for diagnostics & writes
-        unifiedDiff: `--- ${relPath} ${hashTag}\n+++ ${relPath} (proposed)\n@@ -${windowStartLine},12 +${windowStartLine},12 @@\n${replSnippet}\n`,
+        unifiedDiff: `--- ${relPath} ${hashTag}\n+++ ${relPath} (proposed)\n@@ -${windowStartLine},${windowSize} +${windowStartLine},${windowSize} @@\n${replSnippet}\n`,
       });
 
       result.astRewritesCount = (result.astRewritesCount || 0) + rewrites;
