@@ -5,7 +5,7 @@ import { getIntelligentSystemPrompt } from '../../src/pipeline/middlewares/promp
 import { WorkspaceContextMiddleware } from '../../src/pipeline/middlewares/WorkspaceContextMiddleware.js';
 import { quantumCompress, quantumCompressWithStats } from '../../src/utils/quantum-compression.js';
 
-const AVST_ROOT = 'C:/dev/AVST';
+const AVST_ROOT = process.env.TEST_WORKSPACE_ROOT || 'C:/dev/AVST';
 
 interface ScenarioMetric {
     scenario: string;

@@ -83,7 +83,7 @@ export function quantumCompress(
         if (t && lower.includes(t)) matchCount++;
       });
       if (matchCount > 0) {
-        density += matchCount * 1.5;
+        density += matchCount * 5.0;
       }
     }
     return { s, i, density };
@@ -99,6 +99,74 @@ export function quantumCompress(
   const kept = [first, ...keptMiddle, last]
     .filter((v, idx, arr) => arr.findIndex(x => x.i === v.i) === idx)
     .sort((a, b) => a.i - b.i);
+
+  const hasNewlines = text.includes('\n');
+  return kept.map(k => k.s).join(hasNewlines ? '\n' : ' ');
+}
+
+/**
+ * Compresses text preserving keyword-matched sentences verbatim as anchors,
+ * and applying quantum compression (symbol-density based) to the remainder.
+ */
+export function quantumCompressWithAnchors(
+  text: string,
+  keywords: string[] | Set<string>,
+  temperature = 0.5
+): string {
+  if (!text || text.trim().length === 0) return text;
+  const kwList = keywords instanceof Set
+    ? Array.from(keywords).map(k => k.toLowerCase()).filter(Boolean)
+    : keywords.map(k => k.toLowerCase()).filter(Boolean);
+
+  const validKeywords = kwList.filter(k => k.length >= 2 && !STOP_WORDS.has(k));
+  if (validKeywords.length === 0) {
+    return quantumCompress(text, temperature);
+  }
+
+  const sentences = splitSentences(text);
+  if (sentences.length <= 2) return text;
+
+  // Split into anchored (matched keyword) and candidates for compression
+  const anchoredIndices = new Set<number>();
+  // Always keep first and last sentence for continuity
+  anchoredIndices.add(0);
+  anchoredIndices.add(sentences.length - 1);
+
+  sentences.forEach((s, idx) => {
+    const sLower = s.toLowerCase();
+    const sWords = new Set(sLower.match(/[a-z0-9_\-\.\/:]+/g) || []);
+    for (const kw of validKeywords) {
+      // Multi-word phrase or compound keyword (e.g. '2 commits', 'ctf-tools:latest') uses includes, single token uses exact set lookup
+      if (kw.includes(' ') || kw.includes(':') || kw.includes('/')) {
+        if (sLower.includes(kw)) {
+          anchoredIndices.add(idx);
+          break;
+        }
+      } else if (sWords.has(kw)) {
+        anchoredIndices.add(idx);
+        break;
+      }
+    }
+  });
+
+  const nonAnchored = sentences
+    .map((s, idx) => ({ s, idx, density: symbolDensity(s) }))
+    .filter(item => !anchoredIndices.has(item.idx));
+
+  const clamped = Math.max(0, Math.min(1, temperature));
+  const keepNonAnchoredCount = Math.round(nonAnchored.length * clamped);
+
+  const selectedNonAnchored = nonAnchored
+    .sort((a, b) => b.density - a.density)
+    .slice(0, keepNonAnchoredCount)
+    .map(item => item.idx);
+
+  const allKeptIndices = new Set([...anchoredIndices, ...selectedNonAnchored]);
+
+  const kept = sentences
+    .map((s, idx) => ({ s, idx }))
+    .filter(item => allKeptIndices.has(item.idx))
+    .sort((a, b) => a.idx - b.idx);
 
   const hasNewlines = text.includes('\n');
   return kept.map(k => k.s).join(hasNewlines ? '\n' : ' ');

@@ -591,11 +591,24 @@ export function summarizeResponse(text: string): string {
     if (text.length <= 2000) return text;
     
     const tag = '\n\n<!-- TF-IDF SUMMARY -->';
-    const compressed = quantumCompress(text, 0.7);
-    if (!compressed.includes('<!-- TF-IDF SUMMARY -->')) {
-        return compressed + tag;
+    const limit = 2000 - tag.length;
+    
+    // First 500 characters preserved verbatim as recency/head anchor
+    const head = text.slice(0, 500);
+    const remainder = text.slice(500);
+    
+    // Quantum compress remainder to fit budget
+    const targetRemainderChars = Math.max(100, limit - head.length);
+    const estRatio = Math.max(0.1, Math.min(0.9, targetRemainderChars / remainder.length));
+    let compressedRemainder = quantumCompress(remainder, estRatio);
+    
+    let combined = `${head}${compressedRemainder}${tag}`;
+    if (combined.length > 2000) {
+        // If still over 2000 chars, trim compressedRemainder preserving head
+        const allowedRemainder = Math.max(0, 2000 - head.length - tag.length);
+        combined = `${head}${compressedRemainder.slice(0, allowedRemainder)}${tag}`;
     }
-    return compressed;
+    return combined;
 }
 
 const DATA_DEMAND_SIGNALS = [
@@ -798,6 +811,11 @@ async function executeSingleSubtask(
                         formattedOutput = quantumCompress(formattedOutput, 0.35, taskWords);
                     }
 
+                    const maxChars = Math.max(800, Math.floor(tokenBudget * 3.8));
+                    if (formattedOutput.length > maxChars) {
+                        formattedOutput = formattedOutput.slice(0, maxChars) + '\n... (trail truncated to budget)';
+                    }
+
                     historySection += `\n### |Subtask: ${entry.task}⟩ (Entanglement Distance: ${w.distance}, Priority: ${priorityLabel})\n`;
                     historySection += `**Status**: Completed\n`;
                     if (entry.filesModified && entry.filesModified.length > 0) {
@@ -812,18 +830,22 @@ async function executeSingleSubtask(
             // point (decomposeGoal, buildExecutionPlan, queue storage, logs, history) only ever
             // sees the short placeholder form — this is the one place the real content gets
             // substituted back in, resolved fresh from the retained map rather than re-derived.
+            const placeholderMap = new Map(Object.entries(resolvedContext));
             const resolvedTaskText = Object.keys(resolvedContext).length > 0
-                ? restoreProtectedReferenceBlocks(currentTask, new Map(Object.entries(resolvedContext)))
+                ? restoreProtectedReferenceBlocks(currentTask, placeholderMap)
                 : currentTask;
+            const resolvedSubtaskPrompt = Object.keys(resolvedContext).length > 0
+                ? restoreProtectedReferenceBlocks(subtaskPrompt, placeholderMap)
+                : subtaskPrompt;
 
             const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${resolvedTaskText}\n\nStrictly focus on this subtask using the tools provided.${historySection}`;
 
             const messages = context.request.messages;
             const sysMsgIdx = messages.findIndex(m => m.role === 'system');
             if (sysMsgIdx !== -1) {
-                messages[sysMsgIdx] = { role: 'system', content: `${subtaskPrompt}${taskHeader}` };
+                messages[sysMsgIdx] = { role: 'system', content: `${resolvedSubtaskPrompt}${taskHeader}` };
             } else {
-                messages.unshift({ role: 'system', content: `${subtaskPrompt}${taskHeader}` });
+                messages.unshift({ role: 'system', content: `${resolvedSubtaskPrompt}${taskHeader}` });
             }
         } catch (err) {
             console.error(`[AgenticMiddleware] Failed to inject subtask prompt: ${err}`);

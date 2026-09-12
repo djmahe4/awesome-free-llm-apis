@@ -2,7 +2,7 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findAgentsMdPath } from '../../utils/agents-md-locator.js';
-import { quantumCompress } from '../../utils/quantum-compression.js';
+import { quantumCompress, quantumCompressWithAnchors } from '../../utils/quantum-compression.js';
 
 /**
  * Calculates Jaccard similarity between a set of tokens and a string.
@@ -288,11 +288,11 @@ async function getRelevantAgentsGuide(workspaceRoot: string, subtaskQuery: strin
             if (line.trim().startsWith('```')) {
                 inCodeBlock = !inCodeBlock;
             }
-            if (!inCodeBlock && /^#{1,4}\s+/.test(line)) {
+            if (!inCodeBlock && /^#{1,3}\s+/.test(line)) {
                 if (currentSection) {
                     sections.push(currentSection);
                 }
-                const title = line.replace(/^#{1,4}\s+/, '').trim();
+                const title = line.replace(/^#{1,3}\s+/, '').trim();
                 currentSection = {
                     title,
                     content: line + '\n'
@@ -338,7 +338,10 @@ async function getRelevantAgentsGuide(workspaceRoot: string, subtaskQuery: strin
                     matchScore += titleWords.has(w) ? 3 : 1;
                 }
             });
-            const jaccard = matchScore / (queryTokens.size + uniqueWords.size - matchCount);
+            const unionSize = queryTokens.size + uniqueWords.size - matchCount;
+            const baseJaccard = matchCount / Math.max(1, unionSize);
+            const titleBoost = 1 + (matchScore - matchCount) * 0.5;
+            const jaccard = baseJaccard * titleBoost;
             return { sec, score: jaccard };
         });
         
@@ -415,11 +418,17 @@ export async function getIntelligentSystemPrompt(
 
     // Inject Workspace Memory and File Context at the very top of the assembled prompt
     if (workspaceContext) {
-        const cappedWorkspace = workspaceContext.length > 5000 ? workspaceContext.slice(0, 5000) + "\n... (truncated)" : workspaceContext;
+        const queryKeywords = context.split(/\W+/).filter(w => w.length >= 3);
+        const cappedWorkspace = workspaceContext.length > 5000 
+            ? quantumCompressWithAnchors(workspaceContext, queryKeywords, 0.7) 
+            : workspaceContext;
         assembled = `## 📂 WORKSPACE CONTEXT\n<workspace_context_isolation_gate>\nRelevant file snippets and directory structures:\n${cappedWorkspace}\n</workspace_context_isolation_gate>\n\n` + assembled;
     }
     if (memoryContext) {
-        const cappedMemory = memoryContext.length > 2000 ? memoryContext.slice(0, 2000) + "\n... (truncated)" : memoryContext;
+        const queryKeywords = context.split(/\W+/).filter(w => w.length >= 3);
+        const cappedMemory = memoryContext.length > 2000 
+            ? quantumCompressWithAnchors(memoryContext, queryKeywords, 0.7) 
+            : memoryContext;
         assembled = `## 🧠 WORKSPACE MEMORY\n<memory_context_isolation_gate>\nRelevant prior knowledge for this workspace:\n${cappedMemory}\n</memory_context_isolation_gate>\n\n` + assembled;
     }
     if (workspaceRoot) {
@@ -433,7 +442,7 @@ export async function getIntelligentSystemPrompt(
         const assembled = data.introduction + "\n" + data.sections
         .filter(s => s.level === 1)
         .map(s => {
-            const content = s.content.length > 5000 ? s.content.substring(0, 4900) + "\n\n[...SECTION TRUNCATED...]\n" : s.content;
+            const content = s.content.length > 5000 ? quantumCompress(s.content, 0.75) : s.content;
             return `\n\n## ${s.title}\n\n${content}`;
         })
         .join("");
@@ -629,11 +638,12 @@ export async function getIntelligentSystemPrompt(
                 let blockContent = content;
                 const MAX_SECTION_SIZE = isSubtask ? 2000 : 4000;
                 if (blockContent.length > MAX_SECTION_SIZE) {
-                    blockContent = blockContent.substring(0, MAX_SECTION_SIZE) + "\n[...SECTION TRUNCATED...]\n";
+                    blockContent = quantumCompressWithAnchors(blockContent, tokens, 0.7);
                 }
                 
                 if (header.length + blockContent.length > remainingBudget) {
-                    blockContent = blockContent.slice(0, Math.max(0, remainingBudget - header.length - 20)) + "\n[...TRUNCATED...]";
+                    const ratio = Math.max(0.2, (remainingBudget - header.length) / blockContent.length);
+                    blockContent = quantumCompressWithAnchors(blockContent, tokens, ratio);
                 }
                 
                 const block = header + blockContent;

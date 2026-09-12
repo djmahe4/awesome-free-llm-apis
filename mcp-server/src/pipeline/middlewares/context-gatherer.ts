@@ -385,6 +385,7 @@ export class ContextGatherer {
                     return a.localeCompare(b); // Fallback to alphabetical
                 });
                 for (const file of sortedFiles) {
+                    if (path.basename(file).toLowerCase() === 'agents.md') continue;
                     const lines = grouped.get(file)!.sort((a, b) => a.line - b.line);
                     const ext = path.extname(file).toLowerCase();
                     

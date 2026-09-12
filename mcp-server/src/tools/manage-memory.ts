@@ -1,6 +1,7 @@
 import { memoryManager } from '../memory/index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
 import { ContextManager } from '../utils/ContextManager.js';
+import { quantumCompressWithAnchors } from '../utils/quantum-compression.js';
 
 export interface ManageMemoryInput {
     action: 'search' | 'list' | 'stats' | 'clear' | 'wiki_search' | 'wiki_write' | 'wiki_list' | 'wiki_read';
@@ -66,15 +67,22 @@ export async function manageMemory(input: ManageMemoryInput) {
 
             let truncatedSingle = false;
             if (currentTokens > MAX_MEMORY_TOKENS) {
+                // Precompute entry sizes to avoid quadratic JSON.stringify in loop
+                const itemTokens = results.map(r => contextManager.countStringTokens(JSON.stringify(r)));
                 while (results.length > 1 && currentTokens > MAX_MEMORY_TOKENS) {
-                    results.pop(); // Remove largest or last item
-                    currentTokens = contextManager.countStringTokens(JSON.stringify(results));
+                    const removed = results.pop();
+                    const removedTokens = itemTokens.pop() ?? 0;
+                    currentTokens = Math.max(0, currentTokens - removedTokens);
                 }
 
                 if (results.length === 1 && currentTokens > MAX_MEMORY_TOKENS) {
                     const single = results[0] as any;
                     if (single && typeof single.content === 'string' && single.content.length > 20000) {
-                        single.content = single.content.slice(0, 20000) + '... [truncated]';
+                        const keywords = query ? query.split(/\s+/).filter(Boolean) : [];
+                        results[0] = {
+                            ...single,
+                            content: quantumCompressWithAnchors(single.content, keywords, 0.6)
+                        };
                         truncatedSingle = true;
                         currentTokens = contextManager.countStringTokens(JSON.stringify(results));
                     }

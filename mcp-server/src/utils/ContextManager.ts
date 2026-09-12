@@ -372,20 +372,25 @@ export class ContextManager {
 
             if (remainingBudget > 5) {
                 const content = getMessageContent(lastMsg);
-                // High-performance truncation
+                // High-performance sandwich truncation
                 const approxChars = remainingBudget * 3;
-                let truncatedContent = content.slice(-approxChars);
+                const headChars = Math.floor(approxChars * 0.6);
+                const tailChars = Math.max(0, approxChars - headChars);
+                let truncatedContent = `${content.slice(0, headChars)}\n[...truncated...]\n${content.slice(-tailChars)}`.trim();
 
                 let currentTokens = this.countStringTokens(truncatedContent);
 
                 if (currentTokens > remainingBudget) {
                     const ratio = remainingBudget / currentTokens;
-                    truncatedContent = truncatedContent.slice(-Math.floor(truncatedContent.length * ratio * 0.9));
+                    const adjustedChars = Math.floor(approxChars * ratio * 0.9);
+                    const adjHead = Math.floor(adjustedChars * 0.6);
+                    const adjTail = Math.max(0, adjustedChars - adjHead);
+                    truncatedContent = `${content.slice(0, adjHead)}\n[...truncated...]\n${content.slice(-adjTail)}`.trim();
                 }
 
                 nonSystemMsgs[nonSystemMsgs.length - 1] = {
                     ...lastMsg,
-                    content: `[...truncated...] ${truncatedContent.trim()}`
+                    content: truncatedContent
                 };
             } else {
                 // System messages alone exceed the target budget.
@@ -394,10 +399,12 @@ export class ContextManager {
                 const content = getMessageContent(lastMsg);
                 const approxChars = 1500 * 3;
                 if (content.length > approxChars) {
-                    const truncatedContent = content.slice(-approxChars);
+                    const headChars = Math.floor(approxChars * 0.6);
+                    const tailChars = Math.max(0, approxChars - headChars);
+                    const truncatedContent = `${content.slice(0, headChars)}\n[...truncated...]\n${content.slice(-tailChars)}`.trim();
                     nonSystemMsgs[nonSystemMsgs.length - 1] = {
                         ...lastMsg,
-                        content: `[...truncated...] ${truncatedContent.trim()}`
+                        content: truncatedContent
                     };
                 }
             }
