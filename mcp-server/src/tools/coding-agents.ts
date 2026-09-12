@@ -190,7 +190,7 @@ async function applyStructuralRewrite(
                 node.replaceWithText(rewritten.content);
                 matchCount += rewritten.matchCount;
                 traversal.skip();
-              } catch (err: any) { console.log("replaceWithText error:", err.message); }
+              } catch (err: any) { console.warn("replaceWithText error:", err.message); }
             }
           }
         });

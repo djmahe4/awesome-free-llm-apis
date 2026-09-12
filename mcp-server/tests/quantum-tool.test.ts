@@ -196,4 +196,84 @@ describe('quantum_tool', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('Unknown quantum_tool action');
   });
+
+  it('analyze handles empty tokens for response and drift detection evaluates against rawPrompt', async () => {
+    await quantumTool({ action: 'setup', sessionId, numBranches: 1 });
+    const { useFreeLLM } = await import('../src/tools/use-free-llm.js');
+    (useFreeLLM as any).mockResolvedValueOnce({
+      choices: [{ message: { content: 'a b' } }],
+    });
+    
+    const result = await quantumTool({
+      action: 'analyze',
+      sessionId,
+      query: 'valid query text',
+      autoCollapseOnDrift: true,
+    });
+    
+    expect(result.success).toBe(true);
+    expect(result.feedback.isDrifted).toBe(true);
+    expect(result.feedback.driftScore).toBe(0);
+  });
+
+  it('autoCollapseOnDrift selectively collapses only low-confidence branches', async () => {
+    await quantumTool({ action: 'setup', sessionId, numBranches: 2 });
+    await quantumTool({
+      action: 'modify',
+      sessionId,
+      gates: [
+        { qubit: 0, column: 0, gate: 'RY', param: 2.5 }
+      ]
+    });
+    await quantumTool({ action: 'step', sessionId });
+
+    const { useFreeLLM } = await import('../src/tools/use-free-llm.js');
+    (useFreeLLM as any).mockResolvedValueOnce({
+      choices: [{ message: { content: 'a b' } }],
+    });
+
+    const result = await quantumTool({
+      action: 'analyze',
+      sessionId,
+      query: 'trigger drift',
+      autoCollapseOnDrift: true,
+    });
+
+    expect(result.success).toBe(true);
+    const stateResult = await quantumTool({ action: 'get_state', sessionId });
+    const state = stateResult.state;
+    expect(state.branches[0].confidence).toBeGreaterThan(0.7);
+    expect(state.branches[0].evidence.some((e: string) => e.includes('[WARNING]'))).toBe(true);
+    
+    expect(state.branches[1].confidence).toBe(0);
+    expect(state.branches[1].evidence.some((e: string) => e.includes('[DECOHERENCE]'))).toBe(true);
+  });
+
+  it('deduplicates conflicting gate recommendations for the same qubit and column', async () => {
+    await quantumTool({ action: 'setup', sessionId, numBranches: 2 });
+    await quantumTool({ action: 'step', sessionId });
+
+    const result = await quantumTool({
+      action: 'analyze',
+      sessionId,
+      query: 'test deduplication'
+    });
+    
+    const gates = result.feedback.recommendedGates;
+    const q0Gates = gates.filter((g: any) => g.qubit === 0);
+    expect(q0Gates.length).toBe(1);
+    expect(q0Gates[0].gate).toBe('CNOT');
+  });
+
+  it('bounds state arrays to prevent unbounded growth', async () => {
+    await quantumTool({ action: 'setup', sessionId, numBranches: 1 });
+    
+    for (let i = 0; i < 55; i++) {
+      await quantumTool({ action: 'modify', sessionId, gates: [{ qubit: 0, column: 0, gate: 'H' }] });
+    }
+    
+    const stateResult = await quantumTool({ action: 'get_state', sessionId });
+    expect(stateResult.state.gates.length).toBe(55);
+    expect(stateResult.state.circuitModifications.length).toBe(50);
+  });
 });
