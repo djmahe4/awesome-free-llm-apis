@@ -25,7 +25,9 @@ import { getBrowserSessionPool } from '../browser/BrowserSessionPool.js';
 
 /** Derive a stable ws-<hash> session ID from tool args, falling back to __no_ws__. */
 async function deriveSessionIdFromArgs(args: Record<string, any> | null | undefined): Promise<string> {
-  const ws: string = (args?.workspace_root || args?.workspaceDir || '').toString().trim();
+  const explicitSid = (args?.sessionId || '').toString().trim();
+  if (explicitSid) return explicitSid;
+  const ws: string = (args?.workspace_root || args?.workspaceDir || args?.workspaceRoot || '').toString().trim();
   if (!ws) return '__no_ws__';
   try {
     const hash = await new WorkspaceScanner(process.cwd()).getWorkspaceHash(ws);

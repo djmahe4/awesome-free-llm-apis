@@ -514,8 +514,17 @@ export function createExpressApp(): express.Express {
               res.status(400).json({ error: `Unknown tool: ${tool}` });
               return;
           }
+          const selfLoggingTools = new Set(['use_free_llm', 'coding_agents', 'local_llm_patch', 'quantum_tool', 'cyber_tool']);
+          if (!selfLoggingTools.has(tool)) {
+            const sid = params.sessionId || '__no_ws__';
+            const { logToolCall } = await import('./utils/ChatLogger.js');
+            await logToolCall(sid, tool, params, result, Date.now() - start, false).catch(() => {});
+          }
           res.json({ ok: true, latencyMs: Date.now() - start, result });
         } catch (err: any) {
+          const sid = params.sessionId || '__no_ws__';
+          const { logToolCall } = await import('./utils/ChatLogger.js');
+          await logToolCall(sid, tool, params, { error: String(err?.message || err) }, Date.now() - start, true).catch(() => {});
           res.status(500).json({ ok: false, latencyMs: Date.now() - start, error: String(err?.message || err) });
         }
       });
@@ -947,16 +956,33 @@ export function createExpressApp(): express.Express {
 
       // Helper to read and normalize chat log format (chat-logs.json or chat-log.json)
       async function readNormalizedChatLog(dirPath: string): Promise<any[]> {
+        let raw = '';
         try {
-          const raw = await fsp.readFile(path.join(dirPath, 'chat-logs.json'), 'utf-8');
-          return JSON.parse(raw);
+          raw = await fsp.readFile(path.join(dirPath, 'chat-logs.json'), 'utf-8');
         } catch {
           try {
-            const raw = await fsp.readFile(path.join(dirPath, 'chat-log.json'), 'utf-8');
-            return JSON.parse(raw);
+            raw = await fsp.readFile(path.join(dirPath, 'chat-log.json'), 'utf-8');
           } catch {
             return [];
           }
+        }
+
+        try {
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return [];
+          return parsed.map((entry: any) => {
+            if (entry && entry.payload && typeof entry.payload === 'object') {
+              return {
+                ts: entry.timestamp || entry.payload.ts || Date.now(),
+                sessionId: entry.sessionId,
+                type: entry.type,
+                ...entry.payload,
+              };
+            }
+            return entry;
+          });
+        } catch {
+          return [];
         }
       }
 

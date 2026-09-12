@@ -1315,22 +1315,28 @@ function scrollChatBottom() {
 }
 
 function appendBubbleFromRecord(msg) {
-  if (msg.role === 'user') {
-    addUserBubbleEl(msg.content, msg.tool, msg.ts);
-  } else if (msg.role === 'assistant') {
-    const el = addSpinnerBubble(msg.tool);
-    renderMarkdown(msg.content).then(html => {
+  const item = (msg && msg.payload && typeof msg.payload === 'object')
+    ? { ts: msg.timestamp || msg.payload.ts, sessionId: msg.sessionId, ...msg.payload }
+    : msg;
+
+  if (!item || typeof item !== 'object') return;
+
+  if (item.role === 'user') {
+    addUserBubbleEl(item.content, item.tool, item.ts);
+  } else if (item.role === 'assistant') {
+    const el = addSpinnerBubble(item.tool);
+    renderMarkdown(item.content).then(html => {
       if (!el.isConnected) return;
-      replaceSpinnerWithResponse(el, html, msg.latencyMs, msg.tool, msg.ts, false, msg.model, msg.provider, msg.contextInjected);
+      replaceSpinnerWithResponse(el, html, item.latencyMs, item.tool, item.ts, false, item.model, item.provider, item.contextInjected);
     });
-  } else if (msg.role === 'error') {
-    addErrorBubbleEl(msg.content, msg.tool, msg.ts);
-  } else if (msg.role === 'subtask_start') {
-    addSubtaskStartBubble(msg.content, msg.ts);
-  } else if (msg.role === 'subtask_response') {
-    addSubtaskResponseBubble(msg.content, msg.output, msg.ts, msg.contextInjected, msg.model, msg.provider);
-  } else if (msg.role === 'tool_call') {
-    addToolCallBubble(msg.tool, msg.args, msg.result, msg.ts, msg.latencyMs, msg.isError);
+  } else if (item.role === 'error') {
+    addErrorBubbleEl(item.content, item.tool, item.ts);
+  } else if (item.role === 'subtask_start') {
+    addSubtaskStartBubble(item.content, item.ts);
+  } else if (item.role === 'subtask_response') {
+    addSubtaskResponseBubble(item.content, item.output, item.ts, item.contextInjected, item.model, item.provider);
+  } else if (item.role === 'tool_call') {
+    addToolCallBubble(item.tool, item.args, item.result, item.ts, item.latencyMs, item.isError);
   }
 }
 
@@ -1426,7 +1432,15 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
   try { if (typeof result === 'string') parsedResult = JSON.parse(result); } catch {}
 
   const resultPreview = (() => {
-    const s = typeof result === 'string' ? result : JSON.stringify(result ?? '');
+    let s = '';
+    if (parsedResult && typeof parsedResult === 'object' && Array.isArray(parsedResult.content) && parsedResult.content[0]?.text) {
+      s = parsedResult.content[0].text;
+    } else if (typeof result === 'string') {
+      s = result;
+    } else {
+      s = JSON.stringify(result ?? '');
+    }
+    s = s.replace(/\s+/g, ' ').trim();
     return s.slice(0, 80) + (s.length > 80 ? '…' : '');
   })();
 
@@ -1710,6 +1724,20 @@ pgParamsToggle.addEventListener('click', () => {
   pgParamsChevron.style.transform = paramsOpen ? '' : 'rotate(-90deg)';
 });
 
+// Background sync for external MCP client tool invocations
+let isRunActive = false;
+setInterval(async () => {
+  if (isRunActive || document.hidden || !activeSessionId || activeSessionId === '__no_ws__') return;
+  try {
+    const log = await loadChatHistory(activeSessionId);
+    if (log.length !== chatHistory.length) {
+      chatHistory = log;
+      rebuildChatLog();
+      refreshConvList(convSearch?.value || '');
+    }
+  } catch {}
+}, 2500);
+
 // ─── Run / Send ───────────────────────────────────────────────────
 pgRunBtn.addEventListener('click', async () => {
   await ensureModels();
@@ -1750,6 +1778,7 @@ pgRunBtn.addEventListener('click', async () => {
 
   let spinnerEl = addSpinnerBubble(activeTool.id);
   let requestDone = false;
+  isRunActive = true;
 
   pgRunBtn.disabled = true;
   pgRunBtn.innerHTML = '<span class="spinner"></span>';
@@ -1811,6 +1840,7 @@ pgRunBtn.addEventListener('click', async () => {
     pgStatus.textContent = '✗ Error'; pgStatus.style.color = 'var(--accent-red)';
   } finally {
     requestDone = true;
+    isRunActive = false;
     clearInterval(pollInterval);
     // Do one final sync to ensure everything is matched up
     try {
