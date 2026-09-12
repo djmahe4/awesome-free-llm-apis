@@ -83,12 +83,33 @@ async function renderMarkdown(text) {
       }
       return `<pre class="code-block" style="font-size:.78rem;">${esc(definition)}</pre>`;
     }
+    
+    // Extract normal code blocks first to prevent inline replacements inside them
+    let codeBlocks = [];
+    let noCode = part.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+      let codeContent = esc(code.trim());
+      if (lang === 'diff') {
+        const diffLines = codeContent.split('\n');
+        codeContent = diffLines.map(l => {
+          if (l.startsWith('+')) return `<span style="color:#4ade80">${l}</span>`;
+          if (l.startsWith('-')) return `<span style="color:#f87171">${l}</span>`;
+          if (l.startsWith('@@')) return `<span style="color:#38bdf8">${l}</span>`;
+          return l;
+        }).join('\n');
+      }
+      codeBlocks.push(`<pre class="code-block" style="font-size:.78rem;overflow-x:auto;"><code>${codeContent}</code></pre>`);
+      return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+    });
+
     // Regular markdown
-    const safePart = esc(part);
+    let safePart = esc(noCode);
+    
+    // Restore code blocks (which are already escaped)
+    codeBlocks.forEach((cb, idx) => {
+      safePart = safePart.replace(`__CODE_BLOCK_${idx}__`, cb);
+    });
+
     return safePart
-      // Fenced code blocks (non-mermaid)
-      .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
-        `<pre class="code-block" style="font-size:.78rem;overflow-x:auto;"><code>${code.trim()}</code></pre>`)
       // Inline code
       .replace(/`([^`]+)`/g, (_, c) => `<code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:.85em;">${c}</code>`)
       // Bold
@@ -124,24 +145,117 @@ async function renderMarkdown(text) {
 // fields like `model`/`provider` (added for the UI badges, never meant to be shown as
 // message text) ended up printed inline in the chat bubble. Falls back to a JSON dump
 // only when there's genuinely no string content field to render.
+function renderQuantumFeedback(fb) {
+  if (!fb) return '';
+  const isDrifted = fb.isDrifted;
+  const driftColor = isDrifted ? 'var(--accent-red)' : 'var(--accent-green)';
+  const driftText = isDrifted ? '⚠ Drift Detected' : '✓ Coherent';
+  
+  let html = `<div class="card" style="margin-top:16px; border-color: ${driftColor};">`;
+  html += `<div class="card-header" style="color:${driftColor}">⚛ Quantum Telemetry: ${driftText} (Score: ${fb.driftScore})</div>`;
+  html += `<div class="card-body" style="font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">`;
+  
+  if (fb.decoheredQubits && fb.decoheredQubits.length) {
+    html += `<div><strong>Decohered Qubits:</strong> ${fb.decoheredQubits.map(q => `<span class="badge badge-amber">${esc(q)}</span>`).join(' ')}</div>`;
+  }
+  if (fb.crossBranchCorrelations && fb.crossBranchCorrelations.length) {
+    html += `<div><strong>Cross-Branch Correlations:</strong><ul style="margin-left:20px; list-style:circle;">${fb.crossBranchCorrelations.map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>`;
+  }
+  if (fb.recommendedGates && fb.recommendedGates.length) {
+    html += `<div><strong>Recommended Gates:</strong><div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;">`;
+    html += fb.recommendedGates.map(g => `<div style="border:1px solid var(--glass-border); padding:6px; border-radius:4px;"><span class="badge badge-purple">${esc(g.gate)}</span> Target: ${esc(g.target)} Col: ${esc(g.column)}<br><span style="color:var(--text-muted); font-size:0.7rem;">${esc(g.reason)}</span></div>`).join('');
+    html += `</div></div>`;
+  }
+  html += `</div></div>`;
+  return html;
+}
+
+function renderCodingAgentsCard(res) {
+  if (!res) return '';
+  let html = `<div class="card" style="margin-top:16px; border-color: var(--accent-cyan);">`;
+  html += `<div class="card-header">🤖 Agent Pipeline: <span class="badge badge-cyan">${esc(res.pipelineStage || 'unknown')}</span>`;
+  if (res.status === 'rollback') {
+    html += ` <span class="badge badge-amber">Rollback</span>`;
+  } else if (res.status === 'applied' || res.status === 'success') {
+    html += ` <span class="badge badge-green">Applied</span>`;
+  }
+  html += `</div>`;
+  html += `<div class="card-body" style="font-size:0.8rem; display:flex; flex-direction:column; gap:12px;">`;
+  
+  if (res.anchors && res.anchors.length) {
+    html += `<div><strong>Anchors:</strong> ${res.anchors.map(a => `<code style="background:rgba(255,255,255,.08);padding:2px 4px;border-radius:3px;margin-right:4px;">${esc(a)}</code>`).join('')}</div>`;
+  }
+  
+  if (res.diagnostics && res.diagnostics.length) {
+    html += `<div><strong>Diagnostics:</strong><ul style="margin-left:0; padding-left:0; list-style:none; display:flex; flex-direction:column; gap:4px; margin-top:4px;">`;
+    html += res.diagnostics.map(d => {
+      let bClass = 'badge-gray';
+      if (d.severity === 'error') bClass = 'badge-red';
+      else if (d.severity === 'warning') bClass = 'badge-amber';
+      else if (d.severity === 'info') bClass = 'badge-blue';
+      return `<li style="background:rgba(255,255,255,.03); padding:4px 8px; border-radius:4px; border-left:2px solid ${bClass.includes('red')?'var(--accent-red)':(bClass.includes('amber')?'var(--accent-amber)':'#60a5fa')}"><span class="badge ${bClass}">${esc(d.severity)}</span> Line ${d.line}: ${esc(d.message)}</li>`;
+    }).join('');
+    html += `</ul></div>`;
+  }
+  
+  if (res.patchPlan && res.patchPlan.length) {
+    html += `<div><strong>File Patches:</strong><div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">`;
+    html += res.patchPlan.map(p => {
+      let diffHtml = '';
+      if (p.diff) {
+        const diffLines = p.diff.split('\n');
+        diffHtml = `<pre class="code-block diff-viewer" style="margin-top:4px; font-size:0.75rem; padding:8px;"><code>`;
+        diffHtml += diffLines.map(l => {
+          if (l.startsWith('+')) return `<span style="color:#4ade80">${esc(l)}</span>`;
+          if (l.startsWith('-')) return `<span style="color:#f87171">${esc(l)}</span>`;
+          if (l.startsWith('@@')) return `<span style="color:#38bdf8">${esc(l)}</span>`;
+          return esc(l);
+        }).join('\n');
+        diffHtml += `</code></pre>`;
+      }
+      return `<div style="border:1px solid var(--glass-border); border-radius:6px; padding:8px;">
+        <div style="font-weight:bold; margin-bottom:4px; color:var(--text-primary);">📝 ${esc(p.file || p.path)}</div>
+        ${diffHtml}
+      </div>`;
+    }).join('');
+    html += `</div></div>`;
+  }
+  
+  html += `</div></div>`;
+  return html;
+}
+
 async function renderResponse(data) {
   const result = data.result ?? data;
-  // Plain string result
+  let baseHtml = '';
   if (typeof result === 'string') {
-    return await renderMarkdown(result);
+    baseHtml = await renderMarkdown(result);
+  } else {
+    const nestedText = result?.content ?? result?.response;
+    if (typeof nestedText === 'string') {
+      baseHtml = await renderMarkdown(nestedText);
+    } else {
+      const SIZE_THRESHOLD = 100 * 1024;
+      const jsonStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+      if (jsonStr.length > SIZE_THRESHOLD) {
+        baseHtml = `<span style="color:var(--text-muted);font-size:.78rem;">Response too large to render (${(jsonStr.length/1024).toFixed(0)}KB). </span><button class="copy-raw-btn btn btn-outline btn-sm" data-v="${esc(jsonStr)}" style="margin-left:8px;">Copy Raw</button>`;
+      } else {
+        baseHtml = highlightJSON(result);
+      }
+    }
   }
-  // Nested text field — different tools use different keys (use_free_llm/vision_tool
-  // use `content`/`response`, execute_skill uses `response`, etc.)
-  const nestedText = result?.content ?? result?.response;
-  if (typeof nestedText === 'string') {
-    return await renderMarkdown(nestedText);
+
+  let extras = '';
+  if (result && typeof result === 'object') {
+    if (result.feedback && result.feedback.driftScore !== undefined) {
+      extras += renderQuantumFeedback(result.feedback);
+    }
+    if (result.patchPlan || result.diagnostics || result.pipelineStage) {
+      extras += renderCodingAgentsCard(result);
+    }
   }
-  const SIZE_THRESHOLD = 100 * 1024; // 100KB
-  const jsonStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-  if (jsonStr.length > SIZE_THRESHOLD) {
-    return `<span style="color:var(--text-muted);font-size:.78rem;">Response too large to render (${(jsonStr.length/1024).toFixed(0)}KB). </span><button class="copy-raw-btn btn btn-outline btn-sm" data-v="${esc(jsonStr)}" style="margin-left:8px;">Copy Raw</button>`;
-  }
-  return highlightJSON(result);
+  
+  return baseHtml + extras;
 }
 
 // ─── Tab System ─────────────────────────────────────────────────
@@ -607,7 +721,7 @@ const TOOL_WHEN_TO_USE = {
 
   coding_agents: `
     <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
-    <div>Autonomous multi-file software engineer based on the OMP (oh-my-pi) pattern. Searches your codebase, writes hash-anchored patches, verifies compiler diagnostics, and commits or rolls back changes.</div>
+    <div>Autonomous multi-file software engineer based on the OMP (oh-my-pi) pattern. Searches your codebase, writes hash-anchored patches, performs AST rewrites, verifies compiler diagnostics, and commits or rolls back changes.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
       <li><code>action: "run"</code> — Executes full refactoring pipeline (Vector RAG grep &rarr; Hashline diffs &rarr; Polyglot LSP checks).</li>
@@ -654,7 +768,7 @@ const TOOL_WHEN_TO_USE = {
 
   quantum_tool: `
     <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
-    <div>Multi-branch reasoning tool that explores diverging hypotheses using quantum-inspired gates and state collapse synthesis.</div>
+    <div>Multi-branch reasoning tool that explores diverging hypotheses using quantum-inspired gates and state collapse synthesis. Includes a strict drift guard to prevent decoherence.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
       <li><code>action: "setup"</code> — Initialize circuit with a preset (<code>"adversarial_debate"</code>, <code>"superposition_exploration"</code>, etc.).</li>
