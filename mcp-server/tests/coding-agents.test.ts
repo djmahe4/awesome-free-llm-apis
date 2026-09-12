@@ -358,7 +358,26 @@ describe('CodingAgentsHandler — issue fixes', () => {
 
     const patch = result.patchPlan.find(p => p.filePath === 'src/math.ts');
     expect(patch).toBeDefined();
-    expect(patch!.unifiedDiff).toMatch(/@@ -\d+,12 \+\d+,12 @@/);
+    // The file only has 1 line, so it should be 1, not 12
+    expect(patch!.unifiedDiff).toMatch(/@@ -\d+,1 \+\d+,1 @@/);
+  });
+
+  it('handles wildcard swap/reordering by mapping names', async () => {
+    ws = await makeTmpWorkspace({
+      'src/swap.ts': 'export function run() { swap(x, y); }',
+    });
+    const result = await CodingAgentsHandler({
+      goal: 'swap arguments',
+      workspaceRoot: ws,
+      dryRun: true,
+      topKFiles: 1,
+      astEditOps: [
+        { pat: 'swap($$$A, $$$B)', out: 'swap($$$B, $$$A)' },
+      ],
+    });
+    const patch = result.patchPlan.find(p => p.filePath === 'src/swap.ts');
+    expect(patch).toBeDefined();
+    expect(patch!.fullPatchedContent).toContain('swap(y, x)');
   });
 
   it('logs warning when ts-morph AST structural rewrite fails', async () => {

@@ -1,5 +1,5 @@
 /**
- * coding-agents.ts — OMP-style multi-file coding agent (v1.2.0)
+ * coding-agents.ts — OMP-style multi-file coding agent (v1.1.0)
  *
  * Pipeline (5 stages):
  *   1. Enumerate  — WorkspaceScanner lists all code files
@@ -141,9 +141,18 @@ function applyPatternRewrite(content: string, pat: string, out: string): { conte
     return { content, matchCount: 0 };
   }
   regex.lastIndex = 0;
-  // If out has $$$ wildcard reference, replace it with $1, $2, etc
-  let groupIndex = 1;
-  const targetOut = hasCapture ? out.replace(/\$\$\$[A-Z0-9_]*/g, () => `$${groupIndex++}`) : out;
+  
+  // Extract wildcard names from pat to map them to capture group indices
+  const patWildcards = Array.from(pat.matchAll(/\$\$\$[A-Z0-9_]*/g)).map(m => m[0]);
+
+  // If out has $$$ wildcard reference, replace it with $1, $2, etc based on index in pat
+  const targetOut = hasCapture 
+    ? out.replace(/\$\$\$[A-Z0-9_]*/g, (match) => {
+        const idx = patWildcards.indexOf(match);
+        return idx !== -1 ? `$${idx + 1}` : match;
+      })
+    : out;
+
   const replaced = content.replace(regex, targetOut);
   return { content: replaced, matchCount: matches.length };
 }
@@ -167,25 +176,24 @@ async function applyStructuralRewrite(
       const project = new Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true });
       const src = project.createSourceFile(filePath, content, { overwrite: true });
 
-      // Pattern without wildcard for literal AST matching
-      const cleanPat = pat.replace(/\$\$\$[A-Z0-9_]*/g, '').trim();
-      const isMostlyWildcards = cleanPat.replace(/[()[\]{},;.\s]/g, '').length === 0;
+      // Extract literal tokens, ignoring wildcards and syntax punctuation
+      const tokens = pat.split(/\$\$\$[A-Z0-9_]*|[()[\]{},;.\s]+/).filter(Boolean);
       let matchCount = 0;
 
-      if (isMostlyWildcards || cleanPat.length > 0) {
-        src.forEachDescendant(node => {
-          const text = node.getText();
-          if (isMostlyWildcards || text.includes(cleanPat)) {
+      src.forEachDescendant((node, traversal) => {
+        const text = node.getText();
+        const matchesTokens = tokens.length === 0 || tokens.every(token => text.includes(token));
+        if (matchesTokens) {
             const rewritten = applyPatternRewrite(text, pat, out);
             if (rewritten.matchCount > 0 && rewritten.content !== text) {
               try {
                 node.replaceWithText(rewritten.content);
                 matchCount += rewritten.matchCount;
-              } catch { /* skip node if non-replaceable */ }
+                traversal.skip();
+              } catch (err: any) { console.log("replaceWithText error:", err.message); }
             }
           }
         });
-      }
 
       if (matchCount > 0) {
         return { content: src.getFullText(), matchCount };
@@ -683,6 +691,9 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       const replacementLines = patchedContent.split('\n');
       const windowSize = 12;
       const { origSnippet, replSnippet, startLine: windowStartLine } = computeWindowedSnippet(lines, replacementLines, windowSize);
+      
+      const origCount = origSnippet ? origSnippet.split('\n').length : 0;
+      const replCount = replSnippet ? replSnippet.split('\n').length : 0;
 
       patches.push({
         filePath: relPath,
@@ -692,7 +703,7 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
         originalSnippet: origSnippet,
         replacementSnippet: replSnippet,
         fullPatchedContent: patchedContent, // full content for diagnostics & writes
-        unifiedDiff: `--- ${relPath} ${hashTag}\n+++ ${relPath} (proposed)\n@@ -${windowStartLine},${windowSize} +${windowStartLine},${windowSize} @@\n${replSnippet}\n`,
+        unifiedDiff: `--- ${relPath} ${hashTag}\n+++ ${relPath} (proposed)\n@@ -${windowStartLine},${origCount} +${windowStartLine},${replCount} @@\n${replSnippet}\n`,
       });
 
       result.astRewritesCount = (result.astRewritesCount || 0) + rewrites;
