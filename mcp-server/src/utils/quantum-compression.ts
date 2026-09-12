@@ -17,14 +17,39 @@ const STOP_WORDS = new Set([
 ]);
 
 function splitSentences(text: string): string[] {
-  return text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
+  const rawSegments = text.split(/\r?\n+/).map(s => s.trim()).filter(Boolean);
+  const result: string[] = [];
+  for (const seg of rawSegments) {
+    // Keep headers, list items (numbered or bulleted), and code fences intact as atomic sentences
+    if (/^(?:#+|-|\*|\d+\.)\s+/.test(seg) || seg.startsWith('```')) {
+      result.push(seg);
+      continue;
+    }
+    // For prose, split on sentence boundary where preceding char is not a single list digit
+    const sentences = seg.split(/(?<=[a-zA-Z0-9)\]"'][.!?])\s+(?=[A-Z0-9"']|$)/).map(s => s.trim()).filter(Boolean);
+    if (sentences.length > 0) {
+      result.push(...sentences);
+    } else {
+      result.push(seg);
+    }
+  }
+  return result;
 }
 
 function symbolDensity(sentence: string): number {
-  const tokens = sentence.toLowerCase().match(/[a-z0-9']+/g) || [];
+  const tokens = sentence.toLowerCase().match(/[a-z0-9_\-\.\/:]+/g) || [];
   if (tokens.length === 0) return 0;
-  const meaningful = tokens.filter(t => !STOP_WORDS.has(t));
-  return meaningful.length / tokens.length;
+  let meaningful = 0;
+  for (const t of tokens) {
+    if (!STOP_WORDS.has(t)) {
+      meaningful++;
+      // High-signal indicators: paths, numbers, code identifiers, ports
+      if (/[0-9_\-\.\/:]/.test(t)) {
+        meaningful += 0.5;
+      }
+    }
+  }
+  return meaningful / tokens.length;
 }
 
 /**
@@ -32,15 +57,38 @@ function symbolDensity(sentence: string): number {
  * always preserving the first and last sentence for context continuity.
  * temperature=1 returns the text unchanged; temperature=0 keeps only the
  * first/last sentence.
+ * Optional `focusTokens` steers retention towards query-relevant sentences.
  */
-export function quantumCompress(text: string, temperature = 0.5): string {
+export function quantumCompress(
+  text: string,
+  temperature = 0.5,
+  focusTokens?: Set<string> | string[]
+): string {
   const clamped = Math.max(0, Math.min(1, temperature));
   if (clamped >= 1) return text;
 
   const sentences = splitSentences(text);
   if (sentences.length <= 2) return text;
 
-  const scored = sentences.map((s, i) => ({ s, i, density: symbolDensity(s) }));
+  const focusSet = focusTokens
+    ? (focusTokens instanceof Set ? focusTokens : new Set(focusTokens.map(f => f.toLowerCase())))
+    : null;
+
+  const scored = sentences.map((s, i) => {
+    let density = symbolDensity(s);
+    if (focusSet && focusSet.size > 0) {
+      const lower = s.toLowerCase();
+      let matchCount = 0;
+      focusSet.forEach(t => {
+        if (t && lower.includes(t)) matchCount++;
+      });
+      if (matchCount > 0) {
+        density += matchCount * 1.5;
+      }
+    }
+    return { s, i, density };
+  });
+
   const keepCount = Math.max(2, Math.round(sentences.length * clamped));
 
   const first = scored[0];
@@ -52,7 +100,8 @@ export function quantumCompress(text: string, temperature = 0.5): string {
     .filter((v, idx, arr) => arr.findIndex(x => x.i === v.i) === idx)
     .sort((a, b) => a.i - b.i);
 
-  return kept.map(k => k.s).join(' ');
+  const hasNewlines = text.includes('\n');
+  return kept.map(k => k.s).join(hasNewlines ? '\n' : ' ');
 }
 
 export interface QuantumCompressionStats {
@@ -68,7 +117,11 @@ export interface QuantumCompressionStats {
 /**
  * Compresses text and computes detailed token metrics and symbol density statistics.
  */
-export function quantumCompressWithStats(text: string, temperature = 0.5): QuantumCompressionStats {
+export function quantumCompressWithStats(
+  text: string,
+  temperature = 0.5,
+  focusTokens?: Set<string> | string[]
+): QuantumCompressionStats {
   const rawLength = text.length;
   const rawTokensEstimate = Math.ceil(rawLength / 3.8);
   const sentences = splitSentences(text);
@@ -76,7 +129,7 @@ export function quantumCompressWithStats(text: string, temperature = 0.5): Quant
     ? sentences.reduce((sum, s) => sum + symbolDensity(s), 0) / sentences.length
     : 0;
 
-  const compressedText = quantumCompress(text, temperature);
+  const compressedText = quantumCompress(text, temperature, focusTokens);
   const compressedLength = compressedText.length;
   const compressedTokensEstimate = Math.ceil(compressedLength / 3.8);
   const compressionRatio = rawLength > 0 ? Math.max(0, (rawLength - compressedLength) / rawLength) : 0;

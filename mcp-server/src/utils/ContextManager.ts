@@ -2,6 +2,7 @@ import type { Message } from '../providers/types.js';
 import type { PipelineContext } from '../pipeline/middleware.js';
 import { getMessageContent } from './MessageUtils.js';
 import { getSharedEncoder } from './tiktoken.js';
+import { quantumCompress } from './quantum-compression.js';
 
 /**
  * Controls how context overflow is handled.
@@ -328,17 +329,8 @@ export class ContextManager {
                 return { ...msg, content };
             }
 
-            // Extract first and last sentences of long prose
-            const sentences = content.split(/[.!?]\s+/);
-            if (sentences.length <= 3) return { ...msg, content };
-
-            if (isWayOver) {
-                // Extremely aggressive: keep only first sentence and last sentence
-                const compressedContent = `${sentences[0]}. ... [stripped ${sentences.length - 2} sentences] ... ${sentences[sentences.length - 1]}.`;
-                return { ...msg, content: compressedContent };
-            }
-
-            const compressedContent = `${sentences[0]}. ${sentences[1]}. ... [summarized] ... ${sentences[sentences.length - 1]}.`;
+            // Quantum compression: retain highest symbol-density sentences while discarding fluff
+            const compressedContent = quantumCompress(content, isWayOver ? 0.35 : 0.6);
             return { ...msg, content: compressedContent };
         };
 

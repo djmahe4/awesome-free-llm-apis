@@ -570,7 +570,8 @@ export class WorkspaceContextMiddleware implements Middleware {
                     keywords: context.keywords || [],
                     memory: memoryContext,
                     workspace: (context as any).grepContext,
-                    isSubtask: isSubtask
+                    isSubtask: isSubtask,
+                    workspaceRoot: context.workspaceRoot
                 });
 
                 const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **2** high-level steps.`;

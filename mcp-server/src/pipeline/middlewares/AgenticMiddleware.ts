@@ -23,6 +23,7 @@ import { ContextGatherer } from './context-gatherer.js';
 import { classifyIntent, disambiguateConfusedIntent } from './intent-classifier.js';
 import { buildExecutionPlan } from './task-classifier.js';
 import { ProviderRegistry } from '../../providers/registry.js';
+import { quantumCompress } from '../../utils/quantum-compression.js';
 
 
 import { SubtaskDecomposer, createEmptyQueueState, newQueueTaskId, type QueueTask, type QueueState, type SubtaskHistoryEntry } from './SubtaskDecomposer.js';
@@ -590,17 +591,10 @@ export function summarizeResponse(text: string): string {
     if (text.length <= 2000) return text;
     
     const tag = '\n\n<!-- TF-IDF SUMMARY -->';
-    const limit = 2000 - tag.length;
-    
-    let compressed = compressSemantically(text, limit);
+    const compressed = quantumCompress(text, 0.7);
     if (!compressed.includes('<!-- TF-IDF SUMMARY -->')) {
-        compressed = compressed + tag;
+        return compressed + tag;
     }
-    
-    if (compressed.length > 2000) {
-        compressed = compressed.slice(0, 2000 - tag.length) + tag;
-    }
-    
     return compressed;
 }
 
@@ -791,16 +785,17 @@ async function executeSingleSubtask(
                     const tokenBudget = Math.floor(totalHistoryBudget * normalizedWeight);
 
                     let formattedOutput = entry.output;
+                    const taskWords = currentTask.toLowerCase().split(/\W+/).filter(w => w.length > 2);
                     let priorityLabel = 'LOW (Status Only)';
                     if (tokenBudget > 1500) {
                         priorityLabel = 'HIGH (Full Detail)';
-                        formattedOutput = compressSemantically(formattedOutput, 12000);
+                        formattedOutput = quantumCompress(formattedOutput, 0.85, taskWords);
                     } else if (tokenBudget > 500) {
                         priorityLabel = 'MEDIUM (Summary)';
-                        formattedOutput = compressSemantically(formattedOutput, 4000);
+                        formattedOutput = quantumCompress(formattedOutput, 0.65, taskWords);
                     } else {
                         priorityLabel = 'LOW (Status Only)';
-                        formattedOutput = compressSemantically(formattedOutput, 800);
+                        formattedOutput = quantumCompress(formattedOutput, 0.35, taskWords);
                     }
 
                     historySection += `\n### |Subtask: ${entry.task}⟩ (Entanglement Distance: ${w.distance}, Priority: ${priorityLabel})\n`;
