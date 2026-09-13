@@ -160,54 +160,30 @@ async function initTelemetry(force = false) {
 
 
 
-async function main() {
-  try {
-    await validateSandboxDependencies();
-    
-    // Initialize persistent tracking
-    await getSharedRouter().init();
-    
-    // Initialize telemetry / session manager
-    await initTelemetry(true);
+export function createExpressApp(): express.Express {
+  const app = express();
 
-    // Periodically check/sync telemetry every hour (supports continuous server runs)
-    const telemetryInterval = setInterval(async () => {
-      try {
-        await initTelemetry();
-      } catch (err) {
-        // Silent warning
-      }
-    }, 60 * 60 * 1000);
-    if (typeof telemetryInterval.unref === 'function') {
-      telemetryInterval.unref();
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        "script-src": ["'self'", "https://cdn.jsdelivr.net", "'unsafe-inline'"],
+        "style-src": ["'self'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com", "'unsafe-inline'"],
+        "font-src": ["'self'", "https://fonts.gstatic.com"],
+        "img-src": ["'self'", "data:", "https:*"],
+        "connect-src": ["'self'", "https://cdn.jsdelivr.net"],
+      },
+    },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true
     }
-    
-    const isSse = process.argv.includes('--sse');
-    if (isSse) {
-      const app = express();
-      const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+  }));
+  app.use(cors());
+  app.use(express.json());
 
-      app.use(helmet({
-        contentSecurityPolicy: {
-          directives: {
-            ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-            "script-src": ["'self'", "https://cdn.jsdelivr.net", "'unsafe-inline'"],
-            "style-src": ["'self'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com", "'unsafe-inline'"],
-            "font-src": ["'self'", "https://fonts.gstatic.com"],
-            "img-src": ["'self'", "data:", "https:*"],
-            "connect-src": ["'self'", "https://cdn.jsdelivr.net"],
-          },
-        },
-        hsts: {
-          maxAge: 31536000,
-          includeSubDomains: true,
-          preload: true
-        }
-      }));
-      app.use(cors());
-      app.use(express.json());
-
-      // API endpoints for dashboard
+  // API endpoints for dashboard
 
       // Long-term session-less rate limiting using TTL cache to prevent memory leaks
       const rateLimitCache = new LRUCache<string, { count: number; resetAt: number }>({
@@ -460,22 +436,26 @@ async function main() {
               result = { content: r?.choices?.[0]?.message?.content ?? '', model: r?.model, provider: r?._providerId };
               break;
             }
-            case 'vision_tool':
-              result = await visionTool({
+            case 'vision_tool': {
+              const r = await visionTool({
                 image_path: params.image_path,
                 prompt: params.prompt,
                 model: params.model,
                 workspace_root: params.workspace_root || process.cwd(),
               });
+              result = { ...r, content: r.response };
               break;
-            case 'execute_skill':
-              result = await executeSkill({
+            }
+            case 'execute_skill': {
+              const r = await executeSkill({
                 skill: params.skill,
                 input: params.input,
                 model: params.model,
                 workspace_root: params.workspace_root,
               });
+              result = { ...r, content: r.response };
               break;
+            }
             case 'manage_memory':
               result = await manageMemory({
                 action: params.action,
@@ -524,13 +504,76 @@ async function main() {
               result = await quantumTool(params);
               break;
             }
+            case 'local_llm_patch': {
+              const { localLlmPatch } = await import('./tools/local-llm-patch.js');
+              result = await localLlmPatch(params);
+              break;
+            }
+            case 'coding_agents': {
+              const { CodingAgentsHandler } = await import('./tools/coding-agents.js');
+              result = await CodingAgentsHandler(params);
+              break;
+            }
             default:
               res.status(400).json({ error: `Unknown tool: ${tool}` });
               return;
           }
+          const selfLoggingTools = new Set(['use_free_llm', 'coding_agents', 'local_llm_patch', 'quantum_tool', 'cyber_tool']);
+          if (!selfLoggingTools.has(tool)) {
+            const sid = params.sessionId || '__no_ws__';
+            const { logToolCall } = await import('./utils/ChatLogger.js');
+            await logToolCall(sid, tool, params, result, Date.now() - start, false).catch(() => {});
+          }
           res.json({ ok: true, latencyMs: Date.now() - start, result });
         } catch (err: any) {
+          const sid = params.sessionId || '__no_ws__';
+          const { logToolCall } = await import('./utils/ChatLogger.js');
+          await logToolCall(sid, tool, params, { error: String(err?.message || err) }, Date.now() - start, true).catch(() => {});
           res.status(500).json({ ok: false, latencyMs: Date.now() - start, error: String(err?.message || err) });
+        }
+      });
+
+      app.post('/api/coding_agents', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { goal, workspaceRoot, dryRun, topKFiles, sessionId, verifyLspDiagnostics } = req.body || {};
+          if (!goal) {
+            res.status(400).json({ error: 'goal is required' });
+            return;
+          }
+          const { CodingAgentsHandler } = await import('./tools/coding-agents.js');
+          const result = await CodingAgentsHandler({
+            goal,
+            workspaceRoot: workspaceRoot ?? process.cwd(),
+            dryRun: dryRun ?? true,
+            topKFiles: topKFiles ?? 5,
+            sessionId,
+            verifyLspDiagnostics: verifyLspDiagnostics ?? true
+          });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ error: err?.message || String(err) });
+        }
+      });
+
+      app.post('/api/local_llm_patch', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { filePath, instruction, workspace_root, sessionId } = req.body || {};
+          if (!filePath || !instruction) {
+            res.status(400).json({ error: 'filePath and instruction are required' });
+            return;
+          }
+          const { localLlmPatch } = await import('./tools/local-llm-patch.js');
+          const result = await localLlmPatch({
+            filePath,
+            instruction,
+            workspace_root,
+            sessionId
+          });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ error: err?.message || String(err) });
         }
       });
 
@@ -599,6 +642,37 @@ async function main() {
           const fileUri = 'file:///' + absPath.replace(/\\/g, '/');
           const kind = file.mimetype === 'application/pdf' ? 'pdf' : 'image';
           res.json({ absPath, fileUri, relativePath: relativePath?.replace(/\\/g, '/'), kind });
+        } catch (err: any) {
+          res.status(500).json({ error: String(err?.message || err) });
+        }
+      });
+
+      // Expose per-tool reference docs for Dashboard info button
+      app.get('/api/tool-docs/:name', async (req, res) => {
+        try {
+          const toolName = req.params.name?.replace(/[^a-zA-Z0-9_-]/g, '');
+          if (!toolName) {
+            res.status(400).json({ error: 'Tool name required' });
+            return;
+          }
+          const candidatePaths = [
+            path.resolve(process.cwd(), 'docs', 'skill', 'references', `${toolName}.md`),
+            path.resolve(process.cwd(), '..', 'docs', 'skill', 'references', `${toolName}.md`),
+            path.resolve(process.cwd(), 'docs', `${toolName}.md`)
+          ];
+          let docContent = '';
+          for (const p of candidatePaths) {
+            try {
+              if (fs.existsSync(p)) {
+                docContent = fs.readFileSync(p, 'utf-8');
+                break;
+              }
+            } catch {}
+          }
+          if (!docContent) {
+            docContent = `# ${toolName}\n\nDocumentation reference for \`${toolName}\`.\n\n*Execute tool via standard MCP JSON-RPC protocol.*`;
+          }
+          res.json({ tool: toolName, markdown: docContent });
         } catch (err: any) {
           res.status(500).json({ error: String(err?.message || err) });
         }
@@ -675,56 +749,165 @@ async function main() {
         }
       });
 
-      // List all agentic sessions with chat-log metadata (msgCount, lastTs)
+      // In-memory cache for /api/sessions (5-second TTL) to eliminate O(N) readdir scans on rapid dashboard refreshes
+      let sessionsCache: { data: any; expiresAt: number } | null = null;
+
+      // Invalidation helper for session cache
+      const invalidateSessionsCache = () => { sessionsCache = null; };
+
+      // List all agentic sessions with chat-log metadata (name, workspace, msgCount, lastTs)
       app.get('/api/sessions', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
+          if (sessionsCache && Date.now() < sessionsCache.expiresAt) {
+            return res.json(sessionsCache.data);
+          }
+
           const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
           try { await fsp.access(projectsBase); } catch { return res.json({ sessions: [] }); }
 
-          // Denylist: exclude test/benchmark/fixture directories that pollute the sidebar
-          const DENYLIST_PREFIXES = ['test-', 'bench-', 'smoke-', 'stress-', 'full-stress-', 'e2e-', 'simulation-', 'study-'];
+          // Denylist: strictly exclude all test/benchmark/fixture/vitest/mock directories that pollute the dashboard
+          const DENYLIST_PREFIXES = [
+            'test-', 'bench-', 'smoke-', 'stress-', 'full-stress-', 'e2e-', 
+            'simulation-', 'study-', 'vitest-', 'fixture-', 'mock-', 'tmp-'
+          ];
 
           const entries = await fsp.readdir(projectsBase);
           const MAX_CONCURRENT = 20;
-          type SessionMeta = { id: string; msgCount: number; lastTs: number };
+          type SessionMeta = { id: string; name?: string; workspace?: string; msgCount: number; lastTs: number };
           const sessions: SessionMeta[] = [];
 
           for (let i = 0; i < entries.length; i += MAX_CONCURRENT) {
             const batch = entries.slice(i, i + MAX_CONCURRENT);
             const results = await Promise.all(batch.map(async d => {
               // Skip test/benchmark artifact directories
-              if (DENYLIST_PREFIXES.some(prefix => d.startsWith(prefix))) return null;
+              if (DENYLIST_PREFIXES.some(prefix => d.toLowerCase().startsWith(prefix))) return null;
               const full = path.resolve(projectsBase, d);
               if (path.dirname(full) !== path.resolve(projectsBase)) return null;
               try {
                 const stat = await fsp.stat(full);
                 if (!stat.isDirectory()) return null;
                 let msgCount = 0; let lastTs = stat.mtimeMs;
+                let sessionName: string | undefined = undefined;
+                let workspace: string | undefined = undefined;
+
                 try {
-                  const log: any[] = JSON.parse(await fsp.readFile(path.join(full, 'chat-log.json'), 'utf-8'));
-                  msgCount = log.length;
-                  if (log.length) lastTs = Math.max(lastTs, log[log.length - 1].ts || 0);
+                  const nameTxt = await fsp.readFile(path.join(full, 'name.txt'), 'utf-8');
+                  if (nameTxt.trim()) sessionName = nameTxt.trim();
                 } catch {}
-                return { id: d, msgCount, lastTs } as SessionMeta;
+
+                try {
+                  const knowledgeContent = await fsp.readFile(path.join(full, 'knowledge.md'), 'utf-8');
+                  const match = knowledgeContent.match(/<!-- workspace: (.*?) -->/);
+                  if (match) workspace = match[1].trim();
+                } catch {}
+
+                try {
+                  const log: any[] = await readNormalizedChatLog(full);
+                  msgCount = log.length;
+                  if (log.length) {
+                    lastTs = Math.max(lastTs, log[log.length - 1].ts || 0);
+                    // If no explicit name.txt, derive from first assistant / tool turn
+                    if (!sessionName) {
+                      const firstResp = log.find((t: any) => t.role === 'assistant' || t.role === 'tool_call' || t.payload?.role === 'assistant');
+                      const contentToTitle = firstResp?.content || firstResp?.payload?.content || firstResp?.payload?.result;
+                      if (contentToTitle) {
+                        const { extractIntelligentTitle } = await import('./utils/ChatLogger.js');
+                        sessionName = extractIntelligentTitle(typeof contentToTitle === 'string' ? contentToTitle : JSON.stringify(contentToTitle), workspace);
+                      }
+                    }
+                  }
+                } catch {}
+
+                return { id: d, name: sessionName, workspace, msgCount, lastTs } as SessionMeta;
               } catch { return null; }
             }));
             sessions.push(...results.filter((s): s is SessionMeta => s !== null));
           }
 
-          // Ensure __no_ws__ is always present in the list
+          // Ensure __no_ws__ is present in the list
           if (!sessions.some(s => s.id === '__no_ws__')) {
-            let msgCount = 0; let lastTs = Date.now() - 365 * 24 * 60 * 60 * 1000; // 1 year ago default
+            let msgCount = 0; let lastTs = Date.now();
+            let sessionName: string | undefined = undefined;
             try {
-              const log: any[] = JSON.parse(await fsp.readFile(path.join(projectsBase, '__no_ws__', 'chat-log.json'), 'utf-8'));
+              const fullNoWs = path.join(projectsBase, '__no_ws__');
+              const nameTxt = await fsp.readFile(path.join(fullNoWs, 'name.txt'), 'utf-8');
+              if (nameTxt.trim()) sessionName = nameTxt.trim();
+            } catch {}
+            try {
+              const log: any[] = await readNormalizedChatLog(path.join(projectsBase, '__no_ws__'));
               msgCount = log.length;
               if (log.length) lastTs = log[log.length - 1].ts || Date.now();
             } catch {}
-            sessions.push({ id: '__no_ws__', msgCount, lastTs });
+            sessions.push({ id: '__no_ws__', name: sessionName || '⚡ One-shot [none]', msgCount, lastTs });
           }
 
           sessions.sort((a, b) => b.lastTs - a.lastTs);
-          res.json({ sessions });
+          const responsePayload = { sessions };
+          sessionsCache = { data: responsePayload, expiresAt: Date.now() + 5000 };
+          res.json(responsePayload);
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // POST /api/sessions — Explicitly create a new conversation session
+      app.post('/api/sessions', express.json({ limit: '16kb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          invalidateSessionsCache();
+          const { workspace = '', name = '' } = req.body || {};
+          const wsTrimmed = (workspace || '').toString().trim();
+          let baseHash = 'conv';
+          if (wsTrimmed) {
+            const hash = await new WorkspaceScanner(process.cwd()).getWorkspaceHash(wsTrimmed);
+            baseHash = `ws-${hash.substring(0, 12)}`;
+          } else {
+            baseHash = `session-${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`;
+          }
+
+          // Append random suffix so users can have multiple distinct sessions on the same workspace
+          const suffix = Math.random().toString(36).substring(2, 7);
+          const sessionId = `${baseHash}-${suffix}`;
+
+          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectDir = path.resolve(projectsBase, sessionId);
+          await fsp.mkdir(projectDir, { recursive: true });
+
+          const wsTag = wsTrimmed ? `[${path.basename(wsTrimmed.replace(/[/\\]+$/, '')) || 'ws'}]` : '[none]';
+          const defaultName = name ? `${name.trim()} ${wsTag}` : `New Conversation ${wsTag}`;
+          await fsp.writeFile(path.join(projectDir, 'name.txt'), defaultName, 'utf-8');
+
+          if (wsTrimmed) {
+            await fsp.writeFile(path.join(projectDir, 'knowledge.md'), `<!-- workspace: ${wsTrimmed} -->\n# Session Memory\n`, 'utf-8');
+          }
+
+          res.json({ success: true, sessionId, name: defaultName, workspace: wsTrimmed });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // PATCH /api/sessions/:sessionId — Rename conversation
+      app.patch('/api/sessions/:sessionId', express.json({ limit: '8kb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          invalidateSessionsCache();
+          const { sessionId } = req.params;
+          if (!/^(?!\.\.?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
+            return res.status(400).json({ error: 'Invalid sessionId' });
+          }
+          const { name = '' } = req.body || {};
+          if (!name || typeof name !== 'string') {
+            return res.status(400).json({ error: 'Name is required' });
+          }
+
+          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectDir = path.resolve(projectsBase, sessionId);
+          await fsp.mkdir(projectDir, { recursive: true });
+          await fsp.writeFile(path.join(projectDir, 'name.txt'), name.trim(), 'utf-8');
+
+          res.json({ success: true, sessionId, name: name.trim() });
         } catch (err) {
           res.status(500).json({ error: String(err) });
         }
@@ -777,16 +960,33 @@ async function main() {
 
       // Helper to read and normalize chat log format (chat-logs.json or chat-log.json)
       async function readNormalizedChatLog(dirPath: string): Promise<any[]> {
+        let raw = '';
         try {
-          const raw = await fsp.readFile(path.join(dirPath, 'chat-logs.json'), 'utf-8');
-          return JSON.parse(raw);
+          raw = await fsp.readFile(path.join(dirPath, 'chat-logs.json'), 'utf-8');
         } catch {
           try {
-            const raw = await fsp.readFile(path.join(dirPath, 'chat-log.json'), 'utf-8');
-            return JSON.parse(raw);
+            raw = await fsp.readFile(path.join(dirPath, 'chat-log.json'), 'utf-8');
           } catch {
             return [];
           }
+        }
+
+        try {
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return [];
+          return parsed.map((entry: any) => {
+            if (entry && entry.payload && typeof entry.payload === 'object') {
+              return {
+                ts: entry.timestamp || entry.payload.ts || Date.now(),
+                sessionId: entry.sessionId,
+                type: entry.type,
+                ...entry.payload,
+              };
+            }
+            return entry;
+          });
+        } catch {
+          return [];
         }
       }
 
@@ -852,9 +1052,16 @@ async function main() {
         if (!checkRateLimit(req, res)) return;
         try {
           const { query = '', keywords = [], agentic = false, workspaceRoot = process.cwd(), sessionId = 'steering-eval-session', subtask } = req.body || {};
-          const userKeywords = Array.isArray(keywords)
-            ? keywords
-            : String(keywords).split(',').map((k: string) => k.trim()).filter(Boolean);
+          let rawKeywordsList: string[] = [];
+          if (Array.isArray(keywords)) {
+            rawKeywordsList = keywords.map(k => String(k));
+          } else if (typeof keywords === 'string') {
+            rawKeywordsList = keywords.split(',');
+          }
+
+          const userKeywords = rawKeywordsList
+            .map(k => k.replace(/[\[\]"'`]/g, '').trim().toLowerCase())
+            .filter(Boolean);
 
           const effectiveKeywords = userKeywords.length > 0
             ? userKeywords
@@ -884,16 +1091,32 @@ async function main() {
           const { WorkspaceContextMiddleware } = await import('./pipeline/middlewares/WorkspaceContextMiddleware.js');
           const middleware = new WorkspaceContextMiddleware();
 
-          const hasValidSubtask = subtask && typeof subtask === 'object' && !Array.isArray(subtask) &&
-            ((typeof subtask.id === 'string' && subtask.id.trim().length > 0) ||
-             (typeof subtask.title === 'string' && subtask.title.trim().length > 0));
+          let planDetails: any = null;
+          let subtaskObj: any = null;
 
-          const subtaskObj = hasValidSubtask
-            ? {
-                id: (typeof subtask.id === 'string' && subtask.id.trim()) || 'subtask-eval-1',
-                title: (typeof subtask.title === 'string' && subtask.title.trim()) || `Execute task: ${query || 'System prompt steering test'}`
-              }
-            : (agentic ? { id: 'subtask-eval-1', title: `Execute task: ${query || 'System prompt steering test'}` } : null);
+          if (agentic) {
+            const { decomposeGoal } = await import('./pipeline/middlewares/AgenticMiddleware.js');
+            const { buildExecutionPlan } = await import('./pipeline/middlewares/task-classifier.js');
+            const { tasks: steps } = decomposeGoal(query || 'Execute multi-step task');
+            const plan = await buildExecutionPlan(steps, resolvedWsRoot);
+            planDetails = {
+              userBrief: plan.userBrief,
+              phases: [
+                ...(plan.phase1 || []).map((t: any) => ({ ...t, phase: 1 })),
+                ...((plan as any).phase2 || []).map((t: any) => ({ ...t, phase: 2 }))
+              ]
+            };
+            const firstTask = planDetails.phases[0];
+            subtaskObj = {
+              id: firstTask?.id || 'subtask-1',
+              title: firstTask?.task || query || 'Execute initial subtask'
+            };
+          } else if (subtask && typeof subtask === 'object' && !Array.isArray(subtask)) {
+            subtaskObj = {
+              id: (typeof subtask.id === 'string' && subtask.id.trim()) || 'subtask-eval-1',
+              title: (typeof subtask.title === 'string' && subtask.title.trim()) || `Execute task: ${query || 'System prompt steering test'}`
+            };
+          }
 
           const context: any = {
             request: {
@@ -913,15 +1136,25 @@ async function main() {
           const steeringTelemetry = context.telemetry?.steeringTelemetry || {};
           steeringTelemetry.matchedSections = promptEval.matchedSections;
 
-          // Assemble the real subtask prompt if in agentic mode so users see exactly what the model receives
-          let assembledPrompt = promptEval.prompt;
+          // Assemble the complete 5-layer system prompt (including L2 ADR/Memory, L3 Wiki, L4 Grep/Workspace, L5 Prompts)
+          let assembledPrompt = await getIntelligentSystemPrompt({
+            context: agentic ? (subtaskObj?.title || query) : query,
+            keywords: effectiveKeywords,
+            memory: context.telemetry?.memoryContext,
+            workspace: context.telemetry?.grepContext,
+            workspaceRoot: resolvedWsRoot,
+            isSubtask: agentic
+          });
+
           if (agentic && subtaskObj) {
             const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${subtaskObj.title}\n- **Subtask ID**: ${subtaskObj.id}\n\nStrictly focus on this subtask using the tools provided.`;
-            assembledPrompt = `${promptEval.prompt}${taskHeader}`;
+            assembledPrompt = `${assembledPrompt}${taskHeader}`;
           }
           steeringTelemetry.fullAssembledSystemPrompt = assembledPrompt;
+          steeringTelemetry.planDetails = planDetails;
+          steeringTelemetry.subtaskContext = subtaskObj;
 
-          const sysTokens = promptEval.totalPromptTokens || steeringTelemetry.memoryLayers?.sysPromptTokens || Math.ceil(assembledPrompt.length / 3.8);
+          const sysTokens = Math.ceil(assembledPrompt.length / 3.8);
           if (!steeringTelemetry.memoryLayers) steeringTelemetry.memoryLayers = {};
           steeringTelemetry.memoryLayers.sysPromptTokens = sysTokens;
           steeringTelemetry.memoryLayers.totalContextTokens = (steeringTelemetry.memoryLayers.shortTermTokens || 0) + (steeringTelemetry.memoryLayers.longTermTokens || 0) + (steeringTelemetry.memoryLayers.wikiTokens || 0) + (steeringTelemetry.memoryLayers.grepTokens || 0) + (steeringTelemetry.memoryLayers.groundingTokens || 0) + sysTokens;
@@ -997,6 +1230,7 @@ async function main() {
       app.post('/api/chat-log/:sessionId', express.json({ limit: '512kb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
+          invalidateSessionsCache();
           const { sessionId } = req.params;
           if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
             return res.status(400).json({ error: 'Invalid sessionId' });
@@ -1017,6 +1251,7 @@ async function main() {
       app.delete('/api/chat-log/:sessionId', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
+          invalidateSessionsCache();
           const { sessionId } = req.params;
           if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
             return res.status(400).json({ error: 'Invalid sessionId' });
@@ -1106,6 +1341,34 @@ async function main() {
       // Serve dashboard static files
       const dashboardPath = path.join(__dirname, '../dashboard');
       app.use(express.static(dashboardPath));
+
+      return app;
+}
+
+async function main() {
+  try {
+    // Validate dependencies for code execution (Python sandbox)
+    await validateSandboxDependencies();
+
+    // Initialize telemetry / session manager
+    await initTelemetry(true);
+
+    // Periodically check/sync telemetry every hour (supports continuous server runs)
+    const telemetryInterval = setInterval(async () => {
+      try {
+        await initTelemetry();
+      } catch (err) {
+        // Silent warning
+      }
+    }, 60 * 60 * 1000);
+    if (typeof telemetryInterval.unref === 'function') {
+      telemetryInterval.unref();
+    }
+
+    const isSse = process.argv.includes('--sse');
+    if (isSse) {
+      const app = createExpressApp();
+      const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
       // Auto-deploy/check SearXNG Docker container if docker is available
       import('./search/searxng-deploy.js').then(({ ensureSearxngContainer }) => {

@@ -12,9 +12,9 @@ function modelBadge(model, provider) {
 }
 
 function esc(str) {
-  if (!str) return '';
+  if (str == null || str === '') return '';
   const d = document.createElement('div');
-  d.textContent = str;
+  d.textContent = String(str);
   return d.innerHTML;
 }
 
@@ -83,12 +83,28 @@ async function renderMarkdown(text) {
       }
       return `<pre class="code-block" style="font-size:.78rem;">${esc(definition)}</pre>`;
     }
+    
+    // Extract normal code blocks first to prevent inline replacements inside them
+    let codeBlocks = [];
+    let noCode = part.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+      let codeContent = esc(code.trim());
+      if (lang === 'diff') {
+        const diffLines = codeContent.split('\n');
+        codeContent = diffLines.map(l => {
+          if (l.startsWith('+')) return `<span style="color:#4ade80">${l}</span>`;
+          if (l.startsWith('-')) return `<span style="color:#f87171">${l}</span>`;
+          if (l.startsWith('@@')) return `<span style="color:#38bdf8">${l}</span>`;
+          return l;
+        }).join('\n');
+      }
+      codeBlocks.push(`<pre class="code-block" style="font-size:.78rem;overflow-x:auto;"><code>${codeContent}</code></pre>`);
+      return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+    });
+
     // Regular markdown
-    const safePart = esc(part);
-    return safePart
-      // Fenced code blocks (non-mermaid)
-      .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
-        `<pre class="code-block" style="font-size:.78rem;overflow-x:auto;"><code>${code.trim()}</code></pre>`)
+    let safePart = esc(noCode);
+
+    let html = safePart
       // Inline code
       .replace(/`([^`]+)`/g, (_, c) => `<code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:.85em;">${c}</code>`)
       // Bold
@@ -113,6 +129,13 @@ async function renderMarkdown(text) {
       .replace(/\n\n+/g, '</p><p style="margin:6px 0;">')
       // Single newlines become <br>
       .replace(/\n/g, '<br>');
+
+    // Restore code blocks (which are already escaped) after inline markdown
+    codeBlocks.forEach((cb, idx) => {
+      html = html.replace(`__CODE_BLOCK_${idx}__`, cb);
+    });
+
+    return html;
   }));
   return `<div class="md-body" style="line-height:1.6;font-size:.82rem;color:var(--text-secondary);">${rendered.join('')}</div>`;
 }
@@ -124,24 +147,164 @@ async function renderMarkdown(text) {
 // fields like `model`/`provider` (added for the UI badges, never meant to be shown as
 // message text) ended up printed inline in the chat bubble. Falls back to a JSON dump
 // only when there's genuinely no string content field to render.
+function renderQuantumFeedback(fb) {
+  if (!fb) return '';
+  const isDrifted = fb.isDrifted;
+  const driftColor = isDrifted ? 'var(--accent-red)' : 'var(--accent-green)';
+  const driftText = isDrifted ? '⚠ Drift Detected' : '✓ Coherent';
+  
+  let html = `<div class="card" style="margin-top:16px; border-color: ${driftColor};">`;
+  html += `<div class="card-header" style="color:${driftColor}">⚛ Quantum Telemetry: ${driftText} (Score: ${fb.driftScore})</div>`;
+  html += `<div class="card-body" style="font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">`;
+  
+  if (fb.decoheredQubits && fb.decoheredQubits.length) {
+    html += `<div><strong>Decohered Qubits:</strong> ${fb.decoheredQubits.map(q => `<span class="badge badge-amber">q${esc(q)}</span>`).join(' ')}</div>`;
+  }
+  if (fb.crossBranchCorrelations && fb.crossBranchCorrelations.length) {
+    html += `<div><strong>Cross-Branch Correlations:</strong><ul style="margin-left:20px; list-style:circle;">`;
+    html += fb.crossBranchCorrelations.map(c => {
+      if (typeof c === 'string') return `<li>${esc(c)}</li>`;
+      let relBadge = 'badge-gray';
+      if (c.relation === 'consensus') relBadge = 'badge-green';
+      else if (c.relation === 'adversarial') relBadge = 'badge-red';
+      const sim = c.similarity != null ? ` (similarity: ${esc(c.similarity)})` : '';
+      const qA = c.qubitA != null ? `q${esc(c.qubitA)}` : 'A';
+      const qB = c.qubitB != null ? `q${esc(c.qubitB)}` : 'B';
+      const pA = c.personaA ? ` (${esc(c.personaA)})` : '';
+      const pB = c.personaB ? ` (${esc(c.personaB)})` : '';
+      return `<li>${qA}${pA} ↔ ${qB}${pB}: <span class="badge ${relBadge}">${esc(c.relation || 'neutral')}</span>${sim}</li>`;
+    }).join('');
+    html += `</ul></div>`;
+  }
+  if (fb.recommendedGates && fb.recommendedGates.length) {
+    html += `<div><strong>Recommended Gates:</strong><div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;">`;
+    html += fb.recommendedGates.map(g => `<div style="border:1px solid var(--glass-border); padding:6px; border-radius:4px;"><span class="badge badge-purple">${esc(g.gate)}</span> Target: ${g.target != null ? esc(g.target) : 'none'} Col: ${g.column != null ? esc(g.column) : 0}<br><span style="color:var(--text-muted); font-size:0.7rem;">${esc(g.reason)}</span></div>`).join('');
+    html += `</div></div>`;
+  }
+  html += `</div></div>`;
+  return html;
+}
+
+function renderCodingAgentsCard(res) {
+  if (!res) return '';
+  let html = `<div class="card" style="margin-top:16px; border-color: var(--accent-cyan);">`;
+  html += `<div class="card-header">🤖 Agent Pipeline: <span class="badge badge-cyan">${esc(res.pipelineStage || 'unknown')}</span>`;
+  if ((res.restoredFiles && res.restoredFiles.length > 0) || res.status === 'rollback' || res.pipelineStage === 'rollback') {
+    const count = res.restoredFiles?.length ? ` (${res.restoredFiles.length} files restored)` : '';
+    html += ` <span class="badge badge-amber">Rollback${count}</span>`;
+  } else if (res.applied || res.status === 'applied' || res.status === 'success') {
+    html += ` <span class="badge badge-green">Applied</span>`;
+  } else {
+    html += ` <span class="badge badge-purple">Dry Run</span>`;
+  }
+  html += `</div>`;
+  html += `<div class="card-body" style="font-size:0.8rem; display:flex; flex-direction:column; gap:12px;">`;
+  
+  if (res.anchors && res.anchors.length) {
+    html += `<div><strong>Anchors:</strong> ${res.anchors.map(a => `<code style="background:rgba(255,255,255,.08);padding:2px 4px;border-radius:3px;margin-right:4px;">${esc(typeof a === 'string' ? a : (a.hashTag || a.filePath || JSON.stringify(a)))}</code>`).join('')}</div>`;
+  }
+  
+  if (res.diagnostics && res.diagnostics.length) {
+    html += `<div><strong>Diagnostics:</strong><ul style="margin-left:0; padding-left:0; list-style:none; display:flex; flex-direction:column; gap:4px; margin-top:4px;">`;
+    html += res.diagnostics.map(d => {
+      let bClass = 'badge-gray';
+      if (d.severity === 'error') bClass = 'badge-red';
+      else if (d.severity === 'warning') bClass = 'badge-amber';
+      else if (d.severity === 'info') bClass = 'badge-blue';
+      const loc = d.filePath ? `[${d.filePath}${d.line != null ? ':' + d.line : ''}] ` : (d.line != null ? `Line ${d.line}: ` : '');
+      return `<li style="background:rgba(255,255,255,.03); padding:4px 8px; border-radius:4px; border-left:2px solid ${bClass.includes('red')?'var(--accent-red)':(bClass.includes('amber')?'var(--accent-amber)':'#60a5fa')}"><span class="badge ${bClass}">${esc(d.severity)}</span> ${esc(loc)}${esc(d.message)}</li>`;
+    }).join('');
+    html += `</ul></div>`;
+  }
+  
+  if (res.patchPlan && res.patchPlan.length) {
+    html += `<div><strong>File Patches:</strong><div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">`;
+    html += res.patchPlan.map(p => {
+      let diffHtml = '';
+      const diffText = p.unifiedDiff || (p.replacementSnippet ? `@@ -${p.startLine} +${p.startLine} @@\n${p.replacementSnippet}` : '');
+      if (diffText) {
+        const diffLines = diffText.split('\n');
+        diffHtml = `<pre class="code-block diff-viewer" style="margin-top:4px; font-size:0.75rem; padding:8px; max-height:450px; overflow-y:auto;"><code>`;
+        diffHtml += diffLines.map(l => {
+          if (l.startsWith('+')) return `<span style="color:#4ade80">${esc(l)}</span>`;
+          if (l.startsWith('-')) return `<span style="color:#f87171">${esc(l)}</span>`;
+          if (l.startsWith('@@')) return `<span style="color:#38bdf8">${esc(l)}</span>`;
+          return esc(l);
+        }).join('\n');
+        diffHtml += `</code></pre>`;
+      }
+      return `<div style="border:1px solid var(--glass-border); border-radius:6px; padding:8px;">
+        <div style="font-weight:bold; margin-bottom:4px; color:var(--text-primary);">📝 ${esc(p.filePath || 'file')}</div>
+        ${diffHtml}
+      </div>`;
+    }).join('');
+    html += `</div></div>`;
+  }
+  
+  html += `</div></div>`;
+  return html;
+}
+
+function renderLocalPatchCard(res) {
+  if (!res || !res.patch) return '';
+  let html = `<div class="card" style="margin-top:16px; border-color: var(--accent-purple);">`;
+  html += `<div class="card-header">🩹 Local LLM Patch: <span class="badge ${res.success ? 'badge-green' : 'badge-red'}">${res.success ? 'Success' : 'Failed'}</span>`;
+  if (res.modelUsed) {
+    html += ` <span class="badge badge-purple">${esc(res.modelUsed)}</span>`;
+  }
+  html += `</div>`;
+  html += `<div class="card-body" style="font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">`;
+  html += `<div><strong>Target File:</strong> <code>${esc(res.filePath || '')}</code></div>`;
+  if (res.patch) {
+    const diffLines = res.patch.split('\n');
+    html += `<div><strong>Patch Content:</strong>`;
+    html += `<pre class="code-block diff-viewer" style="margin-top:4px; font-size:0.75rem; padding:8px; max-height:450px; overflow-y:auto;"><code>`;
+    html += diffLines.map(l => {
+      if (l.startsWith('+')) return `<span style="color:#4ade80">${esc(l)}</span>`;
+      if (l.startsWith('-')) return `<span style="color:#f87171">${esc(l)}</span>`;
+      if (l.startsWith('@@')) return `<span style="color:#38bdf8">${esc(l)}</span>`;
+      return esc(l);
+    }).join('\n');
+    html += `</code></pre></div>`;
+  }
+  html += `</div></div>`;
+  return html;
+}
+
 async function renderResponse(data) {
   const result = data.result ?? data;
-  // Plain string result
-  if (typeof result === 'string') {
-    return await renderMarkdown(result);
+  let baseHtml = '';
+
+  const mdText = typeof result === 'string'
+    ? result
+    : (result?.content || result?.response || result?.markdown);
+
+  if (typeof mdText === 'string' && mdText.trim()) {
+    baseHtml = await renderMarkdown(mdText);
+  } else {
+    const SIZE_THRESHOLD = 100 * 1024;
+    const jsonStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+    if (jsonStr.length > SIZE_THRESHOLD) {
+      baseHtml = `<span style="color:var(--text-muted);font-size:.78rem;">Response too large to render (${(jsonStr.length/1024).toFixed(0)}KB). </span><button class="copy-raw-btn btn btn-outline btn-sm" data-v="${esc(jsonStr)}" style="margin-left:8px;">Copy Raw</button>`;
+    } else {
+      baseHtml = highlightJSON(result);
+    }
   }
-  // Nested text field — different tools use different keys (use_free_llm/vision_tool
-  // use `content`/`response`, execute_skill uses `response`, etc.)
-  const nestedText = result?.content ?? result?.response;
-  if (typeof nestedText === 'string') {
-    return await renderMarkdown(nestedText);
+
+  let extras = '';
+  if (result && typeof result === 'object') {
+    if (result.feedback && result.feedback.driftScore !== undefined) {
+      extras += renderQuantumFeedback(result.feedback);
+    }
+    if (result.patchPlan || result.diagnostics || result.pipelineStage) {
+      extras += renderCodingAgentsCard(result);
+    }
+    if (result.patch && result.filePath) {
+      extras += renderLocalPatchCard(result);
+    }
   }
-  const SIZE_THRESHOLD = 100 * 1024; // 100KB
-  const jsonStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-  if (jsonStr.length > SIZE_THRESHOLD) {
-    return `<span style="color:var(--text-muted);font-size:.78rem;">Response too large to render (${(jsonStr.length/1024).toFixed(0)}KB). </span><button class="copy-raw-btn btn btn-outline btn-sm" data-v="${esc(jsonStr)}" style="margin-left:8px;">Copy Raw</button>`;
-  }
-  return highlightJSON(result);
+  
+  return baseHtml + extras;
 }
 
 // ─── Tab System ─────────────────────────────────────────────────
@@ -469,7 +632,11 @@ const TOOLS = [
     id: 'cyber_tool', label: 'cyber_tool', icon: '🛡️',
     tag: 'Cyber Security',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory'] },
+      { id: 'action', label: 'Action', type: 'select', options: ['osint', 'list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory'] },
+      { id: 'target', label: 'Target (for osint)', type: 'text', placeholder: 'example.com or johndoe' },
+      { id: 'osintType', label: 'OSINT Type (for osint)', type: 'select', options: ['all', 'domain', 'ip', 'username'] },
+      { id: 'autoSearch', label: 'Auto Search Recon Dorks (osint)', type: 'select', options: ['false', 'true'] },
+      { id: 'allowPrivateIps', label: 'Allow Private / Internal IPs (SSRF Bypass)', type: 'select', options: ['false', 'true'] },
       { id: 'toolName', label: 'Tool Name', type: 'text', placeholder: 'sqlmap' },
       { id: 'githubUrl', label: 'GitHub URL (for register)', type: 'text', placeholder: 'https://github.com/sqlmapproject/sqlmap' },
       { id: 'sessionId', label: 'Session / CTF ID', type: 'text', placeholder: 'ctf-challenge-1' },
@@ -503,6 +670,27 @@ const TOOLS = [
       { id: 'gates', label: 'Gates JSON array (for modify)', type: 'textarea', placeholder: '[{"qubit":0,"column":0,"gate":"H"},{"qubit":0,"column":1,"gate":"RY","param":1.2}]' },
       { id: 'query', label: 'Question (for analyze)', type: 'textarea', placeholder: 'What should we conclude?' },
       { id: 'temperature', label: 'Compression temperature 0-1 (for analyze)', type: 'number', placeholder: '0.7' },
+    ]
+  },
+  {
+    id: 'local_llm_patch', label: 'local_llm_patch', icon: '🩹',
+    tag: 'Local Code Patching',
+    fields: [
+      { id: 'filePath', label: 'File Path', type: 'text', placeholder: 'src/server.ts' },
+      { id: 'instruction', label: 'Patch Instruction', type: 'textarea', placeholder: 'Add a new request-id header middleware' },
+      { id: 'workspace_root', label: 'Workspace Root (optional)', type: 'text', placeholder: 'C:/path/to/project' },
+      { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'patch-session-1' },
+    ]
+  },
+  {
+    id: 'coding_agents', label: 'coding_agents', icon: '🤖',
+    tag: 'Autonomous Multi-File Coding',
+    fields: [
+      { id: 'goal', label: 'Refactoring / Coding Goal', type: 'textarea', placeholder: 'Add rate limiting to express endpoints' },
+      { id: 'workspaceRoot', label: 'Workspace Root (optional)', type: 'text', placeholder: 'C:/path/to/workspace' },
+      { id: 'dryRun', label: 'Dry Run Mode (simulate only)', type: 'toggle', default: true },
+      { id: 'topKFiles', label: 'Candidate Files Count (RAG)', type: 'number', placeholder: '5' },
+      { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'coding-session-1' },
     ]
   },
   {
@@ -557,8 +745,201 @@ async function ensureModels() {
   } catch {}
 }
 
+const TOOL_WHEN_TO_USE = {
+  use_free_llm: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Your primary AI Swiss Army Knife for asking questions, writing code, research, and running multi-step background tasks without paying for tokens.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "run"</code> (Default) — Start a direct chat turn or multi-step agentic plan (set <code>agentic: true</code>).</li>
+      <li><code>action: "status"</code> — Check the progress of a long-running background task.</li>
+      <li><code>action: "continue"</code> — Resume after human-in-the-loop terminal action (pass <code>resume_input: "continue <ID> <result>"</code>).</li>
+      <li><code>action: "abort"</code> — Cancel an active execution.</li>
+    </ul>`,
+
+  vision_tool: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Vision Language Model (VLM) inspector for reading images, comparing UI screenshots, and parsing flowchart diagrams.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "analyze_ui"</code> — Extract clickable buttons, text inputs, and pixel coordinates from UI screenshots.</li>
+      <li><code>action: "extract_diagram"</code> — Convert architectural diagrams and flowcharts into readable structured text.</li>
+      <li><code>action: "compare_diff"</code> — Compare two screenshots to detect visual regression differences (requires <code>compare_image_path</code>).</li>
+      <li><code>action: "inspect_image"</code> — General OCR and image Q&A using free vision models.</li>
+    </ul>`,
+
+  coding_agents: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Autonomous multi-file software engineer based on the OMP (oh-my-pi) pattern. Searches your codebase, writes hash-anchored patches, performs AST rewrites, verifies compiler diagnostics, and commits or rolls back changes.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "run"</code> — Executes full refactoring pipeline (Vector RAG grep &rarr; Hashline diffs &rarr; Polyglot LSP checks).</li>
+      <li><code>resolve: "apply"</code> — Confirms and saves patched files to disk.</li>
+      <li><code>resolve: "discard"</code> — Rejects staged changes without writing to disk.</li>
+      <li><code>resolve: "rollback"</code> — Instantly restores previous state using Content-Addressable Storage (CAS) snapshots.</li>
+    </ul>`,
+
+  local_llm_patch: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>100% offline code patcher that runs on your machine via local Ollama. Zero network requests, 0 API cost.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "apply_patch"</code> — Generate and apply targeted unified diff to a single file.</li>
+      <li><code>action: "revert_patch"</code> — Restore the original file from the automatic backup snapshot.</li>
+      <li><code>action: "audit_ast"</code> — Check syntax trees for compilation errors before applying.</li>
+    </ul>`,
+
+  browser_tool: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Headless Playwright web browser for scraping dynamic sites, clicking buttons, extracting tables, and capturing network calls.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "navigate"</code> & <code>"snapshot"</code> — Load URL and return the clean accessibility tree (low token cost).</li>
+      <li><code>action: "click"</code>, <code>"scroll"</code>, <code>"wait"</code> — Interact with dynamic single-page applications (SPAs).</li>
+      <li><code>action: "network"</code> & <code>"api_replay"</code> — Intercept private backend JSON APIs and replay them directly without browser overhead.</li>
+      <li><code>action: "deep_scrape"</code> & <code>"extract"</code> — Extract structured tables into clean JSON/CSV with anti-bot stealth.</li>
+    </ul>`,
+
+  cyber_tool: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Security coaching assistant, passive OSINT reconnaissance engine, and decision-graph tracker for authorized CTF challenges and educational penetration testing.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "osint"</code> — Passive DNS & infrastructure reconnaissance (A, AAAA, MX, TXT, NS), search dork generation, and automatic Markdown report creation in the cyber wiki. Supports <code>autoSearch: true</code> for automated multi-step search recon.</li>
+      <li><code>action: "lookup"</code> / <code>"get_tool"</code> — Query CLI flags and syntax for security tools (nmap, sqlmap, gobuster, etc.).</li>
+      <li><code>action: "coach"</code> — Receive strategic next test steps based on target recon findings.</li>
+      <li><code>action: "save_graph"</code> & <code>"load_graph"</code> — Create or visualize hypothesis nodes on the persistent engagement graph.</li>
+      <li><code>action: "tool_memory"</code> — Read or persist tactical execution notes.</li>
+    </ul>
+    <div style="margin-top:6px;font-size:0.72rem;color:var(--accent-red,#ff5555);">
+      🛡️ <b>Security Boundary:</b> Requests to cloud metadata (<code>169.254.169.254</code>) and private subnets are blocked by default to prevent SSRF.
+    </div>`,
+
+  quantum_tool: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Multi-branch reasoning tool that explores diverging hypotheses using quantum-inspired gates and state collapse synthesis. Includes a strict drift guard to prevent decoherence.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "setup"</code> — Initialize circuit with a preset (<code>"adversarial_debate"</code>, <code>"superposition_exploration"</code>, etc.).</li>
+      <li><code>action: "step"</code> — Execute gate columns (Hadamard reset, Pauli-X flip, RY rotation, CNOT entanglement).</li>
+      <li><code>action: "analyze"</code> — Collapse the quantum state and generate synthesized LLM conclusions.</li>
+    </ul>`,
+
+  execute_skill: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Runs specialized agent workflows loaded with strict SKILL.md rules, examples, and domain guardrails.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "run"</code> — Provide <code>skill_name</code> (e.g. <code>"vibe-code-auditor"</code>, <code>"tdd-workflow"</code>) and your user prompt.</li>
+    </ul>`,
+
+  load_skill_prompt: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Search and load ready-to-use system prompts from the local repository or bundled Hermes catalog without running the LLM.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>type: "skill"</code> — Load a specific skill's system instructions.</li>
+      <li><code>type: "persona"</code> — Load a specialized persona prompt (e.g., Coder, Security Auditor, Researcher).</li>
+    </ul>`,
+
+  manage_memory: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Manage persistent long-term memory, project architectural decision records (ADRs), and workspace wiki documentation.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "search"</code> / <code>"save"</code> / <code>"delete"</code> — Vector semantic search across long-term facts.</li>
+      <li><code>action: "read_adr"</code> / <code>"write_adr"</code> — Maintain architectural decisions in <code>.free-llm-mcp/wiki/adr/</code>.</li>
+      <li><code>action: "wiki_read"</code> / <code>"wiki_write"</code> / <code>"wiki_list"</code> — Maintain technical wiki guides.</li>
+    </ul>`,
+
+  index_workspace: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Proactively scans and embeds all files in your project into the local vector database for fast semantic search.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>workspace_root</code> — Target directory path to index.</li>
+      <li><code>force: true</code> — Force re-indexing all files, bypassing timestamp caches.</li>
+    </ul>`,
+
+  store_workspace_skill: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Save custom reusable AI skills and workflow guides directly into your repository's <code>.agents/</code> folder.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li>Provide <code>skill_name</code>, <code>description</code>, and Markdown <code>content</code> following the Agent Skills spec.</li>
+    </ul>`,
+
+  validate_provider: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Diagnose LLM provider connectivity, check API keys, and test latency.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>provider</code> — Select provider (e.g. <code>"gemini"</code>, <code>"groq"</code>, <code>"openrouter"</code>, <code>"ollama"</code>, <code>"cohere"</code>).</li>
+    </ul>`,
+
+  get_token_stats: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Inspect your real-time rate limit meters, remaining requests, and lifetime tokens across all providers.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li>No parameters required — returns live memory counters synchronized with disk storage.</li>
+    </ul>`
+};
+
+async function showToolDocsModal(tool) {
+  const modal = document.getElementById('tool-docs-modal');
+  const title = document.getElementById('modal-tool-title');
+  const icon = document.getElementById('modal-tool-icon');
+  const tag = document.getElementById('modal-tool-tag');
+  const whenToUse = document.getElementById('modal-when-to-use');
+  const body = document.getElementById('modal-tool-body');
+  const closeBtn = document.getElementById('modal-close-btn');
+
+  if (!modal) return;
+
+  title.textContent = tool.label;
+  icon.textContent = tool.icon || '📖';
+  tag.textContent = tool.tag || 'Tool Reference';
+  whenToUse.innerHTML = TOOL_WHEN_TO_USE[tool.id] || `<strong>When to use:</strong> Specialized automation tool for ${tool.label}.`;
+  body.innerHTML = '<div class="conv-empty"><span class="spinner"></span> Loading documentation…</div>';
+
+  modal.style.display = 'flex';
+
+  const closeModal = () => {
+    modal.style.display = 'none';
+    document.removeEventListener('keydown', onKey);
+  };
+
+  const onKey = (e) => {
+    if (e.key === 'Escape') closeModal();
+  };
+
+  closeBtn.onclick = closeModal;
+  modal.onclick = (e) => {
+    if (e.target === modal) closeModal();
+  };
+  document.addEventListener('keydown', onKey);
+
+  try {
+    const r = await fetch(`/api/tool-docs/${tool.id}`);
+    const d = await r.json();
+    const md = d.markdown || `# ${tool.label}\n\nNo detailed documentation found for \`${tool.id}\`.`;
+    body.innerHTML = await renderMarkdown(md);
+  } catch (err) {
+    body.innerHTML = `<div style="color:var(--accent-red);padding:12px;">Failed to load documentation: ${esc(err.message)}</div>`;
+  }
+}
+
 function renderToolForm(tool) {
-  pgToolTitle.textContent = tool.label;
+  pgToolTitle.innerHTML = `${tool.label} <button id="tool-info-btn" title="View tool docs & usage guide" style="background:none;border:none;cursor:pointer;font-size:0.95rem;color:var(--accent-cyan);margin-left:8px;transition:transform 0.15s ease;" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">ⓘ</button>`;
+  const infoBtn = document.getElementById('tool-info-btn');
+  if (infoBtn) {
+    infoBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showToolDocsModal(tool);
+    };
+  }
   pgForm.innerHTML = '';
 
   if (!tool.fields.length) {
@@ -601,6 +982,12 @@ function renderToolForm(tool) {
       const ta = document.createElement('textarea');
       ta.id = `pg-field-${f.id}`;
       ta.placeholder = f.placeholder || '';
+      ta.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          pgRunBtn.click();
+        }
+      });
       wrap.appendChild(ta);
 
     } else if (f.type === 'select') {
@@ -977,22 +1364,28 @@ function scrollChatBottom() {
 }
 
 function appendBubbleFromRecord(msg) {
-  if (msg.role === 'user') {
-    addUserBubbleEl(msg.content, msg.tool, msg.ts);
-  } else if (msg.role === 'assistant') {
-    const el = addSpinnerBubble(msg.tool);
-    renderMarkdown(msg.content).then(html => {
+  const item = (msg && msg.payload && typeof msg.payload === 'object')
+    ? { ts: msg.timestamp || msg.payload.ts, sessionId: msg.sessionId, ...msg.payload }
+    : msg;
+
+  if (!item || typeof item !== 'object') return;
+
+  if (item.role === 'user') {
+    addUserBubbleEl(item.content, item.tool, item.ts);
+  } else if (item.role === 'assistant') {
+    const el = addSpinnerBubble(item.tool);
+    renderMarkdown(item.content).then(html => {
       if (!el.isConnected) return;
-      replaceSpinnerWithResponse(el, html, msg.latencyMs, msg.tool, msg.ts, false, msg.model, msg.provider, msg.contextInjected);
+      replaceSpinnerWithResponse(el, html, item.latencyMs, item.tool, item.ts, false, item.model, item.provider, item.contextInjected);
     });
-  } else if (msg.role === 'error') {
-    addErrorBubbleEl(msg.content, msg.tool, msg.ts);
-  } else if (msg.role === 'subtask_start') {
-    addSubtaskStartBubble(msg.content, msg.ts);
-  } else if (msg.role === 'subtask_response') {
-    addSubtaskResponseBubble(msg.content, msg.output, msg.ts, msg.contextInjected, msg.model, msg.provider);
-  } else if (msg.role === 'tool_call') {
-    addToolCallBubble(msg.tool, msg.args, msg.result, msg.ts, msg.latencyMs, msg.isError);
+  } else if (item.role === 'error') {
+    addErrorBubbleEl(item.content, item.tool, item.ts);
+  } else if (item.role === 'subtask_start') {
+    addSubtaskStartBubble(item.content, item.ts);
+  } else if (item.role === 'subtask_response') {
+    addSubtaskResponseBubble(item.content, item.output, item.ts, item.contextInjected, item.model, item.provider);
+  } else if (item.role === 'tool_call') {
+    addToolCallBubble(item.tool, item.args, item.result, item.ts, item.latencyMs, item.isError);
   }
 }
 
@@ -1087,13 +1480,57 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
   try { if (typeof args === 'string') parsedArgs = JSON.parse(args); } catch {}
   try { if (typeof result === 'string') parsedResult = JSON.parse(result); } catch {}
 
+  const resultText = (() => {
+    if (parsedResult && typeof parsedResult === 'object') {
+      if (Array.isArray(parsedResult.content) && parsedResult.content[0]?.text) {
+        return parsedResult.content[0].text;
+      }
+      if (typeof parsedResult.content === 'string') return parsedResult.content;
+      if (typeof parsedResult.response === 'string') return parsedResult.response;
+      if (typeof parsedResult.markdown === 'string') return parsedResult.markdown;
+      if (typeof parsedResult.patch === 'string') return parsedResult.patch;
+      if (typeof parsedResult.patchSummary === 'string') return parsedResult.patchSummary;
+    }
+    return typeof result === 'string' ? result : '';
+  })();
+
   const resultPreview = (() => {
-    const s = typeof result === 'string' ? result : JSON.stringify(result ?? '');
+    let s = resultText || (typeof result === 'string' ? result : JSON.stringify(result ?? ''));
+    s = s.replace(/\s+/g, ' ').trim();
     return s.slice(0, 80) + (s.length > 80 ? '…' : '');
   })();
 
   const borderColor = isError ? 'var(--accent-red, #ef4444)' : 'var(--accent-cyan)';
   const icon = isError ? '⚠️' : '🔧';
+
+  const outputContainerId = `tool-out-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  let resultBodyHtml = '';
+  if (parsedResult && typeof parsedResult === 'object' && Array.isArray(parsedResult.patchPlan) && parsedResult.patchPlan.length) {
+    resultBodyHtml = parsedResult.patchPlan.map(p => {
+      const diffText = p.unifiedDiff || p.diff || (p.replacementSnippet ? `@@ -${p.startLine} +${p.startLine} @@\n${p.replacementSnippet}` : '');
+      const diffLines = diffText ? diffText.split('\n') : [];
+      return `<div style="margin-bottom:8px; border:1px solid var(--glass-border); border-radius:4px; padding:6px;">
+        <div style="font-weight:600; color:var(--text-primary); margin-bottom:4px;">📝 ${esc(p.filePath || p.file || 'file')}</div>
+        <pre class="code-block diff-viewer" style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:350px; font-size:.72rem; padding:6px; margin:0;"><code>` +
+        diffLines.map(l => {
+          if (l.startsWith('+')) return `<span style="color:#4ade80">${esc(l)}</span>`;
+          if (l.startsWith('-')) return `<span style="color:#f87171">${esc(l)}</span>`;
+          if (l.startsWith('@@')) return `<span style="color:#38bdf8">${esc(l)}</span>`;
+          return esc(l);
+        }).join('\n') + `</code></pre>
+      </div>`;
+    }).join('');
+  } else if (resultText) {
+    resultBodyHtml = `<div id="${outputContainerId}" class="tool-call-rendered-md" style="max-height:450px; overflow-y:auto;">` +
+      `<pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; font-size:.73rem; margin:0;">${esc(resultText)}</pre>` +
+      `</div>`;
+    renderMarkdown(resultText).then(mdHtml => {
+      const el = div.querySelector(`#${outputContainerId}`);
+      if (el) el.innerHTML = mdHtml;
+    }).catch(() => {});
+  } else {
+    resultBodyHtml = `<pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:450px; font-size:.73rem; margin:0;">${esc(JSON.stringify(parsedResult, null, 2))}</pre>`;
+  }
 
   div.innerHTML = `
     <div class="chat-bubble" style="padding:8px 12px; background:rgba(255,255,255,0.02); border-left:3px solid ${borderColor};">
@@ -1108,10 +1545,10 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
         </summary>
         <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); font-size:.73rem;">
           <div style="margin-bottom:6px; color:var(--text-muted);"><strong>Args:</strong><br>
-            <pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:120px;">${esc(JSON.stringify(parsedArgs, null, 2))}</pre>
+            <pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:200px; margin:4px 0;">${esc(JSON.stringify(parsedArgs, null, 2))}</pre>
           </div>
-          <div style="color:var(--text-muted);"><strong>Result:</strong><br>
-            <pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:120px;">${esc(JSON.stringify(parsedResult, null, 2))}</pre>
+          <div style="color:var(--text-muted);"><strong>Output:</strong><br>
+            ${resultBodyHtml}
           </div>
         </div>
       </details>
@@ -1220,6 +1657,7 @@ pgAgenticToggle?.addEventListener('change', updateWorkspaceUI);
 
 // ─── Conversation list panel ──────────────────────────────────────
 let _convSearchTimer = null;
+const pgNewConvBtn = document.getElementById('pg-new-conv-btn');
 
 async function refreshConvList(filter = '') {
   if (!convList) return;
@@ -1229,7 +1667,11 @@ async function refreshConvList(filter = '') {
     const { sessions } = await r.json();
     const list = Array.isArray(sessions) ? sessions : [];
     const q = filter.toLowerCase().trim();
-    const filtered = q ? list.filter(s => s.id.toLowerCase().includes(q)) : list;
+    const filtered = q ? list.filter(s => 
+      s.id.toLowerCase().includes(q) || 
+      (s.name && s.name.toLowerCase().includes(q)) || 
+      (s.workspace && s.workspace.toLowerCase().includes(q))
+    ) : list;
     renderConvList(filtered);
   } catch {}
 }
@@ -1242,12 +1684,12 @@ function renderConvList(sessions) {
   }
   convList.innerHTML = sessions.map(s => {
     const isActive = s.id === activeSessionId;
-    const label = s.id === '__no_ws__' ? '⚡ One-shot' : s.id;
+    const displayName = s.name || (s.id === '__no_ws__' ? '⚡ One-shot [none]' : s.id);
     const sub = s.msgCount ? `${s.msgCount} msgs` : 'empty';
     const ago = s.lastTs ? timeAgo(s.lastTs) : '';
-    return `<div class="conv-item${isActive ? ' active' : ''}" data-sid="${esc(s.id)}" title="${esc(s.id)}">
-      <div class="conv-item-label">${esc(label)}</div>
-      <div class="conv-item-meta"><span>${sub}</span><span>${ago}</span></div>
+    return `<div class="conv-item${isActive ? ' active' : ''}" data-sid="${esc(s.id)}" title="${esc(s.id)} — ${esc(displayName)}">
+      <div class="conv-item-label" style="font-weight:500; font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(displayName)}</div>
+      <div class="conv-item-meta" style="font-size:.68rem; opacity:.75;"><span>${sub}</span><span>${ago}</span></div>
     </div>`;
   }).join('');
 
@@ -1269,6 +1711,30 @@ function renderConvList(sessions) {
     });
   });
 }
+
+// ─── + New Conversation Handler ──────────────────────────────────
+pgNewConvBtn?.addEventListener('click', async () => {
+  const ws = pgWorkspace.value.trim();
+  try {
+    const r = await fetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace: ws })
+    });
+    if (r.ok) {
+      const d = await r.json();
+      activeSessionId = d.sessionId;
+      chatHistory = [];
+      rebuildChatLog();
+      refreshConvList();
+      pgStatus.textContent = '✓ New chat ready';
+      pgStatus.style.color = 'var(--accent-green)';
+      setTimeout(() => { pgStatus.textContent = ''; }, 2000);
+    }
+  } catch (err) {
+    console.error('Failed to create new session:', err);
+  }
+});
 
 function timeAgo(ts) {
   const diff = Date.now() - ts;
@@ -1343,6 +1809,20 @@ pgParamsToggle.addEventListener('click', () => {
   pgParamsChevron.style.transform = paramsOpen ? '' : 'rotate(-90deg)';
 });
 
+// Background sync for external MCP client tool invocations
+let isRunActive = false;
+setInterval(async () => {
+  if (isRunActive || document.hidden || !activeSessionId || activeSessionId === '__no_ws__') return;
+  try {
+    const log = await loadChatHistory(activeSessionId);
+    if (log.length !== chatHistory.length) {
+      chatHistory = log;
+      rebuildChatLog();
+      refreshConvList(convSearch?.value || '');
+    }
+  } catch {}
+}, 2500);
+
 // ─── Run / Send ───────────────────────────────────────────────────
 pgRunBtn.addEventListener('click', async () => {
   await ensureModels();
@@ -1352,22 +1832,30 @@ pgRunBtn.addEventListener('click', async () => {
   if (ws) {
     params.workspace_root = ws;
     params.sessionId = activeSessionId;
-    // Agentic is an explicit opt-in (see the checkbox next to the workspace input) —
-    // it used to be auto-enabled just because a workspace was set, which forced every
-    // grounded request (including simple pdf://file:// reference lookups, which already
-    // work via workspace memory/context alone) through subtask decomposition. That
-    // decomposition has no way to distinguish injected reference content from
-    // user-authored task lists, so it could shred a resolved PDF-context block into
-    // bogus one-line "subtasks".
     if (activeTool.id === 'use_free_llm' && pgAgenticToggle?.checked) {
       params.agentic = true;
     }
+  } else {
+    // Unify multi-tool retrospective session tracking even in one-shot / standalone sessions
+    params.sessionId = activeSessionId;
   }
 
-  const userText = params.prompt || params.query || params.input
-    || `[${activeTool.label}] ${JSON.stringify(params).slice(0, 120)}`;
+  function extractHumanReadableUserText(toolId, p) {
+    if (p.prompt) return p.prompt;
+    if (p.goal) return `🎯 ${p.goal}`;
+    if (p.instruction) return `🩹 ${p.instruction}`;
+    if (p.input) return p.input;
+    if (p.query) return `🔍 ${p.query}`;
+    if (p.userInstructions) return `🌐 ${p.userInstructions}${p.url ? ` (${p.url})` : ''}`;
+    if (p.url) return `🌐 [${p.action || 'browse'}] ${p.url}`;
+    if (p.observation) return `🛡️ [Observation] ${p.observation}`;
+    if (p.action) return `⚡ Action: ${p.action}${p.toolName ? ` (${p.toolName})` : ''}${p.sessionId ? ` [${p.sessionId}]` : ''}`;
+    return `[${activeTool.label}] ${JSON.stringify(p).slice(0, 120)}`;
+  }
+
+  const userText = extractHumanReadableUserText(activeTool.id, params);
   const ts = Date.now();
-  const userTurn = { role: 'user', tool: activeTool.id, content: userText, ts };
+  const userTurn = { role: 'user', tool: activeTool.id, content: userText, ts, workspaceRoot: ws || undefined };
 
   chatHistory.push(userTurn);
   saveTurn(activeSessionId, userTurn);
@@ -1375,6 +1863,7 @@ pgRunBtn.addEventListener('click', async () => {
 
   let spinnerEl = addSpinnerBubble(activeTool.id);
   let requestDone = false;
+  isRunActive = true;
 
   pgRunBtn.disabled = true;
   pgRunBtn.innerHTML = '<span class="spinner"></span>';
@@ -1388,11 +1877,6 @@ pgRunBtn.addEventListener('click', async () => {
       if (log.length !== chatHistory.length) {
         chatHistory = log;
         rebuildChatLog();
-        // rebuildChatLog() wipes chatLog.innerHTML, which destroys the spinner
-        // bubble appended below — without re-adding it, the spinner silently
-        // disappears (and the later spinnerEl.replaceWith() below becomes a
-        // no-op on a detached node) as soon as any mid-flight server-side turn
-        // (a tool call, an agentic subtask) lands before the final response.
         if (!requestDone) {
           spinnerEl = addSpinnerBubble(activeTool.id);
         }
@@ -1408,7 +1892,7 @@ pgRunBtn.addEventListener('click', async () => {
 
     if (data.ok === false || !r.ok) {
       const errMsg = data.error || 'Unknown error';
-      const errTurn = { role: 'error', tool: activeTool.id, content: errMsg, ts: replyTs };
+      const errTurn = { role: 'error', tool: activeTool.id, content: errMsg, ts: replyTs, workspaceRoot: ws || undefined };
       chatHistory.push(errTurn);
       saveTurn(activeSessionId, errTurn);
       spinnerEl.replaceWith(addErrorBubbleEl(errMsg, activeTool.id, replyTs));
@@ -1421,7 +1905,7 @@ pgRunBtn.addEventListener('click', async () => {
         : (typeof nestedText === 'string' ? nestedText : JSON.stringify(rawText, null, 2));
       const respModel = data.result?.model;
       const respProvider = data.result?.provider;
-      const assistantTurn = { role: 'assistant', tool: activeTool.id, content, latencyMs, ts: replyTs, model: respModel, provider: respProvider };
+      const assistantTurn = { role: 'assistant', tool: activeTool.id, content, latencyMs, ts: replyTs, model: respModel, provider: respProvider, workspaceRoot: ws || undefined };
       chatHistory.push(assistantTurn);
       saveTurn(activeSessionId, assistantTurn);
       replaceSpinnerWithResponse(spinnerEl, html, latencyMs, activeTool.id, replyTs, true, respModel, respProvider);
@@ -1434,13 +1918,14 @@ pgRunBtn.addEventListener('click', async () => {
     }
   } catch (err) {
     const errMsg = `Network error: ${err.message}`;
-    const errTurn = { role: 'error', tool: activeTool.id, content: errMsg, ts: Date.now() };
+    const errTurn = { role: 'error', tool: activeTool.id, content: errMsg, ts: Date.now(), workspaceRoot: ws || undefined };
     chatHistory.push(errTurn);
     saveTurn(activeSessionId, errTurn);
     spinnerEl.replaceWith(addErrorBubbleEl(errMsg, activeTool.id, Date.now()));
     pgStatus.textContent = '✗ Error'; pgStatus.style.color = 'var(--accent-red)';
   } finally {
     requestDone = true;
+    isRunActive = false;
     clearInterval(pollInterval);
     // Do one final sync to ensure everything is matched up
     try {
@@ -1449,7 +1934,7 @@ pgRunBtn.addEventListener('click', async () => {
     } catch {}
     pgRunBtn.disabled = false;
     pgRunBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send`;
-    refreshConvList(); // update message count in sidebar
+    refreshConvList(); // update message count and title in sidebar
     attachments = [];
     renderAttachments();
   }
@@ -2074,9 +2559,12 @@ async function runSteeringEvaluation() {
   const workspaceRoot = (steeringWorkspaceInput?.value || '.').trim();
   const isAgentic = !!steeringAgenticToggle?.checked;
 
-  const userKeywords = rawKeywordsStr
-    ? rawKeywordsStr.split(',').map(k => k.trim().toLowerCase()).filter(Boolean)
-    : [];
+  let userKeywords = [];
+  if (rawKeywordsStr) {
+    // Sanitize bracketed array or quoted syntax: ["arxiv", "physics"] -> arxiv, physics
+    const cleaned = rawKeywordsStr.replace(/[\[\]"'`]/g, '');
+    userKeywords = cleaned.split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+  }
 
   if (btnRunSteeringEval) {
     btnRunSteeringEval.disabled = true;
@@ -2198,12 +2686,34 @@ async function runSteeringEvaluation() {
     if (isAgentic || st.subtaskContext) {
       if (steeringSubtaskView) {
         steeringSubtaskView.style.display = 'block';
-        const subId = st.subtaskContext?.id || 'subtask-eval-1';
+        const subId = st.subtaskContext?.id || 'subtask-1';
         const subTitle = st.subtaskContext?.title || (query ? `Execute task: ${query}` : 'System prompt steering subtask');
+        const plan = st.planDetails;
+        let planHtml = '';
+
+        if (plan && plan.phases && plan.phases.length > 0) {
+          const phasesList = plan.phases.map(p => `
+            <div style="font-size:.72rem;color:var(--text-secondary);display:flex;align-items:center;gap:6px;padding:3px 0;">
+              <span class="badge ${p.phase === 1 ? 'badge-purple' : 'badge-gray'}" style="font-size:.62rem;">Phase ${p.phase}</span>
+              <span><strong>${esc(p.id)}:</strong> ${esc(p.task)}</span>
+              <span class="badge badge-cyan" style="font-size:.6rem;margin-left:auto;">lane: ${esc(p.lane || 'sequential')}</span>
+            </div>
+          `).join('');
+
+          planHtml = `
+            <div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(236,72,153,.3);">
+              <div style="font-size:.7rem;font-weight:700;color:var(--text-muted);margin-bottom:4px;">DECOMPOSED TASK EXECUTION PLAN (${plan.phases.length} subtasks):</div>
+              ${phasesList}
+            </div>`;
+        }
+
         steeringSubtaskView.innerHTML = `
-          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(236,72,153,.12);border:1px solid rgba(236,72,153,.35);border-radius:6px;font-size:.76rem;color:#f472b6;">
-            <span class="badge" style="background:#ec4899;color:#fff;font-weight:700;font-size:.68rem;">AGENTIC SUBTASK ACTIVE</span>
-            <span>Subtask ID: <code>${esc(subId)}</code> &bull; <strong>${esc(subTitle)}</strong></span>
+          <div style="padding:10px 12px;background:rgba(236,72,153,.12);border:1px solid rgba(236,72,153,.35);border-radius:6px;font-size:.76rem;color:#f472b6;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="badge" style="background:#ec4899;color:#fff;font-weight:700;font-size:.68rem;">AGENTIC PLANNER ACTIVE</span>
+              <span>Active Subtask: <code>${esc(subId)}</code> &bull; <strong>${esc(subTitle)}</strong></span>
+            </div>
+            ${planHtml}
           </div>`;
       }
     } else {

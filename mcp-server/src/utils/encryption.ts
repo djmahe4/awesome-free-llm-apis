@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs-extra';
 import path from 'path';
 import os from 'os';
+import { withFileLock } from './file-lock.js';
 
 const ALGORITHM = 'aes-256-gcm';
 
@@ -28,18 +29,13 @@ async function getSecretKey(): Promise<Buffer> {
             keyBuffer = Buffer.from(process.env.MCP_SECRET_KEY, 'hex');
         } else {
             const keyPath = getKeyPath();
-            if (await fs.pathExists(keyPath)) {
-                const hexKey = await fs.readFile(keyPath, 'utf8');
-                keyBuffer = Buffer.from(hexKey.trim(), 'hex');
-            } else {
-                // Generate a random 32-byte key, written via a uniquely-named tmp
-                // file + rename. fs.move's overwrite:false guard is a check-then-act
-                // (stat, then rename) — not atomic — so two processes racing on a
-                // still-missing key file can both pass that check and both rename;
-                // the loser's promise won't necessarily reject. Rather than trust
-                // whichever branch we took, always read back whatever bytes are
-                // actually on disk after the write, so every racing process
-                // converges on the one value that ultimately landed there.
+            keyBuffer = await withFileLock(keyPath, async () => {
+                if (await fs.pathExists(keyPath)) {
+                    const hexKey = await fs.readFile(keyPath, 'utf8');
+                    return Buffer.from(hexKey.trim(), 'hex');
+                }
+
+                // Generate a random 32-byte key, write atomically with exclusive lock
                 const key = crypto.randomBytes(32);
                 const hexKey = key.toString('hex');
 
@@ -47,13 +43,13 @@ async function getSecretKey(): Promise<Buffer> {
                 const tmpPath = `${keyPath}.${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}.tmp`;
                 await fs.writeFile(tmpPath, hexKey, { mode: 0o600, encoding: 'utf8' });
                 try {
-                    await fs.move(tmpPath, keyPath, { overwrite: false });
+                    await fs.move(tmpPath, keyPath, { overwrite: true });
                 } catch {
                     await fs.remove(tmpPath).catch(() => {});
                 }
                 const hexKeyOnDisk = await fs.readFile(keyPath, 'utf8');
-                keyBuffer = Buffer.from(hexKeyOnDisk.trim(), 'hex');
-            }
+                return Buffer.from(hexKeyOnDisk.trim(), 'hex');
+            });
         }
 
         if (keyBuffer.length !== 32) {

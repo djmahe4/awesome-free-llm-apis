@@ -2,6 +2,7 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findAgentsMdPath } from '../../utils/agents-md-locator.js';
+import { quantumCompress, quantumCompressWithAnchors } from '../../utils/quantum-compression.js';
 
 /**
  * Calculates Jaccard similarity between a set of tokens and a string.
@@ -250,7 +251,7 @@ export interface PromptOptions {
     workspaceRoot?: string;
 }
 
-async function getRelevantAgentsGuide(workspaceRoot: string, subtaskQuery: string): Promise<string> {
+async function getRelevantAgentsGuide(workspaceRoot: string, subtaskQuery: string, isSubtask = false): Promise<string> {
     try {
         const agentsPaths = [
             findAgentsMdPath(workspaceRoot),
@@ -272,7 +273,7 @@ async function getRelevantAgentsGuide(workspaceRoot: string, subtaskQuery: strin
         
         const content = await fsp.readFile(filePath, 'utf-8');
         
-        // Split AGENTS.md into sections based on headers
+        // Split AGENTS.md into sections based on headers (ignoring code blocks)
         const lines = content.split('\n');
         interface Section {
             title: string;
@@ -281,18 +282,26 @@ async function getRelevantAgentsGuide(workspaceRoot: string, subtaskQuery: strin
         
         const sections: Section[] = [];
         let currentSection: Section | null = null;
+        let inCodeBlock = false;
         
         for (const line of lines) {
-            if (line.startsWith('#')) {
+            if (line.trim().startsWith('```')) {
+                inCodeBlock = !inCodeBlock;
+            }
+            if (!inCodeBlock && /^#{1,3}\s+/.test(line)) {
                 if (currentSection) {
                     sections.push(currentSection);
                 }
+                const title = line.replace(/^#{1,3}\s+/, '').trim();
                 currentSection = {
-                    title: line.replace(/^#+\s+/, '').trim(),
+                    title,
                     content: line + '\n'
                 };
             } else if (currentSection) {
                 currentSection.content += line + '\n';
+            } else {
+                // Pre-header preamble
+                currentSection = { title: 'Introduction', content: line + '\n' };
             }
         }
         if (currentSection) {
@@ -302,20 +311,37 @@ async function getRelevantAgentsGuide(workspaceRoot: string, subtaskQuery: strin
         if (sections.length === 0) return '';
         
         // Semantic selection using Jaccard/keyword overlap with the subtaskQuery
-        const queryTokens = new Set(subtaskQuery.toLowerCase().split(/\W+/).filter(t => t.length >= 3));
+        const TECH_ACRONYMS = new Set(['ui', 'ip', 'os', 'db', 'id', 'ci', 'cd']);
+        const STOPWORDS = new Set(['now', 'what', 'and', 'the', 'check', 'how', 'with', 'for', 'about', 'is', 'are']);
+        const queryTokens = new Set(
+            subtaskQuery
+                .toLowerCase()
+                .split(/\W+/)
+                .filter(t => !STOPWORDS.has(t) && (t.length >= 3 || TECH_ACRONYMS.has(t)))
+        );
         if (queryTokens.size === 0) {
             // Default to first section (usually structural summary or introduction)
-            return `### 📋 Target Project Guide (${path.basename(filePath)})\n${sections[0].content.slice(0, 2000)}\n`;
+            const guide = sections[0].content;
+            const contentToInject = isSubtask ? quantumCompress(guide, 0.75, queryTokens) : guide;
+            return `### 📋 Target Project Guide (${path.basename(filePath)})\n${contentToInject}\n`;
         }
         
         const scoredSections = sections.map(sec => {
+            const titleWords = new Set(sec.title.toLowerCase().split(/\W+/).filter(Boolean));
             const words = sec.content.toLowerCase().split(/\W+/).filter(Boolean);
             const uniqueWords = new Set(words);
             let matchCount = 0;
+            let matchScore = 0;
             uniqueWords.forEach(w => {
-                if (queryTokens.has(w)) matchCount++;
+                if (queryTokens.has(w)) {
+                    matchCount++;
+                    matchScore += titleWords.has(w) ? 3 : 1;
+                }
             });
-            const jaccard = matchCount / (queryTokens.size + uniqueWords.size - matchCount);
+            const unionSize = queryTokens.size + uniqueWords.size - matchCount;
+            const baseJaccard = matchCount / Math.max(1, unionSize);
+            const titleBoost = 1 + (matchScore - matchCount) * 0.5;
+            const jaccard = baseJaccard * titleBoost;
             return { sec, score: jaccard };
         });
         
@@ -323,18 +349,21 @@ async function getRelevantAgentsGuide(workspaceRoot: string, subtaskQuery: strin
         const relevant = scoredSections
             .filter(item => item.score > 0.02)
             .sort((a, b) => b.score - a.score)
-            .slice(0, 2) // Limit to top 2 sections to avoid context bloat
+            .slice(0, 3) // Limit to top 3 sections
             .map(item => item.sec);
             
         if (relevant.length === 0) {
             // Default to introduction section if no specific match
-            return `### 📋 Target Project Guide (Introduction)\n${sections[0].content.slice(0, 2000)}\n`;
+            const guide = sections[0].content;
+            const contentToInject = isSubtask ? quantumCompress(guide, 0.75, queryTokens) : guide;
+            return `### 📋 Target Project Guide (Introduction)\n${contentToInject}\n`;
         }
         
         let output = `### 📋 Target Project Guide (Contextually Filtered from ${path.basename(filePath)})\n`;
         for (const sec of relevant) {
-            const sectionContent = sec.content.length > 3000 ? sec.content.slice(0, 3000) + '\n... [section truncated]' : sec.content;
-            output += `\n#### ${sec.title}\n${sectionContent}\n`;
+            const hasHeader = sec.content.startsWith('#') || sec.content.startsWith(`### ${sec.title}`);
+            const contentToInject = isSubtask ? quantumCompress(sec.content, 0.75, queryTokens) : sec.content;
+            output += hasHeader ? `\n${contentToInject}\n` : `\n#### ${sec.title}\n${contentToInject}\n`;
         }
         
         return output;
@@ -382,20 +411,28 @@ export async function getIntelligentSystemPrompt(
         }
     }
 
-    const introduction = isSubtask ? getMinimalIdentity(data) : (`# ROLE\n${data.introduction || ""}\n`);
+    const introduction = isSubtask 
+        ? `${getMinimalIdentity(data)}\n\n### 🎯 Subtask Objective\n${context}\n` 
+        : (`# ROLE\n${data.introduction || ""}\n`);
     let assembled = introduction;
 
     // Inject Workspace Memory and File Context at the very top of the assembled prompt
     if (workspaceContext) {
-        const cappedWorkspace = workspaceContext.length > 5000 ? workspaceContext.slice(0, 5000) + "\n... (truncated)" : workspaceContext;
+        const queryKeywords = context.split(/\W+/).filter(w => w.length >= 3);
+        const cappedWorkspace = workspaceContext.length > 5000 
+            ? quantumCompressWithAnchors(workspaceContext, queryKeywords, 0.7) 
+            : workspaceContext;
         assembled = `## 📂 WORKSPACE CONTEXT\n<workspace_context_isolation_gate>\nRelevant file snippets and directory structures:\n${cappedWorkspace}\n</workspace_context_isolation_gate>\n\n` + assembled;
     }
     if (memoryContext) {
-        const cappedMemory = memoryContext.length > 2000 ? memoryContext.slice(0, 2000) + "\n... (truncated)" : memoryContext;
+        const queryKeywords = context.split(/\W+/).filter(w => w.length >= 3);
+        const cappedMemory = memoryContext.length > 2000 
+            ? quantumCompressWithAnchors(memoryContext, queryKeywords, 0.7) 
+            : memoryContext;
         assembled = `## 🧠 WORKSPACE MEMORY\n<memory_context_isolation_gate>\nRelevant prior knowledge for this workspace:\n${cappedMemory}\n</memory_context_isolation_gate>\n\n` + assembled;
     }
     if (workspaceRoot) {
-        const agentsGuide = await getRelevantAgentsGuide(workspaceRoot, context);
+        const agentsGuide = await getRelevantAgentsGuide(workspaceRoot, context, isSubtask);
         if (agentsGuide) {
             assembled = `## 📋 TARGET PROJECT GUIDELINES\n<target_project_guidelines_isolation_gate>\n${agentsGuide}\n</target_project_guidelines_isolation_gate>\n\n` + assembled;
         }
@@ -405,7 +442,7 @@ export async function getIntelligentSystemPrompt(
         const assembled = data.introduction + "\n" + data.sections
         .filter(s => s.level === 1)
         .map(s => {
-            const content = s.content.length > 5000 ? s.content.substring(0, 4900) + "\n\n[...SECTION TRUNCATED...]\n" : s.content;
+            const content = s.content.length > 5000 ? quantumCompress(s.content, 0.75) : s.content;
             return `\n\n## ${s.title}\n\n${content}`;
         })
         .join("");
@@ -601,11 +638,12 @@ export async function getIntelligentSystemPrompt(
                 let blockContent = content;
                 const MAX_SECTION_SIZE = isSubtask ? 2000 : 4000;
                 if (blockContent.length > MAX_SECTION_SIZE) {
-                    blockContent = blockContent.substring(0, MAX_SECTION_SIZE) + "\n[...SECTION TRUNCATED...]\n";
+                    blockContent = quantumCompressWithAnchors(blockContent, tokens, 0.7);
                 }
                 
                 if (header.length + blockContent.length > remainingBudget) {
-                    blockContent = blockContent.slice(0, Math.max(0, remainingBudget - header.length - 20)) + "\n[...TRUNCATED...]";
+                    const ratio = Math.max(0.2, (remainingBudget - header.length) / blockContent.length);
+                    blockContent = quantumCompressWithAnchors(blockContent, tokens, ratio);
                 }
                 
                 const block = header + blockContent;

@@ -81,4 +81,28 @@ describe('load_skill_prompt', () => {
       { recursive: true }
     );
   });
+
+  it('loads a bundled Hermes skill (e.g. humanizer) first when type is load without explicit source', async () => {
+    const result = await loadSkillPrompt({
+      type: 'load',
+      name: 'humanizer',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.skill).toBe('humanizer');
+    expect(result.prompt).toBeDefined();
+    expect(result.prompt).toContain('Humanizer: Remove AI Writing Patterns');
+  });
+
+  it('loads Hermes skill when skill parameter is used instead of name', async () => {
+    const result = await loadSkillPrompt({
+      type: 'load',
+      skill: 'humanizer',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.skill).toBe('humanizer');
+    expect(result.prompt).toBeDefined();
+    expect(result.prompt).toContain('Humanizer: Remove AI Writing Patterns');
+  });
 });

@@ -28,6 +28,7 @@ async function getDirectoryTree(dirPath: string, maxDepth = 2, currentDepth = 0,
 
         const filtered = entries.filter(entry => {
             const name = entry.name;
+            if (name.toLowerCase() === 'agents.md') return false;
             if (name.startsWith('.') && name !== '.env' && name !== '.env.example') return false;
             if (EXCLUDE_DIRS.includes(name) || ['data', 'cache', 'temp', 'tmp', 'projects', 'scrapes'].includes(name)) return false;
             const ext = path.extname(name).toLowerCase();
@@ -570,7 +571,8 @@ export class WorkspaceContextMiddleware implements Middleware {
                     keywords: context.keywords || [],
                     memory: memoryContext,
                     workspace: (context as any).grepContext,
-                    isSubtask: isSubtask
+                    isSubtask: isSubtask,
+                    workspaceRoot: context.workspaceRoot
                 });
 
                 const highLevelStepsSection = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **2** high-level steps.`;

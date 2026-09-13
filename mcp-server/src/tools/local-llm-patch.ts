@@ -38,7 +38,41 @@ export interface LocalLlmPatchResult {
   modelUsed?: string;
   usedFallbackModel?: boolean;
   patch?: string;
+  content?: string;
+  markdown?: string;
   error?: string;
+}
+
+export function formatLocalLlmPatchMarkdown(result: LocalLlmPatchResult): string {
+  if (!result.success) {
+    return `### 🩹 Local LLM Patch: Failed\n\n**Error:** ${result.error || 'Unknown error'}`;
+  }
+
+  const lines: string[] = [];
+  lines.push(`### 🩹 Local LLM Patch: Success\n`);
+  if (result.filePath) {
+    lines.push(`- **Target File:** \`${result.filePath}\``);
+  }
+  if (result.modelUsed) {
+    lines.push(`- **Model Used:** \`${result.modelUsed}\`${result.usedFallbackModel ? ' _(fallback)_' : ''}`);
+  }
+
+  if (result.patch) {
+    lines.push(`\n#### Proposed Patch / New Content\n`);
+    const trimmed = result.patch.trim();
+    if (trimmed.startsWith('---') || trimmed.startsWith('@@') || trimmed.startsWith('diff --git')) {
+      lines.push('```diff');
+      lines.push(trimmed);
+      lines.push('```');
+    } else {
+      const ext = path.extname(result.filePath || '').replace('.', '') || 'text';
+      lines.push(`\`\`\`${ext}`);
+      lines.push(trimmed);
+      lines.push('```');
+    }
+  }
+
+  return lines.join('\n');
 }
 
 /** Strips a single ```lang\n...\n``` fence if the model wrapped its answer in one, else returns the text unchanged. */
@@ -147,6 +181,9 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
     isError = true;
     result = { success: false, error: err?.message || String(err) };
   }
+
+  result.content = formatLocalLlmPatchMarkdown(result);
+  result.markdown = result.content;
 
   await logToolCall(sessionId, 'local_llm_patch', input, result, Date.now() - start, isError).catch(() => {});
   return result;

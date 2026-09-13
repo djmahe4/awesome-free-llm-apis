@@ -1,6 +1,6 @@
 {
   "name": "free-llm-mcp-server",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "type": "module",
   "description": "MCP server for free LLM APIs",
   "bin": {
@@ -43,13 +43,19 @@
     "quickjs-emscripten": "^0.29.0",
     "remark": "^15.0.1",
     "remark-parse": "^11.0.0",
+    "ts-morph": "^28.0.0",
     "unist-util-visit": "^5.1.0",
     "vectra": "^0.12.3",
-    "yaml": "^2.4.2",
+    "yaml": "^2.8.3",
     "zod": "^3.23.8"
   },
   "overrides": {
-    "ip-address": "^10.2.0"
+    "ip-address": "^10.2.0",
+    "sharp": "^0.35.3",
+    "esbuild": "^0.28.1",
+    "fast-uri": "^3.1.6",
+    "qs": "^6.16.0",
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@emnapi/core": "1.9.1",

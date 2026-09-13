@@ -83,25 +83,82 @@ graph TD
 
 ---
 
-## 2. Quantum-Inspired Routing & Model Scoring
+## 2. Quantum Scoring & Probabilistic Model Selection Mechanism
 
-The `TextRouterMiddleware` uses a **probabilistic quantum scoring matrix** instead of static model routing. It treats model selection as a state vector that collapses based on real-time telemetry and task constraints.
+The `TextRouterMiddleware` uses a **probabilistic quantum scoring matrix** instead of static model routing. It models all eligible candidate models as a normalized state vector $|\Psi\rangle$ that collapses onto the optimal available model based on task alignment, provider health, token context capacity, and real-time rate limits.
 
-### Task-Based Model Mapping
+```mermaid
+flowchart LR
+    A["Incoming Request (TaskType, Tokens)"] --> B["Compute Raw Amplitudes α_i"]
+    B --> C["Apply Health Factor H_i (Circuit Breakers)"]
+    C --> D["Apply Context Capacity C_i (Window Limits)"]
+    D --> E["Calculate Normalized State Vector |Ψ⟩"]
+    E --> F["State Collapse: Sort by Probability P_i"]
+    F --> G["Sequential Fallback Execution"]
+```
+
+### 🎯 Task-Based Model Mapping
 The centralized `TaskClassifier` dynamically classifies the request into a `TaskType` and collapses the routing state to the optimal model tier:
+* **Coding**: `qwen/qwen3-coder-480b-a35b:free` &rarr; `gemini-3.1-flash-lite` &rarr; `codestral-latest`
+* **Reasoning**: `deepseek/deepseek-r1` &rarr; `nvidia/nemotron-3-ultra-550b-a55b` &rarr; `z-ai/glm-5.2`
+* **Search / Summarization**: `gemini-3.1-flash-lite` &rarr; `cohere/command-r-plus` &rarr; `mistral-small-latest`
+* **Vision / Multimodal**: `qwen/qwen3.6-27b` &rarr; `meta/llama-3.2-90b-vision-instruct` &rarr; `gemini-3.1-flash-lite`
+* **Chat / General**: `meta-llama/llama-3.3-70b-instruct` &rarr; `gemma4:31b`
 
-* **Coding**: `qwen/qwen3-coder-480b-a35b:free` -> `gemini-3.1-flash-lite`
-* **Reasoning**: `deepseek/deepseek-r1` -> `nvidia/nemotron-3-ultra-550b-a55b`
-* **Search / Summarization**: `gemini-3.1-flash-lite` -> `cohere/command-r-plus`
-* **Chat / General**: `meta-llama/llama-3.3-70b-instruct`
+### ⚡ State Collapse & Telemetry Lifecycle
+1. **Scoring**: Each model is assigned an initial capability amplitude based on the classified `TaskType`.
+2. **Modifiers**: Real-time RPM/RPD quotas, context window boundaries, and latency averages (from `get_token_stats`) scale the amplitudes.
+3. **Collapse**: The system sorts models by collapse probability and sequentially attempts execution, falling back instantly if a provider fails or hits a rate limit.
 
-### State Collapse & Telemetry
-1. **Scoring**: Each model is scored based on the classified `TaskType`.
-2. **Modifiers**: Real-time RPM/RPD quotas and latency averages (from `get_token_stats`) modify the scores.
-3. **Collapse**: The system sorts models by collapse probability and sequentially attempts execution, falling back instantly if a provider fails.
+### 🧠 Centralized Task Classifier
+The `TaskClassifier` uses single-pass regex heuristics with word boundaries (`\b`) and a keyword weighting map (`keywordTaskMap`) to classify the task type in under 0.05ms, preventing any runtime latency overhead.
 
-### Centralized Task Classifier
-The `TaskClassifier` uses single-pass regex heuristics with word boundaries (`\b`) and a keyword weighting map (`keywordTaskMap`) to classify the task type in under 0.05ms, preventing any overhead.ad.
+---
+
+### 🧮 The State Vector Probability Equation
+
+For a set of $N$ candidate models $\{M_1, M_2, \dots, M_N\}$, the quantum state vector is defined as:
+
+$$|\Psi\rangle = \sum_{i=1}^{N} \alpha_i |M_i\rangle$$
+
+Where the unnormalized amplitude $\alpha_i$ for model $M_i$ is given by:
+
+$$\alpha_i = \text{Alignment}(M_i, \text{TaskType}) \times \text{HealthFactor}(M_i) \times \text{CapacityFactor}(M_i)$$
+
+The normalized probability $P(M_i)$ of collapsing to model $M_i$ is:
+
+$$P(M_i) = \frac{\alpha_i}{\sum_{j=1}^{N} \alpha_j}$$
+
+---
+
+### 🔬 Amplitude Weighting Parameters
+
+#### 1. Task Alignment Factor
+Calculated from the base model capability score ($\text{Cap} \in [0.5, 1.0]$) and specialized model architecture tags:
+- **Coding Task**: $\text{Cap} \times 2.0$ (if specialized coder model), $\text{Cap} \times 1.5$ (if reasoning model), $\text{Cap} \times 0.8$ (general).
+- **Reasoning Task**: $\text{Cap} \times 2.5$ (if deepseek-r1 / o1 / reasoning model), $\text{Cap} \times 0.6$ (general).
+- **Vision Task**: $\text{Cap} \times 2.0$ (if VLM / multimodal), $0.01$ (if text-only).
+- **Summarization Task**: $\text{Cap} \times 1.2$.
+
+#### 2. Provider Health Factor ($\text{HealthFactor}$)
+Tracks circuit breaker statuses across all active providers exposing model $M_i$:
+
+$$\text{HealthFactor} = \frac{\text{Active Healthy Providers for } M_i}{\text{Total Providers for } M_i}$$
+
+If all providers for $M_i$ are cooling down or hitting rate limits, $\text{HealthFactor}$ drops to $0.1$, safely deprioritizing the model without removing it from fallback options.
+
+#### 3. Context Capacity Factor ($\text{CapacityFactor}$)
+Prevents context truncation errors by checking the estimated input tokens against the model's physical context window ($W$):
+- If $\text{Tokens} > 0.90 \times W \implies \text{CapacityFactor} = 0.1$
+- If $\text{Tokens} > 0.70 \times W \implies \text{CapacityFactor} = 0.5$
+- If $\text{Tokens} > 8,000$ and $\text{Cap} < 0.70 \implies \text{CapacityFactor} \times= 0.3$ (protects weak $<8\text{B}$ models from context bloat).
+
+---
+
+### 📉 Confused-User Inversion
+When the `TaskClassifier` detects a confused user state (e.g. empty prompt or naked file upload without clear instructions), the sorting order is deliberately **inverted**:
+- The router selects the cheapest / highest-throughput model first (e.g. `gemini-3.1-flash-lite`) to ask for clarification, conserving expensive reasoning quotas.
+- Automatically appends a `[System Note: Guide the user]` prompt modifier.
 
 ---
 
@@ -137,6 +194,19 @@ Interface for the persistent, workspace-aware memory system.
 ### 5. `store_workspace_skill` & `index_workspace`
 - **`store_workspace_skill`**: Explicitly save structured research and decisions following the `@skill-writer` schema.
 - **`index_workspace`**: Proactively index all workspace files into the vector database for high-fidelity semantic recall.
+
+### 6. `local_llm_patch` [NEW]
+Single-file code patching tool using a locally running Ollama instance. Ranks local coding models, enriches the prompt with neighborhood context, and returns a clean replacement patch without mutating disk.
+
+### 7. `coding_agents` [NEW]
+OMP-pattern (`oh-my-pi`) autonomous multi-file refactoring engine:
+- **VectorStore TF-IDF RAG**: Discovers top candidate files matching the user's goal.
+- **`[PATH#SHA8]` Snapshot Anchors**: Protects against concurrent multi-agent edits and drift.
+- **Polyglot LSP & Subprocess Diagnostics**: Verifies code with `ts-morph` (TS/JS), Python `ast.parse`, Go `go vet`, and Rust `rustc --error-format json`.
+- **Zero-Waste CAS Checkpointing**: Snapshots pre-apply states in a content-addressable store for instant rollback (`resolve: { action: 'rollback' }`).
+- **Atomic Batch Commits**: Applies changes across multiple files transactionally on `resolve: { action: 'apply' }`.
+
+See [skill/references/coding_agents.md](skill/references/coding_agents.md) for the complete reference and usage guide.
 
 ---
 
@@ -272,18 +342,87 @@ To prevent corruption and race conditions during concurrent workspace indexing o
 
 `quantum_tool` provides a mathematically grounded multi-perspective reasoning framework modeling hypothesis branches as qubits.
 
-### 🔬 Supported Circuit Archetypes
-1. **`superposition_exploration`**: Disperses initial certainty across branches via Hadamard transformations ($H$) followed by gentle exploration rotations ($R_Y$) and neighbor entanglement ($CNOT$).
-2. **`adversarial_debate`**: Sets polarized proponent and opponent branches ($R_Y(1.8)$ vs $R_Y(-1.8)$), triggers counter-argument phase inversions ($X$), and applies cross-examination gates ($CNOT$).
-3. **`consensus_alignment`**: Aligns parallel specialist branches through converging parameterized rotations ($R_Y(0.85)$) and phase markers ($CZ$).
-4. **`grover_amplification`**: Focuses synthesis weight onto a target candidate hypothesis while maintaining alternative contexts.
-5. **`entangled_verification`**: Establishes paired worker/verifier Bell states ($H$ + $CNOT$) with cross-pair correlation checks ($CZ$).
+> [!TIP]
+> **Beginner Intuition: What is a Quantum Reasoning Circuit?**  
+> In standard LLM prompting, an AI often commits early to a single line of thought. In a quantum reasoning circuit:
+> - Each **qubit / branch** represents an independent hypothesis, point of view, or specialized persona (e.g. `Security Engineer`, `Performance Architect`, `Red Teamer`).
+> - **Confidence ($C$)** represents the probability ($0.0 \to 1.0$) of a hypothesis being true or favored ($C = 0.5$ is complete uncertainty / neutral superposition).
+> - **Quantum Gates** are mathematical operations applied column-by-column to explore, challenge, flip, entangle, or measure confidence across branches before asking the LLM to synthesize final findings.
+
+---
+
+### 🧩 Beginner-Friendly Guide to Quantum Gates
+
+| Gate Name | Mathematical Symbol | Beginner Intuition & What It Does to Hypotheses | Confidence Math |
+|:---|:---:|:---|:---|
+| **Hadamard** | $H$ | **Reset to Neutral Superposition**: Resets the branch to maximal open-mindedness ($C = 0.5$) where all possibilities are equal. | $C \to 0.5$ |
+| **Pauli-X (NOT)** | $X$ | **Counter-Argument / Flip**: Completely inverts the stance (e.g. `for` becomes `against`, and strong belief $0.9$ becomes doubt $0.1$). | $C \to 1.0 - C$ |
+| **Y-Rotation** | $R_Y(\theta)$ | **Parameterized Argument Strength**: Nudges the confidence up or down by an angle $\theta$ (in radians). Positive $\theta$ strengthens belief, negative weakens it. | $\phi = 2\arcsin(\sqrt{C}) + \theta$<br/>$C \to \sin^2(\phi / 2)$ |
+| **Z-Phase & RZ** | $Z$, $R_Z(\theta)$ | **Phase Marking (Evidence Tagging)**: Does not change belief percentage directly, but attaches a semantic phase marker to prioritize specific evidence during synthesis. | Stance unchanged; records phase stamp |
+| **Controlled-NOT** | $CNOT$ | **Conditional Challenge / Entanglement**: If the *control* persona is confident ($C > 0.5$), it automatically challenges and flips the *target* persona's stance. | If $C_{\text{control}} > 0.5$,<br/>$C_{\text{target}} \to 1.0 - C_{\text{target}}$ |
+| **Controlled-Z** | $CZ$ | **Cross-Verification**: Correlates two branches so their supporting evidence is jointly evaluated during final state collapse. | Phase correlation linked |
+| **SWAP** | $SWAP$ | **Perspective Reversal**: Swaps the exact stances and confidence values between two specialist personas. | Branch $A \leftrightarrow B$ |
+| **MEASURE** | $M$ | **State Collapse / Final Decision**: Collapses the hypothesis from uncertainty to a concrete final verdict ($0.0$ or $1.0$). | $C \ge 0.5 \to 1.0$<br/>$C < 0.5 \to 0.0$ |
+
+---
+
+### 🔬 Supported Circuit Archetypes (Prebuilts)
+
+You do not need to construct circuits manually; you can pass `presetCircuit`:
+
+1. **`superposition_exploration`** *(Best for brainstorming & root-cause exploration)*:
+   - Sets all personas to neutral $H$ superposition.
+   - Applies subtle $R_Y$ exploration angles to diverge viewpoints.
+   - Chains $CNOT$ gates between adjacent branches to spread discoveries across specialists.
+2. **`adversarial_debate`** *(Best for security audits, architecture reviews, and bug vs feature debates)*:
+   - Polarizes Branch 0 (`Proponent`, $R_Y(1.8)$) against Branch 1 (`Opponent`, $R_Y(-1.8)$).
+   - Inverts opponent stances with Pauli-$X$ counter-arguments.
+   - Cross-examines with $CNOT$ and $CZ$ before collapsing with `MEASURE`.
+3. **`consensus_alignment`** *(Best for multi-agent alignment and RFC evaluations)*:
+   - Initializes specialist branches in parallel.
+   - Applies converging parameterized $R_Y(0.85)$ rotations to find common ground.
+   - Uses $CZ$ phase marking to highlight unified architectural recommendations.
+4. **`grover_amplification`** *(Best for selecting the best solution out of multiple alternatives)*:
+   - Applies quantum amplitude amplification to boost the confidence of the leading candidate hypothesis while retaining secondary alternatives for safety comparison.
+5. **`entangled_verification`** *(Best for TDD and critical security checks)*:
+   - Establishes paired Worker-Verifier Bell states ($H$ + $CNOT$).
+   - Executes cross-pair $CZ$ verification gates to ensure code claims match test evidence.
+
+---
+
+### 💻 Step-by-Step MCP Interaction Example
+
+```json
+// Step 1: Initialize the session with a preset circuit
+{
+  "action": "setup",
+  "sessionId": "security-review-1",
+  "presetCircuit": "adversarial_debate",
+  "personas": ["Security Auditor", "System Architect", "DevOps Engineer"]
+}
+
+// Step 2: Step through the gate columns
+{
+  "action": "step",
+  "sessionId": "security-review-1"
+}
+
+// Step 3: Run synthesis and analyze the collapsed quantum state
+{
+  "action": "analyze",
+  "sessionId": "security-review-1",
+  "query": "Synthesize the findings on rate limiting and token leakage vulnerabilities.",
+  "temperature": 0.5
+}
+```
+
+---
 
 ### 📈 Real-Time Telemetry & Token Efficiency Matrix
-Every step and synthesis return execution timing and token efficiency metrics:
+Every step and synthesis returns real-time mathematical telemetry:
 - **`executionMetrics`**: `totalDurationMs`, `gateExecutionMs`, `llmInferenceMs`.
-- **`tokenEfficiencyMatrix`**: `rawPromptTokens`, `compressedPromptTokens`, `tokenSavingsPct`, `symbolDensity`, `tokensPerBranch`, `tokensPerSecond`.
-- **`quantumStateMetrics`**: `circuitDepth`, `activeGateCount`, `confidenceDivergence` ($\sigma^2$), `entropyScore`, `resolvedBranchesCount`, `superpositionBranchesCount`.
+- **`tokenEfficiencyMatrix`**: `rawPromptTokens`, `compressedPromptTokens`, `tokenSavingsPct` (typically 30-50% savings via quantum semantic compression), `symbolDensity`, `tokensPerBranch`.
+- **`quantumStateMetrics`**: `circuitDepth`, `activeGateCount`, `confidenceDivergence` ($\sigma^2$), `entropyScore` (uncertainty level), `resolvedBranchesCount`, `superpositionBranchesCount`.
 
 ---
 
@@ -296,4 +435,95 @@ To ensure workspace isolation without polluting project trees:
   $$S = S_0 \cdot \left(1 + 0.5 \cdot (\text{sourceCount} - 1)\right)$$
   $$\text{Decay Multiplier} = e^{-\frac{\Delta t}{S}}$$
 - **Test Telemetry Sandboxing**: All test runners and CI suites sandbox telemetry under `os.tmpdir()`, preventing test runs from modifying user stats or triggering Firebase resets.
+
+---
+
+## 12. OMP Architecture, CAS Checkpointing & Polyglot LSP (v1.1.0)
+
+`coding_agents` implements the core architecture of **OMP (`oh-my-pi`)**:
+
+### 🎯 Hash-Anchored Line Edits (Hashline)
+Instead of fragile line numbers or ambiguous regex matches, edits use `[PATH#SHA8]` content snapshot anchors. If a file is modified externally or by concurrent subagents, the anchor hash check prevents stale overwrites.
+
+### 📦 Content-Addressable Storage (CAS) Checkpointing
+Pre-apply workspace states are stored in an in-memory and disk-backed CAS store (`src/memory/ContentAddressableCheckpoint.ts`):
+- **Zero-Waste Deduplication**: Checkpoints store lightweight manifests (`{ filePath -> sha256_hash }`). Unchanged files across revisions consume zero additional storage bytes.
+- **Transactional Rollback**: Instantly restores previous checkpoints via `resolve: { action: 'rollback', checkpointId?: string }`.
+
+### 🌐 Polyglot Compiler Diagnostics
+Before applying proposed diffs, the pipeline executes syntax and semantic checks per language:
+- **TypeScript / JavaScript**: `ts-morph` in-memory `getPreEmitDiagnostics()` with AST descendant symbol mapping.
+- **Python**: Subprocess `python3 -c "import ast, sys..."` parser returning exact 1-based line/col errors.
+- **Go**: Subprocess `go vet` with structured error regex capture.
+- **Rust**: Subprocess `rustc --error-format json` compiler diagnostic engine.
+
+---
+
+## 13. Agentic vs. Single-Pass Prompt Steering & DAG Planner (v1.1.0)
+
+The Steering Studio in the web dashboard provides live simulation of the 5-layer composite system prompt and subtask decomposition DAG without consuming external LLM API tokens.
+
+### 🔄 Multi-Pass Agentic vs. Single-Pass Execution
+
+```mermaid
+flowchart TD
+    A[Incoming User Request] --> B{agentic: true?}
+    
+    B -- No: Single-Pass --> C[Broad System Prompt Engine]
+    C --> C1[12,000 char prompt budget]
+    C1 --> C2[Selects up to 7 prompt.json modular sections]
+    C2 --> C3[Includes meta-planning & architectural sections]
+    C3 --> C4[Injects full L1-L5 memory layers]
+    
+    B -- Yes: Multi-Pass Agentic --> D{Input Format}
+    D -- Structured DSL --> D1[Extract lines with >, -, 1.]
+    D -- Normal Unstructured Text --> D2[Decompose via SubtaskDecomposer]
+    D1 --> E[buildExecutionPlan DAG Classifier]
+    D2 --> E
+    E --> F[Partition into Phase 1 & Phase 2 Lanes]
+    F --> G[Scope System Prompt to Active Phase 1 Subtask]
+    G --> H[8,000 char prompt budget]
+    H --> I[Zero-out meta-planning sections: reader_contract, momentum_ratchets]
+    I --> J[Inject ## 📝 CURRENT SUBTASK execution boundary]
+```
+
+### 🧠 The 5-Layer System Memory Hierarchy
+
+The prompt assembler organizes context into five isolated, priority-ordered layers:
+1. **L1 — Short-Term Session Memory**: Recent conversation turns, immediate user instructions, and live subtask execution state.
+2. **L2 — Long-Term Memory & ADR Decisions**: Project preferences, verified technical rules, and architectural decision records located in `.free-llm-mcp/wiki/adr/`.
+3. **L3 — Workspace Wiki Knowledge**: Curated technical documentation, module catalogues, and domain guides in `.free-llm-mcp/wiki/`.
+4. **L4 — Dynamic Code Snippets (Born-Rule Grep)**: Relevance-scored directory trees, folder snippets, and symbol definitions extracted via Born-Rule keyword grep.
+5. **L5 — Modular Skill & Prompt Steering**: Targeted sections dynamically extracted from `prompt.json` based on TF-IDF relevance scoring.
+
+### 🛡️ Context Bloat Guard & Execution Guarantees
+- **Safe Phase Mapping**: `ExecutionPlan` phase arrays (`phase1`, `phase2`) are guarded with optional chaining to prevent runtime `TypeError` on single-task unstructured inputs.
+- **Zero LLM Leakage**: The steering simulation uses deterministic graph heuristics, regex parsing, and in-memory TF-IDF scoring — consuming **0 API tokens** and making **0 external model calls**.
+
+---
+
+## 14. Complete MCP Tool Suite & Subcommand Interaction Reference (v1.2.0)
+
+Every tool in the server adheres to the Model Context Protocol (MCP) JSON-RPC 2.0 specification over Stdio or SSE transports.
+
+### 🛠️ Tool Catalog & Subcommand Execution Guide
+
+| Tool Name | Key Subactions (`action`) | Purpose & When to Use | Core Parameters |
+|---|---|---|---|
+| **`use_free_llm`** | `run`, `continue`, `status`, `abort` | Primary multi-model router, agentic planner, and long-running background engine. | `prompt`, `agentic`, `model`, `workspace_root`, `sessionId`, `resume_input`, `skipIndexing`, `keywords` |
+| **`coding_agents`** | `run` (dispatching `ast_edit`, `diagnostics`, `resolve`) | Autonomous multi-file refactoring, CAS checkpoint rollbacks, and polyglot compiler checks (TS, Python, Go, Rust). | `instruction`, `target_files`, `workspace_root`, `patch_mode`, `compiler_check`, `checkpoint_id`, `resolve` |
+| **`local_llm_patch`** | `apply_patch`, `revert_patch`, `audit_ast` | 100% offline local patching via Ollama (`qwen2.5-coder`, `deepseek-coder`). Zero API cost. | `file_path`, `instruction`, `model`, `ollama_endpoint`, `revert` |
+| **`browser_tool`** | `navigate`, `snapshot`, `click`, `scroll`, `wait`, `evaluate`, `network`, `api_replay`, `extract`, `deep_scrape`, `screenshot`, `checkpoint`, `session` | Headless Playwright browser automation, DOM accessibility tree snapshots, private API intercept/replay, and anti-detection scraping. | `action`, `url`, `sessionId`, `selector`, `text`, `script`, `scrollDirection`, `antiDetection`, `outputFormat` |
+| **`cyber_tool`** | `osint`, `lookup`, `get_tool`, `register_tool`, `wiki_lookup`, `learn`, `coach`, `save_graph`, `load_graph`, `tool_memory` | Passive OSINT reconnaissance, educational CTF coaching, security tool syntax registry, and persistent decision-tree graph exploration. | `action`, `target`, `osintType`, `toolName`, `githubUrl`, `sessionId`, `observation`, `graphNode`, `memoryOp`, `note` |
+| **`quantum_tool`** | `setup`, `step`, `pause`, `continue`, `modify`, `reset`, `status`, `get_state`, `analyze` | Multi-branch hypothesis reasoning, parameterized quantum rotation gates ($H, X, R_Y, CNOT, CZ$), and state collapse synthesis. | `action`, `sessionId`, `presetCircuit`, `numBranches`, `personas`, `gates`, `query`, `temperature` |
+| **`vision_tool`** | `analyze_ui`, `extract_diagram`, `compare_diff`, `inspect_image` | Multimodal visual inspection, screenshot OCR, UI bounding-box extraction, and visual regression diffing. | `image_path`, `prompt`, `action`, `compare_image_path`, `model` |
+| **`execute_skill`** | `run` | Grounded execution of complex agent skills with bundled `SKILL.md` constraints, examples, and tool routing. | `skill_name`, `user_prompt`, `workspace_root`, `model` |
+| **`manage_memory`** | `search`, `save`, `delete`, `list`, `read_adr`, `write_adr`, `wiki_list`, `wiki_read`, `wiki_write` | Workspace vector memory search, persistent ADR (Architectural Decision Record) management, and wiki maintenance. | `action`, `query`, `title`, `content`, `tags`, `workspace_root`, `limit` |
+| **`index_workspace`** | `index`, `status`, `clear` | Proactive vector embedding indexing using local in-memory embeddings (`Xenova/bge-small-en-v1.5`). | `workspace_root`, `force` |
+| **`store_workspace_skill`**| `store` | Explicitly saving new agent skills and operational workflows conforming to the agent-skills specification. | `skill_name`, `description`, `content`, `workspace_root` |
+| **`load_skill_prompt`** | `load`, `search` | Dynamic keyword discovery and prompt assembly from bundled Hermes skills or local `.agents/` catalog. | `type`, `name`, `keywords`, `workspaceDir` |
+| **`validate_provider`** | `validate` | Health check, API key verification, and latency measurement for individual LLM providers. | `provider` (`gemini`, `groq`, `openrouter`, `ollama`, `cohere`, etc.) |
+| **`get_token_stats`** | `read` | Real-time RPM/RPD token quotas, quota resets, and durable lifetime request telemetry across all providers. | *(No parameters required)* |
+
+
 

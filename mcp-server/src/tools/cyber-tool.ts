@@ -9,10 +9,15 @@ import { promises as fs, existsSync } from 'node:fs';
 
 export interface CyberToolInput {
     action: 'list_tools' | 'get_tool' | 'register_tool' | 'wiki_lookup'
-        | 'learn' | 'coach' | 'save_graph' | 'load_graph' | 'tool_memory';
+        | 'learn' | 'coach' | 'save_graph' | 'load_graph' | 'tool_memory' | 'osint';
     toolName?: string;
     githubUrl?: string;
     sessionId?: string;
+    // osint
+    target?: string;
+    osintType?: 'domain' | 'ip' | 'username' | 'all';
+    autoSearch?: boolean;
+    allowPrivateIps?: boolean;
     // learn / coach
     goal?: string;
     level?: 'beginner' | 'intermediate' | 'advanced';
@@ -610,6 +615,177 @@ export async function cyberTool(input: CyberToolInput) {
                     reliability: stats || null
                 };
             }
+        } else if (action === 'osint') {
+            const target = (input.target || '').trim();
+            if (!target) throw new Error('target is required and cannot be empty for osint action');
+            const osintType = input.osintType || 'all';
+
+            // SSRF & Target Scope Guard: Validate target is not private loopback / metadata / internal subnet unless explicitly allowed
+            const isPrivateOrLoopback = (host: string): boolean => {
+                let lower = host.toLowerCase().trim();
+                // Strip bracketed IPv6 e.g. [::1]:80 or [::1] or [::ffff:127.0.0.1]:3000
+                if (lower.startsWith('[')) {
+                    const closeBracket = lower.indexOf(']');
+                    if (closeBracket !== -1) {
+                        lower = lower.substring(1, closeBracket);
+                    }
+                } else if (lower.includes(':') && !lower.includes('::') && lower.split(':').length === 2 && !lower.includes('.')) {
+                    // Standard IPv4 with port e.g. 127.0.0.1:8080 or localhost:3000
+                    lower = lower.split(':')[0];
+                }
+
+                if (lower === 'localhost') return true;
+
+                // Handle IPv4-mapped IPv6 addresses e.g. ::ffff:127.0.0.1, ::ffff:10.0.0.1, or full form 0000:0000:0000:0000:0000:ffff:127.0.0.1
+                if (lower.includes('ffff:') && lower.includes('.')) {
+                    const mappedIpv4 = lower.split(':').pop() || '';
+                    if (mappedIpv4 === '127.0.0.1' || mappedIpv4 === '0.0.0.0' || mappedIpv4 === '169.254.169.254') return true;
+                    if (/^(0|10|127|169\.254|172\.(1[6-9]|2[0-9]|3[0-1])|192\.168)\./.test(mappedIpv4)) return true;
+                }
+
+                // Check standard IPv4 private / loopback / link-local / broadcast ranges
+                if (lower === '127.0.0.1' || lower === '0.0.0.0' || lower === '169.254.169.254') return true;
+                if (/^(0|10|127|169\.254|172\.(1[6-9]|2[0-9]|3[0-1])|192\.168)\./.test(lower)) return true;
+
+                // Check IPv6 loopback, unspecified, link-local, and unique local addresses
+                if (lower === '::1' || lower === '::') return true;
+                if (/^(0*:)*0*1$/.test(lower)) return true; // Matches full/expanded IPv6 loopbacks like 0:0:0:0:0:0:0:1 or 0000:...:0001
+                if (/^(0*:)+0*$/.test(lower)) return true; // Matches full/expanded IPv6 unspecified like 0:0:0:0:0:0:0:0
+                if (lower.startsWith('fe80:') || lower.startsWith('fc00:') || lower.startsWith('fd00:')) return true;
+
+                return false;
+            };
+
+            if (!input.allowPrivateIps && isPrivateOrLoopback(target)) {
+                throw new Error(`Security error: invalid or private target rejected to prevent SSRF: ${target}`);
+            }
+
+            const dns = await import('node:dns/promises');
+
+            const dnsReport: Record<string, any> = {};
+            const resolvedIps: string[] = [];
+
+            const shouldQueryDns = osintType === 'domain' || osintType === 'ip' || osintType === 'all';
+
+            // Helper to wrap DNS promise with timeout guard (default 3000ms)
+            const withDnsTimeout = <T>(p: Promise<T>, ms = 3000): Promise<T> =>
+                Promise.race([
+                    p,
+                    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('DNS Timeout')), ms))
+                ]);
+
+            if (shouldQueryDns) {
+                try {
+                    const a = await withDnsTimeout(dns.resolve4(target)).catch(() => []);
+                    if (a.length) { dnsReport.A = a; resolvedIps.push(...a); }
+                } catch {}
+
+                try {
+                    const aaaa = await withDnsTimeout(dns.resolve6(target)).catch(() => []);
+                    if (aaaa.length) { dnsReport.AAAA = aaaa; resolvedIps.push(...aaaa); }
+                } catch {}
+
+                try {
+                    const mx = await withDnsTimeout(dns.resolveMx(target)).catch(() => []);
+                    if (mx.length) dnsReport.MX = mx;
+                } catch {}
+
+                try {
+                    const txt = await withDnsTimeout(dns.resolveTxt(target)).catch(() => []);
+                    if (txt.length) dnsReport.TXT = txt;
+                } catch {}
+
+                try {
+                    const ns = await withDnsTimeout(dns.resolveNs(target)).catch(() => []);
+                    if (ns.length) dnsReport.NS = ns;
+                } catch {}
+            }
+
+            const recommendedDorks: string[] = [];
+            if (osintType === 'username') {
+                recommendedDorks.push(
+                    `site:github.com "${target}"`,
+                    `site:twitter.com "${target}" | site:x.com "${target}"`,
+                    `site:linkedin.com/in/ "${target}"`,
+                    `site:reddit.com/user/ "${target}"`
+                );
+            } else {
+                recommendedDorks.push(
+                    `site:${target} filetype:pdf`,
+                    `site:${target} inurl:admin | inurl:login`,
+                    `site:github.com "${target}"`,
+                    `site:linkedin.com/in/ "${target}"`,
+                    `site:crt.sh/?q=${target}`
+                );
+            }
+
+            // Multi-step Automated Reconnaissance: execute dorks via SearchProviderRegistry if requested
+            let searchResults: any[] = [];
+            if (input.autoSearch) {
+                try {
+                    const { SearchProviderRegistry } = await import('../search/registry.js');
+                    const searchRegistry = SearchProviderRegistry.getInstance();
+                    const available = searchRegistry.getAvailableProviders();
+                    const provider = available[0] || searchRegistry.getProviders()[0];
+                    if (provider) {
+                        const topDorks = recommendedDorks.slice(0, 3);
+                        for (const dork of topDorks) {
+                            try {
+                                const res = await provider.search(dork, 3);
+                                searchResults.push({
+                                    query: dork,
+                                    results: Array.isArray(res) ? res : []
+                                });
+                            } catch (e: any) {
+                                searchResults.push({
+                                    query: dork,
+                                    error: String(e?.message || e),
+                                    results: []
+                                });
+                            }
+                        }
+                    }
+                } catch {}
+            }
+
+            // Build high-level summary
+            const summaryParts: string[] = [];
+            if (shouldQueryDns) {
+                summaryParts.push(`Resolved ${resolvedIps.length} IP(s)`);
+                if (dnsReport.MX?.length) summaryParts.push(`${dnsReport.MX.length} Mail Server(s)`);
+                if (dnsReport.TXT?.length) summaryParts.push(`${dnsReport.TXT.length} TXT/SPF Record(s)`);
+                if (dnsReport.NS?.length) summaryParts.push(`${dnsReport.NS.length} Nameserver(s)`);
+            } else {
+                summaryParts.push(`Target type: ${osintType}`);
+            }
+            summaryParts.push(`${recommendedDorks.length} Recon Dorks formulated`);
+            if (input.autoSearch) {
+                summaryParts.push(`${searchResults.reduce((acc, s) => acc + (s.results?.length || 0), 0)} search result(s) gathered`);
+            }
+            const summary = summaryParts.join(' | ');
+
+            const wiki = new WikiMemory(CYBER_WIKI_NAMESPACE);
+            const wikiContent = `# OSINT Report for ${target}\n\n`
+                + `**Timestamp**: ${new Date().toISOString()}\n\n`
+                + `**Summary**: ${summary}\n\n`
+                + `## Resolved IPs\n${resolvedIps.map(ip => `- ${ip}`).join('\n') || '- None'}\n\n`
+                + `## DNS Records\n\`\`\`json\n${JSON.stringify(dnsReport, null, 2)}\n\`\`\`\n\n`
+                + `## Recommended Google / Recon Dorks\n${recommendedDorks.map(d => `- \`${d}\``).join('\n')}\n\n`
+                + (input.autoSearch ? `## Automated Search Results\n\`\`\`json\n${JSON.stringify(searchResults, null, 2)}\n\`\`\`\n` : '');
+
+            await safeWikiWrite(wiki, `osint/${target.replace(/[^\w.-]/g, '_')}`, wikiContent, ['cyber', 'osint']);
+
+            result = {
+                success: true,
+                target,
+                osintType,
+                resolvedIps,
+                dns: dnsReport,
+                recommendedDorks,
+                summary,
+                ...(input.autoSearch ? { searchResults } : {}),
+                timestamp: new Date().toISOString()
+            };
         } else {
             throw new Error(`Unsupported cyber_tool action: ${action}`);
         }

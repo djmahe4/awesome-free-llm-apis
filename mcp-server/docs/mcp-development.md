@@ -135,5 +135,8 @@ Register your new middleware by adding it to the `PipelineExecutor` instantiatio
  
 To avoid documentation drift, refer to the following single sources of truth:
 - For the full request lifecycle and routing design, see the [Workflow & Architecture Guide](guide.md).
-- For details on workspace-aware memory, caching, and ADR extraction, see the [Memory Usage Guide](references/memory-usage.md).
+- For autonomous multi-file refactoring, CAS checkpointing, and LSP verification, see the [Coding Agents Reference](skill/references/coding_agents.md).
+- For single-file offline local patching, see the [Local LLM Patch Reference](skill/references/local_llm_patch.md).
+- For browser automation and session scraping, see the [Browser Tool Reference](skill/references/browser_tool.md).
+- For security coaching and CTF decision graphs, see the [Cyber Tool Reference](skill/references/cyber_tool.md).
 - For prompt scoring and dynamic injection, see the [Agentic Prompt Injection Guide](agentic-prompts.md).

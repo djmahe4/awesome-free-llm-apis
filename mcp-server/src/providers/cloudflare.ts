@@ -8,6 +8,7 @@ export class CloudflareProvider extends BaseProvider {
   rateLimits: RateLimits = {};
   models: ProviderModel[] = [
     { id: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', name: 'Llama 3.3 70B (Cloudflare)' },
+    { id: '@cf/zai-org/glm-4.7-flash', name: 'GLM 4.7 Flash (Cloudflare)' },
     { id: '@cf/qwen/qwq-32b', name: 'QwQ 32B (Cloudflare)' },
     { id: '@cf/qwen/qwen2.5-coder-32b-instruct', name: 'Qwen 2.5 Coder 32B (Cloudflare)' },
     { id: '@cf/meta/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout 17B (Vision)' },

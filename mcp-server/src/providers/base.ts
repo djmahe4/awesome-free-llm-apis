@@ -13,7 +13,7 @@ export abstract class BaseProvider implements Provider {
   abstract models: ProviderModel[];
   /** Vision-capable models. Computed dynamically from the centralized config. */
   get visionModels(): ProviderModel[] {
-    return this.models.filter(m => isVisionSupported(m.id));
+    return this.models.filter(m => isVisionSupported(m.id, m.capabilities));
   }
   abstract rateLimits: RateLimits;
   abstract envVar: string;

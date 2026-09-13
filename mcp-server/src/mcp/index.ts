@@ -25,7 +25,9 @@ import { getBrowserSessionPool } from '../browser/BrowserSessionPool.js';
 
 /** Derive a stable ws-<hash> session ID from tool args, falling back to __no_ws__. */
 async function deriveSessionIdFromArgs(args: Record<string, any> | null | undefined): Promise<string> {
-  const ws: string = (args?.workspace_root || args?.workspaceDir || '').toString().trim();
+  const explicitSid = (args?.sessionId || '').toString().trim();
+  if (explicitSid) return explicitSid;
+  const ws: string = (args?.workspace_root || args?.workspaceDir || args?.workspaceRoot || '').toString().trim();
   if (!ws) return '__no_ws__';
   try {
     const hash = await new WorkspaceScanner(process.cwd()).getWorkspaceHash(ws);
@@ -544,6 +546,36 @@ export async function createMCPServer(): Promise<Server> {
           },
           required: ['action', 'sessionId']
         }
+      },
+      {
+        name: 'local_llm_patch',
+        description: 'Single-file code patching tool using a locally running Ollama instance. Ranks installed local coding models, enriches the request with local workspace context, and returns a single-file replacement patch.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            filePath: { type: 'string', description: 'Relative or absolute path to the file to be patched' },
+            instruction: { type: 'string', description: 'Instruction explaining what edits or additions to make' },
+            workspace_root: { type: 'string', description: 'Optional root workspace directory for context enrichment' },
+            sessionId: { type: 'string', description: 'Optional session identifier for audit logging' }
+          },
+          required: ['filePath', 'instruction']
+        }
+      },
+      {
+        name: 'coding_agents',
+        description: 'OMP-pattern autonomous multi-file coding agent: performs workspace enumeration, VectorStore TF-IDF RAG file discovery, line-anchored [PATH#TAG] snapshot diff generation, AST symbol extraction, and TypeScript/LSP syntax diagnostics verification.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            goal: { type: 'string', description: 'The refactoring, feature addition, or bugfix goal' },
+            workspaceRoot: { type: 'string', description: 'Workspace root path (defaults to current working directory)' },
+            dryRun: { type: 'boolean', description: 'Whether to return the line-anchored patch plan without mutating disk (default true)' },
+            topKFiles: { type: 'number', description: 'Maximum candidate files to locate with VectorStore RAG (default 5)' },
+            sessionId: { type: 'string', description: 'Session identifier for audit logging and snapshot caching' },
+            verifyLspDiagnostics: { type: 'boolean', description: 'Verify syntactic/AST diagnostics before completing plan (default true)' }
+          },
+          required: ['goal']
+        }
       }
     ],
   }));
@@ -620,8 +652,10 @@ export async function createMCPServer(): Promise<Server> {
       } else if (name === 'execute_skill') {
         const input = args as any;
         const result = await executeSkill(input);
+        const text = result.success ? (result.response ?? '') : `Error: ${result.error}`;
         response = {
-          content: [{ type: 'text' as const, text: result.success ? result.response ?? '' : `Error: ${result.error}` }]
+          content: [{ type: 'text' as const, text: toMarkdownResponse(text) }],
+          isError: !result.success,
         };
       } else if (name === 'browser_tool') {
         const result = await dispatchBrowserAction(args);
@@ -641,6 +675,20 @@ export async function createMCPServer(): Promise<Server> {
         response = {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
           isError: !result.success,
+        };
+      } else if (name === 'local_llm_patch') {
+        const { localLlmPatch } = await import('../tools/local-llm-patch.js');
+        const result = await localLlmPatch(args as any);
+        response = {
+          content: [{ type: 'text' as const, text: toMarkdownResponse(result.content || result.markdown || '') }],
+          isError: !result.success,
+        };
+      } else if (name === 'coding_agents') {
+        const { CodingAgentsHandler } = await import('../tools/coding-agents.js');
+        const result = await CodingAgentsHandler(args as any);
+        response = {
+          content: [{ type: 'text' as const, text: toMarkdownResponse(result.content || result.markdown || '') }],
+          isError: !result.applied && !!result.error,
         };
       } else {
         throw new Error(`Unknown tool: ${name}`);

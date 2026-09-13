@@ -138,6 +138,7 @@ export class WorkspaceWalker {
                     }
                     await this.walk(root, fullPath, keywords, candidates, ig, depth + 1, overrideIgnores, gitignoreRoot, isTheoretical, state, priorityFiles, manifestDependencies, vulnerableDeps);
                 } else if (entry.isFile()) {
+                    if (entry.name.toLowerCase() === 'agents.md') continue;
                     // Skip type declaration files when scanning node_modules to avoid scanning thousands of .d.ts files
                     if (overrideIgnores && fullPath.includes('node_modules') && (entry.name.endsWith('.d.ts') || entry.name.endsWith('.d.mts') || entry.name.endsWith('.d.cts'))) {
                         continue;

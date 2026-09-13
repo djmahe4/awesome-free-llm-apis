@@ -23,6 +23,7 @@ import { ContextGatherer } from './context-gatherer.js';
 import { classifyIntent, disambiguateConfusedIntent } from './intent-classifier.js';
 import { buildExecutionPlan } from './task-classifier.js';
 import { ProviderRegistry } from '../../providers/registry.js';
+import { quantumCompress } from '../../utils/quantum-compression.js';
 
 
 import { SubtaskDecomposer, createEmptyQueueState, newQueueTaskId, type QueueTask, type QueueState, type SubtaskHistoryEntry } from './SubtaskDecomposer.js';
@@ -592,16 +593,22 @@ export function summarizeResponse(text: string): string {
     const tag = '\n\n<!-- TF-IDF SUMMARY -->';
     const limit = 2000 - tag.length;
     
-    let compressed = compressSemantically(text, limit);
-    if (!compressed.includes('<!-- TF-IDF SUMMARY -->')) {
-        compressed = compressed + tag;
-    }
+    // First 500 characters preserved verbatim as recency/head anchor
+    const head = text.slice(0, 500);
+    const remainder = text.slice(500);
     
-    if (compressed.length > 2000) {
-        compressed = compressed.slice(0, 2000 - tag.length) + tag;
-    }
+    // Quantum compress remainder to fit budget
+    const targetRemainderChars = Math.max(100, limit - head.length);
+    const estRatio = Math.max(0.1, Math.min(0.9, targetRemainderChars / remainder.length));
+    let compressedRemainder = quantumCompress(remainder, estRatio);
     
-    return compressed;
+    let combined = `${head}${compressedRemainder}${tag}`;
+    if (combined.length > 2000) {
+        // If still over 2000 chars, trim compressedRemainder preserving head
+        const allowedRemainder = Math.max(0, 2000 - head.length - tag.length);
+        combined = `${head}${compressedRemainder.slice(0, allowedRemainder)}${tag}`;
+    }
+    return combined;
 }
 
 const DATA_DEMAND_SIGNALS = [
@@ -791,16 +798,22 @@ async function executeSingleSubtask(
                     const tokenBudget = Math.floor(totalHistoryBudget * normalizedWeight);
 
                     let formattedOutput = entry.output;
+                    const taskWords = currentTask.toLowerCase().split(/\W+/).filter(w => w.length > 2);
                     let priorityLabel = 'LOW (Status Only)';
                     if (tokenBudget > 1500) {
                         priorityLabel = 'HIGH (Full Detail)';
-                        formattedOutput = compressSemantically(formattedOutput, 12000);
+                        formattedOutput = quantumCompress(formattedOutput, 0.85, taskWords);
                     } else if (tokenBudget > 500) {
                         priorityLabel = 'MEDIUM (Summary)';
-                        formattedOutput = compressSemantically(formattedOutput, 4000);
+                        formattedOutput = quantumCompress(formattedOutput, 0.65, taskWords);
                     } else {
                         priorityLabel = 'LOW (Status Only)';
-                        formattedOutput = compressSemantically(formattedOutput, 800);
+                        formattedOutput = quantumCompress(formattedOutput, 0.35, taskWords);
+                    }
+
+                    const maxChars = Math.max(800, Math.floor(tokenBudget * 3.8));
+                    if (formattedOutput.length > maxChars) {
+                        formattedOutput = formattedOutput.slice(0, maxChars) + '\n... (trail truncated to budget)';
                     }
 
                     historySection += `\n### |Subtask: ${entry.task}⟩ (Entanglement Distance: ${w.distance}, Priority: ${priorityLabel})\n`;
@@ -817,18 +830,22 @@ async function executeSingleSubtask(
             // point (decomposeGoal, buildExecutionPlan, queue storage, logs, history) only ever
             // sees the short placeholder form — this is the one place the real content gets
             // substituted back in, resolved fresh from the retained map rather than re-derived.
+            const placeholderMap = new Map(Object.entries(resolvedContext));
             const resolvedTaskText = Object.keys(resolvedContext).length > 0
-                ? restoreProtectedReferenceBlocks(currentTask, new Map(Object.entries(resolvedContext)))
+                ? restoreProtectedReferenceBlocks(currentTask, placeholderMap)
                 : currentTask;
+            const resolvedSubtaskPrompt = Object.keys(resolvedContext).length > 0
+                ? restoreProtectedReferenceBlocks(subtaskPrompt, placeholderMap)
+                : subtaskPrompt;
 
             const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${resolvedTaskText}\n\nStrictly focus on this subtask using the tools provided.${historySection}`;
 
             const messages = context.request.messages;
             const sysMsgIdx = messages.findIndex(m => m.role === 'system');
             if (sysMsgIdx !== -1) {
-                messages[sysMsgIdx] = { role: 'system', content: `${subtaskPrompt}${taskHeader}` };
+                messages[sysMsgIdx] = { role: 'system', content: `${resolvedSubtaskPrompt}${taskHeader}` };
             } else {
-                messages.unshift({ role: 'system', content: `${subtaskPrompt}${taskHeader}` });
+                messages.unshift({ role: 'system', content: `${resolvedSubtaskPrompt}${taskHeader}` });
             }
         } catch (err) {
             console.error(`[AgenticMiddleware] Failed to inject subtask prompt: ${err}`);

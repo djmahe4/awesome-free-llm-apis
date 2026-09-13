@@ -2,6 +2,7 @@ import type { Message } from '../providers/types.js';
 import type { PipelineContext } from '../pipeline/middleware.js';
 import { getMessageContent } from './MessageUtils.js';
 import { getSharedEncoder } from './tiktoken.js';
+import { quantumCompress } from './quantum-compression.js';
 
 /**
  * Controls how context overflow is handled.
@@ -328,17 +329,8 @@ export class ContextManager {
                 return { ...msg, content };
             }
 
-            // Extract first and last sentences of long prose
-            const sentences = content.split(/[.!?]\s+/);
-            if (sentences.length <= 3) return { ...msg, content };
-
-            if (isWayOver) {
-                // Extremely aggressive: keep only first sentence and last sentence
-                const compressedContent = `${sentences[0]}. ... [stripped ${sentences.length - 2} sentences] ... ${sentences[sentences.length - 1]}.`;
-                return { ...msg, content: compressedContent };
-            }
-
-            const compressedContent = `${sentences[0]}. ${sentences[1]}. ... [summarized] ... ${sentences[sentences.length - 1]}.`;
+            // Quantum compression: retain highest symbol-density sentences while discarding fluff
+            const compressedContent = quantumCompress(content, isWayOver ? 0.35 : 0.6);
             return { ...msg, content: compressedContent };
         };
 
@@ -380,20 +372,25 @@ export class ContextManager {
 
             if (remainingBudget > 5) {
                 const content = getMessageContent(lastMsg);
-                // High-performance truncation
+                // High-performance sandwich truncation
                 const approxChars = remainingBudget * 3;
-                let truncatedContent = content.slice(-approxChars);
+                const headChars = Math.floor(approxChars * 0.6);
+                const tailChars = Math.max(0, approxChars - headChars);
+                let truncatedContent = `${content.slice(0, headChars)}\n[...truncated...]\n${content.slice(-tailChars)}`.trim();
 
                 let currentTokens = this.countStringTokens(truncatedContent);
 
                 if (currentTokens > remainingBudget) {
                     const ratio = remainingBudget / currentTokens;
-                    truncatedContent = truncatedContent.slice(-Math.floor(truncatedContent.length * ratio * 0.9));
+                    const adjustedChars = Math.floor(approxChars * ratio * 0.9);
+                    const adjHead = Math.floor(adjustedChars * 0.6);
+                    const adjTail = Math.max(0, adjustedChars - adjHead);
+                    truncatedContent = `${content.slice(0, adjHead)}\n[...truncated...]\n${content.slice(-adjTail)}`.trim();
                 }
 
                 nonSystemMsgs[nonSystemMsgs.length - 1] = {
                     ...lastMsg,
-                    content: `[...truncated...] ${truncatedContent.trim()}`
+                    content: truncatedContent
                 };
             } else {
                 // System messages alone exceed the target budget.
@@ -402,10 +399,12 @@ export class ContextManager {
                 const content = getMessageContent(lastMsg);
                 const approxChars = 1500 * 3;
                 if (content.length > approxChars) {
-                    const truncatedContent = content.slice(-approxChars);
+                    const headChars = Math.floor(approxChars * 0.6);
+                    const tailChars = Math.max(0, approxChars - headChars);
+                    const truncatedContent = `${content.slice(0, headChars)}\n[...truncated...]\n${content.slice(-tailChars)}`.trim();
                     nonSystemMsgs[nonSystemMsgs.length - 1] = {
                         ...lastMsg,
-                        content: `[...truncated...] ${truncatedContent.trim()}`
+                        content: truncatedContent
                     };
                 }
             }

@@ -1,6 +1,6 @@
-# free-llm-apis MCP Server
+# free-llm-apis MCP Server (v1.1.0)
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that exposes focused tools for interacting with 70+ free LLM providers through a unified, agent-first interface.
+An enterprise-grade [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server exposing 14 zero-token-cost tools for interacting with 70+ free LLMs, local offline coding models, real browser sessions, and quantum-inspired multi-hypothesis reasoning engines.
 
 ---
 
@@ -13,7 +13,9 @@ graph TD
     
     subgraph "Core Tools & Subsystems"
         J[MemoryManager<br/>src/memory/]
-        K[SandboxExecutor<br/>src/sandbox/]
+        K[CodingAgentsHandler<br/>src/tools/coding-agents.ts]
+        Q[QuantumReasoningEngine<br/>src/tools/quantum-tool.ts]
+        BR[BrowserAutomation<br/>src/tools/browser-tool.ts]
     end
 
     C --> D[ResponseCacheMiddleware]
@@ -29,12 +31,14 @@ graph TD
 
     C --> J
     C --> K
+    C --> Q
+    C --> BR
     
     D -->|Cache Hit| A
     M1 --> L1 --> K1 --> J1 --> H --> G --> F --> E --> D --> A
 ```
 
-### Pipeline Order (v1.0.6)
+### Pipeline Order (v1.1.0)
 
 | Stage | Component | Purpose |
 |-------|-----------|---------|
@@ -42,28 +46,33 @@ graph TD
 | 2 | `WorkspaceContextMiddleware` | Resolves `wsHash`, performs **Pre-emptive Indexing**, and injects Grep grounding + vector context. |
 | 3 | `StructuralMiddleware` | Injects full **Session Memory** (queue state + distilled knowledge) and enforces Markdown response formats. |
 | 4 | `ImageRouterMiddleware` | Detects `file:///` URIs, parses image extensions, converts to base64, and routes to VLMs. |
-| 5 | `TextRouterMiddleware` | Task-to-Tier routing using `TaskClassifier.autoClassify` to select optimal model. |
-| 6 | `AgenticMiddleware` *(optional)* | Task decomposition, research validation, and multi-turn state persistence. Time-budgeted (`MCP_SUBTASK_BUDGET_MS`, default 20s) — see [Long-Running / Background Execution](#long-running--background-execution) below. |
-| 7 | `TokenManagerMiddleware` | Enforces rate-limit tracking and quota gates. |
-| 8 | `LLMExecutor` | HTTPS request; updates RPM/TPM usage from headers; handles circuit-breaking. |
+| 5 | `TextRouterMiddleware` | **Quantum-Inspired Model Routing & State Collapse** using normalized state vector probability matrices. |
+| 6 | `AgenticMiddleware` *(optional)* | DAG subtask decomposition, research validation, and multi-turn state persistence. Time-budgeted (`MCP_SUBTASK_BUDGET_MS`, default 20s) with async background execution. |
+| 7 | `TokenManagerMiddleware` | Enforces rate-limit tracking and quota gates with live disk synchronization. |
+| 8 | `LLMExecutor` | HTTPS requests, telemetry header parsing (`x-ratelimit-*`), circuit-breaking cooldowns, and seamless fallbacks. |
 
 ---
 
+## 🛠️ Complete 14-Tool MCP Suite
+
 > **Strict rule for agents:** Use only documented MCP tools. Prefer internal middleware changes to extend capability.
 
-| Tool | Purpose | Required Params | Key Optional Params |
-|------|---------|----------------|---------------------|
-| `use_free_llm` | Universal chat with deterministic steering; returns ONLY text content | `messages` | `model`, `keywords`, `agentic`, `sessionId`, **`workspace_root`**, `action` |
-| `execute_skill` | Runs a prompt grounded in a specific skill's instructions and reference files | `skill`, `input` | `model`, `workspace_root` |
-| `vision_tool` | Analyze local images via a vision-capable model | `image_path` | `prompt`, `model` |
-| `load_skill_prompt` | Dynamically load or search for skill prompts from the global index | `skill` | — |
-| `get_token_stats` | Real-time per-provider usage and quota stats | *(none)* | — |
-| `validate_provider` | Health-check and credential validation | `providerId` | — |
-| `manage_memory` | Workspace-scoped memory: search/list/stats/clear | `action` | `workspace_root`, `query`, `limit` |
-| `store_workspace_skill` | Explicitly save structured knowledge and generated scripts | `name`, `what` | `workspace_root` |
-| `index_workspace` | Proactively index workspace files for semantic search | `workspace_root` | `force` |
-| `browser_tool` | Owns a real `chrome-devtools-mcp` session; granular actions (navigate/click/extract/network/api_replay/checkpoint/...) plus a legacy one-call `scrape` macro — see [browser_tool.md](docs/browser_tool.md) | `action` | `url`, `sessionId`, `params`, `userInstructions`, `outputDir`, `strict` |
-| `cyber_tool` | Isolated security tool registry & wiki manager for security binaries (`sqlmap`, `nmap`, `ffuf`) | `action` | `toolName`, `githubUrl` |
+| Tool | Category | Primary Action / Purpose | Key Parameters |
+|---|---|---|---|
+| `use_free_llm` | Chat & Orchestration | Universal chat completion, single-turn Q&A, and multi-step agentic DAG execution | `messages`, `agentic`, `workspace_root`, `action` (`run`\|`continue`\|`status`\|`abort`), `resume_input` |
+| `coding_agents` | Refactoring & Patching | Multi-file refactoring, VectorStore TF-IDF discovery, Hashline diffs & Polyglot LSP checks | `goal`, `workspaceRoot`, `dryRun`, `topKFiles`, `sessionId`, `astEditOps`, `resolve` (`apply`\|`discard`\|`rollback`) |
+| `local_llm_patch` | Offline Local Coding | 100% offline single-file patching powered by local Ollama coding models with 0 API cost | `action` (`apply_patch`\|`revert_patch`\|`audit_ast`), `target_file`, `instructions`, `model` |
+| `quantum_tool` | Multi-Branch Reasoning | Multi-hypothesis reasoning circuits with gate operators ($H, X, R_Y, CNOT, CZ$) and state collapse | `action` (`setup`\|`step`\|`pause`\|`continue`\|`modify`\|`analyze`), `preset`, `circuit`, `params` |
+| `browser_tool` | Web Automation | Headless Playwright automation, DOM snapshots, private API intercept/replay, and table scraping | `action` (`navigate`\|`snapshot`\|`click`\|`network`\|`api_replay`\|`extract`), `url`, `sessionId` |
+| `cyber_tool` | Security & OSINT | Tool syntax lookups, passive OSINT reconnaissance, CTF coaching, and decision-tree graphing | `action` (`osint`\|`lookup`\|`get_tool`\|`register_tool`\|`coach`\|`save_graph`\|`load_graph`\|`tool_memory`), `target`, `toolName` |
+| `vision_tool` | Multimodal Inspection | Visual UI testing, bounding box extraction, flowchart parsing, and image diff regression | `image_path`, `action` (`analyze_ui`\|`extract_diagram`\|`compare_diff`\|`inspect_image`) |
+| `execute_skill` | Specialized Skills | Runs prompts grounded with strict `SKILL.md` rules, references, and operational constraints | `skill`, `input`, `workspace_root` |
+| `load_skill_prompt` | Prompt Catalogs | Search and load skill system prompts from the local repository or bundled Hermes catalog | `skill`, `type` (`skill`\|`persona`), `search` |
+| `manage_memory` | Long-Term Memory | Query, store, and manage workspace vector memory, ADR decisions, and wiki documentation | `action` (`search`\|`save`\|`read_adr`\|`write_adr`\|`wiki_read`\|`wiki_write`), `workspace_root` |
+| `index_workspace` | Vector Embedding | Proactively builds or refreshes the local vector database index across project source files | `workspace_root`, `force` |
+| `store_workspace_skill` | Skill Authoring | Explicitly saves structured agent skills following the Agent Skills specification | `name`, `description`, `content`, `workspace_root` |
+| `validate_provider` | Diagnostics | Health-check API credentials, measure network latency, and test provider responsiveness | `provider` (`gemini`\|`groq`\|`openrouter`\|`ollama`\|`cohere`\|...) |
+| `get_token_stats` | Telemetry & Quotas | Live in-memory rate limit trackers merged with durable disk persistence | *(none)* |
 
 ---
 

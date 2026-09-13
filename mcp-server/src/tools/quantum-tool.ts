@@ -1,6 +1,7 @@
 import { logToolCall } from '../utils/ChatLogger.js';
 import { quantumCompress, quantumCompressWithStats, QuantumCompressionStats } from '../utils/quantum-compression.js';
 import { TaskType } from '../pipeline/middleware.js';
+import { LRUCache } from 'lru-cache';
 
 export type GateName = 'H' | 'X' | 'Y' | 'Z' | 'RY' | 'RZ' | 'CNOT' | 'CZ' | 'SWAP' | 'MEASURE' | 'BARRIER';
 
@@ -62,6 +63,32 @@ export interface QuantumCircuitState {
   mermaid: string;
 }
 
+export interface CrossBranchCorrelation {
+  qubitA: number;
+  qubitB: number;
+  personaA: string;
+  personaB: string;
+  similarity: number;
+  relation: 'consensus' | 'adversarial' | 'neutral';
+}
+
+export interface GateRecommendation {
+  qubit: number;
+  column: number;
+  gate: 'CNOT' | 'CZ' | 'RY' | 'SWAP' | 'MEASURE' | 'H' | 'X';
+  target?: number;
+  param?: number;
+  reason: string;
+}
+
+export interface QuantumFeedbackReport {
+  driftScore: number;
+  isDrifted: boolean;
+  decoheredQubits: number[];
+  crossBranchCorrelations: CrossBranchCorrelation[];
+  recommendedGates: GateRecommendation[];
+}
+
 export interface QuantumToolInput {
   action: 'setup' | 'step' | 'pause' | 'continue' | 'modify' | 'reset' | 'status' | 'get_state' | 'analyze';
   sessionId: string;
@@ -71,10 +98,157 @@ export interface QuantumToolInput {
   gates?: GateOp[];
   query?: string;
   temperature?: number;
+  autoCollapseOnDrift?: boolean;
 }
 
 const DEFAULT_MAX_STEP = 4;
-const sessions = new Map<string, QuantumCircuitState>();
+// Bounded LRU cache with TTL to prevent memory leaks across long sessions
+const sessions = new LRUCache<string, QuantumCircuitState>({
+  max: 200,
+  ttl: 1000 * 60 * 60 * 2, // 2 hours
+});
+
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 2);
+}
+
+function jaccardSimilarity(tokensA: string[], tokensB: string[]): number {
+  if (tokensA.length === 0 || tokensB.length === 0) return 0;
+  const setA = new Set(tokensA);
+  const setB = new Set(tokensB);
+  let intersection = 0;
+  for (const item of setA) {
+    if (setB.has(item)) intersection++;
+  }
+  const union = setA.size + setB.size - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+/**
+ * Semantic Hallucination/Drift Guard:
+ * Computes similarity between the initial user prompt and the synthesized LLM output.
+ */
+function computePromptDrift(prompt: string, response: string, threshold = 0.12): { similarity: number; isDrifted: boolean } {
+  const pTokens = tokenize(prompt);
+  const rTokens = tokenize(response);
+  if (pTokens.length === 0 && rTokens.length === 0) {
+    return { similarity: 1, isDrifted: false };
+  }
+  if (pTokens.length === 0 || rTokens.length === 0) {
+    return { similarity: 0, isDrifted: true };
+  }
+  const sim = Math.round(jaccardSimilarity(pTokens, rTokens) * 1000) / 1000;
+  return { similarity: sim, isDrifted: sim < threshold };
+}
+
+/**
+ * Cross-Branch Semantic Correlation:
+ * Evaluates agreement, disagreement, or neutrality across branch reasoning lines.
+ */
+function computeCrossBranchCorrelations(branches: QuantumBranch[]): CrossBranchCorrelation[] {
+  const correlations: CrossBranchCorrelation[] = [];
+  for (let i = 0; i < branches.length; i++) {
+    for (let j = i + 1; j < branches.length; j++) {
+      const bA = branches[i];
+      const bB = branches[j];
+      const tA = `${bA.persona} ${bA.evidence.join(' ')}`;
+      const tB = `${bB.persona} ${bB.evidence.join(' ')}`;
+      const sim = Math.round(jaccardSimilarity(tokenize(tA), tokenize(tB)) * 1000) / 1000;
+
+      let relation: 'consensus' | 'adversarial' | 'neutral' = 'neutral';
+      if (sim >= 0.40 || (bA.stance === bB.stance && bA.stance !== 'neutral')) {
+        relation = 'consensus';
+      } else if (bA.stance !== bB.stance && bA.stance !== 'neutral' && bB.stance !== 'neutral') {
+        relation = 'adversarial';
+      }
+
+      correlations.push({
+        qubitA: i,
+        qubitB: j,
+        personaA: bA.persona,
+        personaB: bB.persona,
+        similarity: sim,
+        relation,
+      });
+    }
+  }
+  return correlations;
+}
+
+/**
+ * Adaptive Gate Suggester:
+ * Formulates next gates based on cross-branch alignment and entropy levels.
+ */
+function generateAdaptiveGateSuggestions(
+  state: QuantumCircuitState,
+  correlations: CrossBranchCorrelation[],
+  nextColumn: number
+): GateRecommendation[] {
+  const recs = new Map<string, GateRecommendation>();
+  const gatePriority: Record<string, number> = { CNOT: 3, CZ: 2, RY: 1, H: 0, X: 0, SWAP: 0, MEASURE: 0 };
+
+  function addRec(rec: GateRecommendation) {
+    const key = `${rec.qubit}:${rec.column}`;
+    if (recs.has(key)) {
+      const existing = recs.get(key)!;
+      if ((gatePriority[rec.gate] ?? 0) > (gatePriority[existing.gate] ?? 0)) {
+        recs.set(key, rec);
+      }
+    } else {
+      recs.set(key, rec);
+    }
+  }
+
+  for (const corr of correlations) {
+    if (corr.relation === 'consensus') {
+      addRec({
+        qubit: corr.qubitA,
+        column: nextColumn,
+        gate: 'CNOT',
+        target: corr.qubitB,
+        reason: `Strong consensus detected between ${corr.personaA} and ${corr.personaB} (similarity ${corr.similarity}). Entangle with CNOT.`,
+      });
+    } else if (corr.relation === 'adversarial') {
+      addRec({
+        qubit: corr.qubitB,
+        column: nextColumn,
+        gate: 'RY',
+        param: -0.6,
+        reason: `Adversarial divergence with ${corr.personaA}. Rotate confidence with RY(-0.6) to stress-test dissenting hypothesis.`,
+      });
+    }
+  }
+
+  // Stagnation / Grover-style amplification for branches in superposition deadlock (~0.5 confidence)
+  state.branches.forEach((b, idx) => {
+    if (b.confidence >= 0.45 && b.confidence <= 0.55 && state.step >= 1) {
+      addRec({
+        qubit: idx,
+        column: nextColumn,
+        gate: 'RY',
+        param: 0.8,
+        reason: `Branch ${b.id} (${b.persona}) is stalled in superposition (~0.50). Amplify confidence to break tie.`,
+      });
+    }
+  });
+
+  return Array.from(recs.values());
+}
+
+/**
+ * Target-Anchored Sliding Window over Branch Evidence:
+ * Retains the latest W evidence entries while folding older steps into a summary note.
+ */
+function getSlidingWindowEvidence(evidence: string[], windowSize = 4): string[] {
+  if (evidence.length <= windowSize) return evidence;
+  const collapsedCount = evidence.length - windowSize;
+  const collapsedNotice = `[${collapsedCount} earlier evidence items collapsed]`;
+  return [collapsedNotice, ...evidence.slice(-windowSize)];
+}
 
 function freshBranch(id: number, persona: string): QuantumBranch {
   return { id: `q${id}`, persona, stance: 'neutral', confidence: 0.5, evidence: [] };
@@ -367,9 +541,13 @@ function renderMermaid(state: QuantumCircuitState): string {
   return lines.join('\n');
 }
 
-async function callAnalyzeLLM(state: QuantumCircuitState, query: string, temperature: number, sessionId: string): Promise<{ content: string; stats: QuantumCompressionStats; llmInferenceMs: number }> {
+async function callAnalyzeLLM(state: QuantumCircuitState, query: string, temperature: number, sessionId: string): Promise<{ content: string; stats: QuantumCompressionStats; llmInferenceMs: number; rawPrompt: string }> {
   const branchSummary = state.branches
-    .map(b => `- ${b.persona} (${b.id}): stance=${b.stance}, confidence=${b.confidence.toFixed(2)}. Evidence: ${b.evidence.join(' ') || '(none yet)'}`)
+    .map(b => {
+      const windowedEvidence = getSlidingWindowEvidence(b.evidence, 4);
+      const evStr = windowedEvidence.join(' ') || '(none yet)';
+      return `- ${b.persona} (${b.id}): stance=${b.stance}, confidence=${b.confidence.toFixed(2)}. Evidence: ${evStr}`;
+    })
     .join('\n');
 
   const rawPrompt = `You are reasoning across ${state.branches.length} parallel perspective branches on a question, built up over ${state.step} circuit steps.\n\nBranch states:\n${branchSummary}\n\nUser question: ${query}\n\nSynthesize a reasoned answer that explicitly weighs the branches by their confidence, notes where they agree/disagree, and flags any branch still near 0.5 confidence (unresolved).`;
@@ -388,7 +566,7 @@ async function callAnalyzeLLM(state: QuantumCircuitState, query: string, tempera
 
   const choices: Array<{ message?: { content?: string } }> = Array.isArray((result as any)?.choices) ? (result as any).choices : [];
   const content = choices.map(c => c?.message?.content ?? '').filter(Boolean).join('\n\n') || '(no response generated)';
-  return { content, stats, llmInferenceMs };
+  return { content, stats, llmInferenceMs, rawPrompt };
 }
 
 export async function quantumTool(input: QuantumToolInput) {
@@ -456,18 +634,69 @@ export async function quantumTool(input: QuantumToolInput) {
     } else if (action === 'analyze') {
       const state = requireSession(sessionId);
       if (!input.query) throw new Error('query is required for action:"analyze"');
-      const { content, stats, llmInferenceMs } = await callAnalyzeLLM(state, input.query, input.temperature ?? 0.7, sessionId);
+      const { content, stats, llmInferenceMs, rawPrompt } = await callAnalyzeLLM(state, input.query, input.temperature ?? 0.7, sessionId);
       const entry = { id: `resp-${Date.now()}`, timestamp: Date.now(), step: state.step, role: 'assistant' as const, content, query: input.query };
       state.llmResponses.push(entry);
+      if (state.llmResponses.length > 10) {
+        state.llmResponses = state.llmResponses.slice(-10);
+      }
+
+      // Reasoning Feedback Loop Analysis
+      const drift = computePromptDrift(rawPrompt, content);
+      const correlations = computeCrossBranchCorrelations(state.branches);
+      const decoheredQubits: number[] = [];
+
+      if (drift.isDrifted && input.autoCollapseOnDrift) {
+        for (let i = 0; i < state.branches.length; i++) {
+          if (state.branches[i].confidence < 0.6) {
+            state.branches[i].confidence = 0;
+            state.branches[i].stance = 'against';
+            state.branches[i].evidence.push(`[DECOHERENCE] Drift detected (score: ${drift.similarity}). Branch collapsed.`);
+            decoheredQubits.push(i);
+          } else {
+            state.branches[i].evidence.push(`[WARNING] Drift detected (score: ${drift.similarity}), but branch preserved due to high confidence.`);
+          }
+        }
+      }
+
+      const recommendedGates = generateAdaptiveGateSuggestions(state, correlations, state.step);
+
+      const feedback: QuantumFeedbackReport = {
+        driftScore: drift.similarity,
+        isDrifted: drift.isDrifted,
+        decoheredQubits,
+        crossBranchCorrelations: correlations,
+        recommendedGates,
+      };
+
       const durationMs = Date.now() - start;
       const telemetry = calculateQuantumMetrics(state, durationMs, { ...stats, llmInferenceMs });
-      result = { success: true, sessionId, response: entry, telemetry };
+      result = { success: true, sessionId, response: entry, feedback, telemetry };
     } else {
       throw new Error(`Unknown quantum_tool action: ${action}`);
     }
   } catch (err: any) {
     isError = true;
     result = { success: false, error: err?.message || String(err) };
+  }
+
+  if (!isError && result && result.state) {
+    const s = result.state;
+    let trimmed = false;
+    if (s.gates.length > 100) {
+      s.gates = s.gates.slice(-100);
+      trimmed = true;
+    }
+    if (s.circuitModifications.length > 50) s.circuitModifications = s.circuitModifications.slice(-50);
+    for (const branch of s.branches) {
+      if (branch.evidence.length > 30) branch.evidence = branch.evidence.slice(-30);
+    }
+    if (trimmed) {
+      s.mermaid = renderMermaid(s);
+      if (result.telemetry) {
+        result.telemetry = calculateQuantumMetrics(s, Date.now() - start);
+      }
+    }
   }
 
   await logToolCall(sessionId, `quantum_tool:${action}`, input, result, Date.now() - start, isError).catch(() => {});

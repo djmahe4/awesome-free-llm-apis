@@ -17,6 +17,8 @@ export function findAgentsMdPath(startDir: string, maxDepth = MAX_WALKUP_DEPTH):
   for (let i = 0; i <= maxDepth; i++) {
     const candidate = path.join(dir, '.agents', 'AGENTS.md');
     if (existsSync(candidate)) return candidate;
+    const candidateLegacy = path.join(dir, 'AGENTS.md');
+    if (existsSync(candidateLegacy)) return candidateLegacy;
     if (dir === home) break;
     const parent = path.dirname(dir);
     if (parent === dir) break; // reached filesystem root
