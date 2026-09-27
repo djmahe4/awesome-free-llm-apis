@@ -31,6 +31,14 @@ describe('DSP Router & Remix Plugins', () => {
       expect(filter).toContain('atempo=0.7937');
     });
 
+    it('chains multiple atempo filters for extreme pitch shift beyond 12 semitones', () => {
+      // semitones +16: ratio = 2.5198, tempoComp = 0.3968 < 0.5
+      const filter = buildAudioDspFilter([
+        { id: '1', type: 'pitch', params: { semitones: 16, sampleRate: 24000 } }
+      ]);
+      expect(filter).toContain('atempo=0.5,atempo=0.7937');
+    });
+
     it('generates stereo pan filter', () => {
       const filter = buildAudioDspFilter([
         { id: '2', type: 'pan', params: { pan: -0.5 } }
@@ -44,7 +52,14 @@ describe('DSP Router & Remix Plugins', () => {
       const filter = buildAudioDspFilter([
         { id: '3', type: 'tempo', params: { factor: 1.25 } }
       ]);
-      expect(filter).toBe('atempo=1.25');
+      expect(filter).toBe('atempo=1.2500');
+    });
+
+    it('chains multiple atempo filters for extreme tempo factor > 2.0', () => {
+      const filter = buildAudioDspFilter([
+        { id: '3b', type: 'tempo', params: { factor: 3.0 } }
+      ]);
+      expect(filter).toBe('atempo=2.0,atempo=1.5000');
     });
 
     it('generates reverb echo filter', () => {

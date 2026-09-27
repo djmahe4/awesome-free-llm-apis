@@ -7,6 +7,25 @@ import type { MediaEffect } from './types.js';
  * Builds FFmpeg audio filter string from an array of MediaEffects.
  * Supported types: pitch, pan, tempo, reverb, eq
  */
+/**
+ * FFmpeg atempo filter strictly requires values between 0.5 and 2.0.
+ * For tempo/pitch compensation outside this range, chain multiple atempo filters.
+ */
+export function formatAtempoChain(factor: number): string {
+  let val = Math.max(0.05, Math.min(20.0, factor));
+  const chain: string[] = [];
+  while (val > 2.0) {
+    chain.push('atempo=2.0');
+    val /= 2.0;
+  }
+  while (val < 0.5) {
+    chain.push('atempo=0.5');
+    val /= 0.5;
+  }
+  chain.push(`atempo=${val.toFixed(4)}`);
+  return chain.join(',');
+}
+
 export function buildAudioDspFilter(effects: MediaEffect[]): string {
   const filters: string[] = [];
 
@@ -20,8 +39,9 @@ export function buildAudioDspFilter(effects: MediaEffect[]): string {
           const ratio = Math.pow(2, semitones / 12);
           const sampleRate = Number(eff.params.sampleRate ?? 24000);
           const newRate = Math.round(sampleRate * ratio);
-          // asetrate changes pitch and speed; atempo restores original speed
-          filters.push(`asetrate=${newRate},atempo=${(1 / ratio).toFixed(4)}`);
+          // asetrate changes pitch and speed; atempo chain restores original speed
+          const tempoComp = 1 / ratio;
+          filters.push(`asetrate=${newRate},${formatAtempoChain(tempoComp)}`);
         }
         break;
       }
@@ -36,10 +56,10 @@ export function buildAudioDspFilter(effects: MediaEffect[]): string {
       }
 
       case 'tempo': {
-        // Tempo warp without pitch change: speed factor (e.g. 0.5x to 2.0x)
-        const factor = Math.max(0.5, Math.min(2.0, Number(eff.params.factor ?? eff.params.speed ?? 1.0)));
-        if (factor !== 1.0) {
-          filters.push(`atempo=${factor.toFixed(2)}`);
+        // Tempo warp without pitch change: speed factor
+        const factor = Number(eff.params.factor ?? eff.params.speed ?? 1.0);
+        if (!isNaN(factor) && factor !== 1.0) {
+          filters.push(formatAtempoChain(factor));
         }
         break;
       }

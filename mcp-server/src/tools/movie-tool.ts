@@ -211,11 +211,13 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
         let artifact = await store.addEffectToArtifact(input.artifactId, normalizedEffect);
 
         if (artifact.artifact_path && input.remix !== false) {
-          const ext = path.extname(artifact.artifact_path) || '.wav';
-          const dir = path.dirname(artifact.artifact_path);
-          const base = path.basename(artifact.artifact_path, ext);
+          const sourcePath = artifact._original_path || artifact.artifact_path;
+          const ext = path.extname(sourcePath) || '.wav';
+          const dir = path.dirname(sourcePath);
+          const base = path.basename(sourcePath, ext).replace(/_remix_\d+$/, '');
           const remixedPath = path.join(dir, `${base}_remix_${Date.now()}${ext}`);
-          const resultPath = await applyMediaEffects(artifact.artifact_path, remixedPath, [normalizedEffect]);
+          const effectsToApply = artifact.effects && artifact.effects.length > 0 ? artifact.effects : [normalizedEffect];
+          const resultPath = await applyMediaEffects(sourcePath, remixedPath, effectsToApply);
           if (resultPath !== artifact.artifact_path) {
             artifact = await store.recordArtifactRemixPath(artifact.artifactId, resultPath);
           }
@@ -240,7 +242,19 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
         return { success: false, error: 'artifactId required for undo_effect' };
       }
       try {
-        const { artifact, undoneEffect } = await store.undoLastEffect(input.artifactId);
+        let { artifact, undoneEffect } = await store.undoLastEffect(input.artifactId);
+        if (artifact._original_path && input.remix !== false) {
+          if (artifact.effects && artifact.effects.length > 0) {
+            const ext = path.extname(artifact._original_path) || '.wav';
+            const dir = path.dirname(artifact._original_path);
+            const base = path.basename(artifact._original_path, ext).replace(/_remix_\d+$/, '');
+            const remixedPath = path.join(dir, `${base}_remix_${Date.now()}${ext}`);
+            const resultPath = await applyMediaEffects(artifact._original_path, remixedPath, artifact.effects);
+            if (resultPath !== artifact.artifact_path) {
+              artifact = await store.recordArtifactRemixPath(artifact.artifactId, resultPath);
+            }
+          }
+        }
         return {
           success: true,
           data: {
