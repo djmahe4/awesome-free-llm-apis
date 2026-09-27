@@ -6,10 +6,18 @@ import { logToolCall } from '../utils/ChatLogger.js';
 import { TaskType } from '../pipeline/middleware.js';
 import path from 'node:path';
 import { promises as fs, existsSync } from 'node:fs';
+import { RunRegistry } from '../pipeline/middlewares/RunRegistry.js';
+
+// Background osint autoSearch results, keyed the same way as its RunRegistry
+// entry. Search-provider calls are network-bound and can legitimately run long,
+// so the dork loop executes off the request/response path (see 'osint' action
+// below) instead of blocking the tool call — callers poll with action:'osint_status'
+// using the same sessionId+target, mirroring use_free_llm's run/continue/status pattern.
+const osintResultsCache = new Map<string, any[]>();
 
 export interface CyberToolInput {
     action: 'list_tools' | 'get_tool' | 'register_tool' | 'wiki_lookup'
-        | 'learn' | 'coach' | 'save_graph' | 'load_graph' | 'tool_memory' | 'osint';
+        | 'learn' | 'coach' | 'save_graph' | 'load_graph' | 'tool_memory' | 'osint' | 'osint_status';
     toolName?: string;
     githubUrl?: string;
     sessionId?: string;
@@ -719,33 +727,58 @@ export async function cyberTool(input: CyberToolInput) {
                 );
             }
 
-            // Multi-step Automated Reconnaissance: execute dorks via SearchProviderRegistry if requested
+            // Multi-step Automated Reconnaissance: execute dorks via SearchProviderRegistry if requested.
+            // Runs detached in the background (RunRegistry-tracked, same pattern as use_free_llm's
+            // run/continue/status) instead of blocking this call — a hung search provider used to be
+            // able to stall the whole osint request with no way to poll or recover.
+            const osintRunKey = `osint:${sessionId}:${target}`;
             let searchResults: any[] = [];
+            let searchStatus: 'idle' | 'running' | 'done' = 'idle';
             if (input.autoSearch) {
-                try {
-                    const { SearchProviderRegistry } = await import('../search/registry.js');
-                    const searchRegistry = SearchProviderRegistry.getInstance();
-                    const available = searchRegistry.getAvailableProviders();
-                    const provider = available[0] || searchRegistry.getProviders()[0];
-                    if (provider) {
-                        const topDorks = recommendedDorks.slice(0, 3);
-                        for (const dork of topDorks) {
-                            try {
-                                const res = await provider.search(dork, 3);
-                                searchResults.push({
-                                    query: dork,
-                                    results: Array.isArray(res) ? res : []
-                                });
-                            } catch (e: any) {
-                                searchResults.push({
-                                    query: dork,
-                                    error: String(e?.message || e),
-                                    results: []
-                                });
+                const existing = RunRegistry.get(osintRunKey);
+                if (existing && !existing.done) {
+                    searchStatus = 'running';
+                } else if (existing && existing.done) {
+                    searchResults = osintResultsCache.get(osintRunKey) || [];
+                    searchStatus = 'done';
+                } else {
+                    const run = RunRegistry.start(osintRunKey);
+                    searchStatus = 'running';
+                    const topDorks = recommendedDorks.slice(0, 3);
+                    (async () => {
+                        const results: any[] = [];
+                        try {
+                            const { SearchProviderRegistry } = await import('../search/registry.js');
+                            const searchRegistry = SearchProviderRegistry.getInstance();
+                            const available = searchRegistry.getAvailableProviders();
+                            const provider = available[0] || searchRegistry.getProviders()[0];
+                            if (provider) {
+                                for (let i = 0; i < topDorks.length; i++) {
+                                    if (run.controller.signal.aborted) break;
+                                    const dork = topDorks[i];
+                                    try {
+                                        // Bound each provider call — background execution still needs a
+                                        // ceiling per call, otherwise one hung request leaks the run forever.
+                                        const res = await Promise.race([
+                                            provider.search(dork, 3),
+                                            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('search provider timeout')), 15_000)),
+                                        ]);
+                                        results.push({ query: dork, results: Array.isArray(res) ? res : [] });
+                                    } catch (e: any) {
+                                        results.push({ query: dork, error: String(e?.message || e), results: [] });
+                                    }
+                                    RunRegistry.progress(osintRunKey, dork, i + 1, topDorks.length);
+                                }
                             }
+                        } catch (e: any) {
+                            RunRegistry.finish(osintRunKey, String(e?.message || e));
+                            osintResultsCache.set(osintRunKey, results);
+                            return;
                         }
-                    }
-                } catch {}
+                        osintResultsCache.set(osintRunKey, results);
+                        RunRegistry.finish(osintRunKey);
+                    })();
+                }
             }
 
             // Build high-level summary
@@ -760,7 +793,9 @@ export async function cyberTool(input: CyberToolInput) {
             }
             summaryParts.push(`${recommendedDorks.length} Recon Dorks formulated`);
             if (input.autoSearch) {
-                summaryParts.push(`${searchResults.reduce((acc, s) => acc + (s.results?.length || 0), 0)} search result(s) gathered`);
+                summaryParts.push(searchStatus === 'done'
+                    ? `${searchResults.reduce((acc, s) => acc + (s.results?.length || 0), 0)} search result(s) gathered`
+                    : 'search running in background — poll with action:"osint_status"');
             }
             const summary = summaryParts.join(' | ');
 
@@ -771,7 +806,7 @@ export async function cyberTool(input: CyberToolInput) {
                 + `## Resolved IPs\n${resolvedIps.map(ip => `- ${ip}`).join('\n') || '- None'}\n\n`
                 + `## DNS Records\n\`\`\`json\n${JSON.stringify(dnsReport, null, 2)}\n\`\`\`\n\n`
                 + `## Recommended Google / Recon Dorks\n${recommendedDorks.map(d => `- \`${d}\``).join('\n')}\n\n`
-                + (input.autoSearch ? `## Automated Search Results\n\`\`\`json\n${JSON.stringify(searchResults, null, 2)}\n\`\`\`\n` : '');
+                + (input.autoSearch && searchStatus === 'done' ? `## Automated Search Results\n\`\`\`json\n${JSON.stringify(searchResults, null, 2)}\n\`\`\`\n` : '');
 
             await safeWikiWrite(wiki, `osint/${target.replace(/[^\w.-]/g, '_')}`, wikiContent, ['cyber', 'osint']);
 
@@ -783,9 +818,33 @@ export async function cyberTool(input: CyberToolInput) {
                 dns: dnsReport,
                 recommendedDorks,
                 summary,
-                ...(input.autoSearch ? { searchResults } : {}),
+                ...(input.autoSearch ? {
+                    searchStatus,
+                    ...(searchStatus === 'done' ? { searchResults } : { sessionId, pollAction: 'osint_status' }),
+                } : {}),
                 timestamp: new Date().toISOString()
             };
+        } else if (action === 'osint_status') {
+            const target = (input.target || '').trim();
+            if (!target) throw new Error('target is required for osint_status');
+            const osintRunKey = `osint:${sessionId}:${target}`;
+            const run = RunRegistry.get(osintRunKey);
+            if (!run) {
+                result = { success: false, searchStatus: 'idle', message: 'No osint autoSearch run found for this sessionId+target. Call action:"osint" with autoSearch:true first.' };
+            } else if (!run.done) {
+                result = {
+                    success: true,
+                    searchStatus: 'running',
+                    progress: { completed: run.completedCount, total: run.totalCount, lastQuery: run.lastSubtask },
+                };
+            } else {
+                result = {
+                    success: !run.error,
+                    searchStatus: 'done',
+                    error: run.error,
+                    searchResults: osintResultsCache.get(osintRunKey) || [],
+                };
+            }
         } else {
             throw new Error(`Unsupported cyber_tool action: ${action}`);
         }

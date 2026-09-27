@@ -155,14 +155,17 @@ export async function createMCPServer(): Promise<Server> {
       },
        {
          name: 'load_skill_prompt',
-         description: 'Search for or load a dynamic skill from the agentic-awesome-skills index. Skills are saved locally to the workspace or home directory.',
+         description: 'Search for or load a dynamic skill from the agentic-awesome-skills index. Skills are saved locally to the workspace or home directory. A `type:"load"` for a skill with many files downloads them in the BACKGROUND (a skill can legitimately take a while) — the initial call returns immediately with status:"running"; poll with pollAction:"status" and the same sessionId until it returns the loaded prompt.',
          inputSchema: {
            type: 'object' as const,
            properties: {
-             type: { type: 'string', enum: ['load', 'search'], description: 'Whether to load a specific skill or search for matching skills.' },
+             type: { type: 'string', enum: ['load', 'search', 'list'], description: 'Whether to load a specific skill, search for matching skills, or list bundled skills (source:"hermes" only).' },
              name: { type: 'string', description: 'The name or ID of the skill to load (required if type is "load").' },
              keywords: { type: 'array', items: { type: 'string' }, description: 'Keywords to search for skills (required if type is "search").' },
              workspaceDir: { type: 'string', description: 'Optional absolute path to a workspace directory for local storage. Defaults to user home directory.' },
+             source: { type: 'string', enum: ['agentic-awesome', 'hermes'], description: 'Which skill set to use. Defaults to trying the bundled Hermes set first, then agentic-awesome.' },
+             sessionId: { type: 'string', description: 'Identifies a background download run across calls for type:"load"; defaults to the skill name. Reuse the same value to poll a running download.' },
+             pollAction: { type: 'string', enum: ['run', 'status'], description: '"run" (default) starts/returns a background download; "status" polls it without starting a new one.' },
            },
            required: ['type'],
          },
@@ -410,7 +413,12 @@ export async function createMCPServer(): Promise<Server> {
           '- files: files modified or referenced',
           '- example: code snippet or example usage',
           '- scripts: map of script filename to code content',
-          '- workspace_root: absolute path to the workspace root'
+          '- workspace_root: absolute path to the workspace root',
+          '',
+          'When script_instructions is given, script generation (one or more internal LLM calls,',
+          'one per script) runs in the BACKGROUND — the call returns immediately with status:"running"',
+          'and a sessionId; poll with pollAction:"status" and the same sessionId until it returns the',
+          'final result. Without script_instructions, the call is synchronous as before (SKILL.md only).',
         ].join('\n'),
         inputSchema: {
           type: 'object',
@@ -421,8 +429,10 @@ export async function createMCPServer(): Promise<Server> {
             why: { type: 'string', description: 'Supporting rationale or background context' },
             files: { type: 'array', items: { type: 'string' }, description: 'Files modified or referenced' },
             example: { type: 'string', description: 'Code snippet or example usage' },
-            script_instructions: { type: 'object', additionalProperties: { type: 'string' }, description: 'Map of script filename to an instruction detailing what the script should do. The server will use an internal LLM to intelligently generate the script code.' },
+            script_instructions: { type: 'object', additionalProperties: { type: 'string' }, description: 'Map of script filename to an instruction detailing what the script should do. The server will use an internal LLM to intelligently generate the script code. Generation runs in the background — see pollAction.' },
             workspace_root: { type: 'string', description: 'Absolute path to the workspace root' },
+            sessionId: { type: 'string', description: 'Identifies a background script-generation run across calls; defaults to the derived skill slug. Reuse the same value to poll a running generation.' },
+            pollAction: { type: 'string', enum: ['run', 'status', 'abort'], description: '"run" (default) starts/returns a background script-generation run; "status" polls it; "abort" cancels an in-flight run.' },
           },
           required: ['name', 'description', 'what', 'workspace_root'],
         },
@@ -489,14 +499,14 @@ export async function createMCPServer(): Promise<Server> {
       },
       {
         name: 'cyber_tool',
-        description: 'Educational cyber security coach plus registry/wiki manager for security binaries (sqlmap, nmap, ffuf). Never executes commands — it teaches the exact commands, explains why, tracks CTF decision graphs, and remembers per-tool run suggestions across sessions so the learner can resume where they left off.',
+        description: 'Educational cyber security coach plus registry/wiki manager for security binaries (sqlmap, nmap, ffuf). Never executes commands — it teaches the exact commands, explains why, tracks CTF decision graphs, and remembers per-tool run suggestions across sessions so the learner can resume where they left off. For osint with autoSearch:true, the search-provider dork lookups run in the BACKGROUND — the call returns immediately with searchStatus:"running"; poll with action:"osint_status" (same sessionId + target) until searchStatus:"done".',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            action: { type: 'string', enum: ['list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory'], description: 'Cyber tool action' },
+            action: { type: 'string', enum: ['list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'osint', 'osint_status'], description: 'Cyber tool action' },
             toolName: { type: 'string', description: 'Security tool name (e.g. sqlmap, nmap, ffuf)' },
             githubUrl: { type: 'string', description: 'GitHub repository URL for tool registration' },
-            sessionId: { type: 'string', description: 'Session/CTF-challenge id; keys the progress record and decision graph for learn/coach/save_graph/load_graph' },
+            sessionId: { type: 'string', description: 'Session/CTF-challenge id; keys the progress record and decision graph for learn/coach/save_graph/load_graph, and (with target) the background search run for osint/osint_status' },
             goal: { type: 'string', description: 'Natural-language objective for the learn action, e.g. "find SQLi on a lab web app"' },
             level: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Learner skill level; defaults to beginner' },
             observation: { type: 'string', description: 'For coach: what the learner ran and what they observed' },
@@ -511,7 +521,11 @@ export async function createMCPServer(): Promise<Server> {
               }
             },
             memoryOp: { type: 'string', enum: ['read', 'write'], description: 'For tool_memory: read or append to that tool\'s run-suggestion memory' },
-            note: { type: 'string', description: 'For tool_memory write: the run suggestion/note to append' }
+            note: { type: 'string', description: 'For tool_memory write: the run suggestion/note to append' },
+            target: { type: 'string', description: 'For osint/osint_status: domain, IP, or username to investigate' },
+            osintType: { type: 'string', enum: ['domain', 'ip', 'username', 'all'], description: 'For osint: what kind of target this is; controls which DNS lookups run' },
+            autoSearch: { type: 'boolean', description: 'For osint: also run recon dorks through a search provider in the background (poll with osint_status)' },
+            allowPrivateIps: { type: 'boolean', description: 'For osint: allow private/loopback targets (SSRF guard is on by default)' },
           },
           required: ['action']
         }
@@ -564,17 +578,55 @@ export async function createMCPServer(): Promise<Server> {
       },
       {
         name: 'coding_agents',
-        description: 'OMP-pattern autonomous multi-file coding agent: performs workspace enumeration, VectorStore TF-IDF RAG file discovery, line-anchored [PATH#TAG] snapshot diff generation, AST symbol extraction, and TypeScript/LSP syntax diagnostics verification.',
+        description: [
+          'OMP-pattern autonomous multi-file coding agent: performs workspace enumeration, VectorStore',
+          'TF-IDF RAG file discovery, line-anchored [PATH#TAG] snapshot diff generation, AST symbol',
+          'extraction, and TypeScript/LSP syntax diagnostics verification.',
+          '',
+          'EXECUTION MODEL: dryRun:true (default), plan creation, and rollback are synchronous — you get',
+          'a result immediately. Real execution (dryRun:false, no plan/pauseOnTaskPlan) runs in the',
+          'BACKGROUND instead: local/cloud LLM patch generation over several files can legitimately take',
+          'a long time for a large goal, so the call returns immediately with status:"running" and the',
+          'sessionId; poll with action:"status" (same sessionId) until it returns the final patch result.',
+          'Use action:"abort" to cancel an in-flight background run after its current file.',
+          '',
+          'MULTI-TASK GOALS: pass pauseOnTaskPlan:true (or action:"plan") to decompose the goal into',
+          'tasks.md and pause; then call action:"resume" (same sessionId) to execute the next pending',
+          'task — each resume call follows the same dryRun-decides-sync-vs-background rule above.',
+        ].join('\n'),
         inputSchema: {
           type: 'object' as const,
           properties: {
             goal: { type: 'string', description: 'The refactoring, feature addition, or bugfix goal' },
             workspaceRoot: { type: 'string', description: 'Workspace root path (defaults to current working directory)' },
-            dryRun: { type: 'boolean', description: 'Whether to return the line-anchored patch plan without mutating disk (default true)' },
+            dryRun: { type: 'boolean', description: 'Whether to return the line-anchored patch plan without mutating disk, synchronously (default true). false triggers real background execution — see description.' },
             targetFiles: { type: 'array', items: { type: 'string' }, description: 'Explicit list of target file paths to edit or create (bypasses RAG location)' },
             topKFiles: { type: 'number', description: 'Maximum candidate files to locate with VectorStore RAG (default 5)' },
-            sessionId: { type: 'string', description: 'Session identifier for audit logging and snapshot caching' },
-            verifyLspDiagnostics: { type: 'boolean', description: 'Verify syntactic/AST diagnostics before completing plan (default true)' }
+            sessionId: { type: 'string', description: 'Session identifier for audit logging, snapshot caching, tasks.md pause/resume, and the background run key for status/abort. Reuse the same value across a plan→resume→status sequence.' },
+            verifyLspDiagnostics: { type: 'boolean', description: 'Verify syntactic/AST diagnostics before completing plan (default true)' },
+            action: { type: 'string', enum: ['plan', 'execute', 'resume', 'status', 'abort'], description: '"plan" writes tasks.md and pauses; "execute" (default) runs the goal directly; "resume" advances the next pending tasks.md task; "status" polls a background run started by a prior dryRun:false call; "abort" cancels one.' },
+            pauseOnTaskPlan: { type: 'boolean', description: 'Same effect as action:"plan" — decompose the goal into tasks.md and pause instead of executing' },
+            astEditOps: {
+              type: 'array',
+              description: 'Structural ast-grep-style rewrites ($$$VAR pattern matching) to apply instead of LLM generation for this call — deterministic, no local/cloud model involved',
+              items: {
+                type: 'object',
+                properties: {
+                  pat: { type: 'string', description: 'ast-grep pattern to match, e.g. "computeTotal($$$A)"' },
+                  out: { type: 'string', description: 'Replacement pattern, e.g. "calculateFinal($$$A)"' },
+                },
+                required: ['pat', 'out'],
+              },
+            },
+            resolve: {
+              type: 'object',
+              description: 'How to finalize a non-dry-run patch, or trigger a rollback',
+              properties: {
+                action: { type: 'string', enum: ['apply', 'rollback'], description: '"apply" writes patches to disk via the CAS-checkpointed atomic writer; "rollback" restores a prior CAS checkpoint (synchronous either way)' },
+                checkpointId: { type: 'string', description: 'For rollback: specific checkpoint to restore; defaults to the most recent one for this sessionId' },
+              },
+            },
+            lspAction: { type: 'object', description: 'Optional direct LSP dispatch request (diagnostics/symbols/definition/references) instead of the full edit pipeline' },
           },
           required: ['goal']
         }

@@ -28,6 +28,7 @@ import fs from 'fs-extra';
 import { VectorStore, DocumentNode } from '../memory/VectorStore.js';
 import { logToolCall } from '../utils/ChatLogger.js';
 import { localLlmPatch } from './local-llm-patch.js';
+import { RunRegistry, RunInfo } from '../pipeline/middlewares/RunRegistry.js';
 import { globalCasStore, CheckpointManifest } from '../memory/ContentAddressableCheckpoint.js';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
@@ -58,7 +59,7 @@ export interface DiagnosticResult {
   message: string;
   severity: 'error' | 'warning' | 'info';
   code?: number;
-  source?: 'omp-lsp' | 'ast-syntactic' | 'semantic' | 'subprocess' | 'json-syntax';
+  source?: 'omp-lsp' | 'ast-syntactic' | 'semantic' | 'subprocess' | 'json-syntax' | 'llm-patch';
 }
 
 export interface LspActionRequest {
@@ -98,7 +99,7 @@ export interface CodingAgentsInput {
   lspAction?: LspActionRequest;
   astEditOps?: AstEditOp[];
   resolve?: ResolveAction;
-  action?: 'plan' | 'execute' | 'resume';
+  action?: 'plan' | 'execute' | 'resume' | 'status' | 'abort';
   pauseOnTaskPlan?: boolean;
 }
 
@@ -112,7 +113,8 @@ export interface CodingAgentsResult {
   patchSummary: string;
   diagnostics: DiagnosticResult[];
   applied: boolean;
-  status?: 'applied' | 'rollback' | 'dry_run' | 'paused';
+  status?: 'applied' | 'rollback' | 'dry_run' | 'paused' | 'running';
+  message?: string;
   checkpointId?: string;
   restoredFiles?: string[];
   astRewritesCount?: number;
@@ -134,7 +136,9 @@ export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
   }
 
   const lines: string[] = [];
-  const statusLabel = result.status === 'paused'
+  const statusLabel = result.status === 'running'
+    ? '⏳ Running in Background'
+    : result.status === 'paused'
     ? '⏸️ Workflow Paused (tasks.md)'
     : (result.applied ? '✅ Changes Applied to Disk' : (result.patchPlan?.length ? '🔍 Proposed Plan (Dry Run)' : '⚡ Execution Completed'));
   lines.push(`### 🤖 Coding Agent: ${statusLabel}\n`);
@@ -868,6 +872,12 @@ function parseTasksMarkdown(content: string): TaskItem[] {
   return tasks;
 }
 
+/** Recovers the original plan goal recorded in a tasks.md header, so resume calls don't overwrite it with a per-task or stale `input.goal`. */
+function extractGoalFromTasksMarkdown(content: string): string | undefined {
+  const match = content.match(/^#\s*Tasks Plan:\s*(.+)$/m);
+  return match ? match[1].trim() : undefined;
+}
+
 function extractCodeBlock(text: string): string {
   const fenced = text.match(/```(?:[a-zA-Z0-9_+-]*)\r?\n([\s\S]*?)```/);
   return fenced ? fenced[1] : text;
@@ -1021,9 +1031,111 @@ async function scanCodeFiles(dir: string, maxFiles = 100): Promise<string[]> {
 
 // ── Main Handler ──────────────────────────────────────────────────────────────
 
+// Background pipeline runs, keyed by sessionId — non-dry-run execution can involve
+// local/cloud LLM patch generation over several files, and a large prompt can
+// legitimately take a long time to produce a large diff. Rather than impose a hard
+// timeout (which would kill valid slow work), a real (non-dry-run) run executes
+// off the request/response path and callers poll with action:'status', mirroring
+// use_free_llm's run/continue/status/abort pattern (RunRegistry.ts). dry_run
+// previews, plan creation, and rollback stay synchronous — they're fast and
+// callers expect an immediate result.
+const codingAgentsResultsCache = new Map<string, CodingAgentsResult>();
+
+function withMarkdown(result: CodingAgentsResult): CodingAgentsResult {
+  result.content = formatCodingAgentsMarkdown(result);
+  result.markdown = result.content;
+  return result;
+}
+
 export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<CodingAgentsResult> {
-  const start = Date.now();
   const sessionId = input.sessionId || `omp-${Date.now()}`;
+  const runKey = `coding_agents:${sessionId}`;
+
+  if (input.action === 'status') {
+    const run = RunRegistry.get(runKey);
+    if (!run) {
+      return withMarkdown({
+        sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: [], anchors: [],
+        patchPlan: [], patchSummary: '', diagnostics: [], applied: false,
+        error: `No run found for sessionId '${sessionId}'. Call with action:"execute" (dryRun:false) first.`,
+      });
+    }
+    if (!run.done) {
+      return withMarkdown({
+        sessionId, goal: input.goal, pipelineStage: 'edit', relevantFiles: [], anchors: [],
+        patchPlan: [], patchSummary: '', diagnostics: [], applied: false,
+        status: 'running',
+        message: `Running: ${run.completedCount}/${run.totalCount} file(s) (last: ${run.lastSubtask || 'n/a'})`,
+      });
+    }
+    return codingAgentsResultsCache.get(runKey) || withMarkdown({
+      sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: [], anchors: [],
+      patchPlan: [], patchSummary: '', diagnostics: [], applied: false,
+      error: 'Run finished but no cached result was found.',
+    });
+  }
+
+  if (input.action === 'abort') {
+    const aborted = RunRegistry.abort(runKey);
+    return withMarkdown({
+      sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: [], anchors: [],
+      patchPlan: [], patchSummary: '', diagnostics: [], applied: false,
+      status: 'running',
+      message: aborted ? 'Abort requested; in-flight file patching will stop after its current file.' : `No active run found for sessionId '${sessionId}' to abort.`,
+    });
+  }
+
+  const dryRun = input.dryRun !== false; // same default as the pipeline itself
+  const isRollback = input.resolve?.action === 'rollback';
+  const isPlanOnly = input.action === 'plan' || input.pauseOnTaskPlan;
+  // astEditOps-only edits are deterministic structural rewrites — the pipeline itself
+  // skips LLM generation entirely for them (see the `!input.astEditOps` guard in Step 4),
+  // so there's nothing slow here to background.
+  const isAstOnly = !!input.astEditOps && input.astEditOps.length > 0;
+
+  // Fast, synchronous paths: preview, plan creation, rollback, deterministic AST edits — unchanged behavior.
+  if (dryRun || isRollback || isPlanOnly || isAstOnly) {
+    return runCodingAgentsPipeline(input, sessionId);
+  }
+
+  // Real execution: background it so a slow local-model generation over a large
+  // prompt can't be mistaken for a hang by the caller's own tool-call timeout.
+  const existingRun = RunRegistry.get(runKey);
+  if (existingRun && !existingRun.done) {
+    return withMarkdown({
+      sessionId, goal: input.goal, pipelineStage: 'edit', relevantFiles: [], anchors: [],
+      patchPlan: [], patchSummary: '', diagnostics: [], applied: false,
+      status: 'running',
+      message: `Already running: ${existingRun.completedCount}/${existingRun.totalCount} file(s). Poll with action:"status" and the same sessionId.`,
+    });
+  }
+
+  const run = RunRegistry.start(runKey);
+  (async () => {
+    try {
+      const result = await runCodingAgentsPipeline(input, sessionId, run);
+      codingAgentsResultsCache.set(runKey, result);
+      RunRegistry.finish(runKey, result.error);
+    } catch (err: any) {
+      codingAgentsResultsCache.set(runKey, withMarkdown({
+        sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: [], anchors: [],
+        patchPlan: [], patchSummary: '', diagnostics: [], applied: false,
+        error: err?.message || String(err),
+      }));
+      RunRegistry.finish(runKey, err?.message || String(err));
+    }
+  })();
+
+  return withMarkdown({
+    sessionId, goal: input.goal, pipelineStage: 'edit', relevantFiles: [], anchors: [],
+    patchPlan: [], patchSummary: '', diagnostics: [], applied: false,
+    status: 'running',
+    message: `Started coding_agents execution in the background. Poll with action:"status" and the same sessionId.`,
+  });
+}
+
+async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: string, run?: RunInfo): Promise<CodingAgentsResult> {
+  const start = Date.now();
   const workspaceRoot = path.resolve(input.workspaceRoot || process.cwd());
   const dryRun = input.dryRun !== false; // safe default: true
   const topK = input.topKFiles || 5;
@@ -1086,12 +1198,14 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
     let activeGoal = input.goal;
     let loadedTasks: TaskItem[] | undefined;
     let nextPendingTask: TaskItem | undefined;
+    let planGoal = input.goal;
 
     // ── Handle Action: 'resume' ──────────────────────────────────────────────
     if (input.action === 'resume') {
       if (await fs.pathExists(tasksFilePath)) {
         const tasksContent = await fs.readFile(tasksFilePath, 'utf-8');
         loadedTasks = parseTasksMarkdown(tasksContent);
+        planGoal = extractGoalFromTasksMarkdown(tasksContent) || input.goal;
         nextPendingTask = loadedTasks.find(t => t.status === 'pending');
         if (nextPendingTask) {
           nextPendingTask.status = 'in_progress';
@@ -1165,8 +1279,11 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
 
     // ── Step 4: Edit (AST rewrites + LLM generation) ─────────────────────────
     result.pipelineStage = 'edit';
+    if (run) run.totalCount = result.relevantFiles.length;
 
     for (const relPath of result.relevantFiles) {
+      if (run?.controller.signal.aborted) break;
+      if (run) RunRegistry.progress(`coding_agents:${sessionId}`, relPath, run.completedCount, run.totalCount);
       const fullPath = path.resolve(workspaceRoot, relPath);
       assertSafe(fullPath, workspaceRoot); // security: block path traversal
 
@@ -1186,7 +1303,6 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       let patchedContent = originalContent;
       let rewrites = 0;
 
-      // 4a. LLM generation via localLlmPatch with seamless cloud fallback
       // 4a. LLM generation via localLlmPatch with seamless cloud fallback
       if (!dryRun && (!input.astEditOps || input.astEditOps.length === 0)) {
         let appliedPatch = false;
@@ -1298,6 +1414,10 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       });
 
       result.astRewritesCount = (result.astRewritesCount || 0) + rewrites;
+      if (run) {
+        run.completedCount++;
+        RunRegistry.progress(`coding_agents:${sessionId}`, relPath, run.completedCount, run.totalCount);
+      }
     }
 
     // 4c. Atomic Multi-File Single Update with Zero-Waste Pre-Apply CAS Checkpointing
@@ -1373,7 +1493,7 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
     // Update tasks.md state if executing a tasks DAG
     if (loadedTasks && nextPendingTask) {
       nextPendingTask.status = 'completed';
-      await fs.writeFile(tasksFilePath, serializeTasksMarkdown(input.goal, loadedTasks), 'utf-8');
+      await fs.writeFile(tasksFilePath, serializeTasksMarkdown(planGoal, loadedTasks), 'utf-8');
       result.tasksPlan = loadedTasks;
       result.tasksFile = 'tasks.md';
       const remaining = loadedTasks.filter(t => t.status === 'pending');

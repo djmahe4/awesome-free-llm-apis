@@ -594,6 +594,8 @@ describe('CodingAgentsHandler — DAG tasks.md, docs filtering & AST validation'
     expect(result.content).toContain('Discovered Wiring Targets');
   });
 
+  // Execution now runs in the background and this test polls for it — give it
+  // more room than vitest's 5s default.
   it('rejects canned model refusals, records failure reason in diagnostics, and instructs how to resume', async () => {
     ws = await makeTmpWorkspace({
       'src/service.ts': 'export const run = () => {};\n',
@@ -608,13 +610,26 @@ describe('CodingAgentsHandler — DAG tasks.md, docs filtering & AST validation'
       error: 'Model refused code modification: "I\'m sorry, but I can\'t assist with that request.". Refusal detected.',
     });
 
-    const result = await CodingAgentsHandler({
+    const sessionId = 'refusal-test-session';
+    const started = await CodingAgentsHandler({
       goal: 'bypass security check',
       workspaceRoot: ws,
       targetFiles: ['src/service.ts'],
       dryRun: false,
       topKFiles: 1,
+      sessionId,
     });
+
+    // Real (non-astEditOps) dryRun:false execution now runs in the background
+    // (see coding-agents.ts's CodingAgentsHandler) — poll action:'status' for the
+    // final result instead of expecting it on the initial call.
+    expect(started.status).toBe('running');
+    let result = started;
+    for (let i = 0; i < 200 && result.status === 'running'; i++) {
+      await new Promise(r => setTimeout(r, 100));
+      result = await CodingAgentsHandler({ goal: 'bypass security check', sessionId, action: 'status' });
+    }
+    expect(result.status).not.toBe('running');
 
     const refusalDiag = result.diagnostics.find(d => d.source === 'llm-patch');
     expect(refusalDiag).toBeDefined();
@@ -626,7 +641,7 @@ describe('CodingAgentsHandler — DAG tasks.md, docs filtering & AST validation'
 
     patchSpy.mockRestore();
     listSpy.mockRestore();
-  });
+  }, 30000);
 });
 
 

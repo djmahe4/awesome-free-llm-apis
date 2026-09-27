@@ -184,7 +184,7 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
       /I am unable to assist with/i,
       /as an ai language model/i,
     ];
-    const isRefusal = refusalPatterns.some(p => p.test(chatResult.content) || p.test(patch));
+    const isRefusal = refusalPatterns.some(p => p.test(chatResult.content) || p.test(patch || ''));
     if (isRefusal) {
       throw new Error(
         `Model refused code modification: "${chatResult.content.trim()}". Context or instruction may have triggered safety filter. Retry with refined technical instruction.`

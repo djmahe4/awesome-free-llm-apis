@@ -481,6 +481,9 @@ export function createExpressApp(): express.Express {
                 name: params.name,
                 keywords: params.keywords,
                 workspaceDir: params.workspaceDir,
+                source: params.source,
+                sessionId: params.sessionId,
+                pollAction: params.pollAction,
               });
               break;
             }
@@ -492,7 +495,11 @@ export function createExpressApp(): express.Express {
                 what: Array.isArray(params.what) ? params.what : [params.what],
                 why: params.why,
                 files: params.files,
+                example: params.example,
+                script_instructions: params.script_instructions,
                 workspace_root: params.workspace_root,
+                sessionId: params.sessionId,
+                pollAction: params.pollAction,
               });
               break;
             }

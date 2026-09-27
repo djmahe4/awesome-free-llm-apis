@@ -31,10 +31,45 @@ function getBaseUrl(): string {
   return (process.env.OLLAMA_LOCAL_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
 }
 
+const LIST_MODELS_TIMEOUT_MS = 5_000;
+// Chat generation can legitimately run long on local hardware for a large prompt/diff —
+// and "large prompt" here includes whatever ContextGatherer/memory/DAG-task-history
+// injection stacked onto the instruction before it got here, not just the user's own
+// text, so a flat ceiling either starves a heavily-context-injected call or is too
+// generous for a trivial one. Scale with the actual serialized prompt size instead.
+// coding_agents now runs non-dry-run execution as a background, pollable run (see
+// CodingAgentsHandler), so this no longer needs to protect a blocking client call —
+// it only needs to eventually terminate a truly stuck request rather than leak the
+// background run forever. callers (local-llm-patch.ts) loop over multiple candidate
+// models on failure, so this is a per-model ceiling, not a per-request one.
+const CHAT_TIMEOUT_BASE_MS = 60_000;
+const CHAT_TIMEOUT_MAX_MS = 15 * 60_000;
+// ~12ms of extra generation budget per prompt character — loose heuristic (local
+// coder models run well under 1 char/ms of *output*, but a long prompt also costs
+// prefill time before any output starts), capped by CHAT_TIMEOUT_MAX_MS regardless.
+const CHAT_TIMEOUT_MS_PER_CHAR = 12;
+
+function computeChatTimeoutMs(messages: OllamaLocalMessage[]): number {
+  const promptChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+  return Math.min(CHAT_TIMEOUT_MAX_MS, CHAT_TIMEOUT_BASE_MS + promptChars * CHAT_TIMEOUT_MS_PER_CHAR);
+}
+
 /** Lists model tags available on the local Ollama server, e.g. ["qwen2.5-coder:7b", "llama3.1:8b"]. */
 export async function listLocalModels(): Promise<string[]> {
   const url = `${getBaseUrl()}/api/tags`;
-  const response = await fetch(url);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LIST_MODELS_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(url, { signal: controller.signal as any });
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Ollama local server did not respond within ${LIST_MODELS_TIMEOUT_MS}ms for ${url}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!response.ok) {
     throw new Error(`Ollama local server responded HTTP ${response.status} for ${url}`);
   }
@@ -65,19 +100,33 @@ export function rankCandidateModels(availableModels: string[]): string[] {
 
 export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number }): Promise<OllamaLocalChatResult> {
   const url = `${getBaseUrl()}/api/chat`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: false,
-      options: {
-        temperature: options?.temperature,
-        num_predict: options?.maxTokens,
-      },
-    }),
-  });
+  const timeoutMs = computeChatTimeoutMs(messages);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        options: {
+          temperature: options?.temperature,
+          num_predict: options?.maxTokens,
+        },
+      }),
+      signal: controller.signal as any,
+    });
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Ollama local model '${model}' did not respond within ${timeoutMs}ms (scaled to prompt size).`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!response.ok) {
     const text = await response.text().catch(() => '');
     throw new Error(`Ollama local server responded HTTP ${response.status}: ${text}`);

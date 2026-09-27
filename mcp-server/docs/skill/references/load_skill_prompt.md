@@ -3,7 +3,7 @@
 **Purpose:** Search, list, or fetch dynamic skill prompts from local skill manifests, the remote agentic-awesome index, or bundled Hermes skills.
 
 **Required params:** `type` (`'search' | 'load' | 'list'`)
-**Key optional params:** `name` (required for `'load'`), `keywords`, `source` (`'agentic-awesome' | 'hermes'`), `workspaceDir`
+**Key optional params:** `name` (required for `'load'`), `keywords`, `source` (`'agentic-awesome' | 'hermes'`), `workspaceDir`, `sessionId`, `pollAction` (`'run' | 'status'`)
 
 ---
 
@@ -26,7 +26,7 @@ If `keywords` is omitted or empty, `load_skill_prompt` automatically derives key
 }
 ```
 
-#### 3. Load Specific Skill System Prompt
+#### 3. Load Specific Skill System Prompt (bundled Hermes — synchronous)
 ```json
 {
   "type": "load",
@@ -34,6 +34,22 @@ If `keywords` is omitted or empty, `load_skill_prompt` automatically derives key
   "source": "hermes"
 }
 ```
+Bundled Hermes skills are on-disk and load synchronously — no polling needed.
+
+#### 4. Load an agentic-awesome Skill (remote, background download)
+A remote skill can have many files, downloaded sequentially over the network, so `type:"load"` with `source:"agentic-awesome"` (or the Hermes-not-found fallback) runs **in the background**:
+```jsonc
+// kick off
+{ "type": "load", "name": "some-multi-file-skill", "source": "agentic-awesome", "sessionId": "load-1" }
+// → { success: true, status: "running", sessionId: "load-1", message: "Started downloading skill '...' ..." }
+
+// poll (same sessionId)
+{ "type": "load", "name": "some-multi-file-skill", "sessionId": "load-1", "pollAction": "status" }
+// → { success: true, status: "running", message: "Downloading skill files: 3/7 (last: scripts/setup.sh)" }
+// ... eventually ...
+// → { success: true, filePath: "...SKILL.md", skill: "...", description: "...", prompt: "..." }
+```
+If `sessionId` is omitted it defaults to `name`.
 
 ---
 

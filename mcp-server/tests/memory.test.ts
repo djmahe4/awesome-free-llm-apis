@@ -142,7 +142,7 @@ describe('Memory System Integration', () => {
         const root = '/tmp/test_ws_skill';
         if (!existsSync(root)) mkdirSync(root, { recursive: true });
 
-        await storeWorkspaceSkill({
+        const skillInput = {
             name: 'test-skill',
             description: 'A test skill',
             what: ['It does things'],
@@ -150,7 +150,14 @@ describe('Memory System Integration', () => {
             script_instructions: {
                 'run.sh': 'Generate a script that echoes hello'
             }
-        });
+        };
+        // script_instructions now generates in the background — poll instead of
+        // asserting immediately after the initial (status:'running') return.
+        let genResult: any = await storeWorkspaceSkill(skillInput);
+        for (let i = 0; i < 100 && genResult.status === 'running'; i++) {
+            await new Promise(r => setTimeout(r, 20));
+            genResult = await storeWorkspaceSkill({ ...skillInput, pollAction: 'status' });
+        }
 
         // Verify the script was created
         const { promises: fs } = await import('fs');

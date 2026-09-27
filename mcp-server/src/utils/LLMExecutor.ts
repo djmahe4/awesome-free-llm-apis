@@ -7,6 +7,7 @@ import { TaskType, type PipelineContext } from '../pipeline/middleware.js';
 import { getMessageContent, prependToMessageContent } from './MessageUtils.js';
 import { Sanitizer } from './Sanitizer.js';
 import { calculateModelWeightedMaxTokens } from './model-tokens.js';
+import { providerLockManager } from './ProviderLockManager.js';
 
 export interface TokenTrackingInfo {
     remainingTokens?: number;
@@ -578,6 +579,25 @@ export class LLMExecutor {
         return response;
     }
 
+    private static readonly AUTO_TIMEOUT_BASE_MS = 15_000;
+    private static readonly AUTO_TIMEOUT_MAX_MS = 5 * 60_000;
+    // Cloud providers are typically faster per-character than a local model's raw
+    // generation, but the same principle applies: a prompt swollen by injected
+    // workspace context/memory/DAG-task-history needs more time than a bare
+    // instruction, and a flat timeout either starves it or is wastefully generous
+    // for a small one. Only kicks in when the caller didn't pass an explicit
+    // timeoutMs — an explicit value is trusted as-is.
+    private static readonly AUTO_TIMEOUT_MS_PER_CHAR = 4;
+
+    private resolvePromptTimeoutMs(explicitTimeoutMs: number | undefined, messages: Message[]): number {
+        if (explicitTimeoutMs) return explicitTimeoutMs;
+        const promptChars = messages.reduce((sum, m) => sum + (getMessageContent(m)?.length || 0), 0);
+        return Math.min(
+            LLMExecutor.AUTO_TIMEOUT_MAX_MS,
+            LLMExecutor.AUTO_TIMEOUT_BASE_MS + promptChars * LLMExecutor.AUTO_TIMEOUT_MS_PER_CHAR,
+        );
+    }
+
     /**
      * Minimal standalone prompt execution (for subtasks/decomposition).
      */
@@ -682,6 +702,8 @@ export class LLMExecutor {
         // Two-pass strategy:
         // Pass 1: Try only healthy providers (score >= 0)
         // Pass 2: Fall back to unhealthy/cooling-down providers (score < 0) on a best-effort basis
+        let anyLocked = false;
+        const resolvedTimeoutMs = this.resolvePromptTimeoutMs(options.timeoutMs, messages);
         const passes = [true, false];
         for (const healthyOnly of passes) {
             for (const modelId of targetModels) {
@@ -690,12 +712,13 @@ export class LLMExecutor {
 
                     // Google Search is a Gemini-exclusive feature in this architecture
                     if (options.google_search && p.id !== 'gemini') continue;
-                    
+
                     // Only use this provider if it supports the specific model we want to run
                     const supportsModel = p.models.some((m: any) => m.id === modelId);
                     if (supportsModel) {
                         try {
-                            const res = await this.tryProvider(context, p.id, modelId, options.timeoutMs || 15000);
+                            const res = await this.callWithLock(p.id, modelId, context, resolvedTimeoutMs, options.sessionId);
+                            if (res === 'locked') { anyLocked = true; continue; }
                             if (res) {
                                 this.recordProviderSuccess(p.id);
                                 return res;
@@ -716,8 +739,13 @@ export class LLMExecutor {
                 const fallbackModel = p.models[0]?.id;
                 if (fallbackModel) {
                     try {
-                        console.error(`[LLMExecutor] Routing fallback (healthyOnly=${healthyOnly}) to ${p.id}/${fallbackModel}`);
-                        const res = await this.tryProvider(context, p.id, fallbackModel, options.timeoutMs || 15000);
+                        if (modelOverride && modelOverride !== 'any' && fallbackModel !== modelOverride) {
+                            console.error(`[LLMExecutor] Explicit modelOverride '${modelOverride}' could not be honored — falling back to ${p.id}/${fallbackModel} instead (healthyOnly=${healthyOnly}).`);
+                        } else {
+                            console.error(`[LLMExecutor] Routing fallback (healthyOnly=${healthyOnly}) to ${p.id}/${fallbackModel}`);
+                        }
+                        const res = await this.callWithLock(p.id, fallbackModel, context, resolvedTimeoutMs, options.sessionId);
+                        if (res === 'locked') { anyLocked = true; continue; }
                         if (res) {
                             this.recordProviderSuccess(p.id);
                             return res;
@@ -730,7 +758,39 @@ export class LLMExecutor {
             }
         }
 
-        throw new Error(`Failed to execute prompt with any provider.`);
+        throw new Error(anyLocked
+            ? `Failed to execute prompt: every candidate provider was locked by another concurrent request (cross-process provider lock). Retry shortly.`
+            : `Failed to execute prompt with any provider.`);
+    }
+
+    /**
+     * Acquires this process's cross-process lock on providerId before calling
+     * tryProvider, so two MCP server processes don't hit the same provider at
+     * once — the caller (prompt()) reroutes to the next candidate on 'locked'
+     * rather than waiting, per ProviderLockManager's reroute-only contract.
+     * Heartbeats the lease every few seconds while the call is in flight so a
+     * legitimately slow request (large prompt, big local model) doesn't have
+     * its lock reclaimed as stale out from under it.
+     */
+    private async callWithLock(
+        providerId: string,
+        modelId: string,
+        context: PipelineContext,
+        timeoutMs: number,
+        sessionId?: string,
+    ): Promise<ChatResponse | null | 'locked'> {
+        const leaseMs = timeoutMs + 5000;
+        const holderId = await providerLockManager.tryAcquire(providerId, sessionId, leaseMs);
+        if (!holderId) return 'locked';
+        const heartbeat = setInterval(() => {
+            providerLockManager.heartbeat(providerId, holderId, leaseMs).catch(() => {});
+        }, Math.max(2000, Math.floor(leaseMs / 2)));
+        try {
+            return await this.tryProvider(context, providerId, modelId, timeoutMs);
+        } finally {
+            clearInterval(heartbeat);
+            await providerLockManager.release(providerId, holderId).catch(() => {});
+        }
     }
 
     /**
