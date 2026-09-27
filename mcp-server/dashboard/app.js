@@ -1480,6 +1480,21 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
   try { if (typeof args === 'string') parsedArgs = JSON.parse(args); } catch {}
   try { if (typeof result === 'string') parsedResult = JSON.parse(result); } catch {}
 
+  // Recover inner content if result was saved as a truncated JSON string
+  if (typeof parsedResult === 'string') {
+    const trimmed = parsedResult.trim();
+    if (trimmed.includes('"text":"') || trimmed.includes('"content":')) {
+      const match = trimmed.match(/"text"\s*:\s*"((?:\\.|[^"\\])*)/);
+      if (match && match[1]) {
+        try {
+          parsedResult = { content: [{ type: 'text', text: JSON.parse(`"${match[1]}"`) }] };
+        } catch {
+          parsedResult = { content: [{ type: 'text', text: match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\') }] };
+        }
+      }
+    }
+  }
+
   const resultText = (() => {
     if (parsedResult && typeof parsedResult === 'object') {
       if (Array.isArray(parsedResult.content) && parsedResult.content[0]?.text) {
@@ -1497,7 +1512,7 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
   const resultPreview = (() => {
     let s = resultText || (typeof result === 'string' ? result : JSON.stringify(result ?? ''));
     s = s.replace(/\s+/g, ' ').trim();
-    return s.slice(0, 80) + (s.length > 80 ? '…' : '');
+    return s.slice(0, 140) + (s.length > 140 ? '…' : '');
   })();
 
   const borderColor = isError ? 'var(--accent-red, #ef4444)' : 'var(--accent-cyan)';
@@ -1511,7 +1526,7 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
       const diffLines = diffText ? diffText.split('\n') : [];
       return `<div style="margin-bottom:8px; border:1px solid var(--glass-border); border-radius:4px; padding:6px;">
         <div style="font-weight:600; color:var(--text-primary); margin-bottom:4px;">📝 ${esc(p.filePath || p.file || 'file')}</div>
-        <pre class="code-block diff-viewer" style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:350px; font-size:.72rem; padding:6px; margin:0;"><code>` +
+        <pre class="code-block diff-viewer" style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:450px; font-size:.72rem; padding:6px; margin:0;"><code>` +
         diffLines.map(l => {
           if (l.startsWith('+')) return `<span style="color:#4ade80">${esc(l)}</span>`;
           if (l.startsWith('-')) return `<span style="color:#f87171">${esc(l)}</span>`;
@@ -1521,7 +1536,7 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
       </div>`;
     }).join('');
   } else if (resultText) {
-    resultBodyHtml = `<div id="${outputContainerId}" class="tool-call-rendered-md" style="max-height:450px; overflow-y:auto;">` +
+    resultBodyHtml = `<div id="${outputContainerId}" class="tool-call-rendered-md" style="max-height:800px; overflow-y:auto;">` +
       `<pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; font-size:.73rem; margin:0;">${esc(resultText)}</pre>` +
       `</div>`;
     renderMarkdown(resultText).then(mdHtml => {
@@ -1529,7 +1544,7 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
       if (el) el.innerHTML = mdHtml;
     }).catch(() => {});
   } else {
-    resultBodyHtml = `<pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:450px; font-size:.73rem; margin:0;">${esc(JSON.stringify(parsedResult, null, 2))}</pre>`;
+    resultBodyHtml = `<pre style="font-family:'JetBrains Mono',monospace; white-space:pre-wrap; overflow-x:auto; max-height:800px; font-size:.73rem; margin:0;">${esc(JSON.stringify(parsedResult, null, 2))}</pre>`;
   }
 
   div.innerHTML = `

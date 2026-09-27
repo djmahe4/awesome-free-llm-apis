@@ -2,7 +2,7 @@ import path from 'path';
 
 const REFERENCE_MARKER_REGEX = /\[(?<label>[^\]]+)\]\((?<bProto>file|mcp|ctx7|artifact|pdf):\/\/(?<bPath>[^)]+)\)|(?<proto>file|mcp|ctx7|artifact|pdf):\/\/(?<path>[^\s)]+)/gi;
 const SENTINEL_REGEX = /\[[A-Z][A-Z0-9_-]*:[^\]]*\]/g;
-const MAX_CONTEXT_LOG_CHARS = 4000;
+const MAX_CONTEXT_LOG_CHARS = 64_000;
 
 export class ContextResolver {
     static isWithinWorkspaceScope(filePath: string, workspaceRoot: string): boolean {
