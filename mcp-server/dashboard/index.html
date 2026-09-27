@@ -67,6 +67,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="4"/></svg>
         Keyword & Prompt Steering
       </button>
+      <button class="tab-btn" data-tab="dagmemory" role="tab" aria-selected="false" id="tab-dagmemory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.2 7.2L10.5 16M15.8 7.2L13.5 16M8.5 6h7"/></svg>
+        Memory Graph
+      </button>
     </nav>
 
     <!-- ══════════════════════════════════════════════════════════
@@ -899,6 +903,59 @@
             <pre id="steering-raw-prompt-view" style="font-size:.72rem;color:var(--text-secondary);max-height:300px;overflow-y:auto;white-space:pre-wrap;margin:0;font-family:monospace;background:rgba(10,10,15,.6);padding:10px;border-radius:4px;">(Click "Inspect Live Ingestion & Telemetry" or edit inputs to load assembled system prompt...)</pre>
           </div>
 
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB: DAG MEMORY GRAPH
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-dagmemory" role="tabpanel" aria-labelledby="tab-dagmemory">
+      <div class="section-title">DAG Memory Graph</div>
+      <div class="section-sub">Nodes and edges stored via <code>manage_memory</code>'s <code>node_add</code>/<code>node_link</code>/<code>graph_query</code> actions for a workspace, with Ebbinghaus decay confidence.</div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-body">
+          <div class="session-controls">
+            <label class="field-label" style="margin:0;white-space:nowrap;" for="dagmem-workspace-input">Workspace</label>
+            <input type="text" id="dagmem-workspace-input" class="session-input" placeholder="workspace path used to scope the graph">
+            <button class="btn btn-primary btn-sm" id="dagmem-load-btn">Load Graph</button>
+            <input type="text" id="dagmem-filter-input" class="session-input" placeholder="Filter nodes by id/content/tag…" style="max-width:220px;">
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-header" style="padding:10px 16px;">
+          <span class="card-title" style="font-size:.82rem;">Add Node</span>
+        </div>
+        <div class="card-body">
+          <div class="session-controls" style="flex-wrap:wrap;">
+            <select id="dagmem-node-type" class="session-input" style="max-width:120px;">
+              <option value="text">text</option>
+              <option value="image">image</option>
+              <option value="video">video</option>
+              <option value="audio">audio</option>
+              <option value="pdf_page">pdf_page</option>
+            </select>
+            <input type="text" id="dagmem-node-content" class="session-input" placeholder="content / thought text" style="flex:2;">
+            <input type="text" id="dagmem-node-tags" class="session-input" placeholder="tags, comma-separated" style="max-width:200px;">
+            <button class="btn btn-primary btn-sm" id="dagmem-add-node-btn">Add Node</button>
+          </div>
+          <div class="section-sub" style="margin-top:10px;">Link two nodes:</div>
+          <div class="session-controls" style="flex-wrap:wrap;">
+            <input type="text" id="dagmem-link-from" class="session-input" placeholder="from node id" style="max-width:200px;">
+            <input type="text" id="dagmem-link-to" class="session-input" placeholder="to node id" style="max-width:200px;">
+            <input type="text" id="dagmem-link-relation" class="session-input" placeholder="relation label" style="max-width:160px;">
+            <button class="btn btn-primary btn-sm" id="dagmem-link-btn">Link</button>
+          </div>
+          <div id="dagmem-form-status" class="section-sub" style="margin-top:8px;"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body" id="dagmem-graph-body">
+          <div class="conv-empty">Enter a workspace and click Load Graph.</div>
         </div>
       </div>
     </section>

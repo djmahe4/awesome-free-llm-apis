@@ -24,12 +24,21 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import fs from 'fs-extra';
 import { VectorStore, DocumentNode } from '../memory/VectorStore.js';
 import { logToolCall } from '../utils/ChatLogger.js';
 import { localLlmPatch } from './local-llm-patch.js';
 import { RunRegistry, RunInfo } from '../pipeline/middlewares/RunRegistry.js';
 import { globalCasStore, CheckpointManifest } from '../memory/ContentAddressableCheckpoint.js';
+
+// `__dirname` isn't a global in ESM (this package is "type": "module") — this
+// file previously used it directly in getAstGrepCmd(), throwing a
+// ReferenceError the instant that function ran, which crashed EVERY astEditOps
+// call (not just the local-node_modules candidate that referenced it) since
+// it's evaluated eagerly as part of the candidates array literal. Same
+// fix/pattern server.ts already uses for its own __dirname.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -915,9 +924,16 @@ function looksLikeHallucinatedReplacement(originalContent: string, patchedConten
   while ((m = declPattern.exec(originalContent)) !== null) {
     anchors.add(m[1]);
   }
-  // Too small/declaration-free to have a meaningful anchor (e.g. a config file,
-  // a short script) — nothing reliable to check, don't false-positive on it.
-  if (anchors.size === 0) return false;
+  // No exported symbols (CSS, HTML, classic non-module scripts): fall back to
+  // line overlap. An edit/append keeps most original lines; a hallucinated
+  // wholesale replacement keeps almost none.
+  if (anchors.size === 0) {
+    const origLines = originalContent.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 3);
+    if (origLines.length < 10) return false;
+    const patchedSet = new Set(patchedContent.split(/\r?\n/).map(l => l.trim()));
+    const kept = origLines.filter(l => patchedSet.has(l)).length;
+    return kept / origLines.length < 0.5;
+  }
   for (const name of anchors) {
     if (patchedContent.includes(name)) return false;
   }

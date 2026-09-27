@@ -115,16 +115,22 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
     const workspaceRoot = input.workspace_root || path.dirname(absPath);
 
     let context: string[] = [];
-    // Skip for brand-new files: there's no existing content to relate grep hits
-    // to, so ContextGatherer's broad instruction-keyword search (generic terms
-    // like "class"/"node"/"memory" match common identifiers across any real
-    // repo) has a high chance of surfacing snippets from totally unrelated
-    // files with zero actual relevance. Observed live: a small local model
-    // latched onto those injected-but-irrelevant snippets and produced a
-    // summary of unrelated files instead of the requested new file's content.
-    // For an existing file there's a real anchor (the file's own content) so
-    // context enrichment stays on there.
-    if (fileExists) {
+    // Skip for brand-new files (no anchor) and for non-code file types.
+    // CSS/HTML/JSON/YAML/text edits are structural/style goals — ContextGatherer's
+    // TF-IDF grep returns cross-language snippets that are irrelevant-by-default
+    // for these extensions. Observed: 5/6 real CSS/JS patch goals with injected
+    // context failed (model hallucinates or summarises injected noise); 1 success
+    // was the case where context injection was skipped. Extension gate is the
+    // cheapest evidence-backed fix.
+    const CODE_CONTEXT_EXTS = new Set([
+      '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+      '.py', '.rs', '.go', '.java', '.cs', '.cpp', '.c', '.h',
+      '.rb', '.php', '.swift', '.kt', '.scala', '.ex', '.exs',
+    ]);
+    const targetExt = path.extname(absPath).toLowerCase();
+    const shouldGatherContext = fileExists && CODE_CONTEXT_EXTS.has(targetExt);
+
+    if (shouldGatherContext) {
       try {
         context = await ContextGatherer.gatherContext({
           workspaceRoot,

@@ -466,6 +466,13 @@ export function createExpressApp(): express.Express {
                 content: params.content,
                 tags: params.tags,
                 links: params.links,
+                persona: params.persona,
+                namespace: params.namespace,
+                node: params.node,
+                nodeId: params.nodeId,
+                from: params.from,
+                to: params.to,
+                relation: params.relation,
               });
               break;
             case 'index_workspace':

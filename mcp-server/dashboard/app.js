@@ -328,6 +328,7 @@ tabBtns.forEach(btn => {
     if (target === 'playground') ensureModels();
     if (target === 'profile')  { fetchUserConfig(); fetchLeaderboard(); }
     if (target === 'wiki')     { initWikiTab(); }
+    if (target === 'dagmemory') { initDagMemoryTab(); }
   });
 });
 
@@ -2754,4 +2755,159 @@ steeringAgenticToggle?.addEventListener('change', runSteeringEvaluation);
 // Initial run on script load
 runSteeringEvaluation();
 setTimeout(runSteeringEvaluation, 500);
+
+// ─── DAG Memory Graph (memory_tool storage+DAG core) ─────────────
+// Renders manage_memory's node/edge graph (node_add/node_link/graph_query
+// actions) for a workspace — mirrors the Cyber Tool Decision Graph pattern
+// above (card-list columns by type + edge list), just grouped by DAG node
+// type instead of CTF decision-graph type.
+const dagMemWorkspaceInput = document.getElementById('dagmem-workspace-input');
+const dagMemLoadBtn        = document.getElementById('dagmem-load-btn');
+const dagMemFilterInput    = document.getElementById('dagmem-filter-input');
+const dagMemGraphBody      = document.getElementById('dagmem-graph-body');
+const dagMemNodeType       = document.getElementById('dagmem-node-type');
+const dagMemNodeContent    = document.getElementById('dagmem-node-content');
+const dagMemNodeTags       = document.getElementById('dagmem-node-tags');
+const dagMemAddNodeBtn     = document.getElementById('dagmem-add-node-btn');
+const dagMemLinkFrom       = document.getElementById('dagmem-link-from');
+const dagMemLinkTo         = document.getElementById('dagmem-link-to');
+const dagMemLinkRelation   = document.getElementById('dagmem-link-relation');
+const dagMemLinkBtn        = document.getElementById('dagmem-link-btn');
+const dagMemFormStatus     = document.getElementById('dagmem-form-status');
+
+let _dagMemGraphData = { nodes: [], edges: [] };
+let dagMemInitialized = false;
+
+const DAG_NODE_TYPE_COLOR = {
+  text: 'var(--accent-cyan)',
+  image: 'var(--accent-purple)',
+  video: 'var(--accent-amber)',
+  audio: 'var(--accent-green)',
+  pdf_page: 'var(--accent-red)',
+};
+
+async function callManageMemoryDag(params) {
+  const r = await fetch('/api/tool', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool: 'manage_memory', params: { ...params, workspace_root: dagMemWorkspaceInput.value.trim() } })
+  });
+  const d = await r.json();
+  if (!r.ok || d.ok === false) throw new Error(d.error || d.result?.error || 'Request failed');
+  return d.result;
+}
+
+function renderDagMemGraph(filterText) {
+  const { nodes, edges } = _dagMemGraphData;
+  if (!nodes.length) {
+    dagMemGraphBody.innerHTML = '<div class="conv-empty">No DAG memory nodes for this workspace yet.</div>';
+    return;
+  }
+
+  const q = (filterText || '').trim().toLowerCase();
+  const matches = (n) => !q || n.id.toLowerCase().includes(q) || (n.content || '').toLowerCase().includes(q) || (n.tags || []).some(t => t.toLowerCase().includes(q));
+
+  const nodesByType = {};
+  for (const n of nodes) {
+    const t = n.type || 'text';
+    (nodesByType[t] = nodesByType[t] || []).push(n);
+  }
+
+  const columns = ['text', 'image', 'video', 'audio', 'pdf_page']
+    .filter(t => nodesByType[t]?.length)
+    .map(t => {
+      const cards = nodesByType[t].map(n => {
+        const dim = !matches(n);
+        const color = DAG_NODE_TYPE_COLOR[t] || 'var(--accent-cyan)';
+        const label = (n.content || n.filePath || n.id).slice(0, 60);
+        return `
+          <div class="provider-card" data-node-id="${esc(n.id)}" style="opacity:${dim ? 0.3 : 1};border-left:3px solid ${color};margin-bottom:8px;">
+            <div class="provider-name" style="font-size:.78rem;">${esc(label)}</div>
+            <div class="provider-id">${esc(n.id)} · conf ${(n.confidence ?? 0).toFixed(2)}</div>
+          </div>`;
+      }).join('');
+      return `
+        <div style="flex:1;min-width:180px;">
+          <div class="section-sub" style="text-transform:uppercase;font-size:.68rem;letter-spacing:.05em;margin-bottom:8px;color:${DAG_NODE_TYPE_COLOR[t] || 'var(--text-muted)'};">${esc(t)} (${nodesByType[t].length})</div>
+          ${cards}
+        </div>`;
+    }).join('');
+
+  const edgeLines = edges
+    .filter(e => !q || matches({ id: e.from, content: '', tags: [] }) || matches({ id: e.to, content: '', tags: [] }))
+    .map(e => `<div style="font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--text-muted);">${esc(e.from)} → ${esc(e.to)} <span style="color:var(--text-muted-2,var(--text-muted));">(${esc(e.relation)})</span></div>`)
+    .join('');
+
+  dagMemGraphBody.innerHTML = `
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;">${columns}</div>
+    <div style="padding-top:12px;border-top:1px solid var(--glass-border);">
+      <div class="section-sub" style="margin-bottom:6px;">Edges (${edges.length})</div>
+      ${edgeLines || '<div class="conv-empty">No edges yet.</div>'}
+    </div>`;
+}
+
+async function loadDagMemGraph() {
+  const ws = dagMemWorkspaceInput.value.trim();
+  if (!ws) return;
+  dagMemGraphBody.innerHTML = '<div class="conv-empty">Loading…</div>';
+  try {
+    const result = await callManageMemoryDag({ action: 'graph_query' });
+    _dagMemGraphData = { nodes: result.nodes || [], edges: result.edges || [] };
+    renderDagMemGraph(dagMemFilterInput.value);
+    localStorage.setItem('mcp-workspace', ws);
+  } catch (err) {
+    dagMemGraphBody.innerHTML = `<div class="conv-empty">Failed to load graph: ${esc(err.message)}</div>`;
+  }
+}
+
+async function addDagMemNode() {
+  const content = dagMemNodeContent.value.trim();
+  if (!content) { dagMemFormStatus.textContent = 'Content is required.'; return; }
+  const tags = dagMemNodeTags.value.split(',').map(t => t.trim()).filter(Boolean);
+  dagMemFormStatus.textContent = 'Adding…';
+  try {
+    await callManageMemoryDag({ action: 'node_add', node: { type: dagMemNodeType.value, content, tags } });
+    dagMemFormStatus.textContent = 'Node added.';
+    dagMemNodeContent.value = '';
+    dagMemNodeTags.value = '';
+    loadDagMemGraph();
+  } catch (err) {
+    dagMemFormStatus.textContent = `Failed to add node: ${err.message}`;
+  }
+}
+
+async function linkDagMemNodes() {
+  const from = dagMemLinkFrom.value.trim();
+  const to = dagMemLinkTo.value.trim();
+  const relation = dagMemLinkRelation.value.trim();
+  if (!from || !to || !relation) { dagMemFormStatus.textContent = 'from, to, and relation are all required.'; return; }
+  dagMemFormStatus.textContent = 'Linking…';
+  try {
+    await callManageMemoryDag({ action: 'node_link', from, to, relation });
+    dagMemFormStatus.textContent = 'Edge added.';
+    dagMemLinkFrom.value = '';
+    dagMemLinkTo.value = '';
+    dagMemLinkRelation.value = '';
+    loadDagMemGraph();
+  } catch (err) {
+    dagMemFormStatus.textContent = `Failed to link nodes: ${err.message}`;
+  }
+}
+
+dagMemLoadBtn?.addEventListener('click', loadDagMemGraph);
+dagMemWorkspaceInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadDagMemGraph(); });
+dagMemFilterInput?.addEventListener('input', () => renderDagMemGraph(dagMemFilterInput.value));
+dagMemAddNodeBtn?.addEventListener('click', addDagMemNode);
+dagMemLinkBtn?.addEventListener('click', linkDagMemNodes);
+
+function initDagMemoryTab() {
+  if (!dagMemInitialized) {
+    dagMemInitialized = true;
+    const savedWs = localStorage.getItem('mcp-workspace');
+    if (savedWs) {
+      dagMemWorkspaceInput.value = savedWs;
+      loadDagMemGraph();
+    }
+  }
+}
 
