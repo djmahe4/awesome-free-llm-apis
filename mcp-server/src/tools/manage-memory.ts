@@ -4,7 +4,8 @@ import { ContextManager } from '../utils/ContextManager.js';
 import { quantumCompressWithAnchors } from '../utils/quantum-compression.js';
 
 export interface ManageMemoryInput {
-    action: 'search' | 'list' | 'stats' | 'clear' | 'wiki_search' | 'wiki_write' | 'wiki_list' | 'wiki_read';
+    action: 'search' | 'list' | 'stats' | 'clear' | 'wiki_search' | 'wiki_write' | 'wiki_list' | 'wiki_read'
+        | 'node_add' | 'node_link' | 'node_list' | 'node_get' | 'graph_query';
     workspace_root?: string;
     query?: string;
     limit?: number;
@@ -15,14 +16,59 @@ export interface ManageMemoryInput {
     persona?: string;
     /** Wiki namespace override, e.g. 'global-cyber-tools'. Defaults to the workspace hash. */
     namespace?: string;
+    /** For node_add: the DAG memory node to create. */
+    node?: {
+        type: 'text' | 'image' | 'video' | 'audio' | 'pdf_page';
+        content?: string;
+        filePath?: string;
+        pdfPage?: number;
+        tags?: string[];
+        halfLifeDays?: number;
+        confidence?: number;
+    };
+    /** For node_get: the node id to fetch. For node_list: pass `tags[0]` to filter by tag. */
+    nodeId?: string;
+    /** For node_link: source and target node ids and the edge's relation label. */
+    from?: string;
+    to?: string;
+    relation?: string;
 }
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
 export async function manageMemory(input: ManageMemoryInput) {
-    const { action, workspace_root: workspaceRoot, query, limit = 10, title, content, tags, links, persona, namespace } = input;
+    const { action, workspace_root: workspaceRoot, query, limit = 10, title, content, tags, links, persona, namespace, node, nodeId, from, to, relation } = input;
     const wsHash = await workspaceScanner.getWorkspaceHash(workspaceRoot);
     switch (action) {
+        case 'node_add': {
+            if (!node) throw new Error('node_add requires `node`.');
+            const dag = memoryManager.getDag(wsHash, workspaceRoot);
+            const created = await dag.addNode(node);
+            return { success: true, node: created };
+        }
+        case 'node_link': {
+            if (!from || !to || !relation) {
+                throw new Error('node_link requires `from`, `to`, and `relation`.');
+            }
+            const dag = memoryManager.getDag(wsHash, workspaceRoot);
+            const edge = await dag.addEdge(from, to, relation);
+            return { success: true, edge };
+        }
+        case 'node_list': {
+            const dag = memoryManager.getDag(wsHash, workspaceRoot);
+            const nodes = await dag.listNodes(tags?.[0]);
+            return { nodes };
+        }
+        case 'node_get': {
+            if (!nodeId) throw new Error('node_get requires `nodeId`.');
+            const dag = memoryManager.getDag(wsHash, workspaceRoot);
+            const foundNode = await dag.getNode(nodeId);
+            return { node: foundNode ?? null };
+        }
+        case 'graph_query': {
+            const dag = memoryManager.getDag(wsHash, workspaceRoot);
+            return await dag.graphQuery();
+        }
         case 'wiki_search': {
             const wiki = memoryManager.getWiki(namespace || wsHash, workspaceRoot);
             const results = await wiki.search(query || '', persona);

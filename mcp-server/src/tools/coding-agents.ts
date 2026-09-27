@@ -50,6 +50,10 @@ export interface LineAnchoredPatch {
   fullPatchedContent: string; // full content used for diagnostics & writes
   unifiedDiff: string;
   symbols?: string[];
+  /** True if this file didn't exist before this run — used by the post-apply
+   * rollback gate, since a CAS checkpoint only captures pre-existing content
+   * and can't "restore" a file that never had a prior version. */
+  isNewFile?: boolean;
 }
 
 export interface DiagnosticResult {
@@ -883,6 +887,43 @@ function extractCodeBlock(text: string): string {
   return fenced ? fenced[1] : text;
 }
 
+/**
+ * Corruption guard for LLM-generated full-file replacements on EXISTING files.
+ * ContextGatherer.gatherContext (used by localLlmPatch for prompt enrichment)
+ * has a known relevance-ranking gap — "top N files" isn't "N most relevant
+ * files" — so a weak local model can occasionally latch onto irrelevant
+ * injected context and produce a syntactically valid, but completely
+ * unrelated, full-file replacement (observed live: a real 364-line
+ * MemoryManager class replaced wholesale with an unrelated smoke-test
+ * script). LSP/syntax diagnostics don't catch this — the output is valid
+ * code, just the wrong code. This is a content-level backstop: for a
+ * non-trivial existing file, at least one of its own top-level declared
+ * symbols (class/function/interface/const/type) must still appear
+ * *somewhere* in the replacement, or it's treated as a hallucinated
+ * replacement rather than a real edit.
+ */
+function looksLikeHallucinatedReplacement(originalContent: string, patchedContent: string): boolean {
+  // `export` is only legal at module top level in TS/JS — never inside a
+  // function or class method body — so requiring it (rather than making it
+  // optional) restricts anchors to real public symbols and excludes generic
+  // local variable/const names declared inside methods (e.g. `const key = `),
+  // which previously produced false-negative "survived" matches purely by
+  // coincidence (any method's local `key`/`value`/`data` would "anchor").
+  const declPattern = /^\s*export\s+(?:default\s+)?(?:abstract\s+)?(?:class|interface|function|const|type|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm;
+  const anchors = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = declPattern.exec(originalContent)) !== null) {
+    anchors.add(m[1]);
+  }
+  // Too small/declaration-free to have a meaningful anchor (e.g. a config file,
+  // a short script) — nothing reliable to check, don't false-positive on it.
+  if (anchors.size === 0) return false;
+  for (const name of anchors) {
+    if (patchedContent.includes(name)) return false;
+  }
+  return true;
+}
+
 async function generateCodePatchWithCloudLLM(
   filePath: string,
   instruction: string,
@@ -1365,6 +1406,19 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           }
         }
 
+        // Corruption guard: an LLM "success" that replaced an existing file's
+        // content with something unrelated (see looksLikeHallucinatedReplacement
+        // doc comment) is worse than a failure — it silently destroys the file.
+        // Revert to the original content and report it the same way as a
+        // generation failure, rather than let it proceed to be written to disk.
+        if (appliedPatch && originalContent && looksLikeHallucinatedReplacement(originalContent, patchedContent)) {
+          patchedContent = originalContent;
+          appliedPatch = false;
+          lastFailureReason = `${result.modelUsed} produced a full-file replacement with no trace of the original file's declared symbols — likely an unrelated/hallucinated result, not applied`;
+          result.modelUsed = undefined;
+          result.usedFallbackModel = undefined;
+        }
+
         if (!appliedPatch && lastFailureReason) {
           result.diagnostics.push({
             filePath: relPath,
@@ -1411,6 +1465,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         replacementSnippet: replSnippet,
         fullPatchedContent: patchedContent, // full content for diagnostics & writes
         unifiedDiff,
+        isNewFile: !fileExists,
       });
 
       result.astRewritesCount = (result.astRewritesCount || 0) + rewrites;
@@ -1489,6 +1544,55 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     result.pipelineStage = 'completed';
     // applied = true only when patches were actually written to disk
     result.applied = !dryRun && input.resolve?.action === 'apply';
+
+    // Post-apply verification gate: diagnostics above were computed AFTER the
+    // write already landed (Step 5 runs after Step 4c) — without this, a
+    // patch with real compiler errors still stays on disk, diagnostics or not.
+    // Observed live: an LLM-hallucinated full-file replacement produced 22
+    // real TS errors (unresolved names, syntax errors) and was still applied.
+    // A CAS checkpoint already exists for this apply — use it to roll back
+    // automatically rather than leave broken code on disk.
+    if (result.applied && result.checkpointId) {
+      // runTsMorphCheck's per-file in-memory project has no lib.d.ts or sibling
+      // modules loaded (by design — see its own comment), so semantic TS
+      // diagnostics (code >= 2000: "Cannot find module", "Cannot find name
+      // Buffer/path", etc.) are known, accepted noise on ANY real file with
+      // relative imports or Node globals — not a corruption signal. Syntax
+      // errors (code < 2000: malformed grammar) ARE reliable regardless of
+      // missing project context, and non-ts-morph sources (subprocess: full
+      // python/go/rustc compiles) are already trustworthy in full.
+      const hasErrorDiagnostics = diagnosticsList.some(d =>
+        d.severity === 'error' && !(d.source === 'ast-syntactic' && typeof d.code === 'number' && d.code >= 2000)
+      );
+      if (hasErrorDiagnostics) {
+        try {
+          const { restoredCount, files } = await globalCasStore.restoreCheckpointToDisk(result.checkpointId, workspaceRoot);
+          // The CAS checkpoint only captures files that existed BEFORE this run
+          // (Step 4c's preApplyMap) — it has no prior version of a brand-new
+          // file to restore, so restoring it is a no-op for those. Delete them
+          // directly instead, or a broken new file survives while the result
+          // claims a clean rollback happened.
+          const deletedNewFiles: string[] = [];
+          for (const patch of patches) {
+            if (patch.isNewFile) {
+              const fullPath = path.resolve(workspaceRoot, patch.filePath);
+              await fs.remove(fullPath).catch(() => {});
+              deletedNewFiles.push(patch.filePath);
+            }
+          }
+          result.applied = false;
+          result.restoredFiles = [...files, ...deletedNewFiles];
+          result.patchSummary = `Automatically rolled back ${restoredCount} file(s)${deletedNewFiles.length ? ` and removed ${deletedNewFiles.length} newly-created file(s)` : ''}: the applied patch introduced ${diagnosticsList.filter(d => d.severity === 'error').length} compiler error(s), which usually means the LLM's output doesn't actually belong to the target file. Checkpoint: ${result.checkpointId}. Re-run with a more explicit goal, astEditOps, or action:"resume".`;
+        } catch (rollbackErr: any) {
+          result.diagnostics.push({
+            filePath: patches[0]?.filePath || 'unknown',
+            message: `Applied patch introduced compiler errors AND automatic rollback failed (${rollbackErr.message}) — file(s) may be left in a broken state. Checkpoint ${result.checkpointId} is still available for manual rollback via resolve:{action:"rollback"}.`,
+            severity: 'error',
+            source: 'llm-patch',
+          });
+        }
+      }
+    }
 
     // Update tasks.md state if executing a tasks DAG
     if (loadedTasks && nextPendingTask) {

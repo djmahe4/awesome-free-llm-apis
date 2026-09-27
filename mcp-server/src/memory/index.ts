@@ -2,6 +2,7 @@ import path from 'path';
 import { ShortTermMemory } from './short-term.js';
 import { LongTermMemory } from './long-term.js';
 import { WikiMemory } from './wiki.js';
+import { DagMemory } from './dag.js';
 import { vectorStore, VectorEntry } from './vector.js';
 import { Sanitizer } from '../utils/Sanitizer.js';
 
@@ -52,6 +53,7 @@ export class MemoryManager {
   shortTerm: ShortTermMemory;
   longTerm: LongTermMemory;
   private wikis = new Map<string, WikiMemory>();
+  private dags = new Map<string, DagMemory>();
 
   constructor(storePath?: string) {
     this.shortTerm = new ShortTermMemory();
@@ -67,6 +69,16 @@ export class MemoryManager {
       this.wikis.set(cacheKey, wiki);
     }
     return wiki;
+  }
+
+  getDag(workspaceHash: string, workspaceRoot?: string): DagMemory {
+    const cacheKey = workspaceRoot ? `${workspaceHash}:local` : workspaceHash;
+    let dag = this.dags.get(cacheKey);
+    if (!dag) {
+      dag = new DagMemory(workspaceHash, workspaceRoot);
+      this.dags.set(cacheKey, dag);
+    }
+    return dag;
   }
 
   createMemoryEntry(content: string, confidence: number = 0.5) {

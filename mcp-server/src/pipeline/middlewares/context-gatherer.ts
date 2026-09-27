@@ -384,7 +384,19 @@ export class ContextGatherer {
                     if (prioA !== prioB) return prioA - prioB;
                     return a.localeCompare(b); // Fallback to alphabetical
                 });
-                for (const file of sortedFiles) {
+                // `limit` is meant to bound the OUTPUT (how many files' snippets a
+                // caller wants injected into a prompt), not just how many candidate
+                // files get ranked — candidateLimit (limit*3, at least 25) is a
+                // wider net for ranking, deliberately larger than what should ship.
+                // Previously this loop ran over every candidate (up to 25 files),
+                // so a caller passing limit:3 could still get results from dozens
+                // of files — for a large repo, near-guaranteed to include several
+                // irrelevant ones (matched only by broad terms like "class"/"map"
+                // extracted from the query). Observed live: a small local model fed
+                // 445 lines of unrelated-file grep noise (candidateLimit=25 files x
+                // up to 10 matches each) overwrote a real file with a hallucinated
+                // summary of that noise instead of doing the requested edit.
+                for (const file of sortedFiles.slice(0, limit)) {
                     if (path.basename(file).toLowerCase() === 'agents.md') continue;
                     const lines = grouped.get(file)!.sort((a, b) => a.line - b.line);
                     const ext = path.extname(file).toLowerCase();

@@ -115,18 +115,29 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
     const workspaceRoot = input.workspace_root || path.dirname(absPath);
 
     let context: string[] = [];
-    try {
-      context = await ContextGatherer.gatherContext({
-        workspaceRoot,
-        query: `${path.basename(absPath)} ${input.instruction}`,
-        limit: 3,
-        sessionId,
-      });
-    } catch (err: any) {
-      // Context enrichment is best-effort — a failure here (e.g. no git repo,
-      // ripgrep unavailable) shouldn't block patch generation from the file
-      // content alone.
-      console.error(`[local-llm-patch] Context gathering failed, proceeding with file content only: ${err.message}`);
+    // Skip for brand-new files: there's no existing content to relate grep hits
+    // to, so ContextGatherer's broad instruction-keyword search (generic terms
+    // like "class"/"node"/"memory" match common identifiers across any real
+    // repo) has a high chance of surfacing snippets from totally unrelated
+    // files with zero actual relevance. Observed live: a small local model
+    // latched onto those injected-but-irrelevant snippets and produced a
+    // summary of unrelated files instead of the requested new file's content.
+    // For an existing file there's a real anchor (the file's own content) so
+    // context enrichment stays on there.
+    if (fileExists) {
+      try {
+        context = await ContextGatherer.gatherContext({
+          workspaceRoot,
+          query: `${path.basename(absPath)} ${input.instruction}`,
+          limit: 3,
+          sessionId,
+        });
+      } catch (err: any) {
+        // Context enrichment is best-effort — a failure here (e.g. no git repo,
+        // ripgrep unavailable) shouldn't block patch generation from the file
+        // content alone.
+        console.error(`[local-llm-patch] Context gathering failed, proceeding with file content only: ${err.message}`);
+      }
     }
 
     const contextBlock = context.length > 0
