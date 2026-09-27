@@ -124,6 +124,8 @@ export interface CodingAgentsResult {
   isPaused?: boolean;
   modelUsed?: string;
   usedFallbackModel?: boolean;
+  wiringFiles?: string[];
+  wiringContext?: string[];
 }
 
 export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
@@ -146,6 +148,9 @@ export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
   }
   if (result.relevantFiles?.length) {
     lines.push(`- **Target Files:** ${result.relevantFiles.map(f => `\`${f}\``).join(', ')}`);
+  }
+  if (result.wiringFiles?.length) {
+    lines.push(`- **Discovered Wiring Targets:** ${result.wiringFiles.map(f => `\`${f}\``).join(', ')}`);
   }
   if (result.anchors?.length) {
     lines.push(`- **Anchors:** ${result.anchors.map(a => `\`${a.hashTag}\``).join(', ')}`);
@@ -246,9 +251,88 @@ function applyPatternRewrite(content: string, pat: string, out: string): { conte
   return { content: replaced, matchCount: matches.length };
 }
 
+function getAstGrepCmd(): string | null {
+  // Check local project node_modules/.bin first
+  const localCandidates = [
+    path.resolve(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'ast-grep.cmd' : 'ast-grep'),
+    path.resolve(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'sg.cmd' : 'sg'),
+    path.resolve(__dirname, '..', '..', 'node_modules', '.bin', process.platform === 'win32' ? 'ast-grep.cmd' : 'ast-grep'),
+  ];
+  for (const cand of localCandidates) {
+    if (fs.existsSync(cand)) return cand;
+  }
+
+  if (hasCommand('ast-grep')) return 'ast-grep';
+  if (hasCommand('sg')) return 'sg';
+
+  if (process.platform === 'win32' && process.env.APPDATA) {
+    const astGrepPath = path.join(process.env.APPDATA, 'npm', 'ast-grep.cmd');
+    if (fs.existsSync(astGrepPath)) return astGrepPath;
+    const sgPath = path.join(process.env.APPDATA, 'npm', 'sg.cmd');
+    if (fs.existsSync(sgPath)) return sgPath;
+  }
+  return null;
+}
+
+function runAstGrepRewrite(
+  content: string,
+  pat: string,
+  out: string,
+  ext: string
+): { content: string; matchCount: number } | null {
+  const sgCmd = getAstGrepCmd();
+  if (!sgCmd) return null;
+
+  const langMap: Record<string, string> = {
+    '.ts': 'ts',
+    '.tsx': 'tsx',
+    '.js': 'js',
+    '.jsx': 'jsx',
+    '.mjs': 'js',
+    '.cjs': 'js',
+    '.py': 'python',
+    '.go': 'go',
+    '.rs': 'rust',
+    '.html': 'html',
+    '.css': 'css',
+    '.json': 'json',
+    '.c': 'c',
+    '.cpp': 'cpp',
+  };
+  const lang = langMap[ext];
+  if (!lang) return null;
+
+  try {
+    const res = spawnSync(sgCmd, [
+      'run',
+      '--pattern', pat,
+      '--rewrite', out,
+      '--lang', lang,
+      '--stdin',
+    ], {
+      input: content,
+      encoding: 'utf-8',
+      timeout: 10_000,
+      windowsHide: true,
+      shell: process.platform === 'win32',
+    });
+
+    if (res.status === 0 && res.stdout && res.stdout !== content) {
+      const { regex } = buildPatternRegex(pat);
+      const matchCount = (content.match(regex) || []).length || 1;
+      return { content: res.stdout, matchCount };
+    }
+  } catch {
+    // fallback to ts-morph / regex
+  }
+  return null;
+}
+
 /**
  * Multi-language structural AST rewrite:
- * Dispatches TS/JS files to in-memory ts-morph AST, and falls back to regex for other formats.
+ * 1. TS/JS files dispatched to in-memory ts-morph compiler AST.
+ * 2. ast-grep CLI (@ast-grep/cli) for multi-language AST rewrites (Python, Rust, Go, HTML, CSS, C/C++).
+ * 3. Fallback to safe regex pattern rewrite for general text/markup.
  */
 async function applyStructuralRewrite(
   filePath: string,
@@ -258,7 +342,7 @@ async function applyStructuralRewrite(
 ): Promise<{ content: string; matchCount: number }> {
   const ext = path.extname(filePath).toLowerCase();
 
-  // 1. TS/JS AST Structural Rewrites via ts-morph
+  // 1. TS/JS AST Structural Rewrites via in-memory ts-morph compiler AST (clean full text output)
   if (/\.(ts|tsx|js|jsx)$/i.test(ext)) {
     try {
       const { Project } = await import('ts-morph');
@@ -292,7 +376,13 @@ async function applyStructuralRewrite(
     }
   }
 
-  // 2. Fallback to safe pattern regex
+  // 2. ast-grep CLI (@ast-grep/cli) for multi-language AST rewrites (Python, Rust, Go, HTML, CSS, C/C++)
+  const astGrepResult = runAstGrepRewrite(content, pat, out, ext);
+  if (astGrepResult && astGrepResult.matchCount > 0) {
+    return astGrepResult;
+  }
+
+  // 3. Fallback to safe pattern regex
   return applyPatternRewrite(content, pat, out);
 }
 
@@ -788,18 +878,20 @@ async function generateCodePatchWithCloudLLM(
   instruction: string,
   currentContent: string,
   workspaceRoot: string,
-  sessionId: string
-): Promise<string | null> {
+  sessionId: string,
+  tasksContext?: string
+): Promise<{ patch: string | null; failureReason?: string }> {
   try {
     const { useFreeLLM } = await import('./use-free-llm.js');
     const filename = path.basename(filePath);
     const prompt = [
       `You are patching a single file: ${filename}.`,
       `Apply the instruction and return the COMPLETE updated file content only, inside a single code fence.`,
-      `Do not include conversational text or explanations outside the code fence.`,
+      `Do not include conversational text, pleasantries, apologies, or explanations outside the code fence.`,
+      tasksContext ? `## Active Task & DAG Plan\n${tasksContext}` : '',
       `## Instruction\n${instruction}`,
       `## Current Content of ${filename}\n\`\`\`\n${currentContent}\n\`\`\``
-    ].join('\n\n');
+    ].filter(Boolean).join('\n\n');
 
     const res = await useFreeLLM({
       messages: [
@@ -816,12 +908,83 @@ async function generateCodePatchWithCloudLLM(
 
     const raw = res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
     if (raw && typeof raw === 'string') {
-      return extractCodeBlock(raw);
+      const refusalPatterns = [
+        /I(?:'m| am)? sorry(?:,| but)? I can(?:'t| not) assist/i,
+        /I cannot fulfill this request/i,
+        /I am unable to assist with/i,
+        /as an ai language model/i,
+      ];
+      if (refusalPatterns.some(p => p.test(raw))) {
+        return {
+          patch: null,
+          failureReason: `Cloud model refused request ("${raw.trim()}"). Refusal detected.`,
+        };
+      }
+
+      const extracted = extractCodeBlock(raw);
+      if (extracted?.trim()) {
+        return { patch: extracted };
+      }
+      return { patch: null, failureReason: 'Model response contained no code block' };
     }
-    return null;
+    return { patch: null, failureReason: 'Empty response received from LLM' };
   } catch (err: any) {
-    console.warn(`[coding-agents] Cloud LLM fallback generation failed for ${filePath}: ${err.message}`);
-    return null;
+    const failureReason = `Cloud LLM generation error: ${err.message || String(err)}`;
+    console.warn(`[coding-agents] ${failureReason}`);
+    return { patch: null, failureReason };
+  }
+}
+
+async function discoverWiringTargets(
+  newFilePath: string,
+  workspaceRoot: string,
+  sessionId: string
+): Promise<{ wiringFiles: string[]; snippets: string[] }> {
+  try {
+    const { ContextGatherer } = await import('../pipeline/middlewares/context-gatherer.js');
+    const parentDir = path.dirname(newFilePath);
+    const parentBasename = path.basename(parentDir);
+    const fileBase = path.basename(newFilePath, path.extname(newFilePath));
+
+    const query = `${parentBasename} ${fileBase} import`;
+    const snippets = await ContextGatherer.gatherContext({
+      workspaceRoot,
+      query,
+      limit: 5,
+      sessionId,
+    });
+
+    const wiringFiles: string[] = [];
+    const filePattern = /\[Context\]\s*---\s*FILE:\s*([^\s-]+)\s*---/g;
+    for (const snippet of snippets) {
+      let m: RegExpExecArray | null;
+      while ((m = filePattern.exec(snippet)) !== null) {
+        const foundPath = m[1].replace(/\\/g, '/');
+        if (
+          foundPath !== newFilePath &&
+          !wiringFiles.includes(foundPath) &&
+          !foundPath.includes('docs/') &&
+          !foundPath.endsWith('.md')
+        ) {
+          wiringFiles.push(foundPath);
+        }
+      }
+    }
+
+    // Check parent barrel export (index.ts / index.js)
+    const fullParent = path.resolve(workspaceRoot, parentDir);
+    for (const barrelName of ['index.ts', 'index.js']) {
+      const fullBarrel = path.join(fullParent, barrelName);
+      const barrelRel = path.relative(workspaceRoot, fullBarrel).replace(/\\/g, '/');
+      if (barrelRel !== newFilePath && (await fs.pathExists(fullBarrel))) {
+        if (!wiringFiles.includes(barrelRel)) wiringFiles.unshift(barrelRel);
+      }
+    }
+
+    return { wiringFiles, snippets };
+  } catch (err: any) {
+    console.warn(`[coding-agents] Wiring discovery skipped: ${err.message}`);
+    return { wiringFiles: [], snippets: [] };
   }
 }
 
@@ -964,6 +1127,24 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       result.relevantFiles = matchedPaths.length > 0 ? matchedPaths : codeFiles.slice(0, topK);
     }
 
+    // ── Step 2b: Automatic Wiring Discovery for New Files ────────────────────
+    const discoveredWiring: string[] = [];
+    const wiringSnippets: string[] = [];
+
+    for (const relPath of result.relevantFiles) {
+      const fullPath = path.resolve(workspaceRoot, relPath);
+      if (!(await fs.pathExists(fullPath))) {
+        const { wiringFiles, snippets } = await discoverWiringTargets(relPath, workspaceRoot, sessionId);
+        discoveredWiring.push(...wiringFiles);
+        wiringSnippets.push(...snippets);
+      }
+    }
+
+    if (discoveredWiring.length > 0) {
+      result.wiringFiles = Array.from(new Set(discoveredWiring));
+      result.wiringContext = wiringSnippets;
+    }
+
     // ── Step 3: Anchor [PATH#SHA8] ───────────────────────────────────────────
     result.pipelineStage = 'anchor';
     const anchors: SnapshotAnchor[] = [];
@@ -1006,15 +1187,27 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       let rewrites = 0;
 
       // 4a. LLM generation via localLlmPatch with seamless cloud fallback
+      // 4a. LLM generation via localLlmPatch with seamless cloud fallback
       if (!dryRun && (!input.astEditOps || input.astEditOps.length === 0)) {
         let appliedPatch = false;
+        let lastFailureReason: string | undefined;
+
+        // Compose DAG task context string if tasks exist
+        const tasksContext = loadedTasks
+          ? `Active Task: [${nextPendingTask?.id || 'adhoc'}] ${activeGoal}\nOverall Plan:\n` +
+            loadedTasks.map(t => `- [${t.status === 'completed' ? 'x' : (t.status === 'in_progress' ? '~' : ' ')}] ${t.task}`).join('\n')
+          : undefined;
+
+        const augmentedInstruction = tasksContext
+          ? `${activeGoal}\n\n[DAG Context]\n${tasksContext}`
+          : activeGoal;
 
         // Try local model first if available
         if (resolvedModel) {
           try {
             const llmResult = await localLlmPatch({
               filePath: fullPath,
-              instruction: activeGoal,
+              instruction: augmentedInstruction,
               workspace_root: workspaceRoot,
               sessionId,
             });
@@ -1023,27 +1216,46 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
               result.modelUsed = resolvedModel;
               result.usedFallbackModel = false;
               appliedPatch = true;
+            } else if (llmResult.error) {
+              lastFailureReason = `Local model (${resolvedModel}) failed: ${llmResult.error}`;
             }
           } catch (llmErr: any) {
-            console.warn(`[coding-agents] Local LLM patch failed for ${relPath}: ${llmErr.message}`);
+            lastFailureReason = `Local model (${resolvedModel}) failed: ${llmErr.message}`;
+            console.warn(`[coding-agents] ${lastFailureReason}`);
           }
         }
 
         // If local model not available or failed, fallback to cloud model
         if (!appliedPatch) {
-          const cloudPatch = await generateCodePatchWithCloudLLM(
+          const localReason = lastFailureReason;
+          const { patch: cloudPatch, failureReason } = await generateCodePatchWithCloudLLM(
             fullPath,
             activeGoal,
             patchedContent,
             workspaceRoot,
-            sessionId
+            sessionId,
+            tasksContext
           );
           if (cloudPatch?.trim()) {
             patchedContent = cloudPatch;
             result.modelUsed = 'cloud-free-llm';
             result.usedFallbackModel = true;
             appliedPatch = true;
+          } else {
+            // If local model specifically failed/refused, surface that primary reason
+            lastFailureReason = localReason
+              ? `${localReason} (Cloud fallback also failed: ${failureReason || 'no response'})`
+              : (failureReason || 'No valid code patch produced by LLM');
           }
+        }
+
+        if (!appliedPatch && lastFailureReason) {
+          result.diagnostics.push({
+            filePath: relPath,
+            message: `${lastFailureReason}. You can continue by re-running coding_agents with action: "resume" or providing astEditOps.`,
+            severity: 'error',
+            source: 'llm-patch',
+          });
         }
       }
 

@@ -177,6 +177,20 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
 
     const patch = extractCodeFromResponse(chatResult.content);
 
+    // Guard against canned refusal responses ("I'm sorry, but I can't assist with that request.")
+    const refusalPatterns = [
+      /I(?:'m| am)? sorry(?:,| but)? I can(?:'t| not) assist/i,
+      /I cannot fulfill this request/i,
+      /I am unable to assist with/i,
+      /as an ai language model/i,
+    ];
+    const isRefusal = refusalPatterns.some(p => p.test(chatResult.content) || p.test(patch));
+    if (isRefusal) {
+      throw new Error(
+        `Model refused code modification: "${chatResult.content.trim()}". Context or instruction may have triggered safety filter. Retry with refined technical instruction.`
+      );
+    }
+
     result = {
       success: true,
       filePath: absPath,

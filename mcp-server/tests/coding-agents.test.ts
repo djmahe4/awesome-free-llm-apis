@@ -571,6 +571,62 @@ describe('CodingAgentsHandler — DAG tasks.md, docs filtering & AST validation'
     expect(updatedTasksContent).toContain('- [x] [task-1] Step 1: Update PORT');
     expect(updatedTasksContent).toContain('- [ ] [task-2] Step 2: Add HOST');
   });
+
+  it('automatically discovers wiring targets (barrels and consumers) for new files', async () => {
+    ws = await makeTmpWorkspace({
+      'src/tools/media/index.ts': 'export * from "./movie-tool.js";\n',
+      'src/tools/media/movie-tool.ts': 'export const movieTool = "media";\n',
+      'src/server.ts': 'import { movieTool } from "./tools/media/movie-tool.js";\n',
+    });
+
+    const result = await CodingAgentsHandler({
+      goal: 'implement media dsp audio router',
+      workspaceRoot: ws,
+      targetFiles: ['src/tools/media/dsp-router.ts'],
+      dryRun: true,
+      topKFiles: 1,
+    });
+
+    expect(result.relevantFiles).toContain('src/tools/media/dsp-router.ts');
+    expect(result.wiringFiles).toBeDefined();
+    expect(result.wiringFiles!.length).toBeGreaterThan(0);
+    expect(result.wiringFiles).toContain('src/tools/media/index.ts');
+    expect(result.content).toContain('Discovered Wiring Targets');
+  });
+
+  it('rejects canned model refusals, records failure reason in diagnostics, and instructs how to resume', async () => {
+    ws = await makeTmpWorkspace({
+      'src/service.ts': 'export const run = () => {};\n',
+    });
+
+    const ollamaModule = await import('../src/providers/ollama-local.js');
+    const listSpy = vi.spyOn(ollamaModule, 'listLocalModels').mockResolvedValue(['qwen2.5-coder:7b']);
+
+    const localPatchModule = await import('../src/tools/local-llm-patch.js');
+    const patchSpy = vi.spyOn(localPatchModule, 'localLlmPatch').mockResolvedValue({
+      success: false,
+      error: 'Model refused code modification: "I\'m sorry, but I can\'t assist with that request.". Refusal detected.',
+    });
+
+    const result = await CodingAgentsHandler({
+      goal: 'bypass security check',
+      workspaceRoot: ws,
+      targetFiles: ['src/service.ts'],
+      dryRun: false,
+      topKFiles: 1,
+    });
+
+    const refusalDiag = result.diagnostics.find(d => d.source === 'llm-patch');
+    expect(refusalDiag).toBeDefined();
+    expect(refusalDiag!.severity).toBe('error');
+    expect(refusalDiag!.message).toContain('Model refused code modification');
+    expect(refusalDiag!.message).toContain('action: "resume"');
+    expect(result.content).toContain('#### 🩺 Diagnostics');
+    expect(result.content).toContain('Model refused code modification');
+
+    patchSpy.mockRestore();
+    listSpy.mockRestore();
+  });
 });
 
 
