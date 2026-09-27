@@ -4,6 +4,7 @@ import { existsSync, createWriteStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import https from 'node:https';
+import os from 'node:os';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '../..');
@@ -46,9 +47,13 @@ async function download() {
     }
 
     // Pre-download Kokoro-ONNX weights for instant local TTS
+    // Stored in user dir ~/.free-llm-mcp/models/kokoro (consistent with vector/embedding cache) and server root
     try {
-        const kokoroDir = path.resolve(root, 'models', 'kokoro');
-        await fs.mkdir(kokoroDir, { recursive: true });
+        const userKokoroDir = path.join(os.homedir(), '.free-llm-mcp', 'models', 'kokoro');
+        const serverKokoroDir = path.resolve(root, 'models', 'kokoro');
+
+        await fs.mkdir(userKokoroDir, { recursive: true });
+        await fs.mkdir(serverKokoroDir, { recursive: true });
 
         const files = [
             {
@@ -62,13 +67,25 @@ async function download() {
         ];
 
         for (const file of files) {
-            const target = path.join(kokoroDir, file.name);
-            if (!existsSync(target)) {
+            const userTarget = path.join(userKokoroDir, file.name);
+            const serverTarget = path.join(serverKokoroDir, file.name);
+
+            const hasUser = existsSync(userTarget);
+            const hasServer = existsSync(serverTarget);
+
+            if (hasUser && !hasServer) {
+                console.log(`[Build] Syncing ${file.name} to server root...`);
+                await fs.copyFile(userTarget, serverTarget);
+            } else if (!hasUser && hasServer) {
+                console.log(`[Build] Syncing ${file.name} to user dir ~/.free-llm-mcp/models/kokoro...`);
+                await fs.copyFile(serverTarget, userTarget);
+            } else if (!hasUser && !hasServer) {
                 console.log(`[Build] Downloading Kokoro asset ${file.name}...`);
-                await downloadFile(file.url, target);
+                await downloadFile(file.url, userTarget);
+                await fs.copyFile(userTarget, serverTarget);
                 console.log(`[Build] ${file.name} downloaded successfully.`);
             } else {
-                console.log(`[Build] Kokoro asset ${file.name} already present.`);
+                console.log(`[Build] Kokoro asset ${file.name} already present in user dir and server root.`);
             }
         }
     } catch (err) {

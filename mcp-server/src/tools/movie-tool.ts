@@ -6,7 +6,8 @@ import { formatLyricsPrompt } from './media/lyrics-router.js';
 import { buildSeoPrompt } from './media/seo-router.js';
 import { synthesizeSpeechLocal } from './media/audio-router.js';
 import { generateStoryScript } from './media/story-router.js';
-import type { TrackLane } from './media/types.js';
+import { applyMediaEffects, normalizeOrRandomizeEffect } from './media/dsp-router.js';
+import { toPublicArtifact, type TrackLane, type MediaEffect } from './media/types.js';
 
 export interface MovieToolInput {
   action:
@@ -18,7 +19,9 @@ export interface MovieToolInput {
     | 'generate_assets'
     | 'generate_story'
     | 'compile_timeline'
-    | 'get_timeline';
+    | 'get_timeline'
+    | 'apply_effect'
+    | 'undo_effect';
   projectId?: string;
   premise?: string;
   sessionId?: string;
@@ -38,6 +41,8 @@ export interface MovieToolInput {
   metadata?: Record<string, any>;
   apiKey?: string;
   hfToken?: string;
+  effect?: MediaEffect;
+  remix?: boolean;
 }
 
 export interface MovieToolOutput {
@@ -147,7 +152,11 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
     case 'get_timeline': {
       try {
         const manifest = await store.load();
-        return { success: true, data: manifest };
+        const publicTracks: Record<string, any[]> = {};
+        for (const [lane, items] of Object.entries(manifest.tracks)) {
+          publicTracks[lane] = items.map(toPublicArtifact);
+        }
+        return { success: true, data: { ...manifest, tracks: publicTracks } };
       } catch (err: any) {
         return { success: false, error: err.message };
       }
@@ -172,7 +181,75 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
           metadata: input.metadata || {},
           proposed_by: 'user'
         });
-        return { success: true, data: artifact };
+        return { success: true, data: toPublicArtifact(artifact) };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'apply_effect': {
+      if (!input.artifactId) {
+        return { success: false, error: 'artifactId required for apply_effect' };
+      }
+      try {
+        const manifest = await store.load();
+        let targetTrack: string | undefined;
+        for (const artifacts of Object.values(manifest.tracks)) {
+          const found = artifacts.find((a) => a.artifactId === input.artifactId);
+          if (found) {
+            targetTrack = found.track;
+            break;
+          }
+        }
+
+        // Prioritize user effect; if invalid or missing, randomize parameters and/or type
+        const { effect: normalizedEffect, wasRandomized } = normalizeOrRandomizeEffect(
+          input.effect,
+          targetTrack || input.track
+        );
+
+        let artifact = await store.addEffectToArtifact(input.artifactId, normalizedEffect);
+
+        if (artifact.artifact_path && input.remix !== false) {
+          const ext = path.extname(artifact.artifact_path) || '.wav';
+          const dir = path.dirname(artifact.artifact_path);
+          const base = path.basename(artifact.artifact_path, ext);
+          const remixedPath = path.join(dir, `${base}_remix_${Date.now()}${ext}`);
+          const resultPath = await applyMediaEffects(artifact.artifact_path, remixedPath, [normalizedEffect]);
+          if (resultPath !== artifact.artifact_path) {
+            artifact = await store.recordArtifactRemixPath(artifact.artifactId, resultPath);
+          }
+        }
+
+        return {
+          success: true,
+          data: {
+            artifact: toPublicArtifact(artifact),
+            effect: normalizedEffect,
+            wasRandomized,
+            canUndo: (artifact.effects?.length || 0) > 0
+          }
+        };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'undo_effect': {
+      if (!input.artifactId) {
+        return { success: false, error: 'artifactId required for undo_effect' };
+      }
+      try {
+        const { artifact, undoneEffect } = await store.undoLastEffect(input.artifactId);
+        return {
+          success: true,
+          data: {
+            artifact: toPublicArtifact(artifact),
+            undoneEffect,
+            remainingEffects: artifact.effects || [],
+            canUndo: (artifact.effects?.length || 0) > 0
+          }
+        };
       } catch (err: any) {
         return { success: false, error: err.message };
       }

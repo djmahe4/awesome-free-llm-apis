@@ -1,7 +1,7 @@
 import fs from 'fs-extra';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { TimelineManifest, TimelineArtifact, TrackLane, ArtifactStatus } from './types.js';
+import type { TimelineManifest, TimelineArtifact, TrackLane, ArtifactStatus, MediaEffect } from './types.js';
 
 export class TimelineManifestStore {
   private manifestPath: string;
@@ -169,5 +169,103 @@ export class TimelineManifestStore {
     }
     manifest.updatedAt = Date.now();
     await fs.writeJSON(this.manifestPath, manifest, { spaces: 2 });
+  }
+
+  public async addEffectToArtifact(artifactId: string, effect: MediaEffect): Promise<TimelineArtifact> {
+    const manifest = await this.load();
+    let target: TimelineArtifact | undefined;
+
+    for (const lane of Object.values(manifest.tracks)) {
+      const a = lane.find((x) => x.artifactId === artifactId);
+      if (a) {
+        target = a;
+        break;
+      }
+    }
+
+    if (!target) {
+      throw new Error(`Artifact ${artifactId} not found in manifest`);
+    }
+
+    if (!target.effects) {
+      target.effects = [];
+    }
+    if (!target._original_path && target.artifact_path) {
+      target._original_path = target.artifact_path;
+    }
+    if (!target._path_history) {
+      target._path_history = target.artifact_path ? [target.artifact_path] : [];
+    }
+
+    target.effects.push(effect);
+    manifest.updatedAt = Date.now();
+    await fs.writeJSON(this.manifestPath, manifest, { spaces: 2 });
+    return target;
+  }
+
+  public async recordArtifactRemixPath(artifactId: string, newPath: string): Promise<TimelineArtifact> {
+    const manifest = await this.load();
+    let target: TimelineArtifact | undefined;
+
+    for (const lane of Object.values(manifest.tracks)) {
+      const a = lane.find((x) => x.artifactId === artifactId);
+      if (a) {
+        target = a;
+        break;
+      }
+    }
+
+    if (!target) {
+      throw new Error(`Artifact ${artifactId} not found in manifest`);
+    }
+
+    if (!target._original_path && target.artifact_path) {
+      target._original_path = target.artifact_path;
+    }
+    if (!target._path_history) {
+      target._path_history = target.artifact_path ? [target.artifact_path] : [];
+    }
+
+    target.artifact_path = newPath;
+    target._path_history.push(newPath);
+    manifest.updatedAt = Date.now();
+    await fs.writeJSON(this.manifestPath, manifest, { spaces: 2 });
+    return target;
+  }
+
+  public async undoLastEffect(artifactId: string): Promise<{ artifact: TimelineArtifact; undoneEffect: MediaEffect }> {
+    const manifest = await this.load();
+    let target: TimelineArtifact | undefined;
+
+    for (const lane of Object.values(manifest.tracks)) {
+      const a = lane.find((x) => x.artifactId === artifactId);
+      if (a) {
+        target = a;
+        break;
+      }
+    }
+
+    if (!target) {
+      throw new Error(`Artifact ${artifactId} not found in manifest`);
+    }
+
+    if (!target.effects || target.effects.length === 0) {
+      throw new Error(`No effects to undo on artifact ${artifactId}`);
+    }
+
+    const undoneEffect = target.effects.pop()!;
+
+    // Revert path history internally
+    if (target._path_history && target._path_history.length > 1) {
+      target._path_history.pop();
+      target.artifact_path = target._path_history[target._path_history.length - 1];
+    } else if (target._original_path && target.effects.length === 0) {
+      target.artifact_path = target._original_path;
+      target._path_history = [target._original_path];
+    }
+
+    manifest.updatedAt = Date.now();
+    await fs.writeJSON(this.manifestPath, manifest, { spaces: 2 });
+    return { artifact: target, undoneEffect };
   }
 }

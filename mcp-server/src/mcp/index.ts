@@ -585,7 +585,7 @@ export async function createMCPServer(): Promise<Server> {
           properties: {
             action: {
               type: 'string',
-              enum: ['init_project', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'compile_timeline', 'get_timeline'],
+              enum: ['init_project', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'compile_timeline', 'get_timeline', 'apply_effect', 'undo_effect'],
               description: 'The movie_tool action to execute'
             },
             projectId: { type: 'string', description: 'Project ID' },
@@ -600,9 +600,17 @@ export async function createMCPServer(): Promise<Server> {
             model: { type: 'string', description: 'Specific model identifier' },
             artifact_path: { type: 'string', description: 'File path to media artifact' },
             prompt: { type: 'string', description: 'Prompt for generation' },
-            artifactId: { type: 'string', description: 'Artifact ID for approval or reroll' },
+            artifactId: { type: 'string', description: 'Artifact ID for approval, reroll, or effect manipulation' },
             apiKey: { type: 'string', description: 'Optional API key for Pollinations or external provider' },
-            hfToken: { type: 'string', description: 'Optional Hugging Face access token' }
+            hfToken: { type: 'string', description: 'Optional Hugging Face access token' },
+            effect: {
+              type: 'object',
+              description: 'DSP remix or video FX effect object. If invalid or omitted during apply_effect, parameters/type are automatically randomized.'
+            },
+            remix: {
+              type: 'boolean',
+              description: 'Whether to render media remix immediately using FFmpeg (defaults to true)'
+            }
           },
           required: ['action']
         }
