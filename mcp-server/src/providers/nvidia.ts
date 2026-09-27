@@ -9,11 +9,12 @@ export class NvidiaProvider extends BaseProvider {
   rateLimits: RateLimits = { rpm: 40 };
   models: ProviderModel[] = [
     // Free Endpoint Models (Catalog & Live Preview)
-    { id: 'deepseek-ai/deepseek-v4-pro-0813', name: 'DeepSeek V4 Pro 0813 (262K MoE)' },
-    { id: 'deepseek-ai/deepseek-v4-flash-0731', name: 'DeepSeek V4 Flash 0731' },
+    { id: 'deepseek-ai/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
+    { id: 'deepseek-ai/deepseek-coder-6.7b-instruct', name: 'DeepSeek Coder 6.7B' },
+    { id: 'z-ai/glm-5.3-flash', name: 'GLM 5.3 Flash' },
+    { id: 'z-ai/glm-5.3', name: 'GLM 5.3' },
     { id: 'nvidia/nemotron-3.5-lightning-30b-a3b', name: 'Nemotron 3.5 Lightning 30B' },
     { id: 'meta/muse-glimmer-30b', name: 'Muse Glimmer 30B (Vision/Reasoning)' },
-    { id: 'z-ai/glm-5.2', name: 'GLM 5.2' },
     { id: 'minimaxai/minimax-m3', name: 'MiniMax M3 (Vision)' },
     { id: 'google/diffusiongemma-26b-a4b-it', name: 'DiffusionGemma 26B' },
     { id: 'google/gemma-4-31b-it', name: 'Gemma 4 31B Instruct' },

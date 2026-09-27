@@ -211,6 +211,14 @@ export abstract class BaseProvider implements Provider {
         const tokens = json.usage?.total_tokens || 0;
         this.recordRequest(tokens);
 
+        // Guard against APIs that return HTTP 200 with an error string inside choices[0].message.content
+        const firstChoiceContent = json.choices?.[0]?.message?.content;
+        if (typeof firstChoiceContent === 'string' && /doesn't have enough credits|insufficient credits|rate limit exceeded/i.test(firstChoiceContent)) {
+          const err: any = new Error(`Provider returned error in content: ${firstChoiceContent}`);
+          err.status = 402;
+          throw err;
+        }
+
         const headers: Record<string, string> = {};
         response.headers.forEach((val, key) => { headers[key] = val; });
         json._headers = headers;

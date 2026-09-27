@@ -322,4 +322,5 @@ preferred persona: coder
 > cohere       (1 model)
 > gemini       (1 model)
 > modelscope   (1 model)
+> pollinations (1 model)
 > ```

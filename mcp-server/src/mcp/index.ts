@@ -576,6 +576,44 @@ export async function createMCPServer(): Promise<Server> {
           },
           required: ['goal']
         }
+      },
+      {
+        name: 'movie_tool',
+        description: 'Vibe movie media engine: timeline manifest, asset generation (Pollinations FLUX T2I, Kokoro TTS, MusicGen BGM), and approvals.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['init_project', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'compile_timeline', 'get_timeline', 'apply_effect', 'undo_effect'],
+              description: 'The movie_tool action to execute'
+            },
+            projectId: { type: 'string', description: 'Project ID' },
+            premise: { type: 'string', description: 'Premise or logline for the project' },
+            sessionId: { type: 'string', description: 'Session identifier' },
+            projectDir: { type: 'string', description: 'Custom project directory path' },
+            track: { type: 'string', enum: ['video', 'vfx', 'bgm', 'bgm_drums', 'bgm_bass', 'bgm_melody', 'vocal', 'song', 'script', 'dialogue'], description: 'Timeline track lane' },
+            start_ms: { type: 'number', description: 'Start timestamp in milliseconds' },
+            end_ms: { type: 'number', description: 'End timestamp in milliseconds' },
+            label: { type: 'string', description: 'Human readable artifact label' },
+            engine: { type: 'string', description: 'Generation engine name' },
+            model: { type: 'string', description: 'Specific model identifier' },
+            artifact_path: { type: 'string', description: 'File path to media artifact' },
+            prompt: { type: 'string', description: 'Prompt for generation' },
+            artifactId: { type: 'string', description: 'Artifact ID for approval, reroll, or effect manipulation' },
+            apiKey: { type: 'string', description: 'Optional API key for Pollinations or external provider' },
+            hfToken: { type: 'string', description: 'Optional Hugging Face access token' },
+            effect: {
+              type: 'object',
+              description: 'DSP remix or video FX effect object. If invalid or omitted during apply_effect, parameters/type are automatically randomized.'
+            },
+            remix: {
+              type: 'boolean',
+              description: 'Whether to render media remix immediately using FFmpeg (defaults to true)'
+            }
+          },
+          required: ['action']
+        }
       }
     ],
   }));
@@ -689,6 +727,13 @@ export async function createMCPServer(): Promise<Server> {
         response = {
           content: [{ type: 'text' as const, text: toMarkdownResponse(result.content || result.markdown || '') }],
           isError: !result.applied && !!result.error,
+        };
+      } else if (name === 'movie_tool') {
+        const { runMovieTool } = await import('../tools/movie-tool.js');
+        const result = await runMovieTool(args as any);
+        response = {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          isError: !result.success,
         };
       } else {
         throw new Error(`Unknown tool: ${name}`);

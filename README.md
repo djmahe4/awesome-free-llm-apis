@@ -169,13 +169,11 @@ Free tier, no credit card. Ultra-fast LPU inference. [^2]
 
 Base URL: `https://api.groq.com/openai/v1`
 
-| Model Name            | Context | Max Output | Modality | Rate Limit        |
-| --------------------- | ------- | ---------- | -------- | ----------------- |
-| `openai/gpt-oss-120b` | 131K    | 65K        | Text     | 30 RPM, 1,000 RPD |
-| `openai/gpt-oss-20b`  | 131K    | 65K        | Text     | 30 RPM, 1,000 RPD |
-| `groq/compound`       | 131K    | 8K         | Text     | 30 RPM, 250 RPD   |
-| `groq/compound-mini`  | 131K    | 8K         | Text     | 30 RPM, 250 RPD   |
-| `qwen/qwen3.6-27b`    | 131K    | 16K        | Text     | 30 RPM, 1,000 RPD |
+| Model Name            | Context | Max Output | Modality      | Rate Limit        |
+| --------------------- | ------- | ---------- | ------------- | ----------------- |
+| `openai/gpt-oss-120b` | 131K    | 65K        | Text          | 30 RPM, 1,000 RPD |
+| `openai/gpt-oss-20b`  | 131K    | 65K        | Text          | 30 RPM, 1,000 RPD |
+| `qwen/qwen3.8-27b`    | 131K    | 16K        | Text + Vision | 30 RPM, 1,000 RPD |
 
 ### [Hugging Face](https://huggingface.co/settings/tokens) 🇺🇸
 
@@ -188,6 +186,8 @@ Base URL: `https://router.huggingface.co/v1`
 | Meta-Llama-3.1-8B-Instruct      | 128K    | ~4K        | Text                           | Credit-metered |
 | gemma-3-4b-it                   | 131K    | ~4K        | Text                           | Credit-metered |
 | phi-4                           | 16K     | ~4K        | Text                           | Credit-metered |
+| deepseek-ai/DeepSeek-V4.1-Flash | 128K    | 16K        | Text (code/reasoning)          | Credit-metered |
+| Qwen/Qwen3.8-Flash-Next         | 131K    | 16K        | Text + Vision                  | Credit-metered |
 | Qwen2.5-Coder-7B-Instruct       | 131K    | ~4K        | Text                           | Credit-metered |
 | Qwen2.5-7B-Instruct             | 131K    | ~4K        | Text                           | Credit-metered |
 | + thousands of community models | Varies  | Varies     | Text, Image, Audio, Embeddings | Credit-metered |
@@ -230,10 +230,14 @@ Free API-Inference for registered users. Requires Alibaba Cloud account binding 
 
 Base URL: `https://api-inference.modelscope.cn/v1`
 
-| Model Name                     | Context | Max Output | Modality  | Rate Limit                                 |
-| ------------------------------ | ------- | ---------- | --------- | ------------------------------------------ |
-| `Qwen/Qwen3.5-35B-A3B`         | 256K    | —          | Text      | 2,000 RPD total; <=500 RPD/model (dynamic) |
-| `Qwen/Qwen3.5-27B`             | 256K    | —          | Text      | 2,000 RPD total; <=500 RPD/model (dynamic) |
+| Model Name                        | Context | Max Output | Modality    | Rate Limit                                 |
+| --------------------------------- | ------- | ---------- | ----------- | ------------------------------------------ |
+| `deepseek-ai/DeepSeek-V4.1-Flash` | 128K    | 16K        | Text (code) | 2,000 RPD total; <=500 RPD/model (dynamic) |
+| `Qwen/Qwen-Image-2.1`             | —       | —          | Image (T2I) | 2,000 RPD total; <=500 RPD/model (dynamic) |
+| `BBB662/ndf-krea2`                | —       | —          | Image (T2I) | 2,000 RPD total; <=500 RPD/model (dynamic) |
+| `MArilei/PiB`                     | —       | —          | Image (T2I) | 2,000 RPD total; <=500 RPD/model (dynamic) |
+| `Qwen/Qwen3.5-35B-A3B`            | 256K    | —          | Text        | 2,000 RPD total; <=500 RPD/model (dynamic) |
+| `Qwen/Qwen3.5-27B`                | 256K    | —          | Text        | 2,000 RPD total; <=500 RPD/model (dynamic) |
 | + API-Inference-enabled models | Varies  | Varies     | LLM, MLLM | Dynamic quotas + dynamic concurrency       |
 
 ### [NVIDIA NIM](https://build.nvidia.com/explore/discover) 🇺🇸
