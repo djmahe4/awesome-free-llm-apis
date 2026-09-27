@@ -6,7 +6,7 @@
 import { ProviderRegistry } from '../../src/providers/registry.js';
 import { IntelligentRouterMiddleware, ImageRouterMiddleware } from '../../src/pipeline/middlewares/IntelligentRouterMiddleware.js';
 import { TaskType } from '../../src/pipeline/middleware.js';
-import { MODEL_METADATA, isVisionSupported } from '../../src/config/models.js';
+import { MODEL_METADATA, isImageGenModel, isAudioModel, isVideoModel } from '../../src/config/models.js';
 
 /**
  * Diagnostic tool to identify missing model-provider mappings 
@@ -41,10 +41,22 @@ async function run() {
         });
     }
 
-    for (const modelId of Object.keys(MODEL_METADATA).filter(isVisionSupported)) {
+    for (const modelId of Object.keys(MODEL_METADATA).filter(isImageGenModel)) {
         routerModels.add(modelId);
         if (!modelToTasks[modelId]) modelToTasks[modelId] = [];
-        modelToTasks[modelId].push('IMAGE_ROUTING');
+        modelToTasks[modelId].push('IMAGE_GENERATION_ROUTING');
+    }
+
+    for (const modelId of Object.keys(MODEL_METADATA).filter(isAudioModel)) {
+        routerModels.add(modelId);
+        if (!modelToTasks[modelId]) modelToTasks[modelId] = [];
+        modelToTasks[modelId].push('AUDIO_ROUTING');
+    }
+
+    for (const modelId of Object.keys(MODEL_METADATA).filter(isVideoModel)) {
+        routerModels.add(modelId);
+        if (!modelToTasks[modelId]) modelToTasks[modelId] = [];
+        modelToTasks[modelId].push('VIDEO_ROUTING');
     }
 
     console.error('--- 1. ORPHANED MODELS ---');
@@ -98,8 +110,14 @@ async function run() {
                 tasks.push(task);
             }
         }
-        if (isVisionSupported(m)) {
-            tasks.push('IMAGE_ROUTING');
+        if (isImageGenModel(m)) {
+            tasks.push('IMAGE_GENERATION_ROUTING');
+        }
+        if (isAudioModel(m)) {
+            tasks.push('AUDIO_ROUTING');
+        }
+        if (isVideoModel(m)) {
+            tasks.push('VIDEO_ROUTING');
         }
         const taskStr = tasks.length > 0 ? tasks.join(', ') : '[UNASSIGNED]';
         console.error(`  - ${m.padEnd(50)} : ${taskStr}`);

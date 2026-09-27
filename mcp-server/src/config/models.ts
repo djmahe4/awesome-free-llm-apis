@@ -1,10 +1,14 @@
 export interface ModelMetadata {
     capability: number;      // 0.0 to 1.0
     contextWindow: number;   // context window size in tokens
-    isVision?: boolean;      // supports multimodal/image input
+    isVision?: boolean;      // supports multimodal/image input (image understanding)
     isVisionOnly?: boolean;  // strictly for vision/multimodal, cannot handle general text tasks
+    isImageGeneration?: boolean; // T2I image generation / diffusion model
+    isAudio?: boolean;       // TTS / speech synthesis
+    isVideo?: boolean;       // T2V / motion video generation
     isCoder?: boolean;       // specialized for coding
     isReasoning?: boolean;   // specialized for reasoning (thinking)
+    isRoleplaying?: boolean; // specialized for roleplaying and storytelling (accessible only for movie_tool)
 }
 
 export const MODEL_METADATA: Record<string, ModelMetadata> = {
@@ -43,15 +47,24 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'openai/gpt-oss-20b': { capability: 0.75, contextWindow: 32000 },
     'openai/gpt-oss-20b:free': { capability: 0.75, contextWindow: 32000 },
     'gpt-oss:20b': { capability: 0.78, contextWindow: 32000 },
-    'groq/compound': { capability: 0.88, contextWindow: 128000 },
-    'groq/compound-mini': { capability: 0.84, contextWindow: 128000 },
     'codestral-latest': { capability: 0.88, contextWindow: 128000, isCoder: true },
-    'poolside/laguna-s-2.1:free': { capability: 0.82, contextWindow: 128000, isCoder: true },
+    'poolside/laguna-s-2.1:free': { capability: 0.85, contextWindow: 128000, isCoder: true, isReasoning: true },
+    'poolside/laguna-s-2.1': { capability: 0.85, contextWindow: 128000, isCoder: true, isReasoning: true },
+    'qwen/qwen3.8-flash': { capability: 0.90, contextWindow: 1000000, isCoder: true, isReasoning: true, isVision: true },
+    'qwen/qwen3.7-flash': { capability: 0.82, contextWindow: 1000000, isReasoning: true, isVision: true },
+    'meta/llama-4-scout': { capability: 0.85, contextWindow: 131072, isVision: true },
+    'mistralai/mistral-small-3.2': { capability: 0.82, contextWindow: 128000 },
+    'inclusionai/ling-3.0-flash-vl': { capability: 0.84, contextWindow: 131072, isVision: true },
+    'google/gemini-2.5-flash-lite:search': { capability: 0.85, contextWindow: 1048576 },
+    'openai/gpt-5.4-nano': { capability: 0.80, contextWindow: 400000 },
     'kilo-auto/free': { capability: 0.85, contextWindow: 128000, isCoder: true },
     'liquid/lfm-2.5-2.6b:free': { capability: 0.80, contextWindow: 32000 },
 
     // A-Tier & Multimodal Models
-    'qwen/qwen3.6-27b': { capability: 0.88, contextWindow: 131072, isVision: true },
+    'Qwen/Qwen3.8-Flash-Next': { capability: 0.92, contextWindow: 131072, isVision: true, isReasoning: true },
+    'qwen/qwen3.8-27b': { capability: 0.90, contextWindow: 131072, isVision: true, isReasoning: true },
+    'qwen/qwen3.8-27b:free': { capability: 0.90, contextWindow: 131072, isVision: true, isReasoning: true, isCoder: true },
+    'inclusionai/ling-3.0-flash-fin:free': { capability: 0.90, contextWindow: 262144, isCoder: true, isReasoning: true },
     'mistralai/mistral-nemotron': { capability: 0.88, contextWindow: 128000 },
     'open-mistral-nemo': { capability: 0.88, contextWindow: 400000 },
     'google/gemma-3-27b-it': { capability: 0.88, contextWindow: 130000, isVision: true },
@@ -60,11 +73,24 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     '@cf/meta/llama-4-scout-17b-16e-instruct': { capability: 0.90, contextWindow: 128000, isVision: true },
     '@cf/google/gemma-4-26b-a4b-it': { capability: 0.94, contextWindow: 128000, isVision: true },
     '@cf/google/gemma-3-12b-it': { capability: 0.82, contextWindow: 128000, isVision: true },
-    '@cf/moonshotai/kimi-k2.6': { capability: 0.88, contextWindow: 128000, isVision: true },
     '@cf/mistralai/mistral-small-3.1-24b-instruct': { capability: 0.84, contextWindow: 128000, isVision: true },
     '@cf/qwen/qwen2.5-coder-32b-instruct': { capability: 0.88, contextWindow: 128000, isCoder: true },
     '@cf/qwen/qwq-32b': { capability: 0.88, contextWindow: 128000, isReasoning: true },
-    '@cf/meta/llama-3.2-11b-vision-instruct': { capability: 0.80, contextWindow: 128000, isVision: true },
+    '@cf/openai/gpt-oss-120b': { capability: 0.94, contextWindow: 128000 },
+    '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b': { capability: 0.92, contextWindow: 128000, isReasoning: true },
+    '@cf/qwen/qwen3.8-27b': { capability: 0.90, contextWindow: 131072, isVision: true, isReasoning: true, isCoder: true },
+    '@cf/qwen/qwen3-30b-a3b-fp8': { capability: 0.88, contextWindow: 128000, isCoder: true },
+    '@cf/nvidia/nemotron-3-120b-a12b': { capability: 0.90, contextWindow: 128000, isReasoning: true },
+    '@cf/openai/gpt-oss-20b': { capability: 0.78, contextWindow: 32000 },
+    '@cf/meta/llama-3.1-8b-instruct-fp8': { capability: 0.75, contextWindow: 128000 },
+    '@cf/meta/llama-3.2-3b-instruct': { capability: 0.70, contextWindow: 128000 },
+    '@cf/meta/llama-3.2-1b-instruct': { capability: 0.65, contextWindow: 128000 },
+    '@cf/ibm-granite/granite-4.0-h-micro': { capability: 0.65, contextWindow: 128000 },
+    '@cf/meta/llama-guard-3-8b': { capability: 0.75, contextWindow: 32000 },
+    '@cf/aisingapore/gemma-sea-lion-v4-27b-it': { capability: 0.82, contextWindow: 128000 },
+    '@cf/black-forest-labs/flux-1-schnell': { capability: 0.90, contextWindow: 32000, isImageGeneration: true },
+    '@cf/bytedance/stable-diffusion-xl-lightning': { capability: 0.88, contextWindow: 32000, isImageGeneration: true },
+    '@cf/lykon/dreamshaper-8-lcm': { capability: 0.85, contextWindow: 32000, isImageGeneration: true },
     'mistral-large-latest': { capability: 0.85, contextWindow: 128000 },
     'mistral-medium-latest': { capability: 0.84, contextWindow: 20000 },
     'mistral-medium-3-5': { capability: 0.87, contextWindow: 128000 },
@@ -77,6 +103,7 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'Qwen/Qwen2.5-72B-Instruct': { capability: 0.85, contextWindow: 128000 },
     'Qwen/Qwen2.5-7B-Instruct': { capability: 0.80, contextWindow: 32000 },
     'Qwen/Qwen3-8B': { capability: 0.70, contextWindow: 32000 },
+    'gemini-3.5-flash-lite': { capability: 0.85, contextWindow: 100000, isVision: true },
     'gemini-3.1-flash-lite': { capability: 0.82, contextWindow: 150000, isVision: true },
     'meta-llama/llama-4-maverick:free': { capability: 0.88, contextWindow: 128000, isVision: true },
     'meta-llama/llama-4-scout:free': { capability: 0.88, contextWindow: 128000, isVision: true },
@@ -98,9 +125,14 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'zai-org/GLM-5': { capability: 0.94, contextWindow: 128000 },
     'zai-org/GLM-4.7-Flash': { capability: 0.85, contextWindow: 128000 },
     'deepseek-ai/DeepSeek-V4-Pro': { capability: 0.98, contextWindow: 128000, isReasoning: true },
+    'deepseek-ai/DeepSeek-V4.1-Flash': { capability: 0.90, contextWindow: 128000, isCoder: true, isReasoning: true },
+    'deepseek-ai/deepseek-v4.1-flash': { capability: 0.90, contextWindow: 128000, isCoder: true, isReasoning: true },
     'deepseek-ai/DeepSeek-V4-Flash': { capability: 0.88, contextWindow: 128000 },
     'deepseek-ai/DeepSeek-V3.2': { capability: 0.94, contextWindow: 128000 },
     'Qwen/Qwen3.5-397B-A17B': { capability: 0.96, contextWindow: 128000, isVision: true },
+    'Qwen/Qwen-Image-2.1': { capability: 0.94, contextWindow: 32000, isImageGeneration: true },
+    'BBB662/ndf-krea2': { capability: 0.92, contextWindow: 32000, isImageGeneration: true },
+    'MArilei/PiB': { capability: 0.91, contextWindow: 32000, isImageGeneration: true },
     'Qwen/Qwen3-VL-235B-A22B-Instruct': { capability: 0.92, contextWindow: 128000, isVision: true },
     'stepfun-ai/Step-3.5-Flash': { capability: 0.82, contextWindow: 128000, isVision: true },
 
@@ -128,20 +160,77 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'meta/llama-3.2-90b-vision-instruct': { capability: 0.86, contextWindow: 128000, isVision: true },
     'minimaxai/minimax-m3': { capability: 0.90, contextWindow: 128000, isVision: true },
     'google/diffusiongemma-26b-a4b-it': { capability: 0.88, contextWindow: 128000, isReasoning: true },
-    'deepseek-ai/deepseek-v4-flash-0731': { capability: 0.90, contextWindow: 128000, isCoder: true },
-    'z-ai/glm-5.2': { capability: 0.96, contextWindow: 128000, isReasoning: true, isCoder: true },
     'moonshotai/kimi-k3': { capability: 0.92, contextWindow: 128000, isReasoning: true },
     'tencent/hy3:free': { capability: 0.88, contextWindow: 128000, isReasoning: true },
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free': { capability: 0.90, contextWindow: 256000, isVision: true, isReasoning: true },
     'minimax-m2.7': { capability: 0.85, contextWindow: 128000 },
-    'deepseek-ai/deepseek-v4-pro-0813': { capability: 0.96, contextWindow: 262144, isCoder: true, isReasoning: true },
     'nvidia/nemotron-3-super-120b-a12b': { capability: 0.93, contextWindow: 1000000, isReasoning: true },
     'nvidia/ising-calibration-1-35b-a3b': { capability: 0.86, contextWindow: 64000, isVision: true },
     'nvidia/ising-calibration-1.5-31b': { capability: 0.90, contextWindow: 128000, isVision: true, isReasoning: true },
     'nvidia/nemotron-3.5-content-safety': { capability: 0.75, contextWindow: 32000 },
     '@cf/zai-org/glm-4.7-flash': { capability: 0.86, contextWindow: 128000 },
-    'mistral-Nemo-Instruct-2407': { capability: 0.85, contextWindow: 128000 }
+    'mistral-Nemo-Instruct-2407': { capability: 0.85, contextWindow: 128000 },
+
+    'deepseek-ai/deepseek-coder-6.7b-instruct': { capability: 0.82, contextWindow: 32000, isCoder: true },
+    'z-ai/glm-5.3-flash': { capability: 0.88, contextWindow: 128000, isReasoning: true },
+    'z-ai/glm-5.3': { capability: 0.94, contextWindow: 128000, isReasoning: true, isCoder: true },
+    'Qwen/Qwen3.5-35B-A3B': { capability: 0.90, contextWindow: 128000, isReasoning: true, isCoder: true },
+    'Qwen/Qwen3.5-27B': { capability: 0.88, contextWindow: 128000, isCoder: true },
+
+    // Pollinations community and verified models
+    'community/AkshayCoder48/stepfun-step-3.7-flash-free': { capability: 0.84, contextWindow: 128000 },
+    'community/AkshayCoder48/grok-4-fast': { capability: 0.88, contextWindow: 128000, isReasoning: true },
+    'community/AkshayCoder48/cohere-north-mini-code:free': { capability: 0.84, contextWindow: 128000, isCoder: true },
+    'community/AkshayCoder48/kilo-auto-free': { capability: 0.85, contextWindow: 128000, isCoder: true, isReasoning: true },
+    'community/AkshayCoder48/gemini-3.1-flash-lite': { capability: 0.85, contextWindow: 150000, isVision: true },
+    'community/AkshayCoder48/gemini-2.5-flash': { capability: 0.86, contextWindow: 150000, isVision: true, isReasoning: true },
+    'community/AkshayCoder48/nvidia-nemotron-3-super-120b-a12b-free': { capability: 0.90, contextWindow: 128000, isReasoning: true },
+
+    // AionLabs Storytelling & Roleplaying (accessible strictly via movie_tool)
+    'aion-labs/aion-3.5': { capability: 0.95, contextWindow: 262144, isRoleplaying: true },
+    'aion-labs/aion-3.5-mini': { capability: 0.90, contextWindow: 262144, isRoleplaying: true },
+    'aion-labs/aion-3.0': { capability: 0.92, contextWindow: 131072, isRoleplaying: true },
+    'aion-labs/aion-3.0-mini': { capability: 0.88, contextWindow: 131072, isRoleplaying: true },
+    'aion-labs/aion-2.0': { capability: 0.88, contextWindow: 131072, isRoleplaying: true },
+    'aion-labs/aion-rp-llama-3.1-8b': { capability: 0.78, contextWindow: 32768, isRoleplaying: true },
+
+    // Pollinations / Multimodal Media Models (Keyframes, Audio, Video)
+    'black-forest-labs/flux.1-schnell': { capability: 0.90, contextWindow: 32000, isImageGeneration: true },
+    'tongyi-mai/z-image-turbo': { capability: 0.88, contextWindow: 32000, isImageGeneration: true },
+    'lykon/dreamshaper-8-lcm': { capability: 0.85, contextWindow: 32000, isImageGeneration: true },
+    'community/MarcosFRG/flux-1-schnell': { capability: 0.88, contextWindow: 32000, isImageGeneration: true },
+    'hexgrad/kokoro-82m': { capability: 0.90, contextWindow: 32000, isAudio: true },
+    'qwen/qwen3-tts-flash': { capability: 0.88, contextWindow: 32000, isAudio: true },
+    'alibaba/wan-2.2-fast': { capability: 0.88, contextWindow: 32000, isVideo: true },
 };
+
+/**
+ * Check if a model is an image generation / T2I model
+ */
+export function isImageGenModel(modelId: string): boolean {
+    return !!MODEL_METADATA[modelId]?.isImageGeneration;
+}
+
+/**
+ * Check if a model is an audio / speech synthesis model
+ */
+export function isAudioModel(modelId: string): boolean {
+    return !!MODEL_METADATA[modelId]?.isAudio;
+}
+
+/**
+ * Check if a model is a video / motion generation model
+ */
+export function isVideoModel(modelId: string): boolean {
+    return !!MODEL_METADATA[modelId]?.isVideo;
+}
+
+/**
+ * Check if a model is strictly a roleplaying/storytelling model
+ */
+export function isRoleplayingModel(modelId: string): boolean {
+    return !!MODEL_METADATA[modelId]?.isRoleplaying;
+}
 
 /**
  * Get the capability score of a model, falling back to 0.5 if unknown
