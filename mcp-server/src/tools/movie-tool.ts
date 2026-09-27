@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { TimelineManifestStore } from './media/timeline-manifest.js';
-import { buildKeyframeUrl, requestKeyframe, generateMotionClip } from './media/video-router.js';
+import { buildKeyframeUrl } from './media/video-router.js';
 import { buildMusicPrompt, generateBgm } from './media/music-router.js';
 import { formatLyricsPrompt } from './media/lyrics-router.js';
 import { buildSeoPrompt } from './media/seo-router.js';

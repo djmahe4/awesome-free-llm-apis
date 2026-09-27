@@ -182,7 +182,7 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'community/AkshayCoder48/grok-4-fast': { capability: 0.88, contextWindow: 128000, isReasoning: true },
     'community/AkshayCoder48/cohere-north-mini-code:free': { capability: 0.84, contextWindow: 128000, isCoder: true },
     'community/AkshayCoder48/kilo-auto-free': { capability: 0.85, contextWindow: 128000, isCoder: true, isReasoning: true },
-    'community/AkshayCoder48/gemini-3.1-flash-lite': { capability: 0.85, contextWindow: 150000, isVision: true },
+    'community/AkshayCoder48/gemini-3.1-flash-lite': { capability: 0.85, contextWindow: 150000, isVision: true, isReasoning: true },
     'community/AkshayCoder48/gemini-2.5-flash': { capability: 0.86, contextWindow: 150000, isVision: true, isReasoning: true },
     'community/AkshayCoder48/nvidia-nemotron-3-super-120b-a12b-free': { capability: 0.90, contextWindow: 128000, isReasoning: true },
 

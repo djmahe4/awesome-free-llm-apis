@@ -4,7 +4,7 @@
  * Usage: tsx scripts/evaluation/model-report.ts
  */
 import { ProviderRegistry } from '../../src/providers/registry.js';
-import { IntelligentRouterMiddleware, ImageRouterMiddleware } from '../../src/pipeline/middlewares/IntelligentRouterMiddleware.js';
+import { IntelligentRouterMiddleware } from '../../src/pipeline/middlewares/IntelligentRouterMiddleware.js';
 import { TaskType } from '../../src/pipeline/middleware.js';
 import { MODEL_METADATA, isImageGenModel, isAudioModel, isVideoModel } from '../../src/config/models.js';
 

@@ -28,35 +28,60 @@ export interface TtsInput {
  */
 export async function synthesizeSpeechLocal(input: TtsInput): Promise<string> {
   const pythonBin = resolvePython();
+  await fs.ensureDir(path.dirname(input.outputPath));
 
-  // 1. Try local Python kokoro-onnx via venv
-  const localSuccess = await new Promise<boolean>((resolve) => {
-    const pythonCode = `
+  // 1. Try local kokoro-onnx if model & voices weights are present
+  const modelDir = path.resolve(process.cwd(), 'models', 'kokoro');
+  const modelPath = path.join(modelDir, 'kokoro-v1.0.onnx');
+  const voicesPath = path.join(modelDir, 'voices-v1.0.bin');
+
+  if (await fs.pathExists(modelPath) && (await fs.pathExists(voicesPath))) {
+    const kokoroSuccess = await new Promise<boolean>((resolve) => {
+      const script = `
 import sys
+import soundfile as sf
+from kokoro_onnx import Kokoro
+
 try:
-    import kokoro_onnx, soundfile
-    print("KOKORO_AVAILABLE")
-except Exception:
+    kokoro = Kokoro(r"${modelPath}", r"${voicesPath}")
+    samples, sample_rate = kokoro.create(
+        ${JSON.stringify(input.text)},
+        voice=${JSON.stringify(input.voice || 'af_heart')},
+        speed=${input.speed || 1.0},
+        lang="en-us"
+    )
+    sf.write(r"${input.outputPath}", samples, sample_rate)
+    sys.exit(0)
+except Exception as e:
+    sys.stderr.write(str(e))
     sys.exit(1)
 `;
-    const proc = spawn(pythonBin, ['-c', pythonCode]);
-    proc.on('close', (code) => resolve(code === 0));
-    proc.on('error', () => resolve(false));
-  });
+      const proc = spawn(pythonBin, ['-c', script]);
+      proc.on('close', (code) => resolve(code === 0));
+      proc.on('error', () => resolve(false));
+    });
 
-  if (localSuccess) {
-    return input.outputPath;
+    if (kokoroSuccess && (await fs.pathExists(input.outputPath))) {
+      const stat = await fs.stat(input.outputPath);
+      if (stat.size > 0) {
+        return input.outputPath;
+      }
+    }
   }
 
-  // 2. Try edge-tts local fallback via venv Python
+  // 2. Synthesize speech via local edge-tts CLI (zero-config, high quality)
+  const voice = input.voice && input.voice.includes('Neural') ? input.voice : 'en-US-ChristopherNeural';
   const edgeSuccess = await new Promise<boolean>((resolve) => {
-    const proc = spawn(pythonBin, ['-m', 'edge_tts', '--text', input.text, '--write-media', input.outputPath]);
+    const proc = spawn(pythonBin, ['-m', 'edge_tts', '--voice', voice, '--text', input.text, '--write-media', input.outputPath]);
     proc.on('close', (code) => resolve(code === 0));
     proc.on('error', () => resolve(false));
   });
 
-  if (edgeSuccess) {
-    return input.outputPath;
+  if (edgeSuccess && (await fs.pathExists(input.outputPath))) {
+    const stat = await fs.stat(input.outputPath);
+    if (stat.size > 0) {
+      return input.outputPath;
+    }
   }
 
   // 3. Cloud Fallback: Pollinations hosted Kokoro-82M / Qwen-TTS endpoint
