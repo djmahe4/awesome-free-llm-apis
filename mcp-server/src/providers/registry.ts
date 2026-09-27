@@ -13,6 +13,8 @@ import { OpenRouterProvider } from './openrouter.js';
 import { SiliconFlowProvider } from './siliconflow.js';
 import { KiloCodeProvider } from './kilocode.js';
 import { ModelScopeProvider } from './modelscope.js';
+import { PollinationsProvider } from './pollinations.js';
+import { AionLabsProvider } from './aionlabs.js';
 import type { Provider, ProviderModel } from './types.js';
 
 export class ProviderRegistry {
@@ -38,7 +40,9 @@ export class ProviderRegistry {
       new OpenRouterProvider(),
       new SiliconFlowProvider(),
       new KiloCodeProvider(),
-      new ModelScopeProvider()
+      new ModelScopeProvider(),
+      new PollinationsProvider(),
+      new AionLabsProvider()
     ];
     for (const p of allProviders) {
       this.providers.set(p.id, p);
