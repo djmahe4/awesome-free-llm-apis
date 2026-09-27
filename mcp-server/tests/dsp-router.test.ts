@@ -249,5 +249,44 @@ describe('DSP Router & Remix Plugins', () => {
       expect(undoRes3.success).toBe(false);
       expect(undoRes3.error).toContain('No effects to undo');
     });
+
+    it('does not discard valid remix path when undoing an effect without a remix path', async () => {
+      const store = new TimelineManifestStore(TEST_DIR);
+      await store.init('proj_dsp_warning', 'session_warning');
+      const artifact = await store.addArtifact({
+        name: 'sound_fx',
+        track: 'bgm',
+        start_ms: 0,
+        end_ms: 1000,
+        label: 'Sound FX',
+        engine: 'mock',
+        model: 'mock',
+        artifact_path: '/path/to/original.wav',
+        status: 'approved',
+        metadata: {},
+        proposed_by: 'user'
+      });
+
+      // 1. First effect creates remix path
+      const eff1: MediaEffect = { id: 'eff_1', type: 'pitch', params: { semitones: 2 } };
+      await store.addEffectToArtifact(artifact.artifactId, eff1);
+      const afterRemix1 = await store.recordArtifactRemixPath(artifact.artifactId, '/path/to/remix1.wav', 'eff_1');
+      expect(afterRemix1.artifact_path).toBe('/path/to/remix1.wav');
+
+      // 2. Second effect is added without remixing (or failed/fallback without new path)
+      const eff2: MediaEffect = { id: 'eff_2', type: 'tempo', params: { factor: 1.2 } };
+      const afterEff2 = await store.addEffectToArtifact(artifact.artifactId, eff2);
+      expect(afterEff2.artifact_path).toBe('/path/to/remix1.wav');
+
+      // 3. Undo second effect - should NOT discard remix1.wav
+      const undo2 = await store.undoLastEffect(artifact.artifactId);
+      expect(undo2.undoneEffect.id).toBe('eff_2');
+      expect(undo2.artifact.artifact_path).toBe('/path/to/remix1.wav');
+
+      // 4. Undo first effect - should revert to original.wav
+      const undo1 = await store.undoLastEffect(artifact.artifactId);
+      expect(undo1.undoneEffect.id).toBe('eff_1');
+      expect(undo1.artifact.artifact_path).toBe('/path/to/original.wav');
+    });
   });
 });

@@ -47,7 +47,12 @@ export interface TimelineArtifact {
   allowOverlap?: boolean;    // When true, allows layer blending/stacking on the same track
   effects?: MediaEffect[];   // Stacked DSP audio/video remix plugins
   _original_path?: string;   // Internal: Base media path before any DSP effects applied
-  _path_history?: string[];  // Internal: History of artifact_paths for undo support
+  _path_history?: Array<string | PathHistoryEntry>;  // Internal: History of artifact_paths for undo support
+}
+
+export interface PathHistoryEntry {
+  effectId?: string;
+  path: string;
 }
 
 /**

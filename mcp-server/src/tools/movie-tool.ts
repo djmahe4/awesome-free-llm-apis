@@ -219,7 +219,7 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
           const effectsToApply = artifact.effects && artifact.effects.length > 0 ? artifact.effects : [normalizedEffect];
           const resultPath = await applyMediaEffects(sourcePath, remixedPath, effectsToApply);
           if (resultPath !== artifact.artifact_path) {
-            artifact = await store.recordArtifactRemixPath(artifact.artifactId, resultPath);
+            artifact = await store.recordArtifactRemixPath(artifact.artifactId, resultPath, normalizedEffect.id);
           }
         }
 

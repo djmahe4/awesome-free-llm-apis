@@ -194,7 +194,7 @@ export class TimelineManifestStore {
       target._original_path = target.artifact_path;
     }
     if (!target._path_history) {
-      target._path_history = target.artifact_path ? [target.artifact_path] : [];
+      target._path_history = target.artifact_path ? [{ effectId: 'initial', path: target.artifact_path }] : [];
     }
 
     target.effects.push(effect);
@@ -203,7 +203,7 @@ export class TimelineManifestStore {
     return target;
   }
 
-  public async recordArtifactRemixPath(artifactId: string, newPath: string): Promise<TimelineArtifact> {
+  public async recordArtifactRemixPath(artifactId: string, newPath: string, effectId?: string): Promise<TimelineArtifact> {
     const manifest = await this.load();
     let target: TimelineArtifact | undefined;
 
@@ -223,11 +223,11 @@ export class TimelineManifestStore {
       target._original_path = target.artifact_path;
     }
     if (!target._path_history) {
-      target._path_history = target.artifact_path ? [target.artifact_path] : [];
+      target._path_history = target._original_path ? [{ effectId: 'initial', path: target._original_path }] : [];
     }
 
     target.artifact_path = newPath;
-    target._path_history.push(newPath);
+    target._path_history.push({ effectId, path: newPath });
     manifest.updatedAt = Date.now();
     await fs.writeJSON(this.manifestPath, manifest, { spaces: 2 });
     return target;
@@ -255,13 +255,28 @@ export class TimelineManifestStore {
 
     const undoneEffect = target.effects.pop()!;
 
-    // Revert path history internally
-    if (target._path_history && target._path_history.length > 1) {
-      target._path_history.pop();
-      target.artifact_path = target._path_history[target._path_history.length - 1];
-    } else if (target._original_path && target.effects.length === 0) {
+    // Revert path history internally only if this specific effect recorded a remix path
+    if (target._path_history && target._path_history.length > 0) {
+      const lastEntry = target._path_history[target._path_history.length - 1];
+      const lastEffectId = typeof lastEntry === 'object' && lastEntry !== null ? lastEntry.effectId : undefined;
+
+      // Only pop path history if the top entry belongs to this undone effect
+      if (lastEffectId === undoneEffect.id) {
+        target._path_history.pop();
+        const prev = target._path_history[target._path_history.length - 1];
+        if (prev) {
+          target.artifact_path = typeof prev === 'string' ? prev : prev.path;
+        } else if (target._original_path) {
+          target.artifact_path = target._original_path;
+        }
+      }
+    }
+
+    if (target.effects.length === 0 && target._original_path) {
       target.artifact_path = target._original_path;
-      target._path_history = [target._original_path];
+      if (target._path_history) {
+        target._path_history = [{ effectId: 'initial', path: target._original_path }];
+      }
     }
 
     manifest.updatedAt = Date.now();
