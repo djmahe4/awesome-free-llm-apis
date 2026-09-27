@@ -30,11 +30,13 @@ export interface LocalLlmPatchInput {
   instruction: string;
   workspace_root?: string;
   sessionId?: string;
+  allowCreate?: boolean;
 }
 
 export interface LocalLlmPatchResult {
   success: boolean;
   filePath?: string;
+  isNewFile?: boolean;
   modelUsed?: string;
   usedFallbackModel?: boolean;
   patch?: string;
@@ -92,7 +94,8 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
     if (!input.instruction) throw new Error('instruction is required');
 
     const absPath = path.resolve(input.filePath);
-    if (!await fs.pathExists(absPath)) {
+    const fileExists = await fs.pathExists(absPath);
+    if (!fileExists && input.allowCreate === false) {
       throw new Error(`File not found: ${absPath}`);
     }
 
@@ -108,7 +111,7 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
 
     const candidateModels = rankCandidateModels(availableModels);
 
-    const fileContent = await fs.readFile(absPath, 'utf-8');
+    const fileContent = fileExists ? await fs.readFile(absPath, 'utf-8') : '';
     const workspaceRoot = input.workspace_root || path.dirname(absPath);
 
     let context: string[] = [];
@@ -130,8 +133,12 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
       ? `\n\n## Related workspace context\n${context.join('\n\n')}`
       : '';
 
+    const fileNotice = fileExists
+      ? `You are patching a single file. Apply the instruction and return the COMPLETE new file content only, wrapped in a single code fence. Do not include explanations outside the fence.`
+      : `You are creating a new file: ${path.basename(absPath)}. Implement the instruction and return the COMPLETE file content only, wrapped in a single code fence. Do not include explanations outside the fence.`;
+
     const prompt = [
-      `You are patching a single file. Apply the instruction and return the COMPLETE new file content only, wrapped in a single code fence. Do not include explanations outside the fence.`,
+      fileNotice,
       `## File: ${path.basename(absPath)}`,
       '```',
       fileContent,
@@ -173,6 +180,7 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
     result = {
       success: true,
       filePath: absPath,
+      isNewFile: !fileExists,
       modelUsed,
       usedFallbackModel: usedFallback,
       patch,

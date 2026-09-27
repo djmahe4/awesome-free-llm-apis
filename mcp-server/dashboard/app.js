@@ -115,7 +115,9 @@ async function renderMarkdown(text) {
       .replace(/\[\[([^\]]+)\]\]/g, (_, title) => `<a href="#" class="wiki-link" data-title="${title.replace(/"/g, '&quot;')}">${title}</a>`)
       // Markdown links: [text](url) — only http(s) URLs become real links, everything else stays plain text
       .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, text, url) => `<a href="${url.replace(/"/g, '&quot;')}" target="_blank" rel="noopener noreferrer">${text}</a>`)
-      // H1-H3
+      // H1-H5 (matched in descending order of hashes)
+      .replace(/^##### (.+)$/gm, '<h5 style="font-size:.78rem;font-weight:600;color:var(--text-primary);margin:8px 0 2px;">$1</h5>')
+      .replace(/^#### (.+)$/gm, '<h4 style="font-size:.82rem;font-weight:600;color:var(--text-primary);margin:9px 0 3px;">$1</h4>')
       .replace(/^### (.+)$/gm, '<h3 style="font-size:.85rem;color:var(--text-primary);margin:10px 0 4px;">$1</h3>')
       .replace(/^## (.+)$/gm, '<h2 style="font-size:.95rem;color:var(--text-primary);margin:12px 0 6px;">$1</h2>')
       .replace(/^# (.+)$/gm, '<h1 style="font-size:1.05rem;color:var(--accent-purple);margin:14px 0 8px;">$1</h1>')
@@ -1425,6 +1427,7 @@ function addSubtaskResponseBubble(taskText, outputText, ts, contextInjected, mod
   div.style.opacity = '0.85';
   
   const uniqueId = 'subtask-' + Math.random().toString(36).substring(2, 9);
+  const outputContainerId = 'subtask-out-' + Math.random().toString(36).substring(2, 9);
   
   const contextHtml = Array.isArray(contextInjected) && contextInjected.length > 0
     ? `<details style="margin-top:8px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.04);">
@@ -1447,8 +1450,8 @@ function addSubtaskResponseBubble(taskText, outputText, ts, contextInjected, mod
           </span>
           <span style="font-size:.7rem; color:var(--text-muted);">click to view output</span>
         </summary>
-        <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); font-size:.75rem; font-family:'JetBrains Mono', monospace; overflow-x:auto; max-height:200px; white-space:pre-wrap; color:var(--text-muted);">
-          ${esc(outputText || 'No output details recorded.')}
+        <div id="${outputContainerId}" style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); font-size:.75rem; font-family:'JetBrains Mono', monospace; overflow-x:auto; max-height:350px; white-space:pre-wrap; color:var(--text-muted);">
+          <pre style="margin:0; font-family:inherit; white-space:pre-wrap;">${esc(outputText || 'No output details recorded.')}</pre>
         </div>
       </details>
       ${contextHtml}
@@ -1457,6 +1460,16 @@ function addSubtaskResponseBubble(taskText, outputText, ts, contextInjected, mod
       ${modelBadge(model, provider)}<span>Subagent Execution</span>
       <span>${new Date(ts || Date.now()).toLocaleTimeString()}</span>
     </div>`;
+
+  if (outputText) {
+    renderMarkdown(outputText).then(html => {
+      const container = div.querySelector(`#${outputContainerId}`);
+      if (container) {
+        container.innerHTML = html;
+        container.style.whiteSpace = 'normal';
+      }
+    }).catch(() => {});
+  }
   
   chatLog.appendChild(div);
   scrollChatBottom();

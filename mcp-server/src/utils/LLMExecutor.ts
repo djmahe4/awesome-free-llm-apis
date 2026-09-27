@@ -630,10 +630,18 @@ export class LLMExecutor {
             ]
         };
 
-        let targetModels = [modelOverride];
-        if (modelOverride === 'any') {
-            const taskKey = options.taskType ? options.taskType.toLowerCase() : 'chat';
-            targetModels = taskModels[taskKey] || taskModels.chat;
+        const taskKey = options.taskType ? options.taskType.toLowerCase() : 'chat';
+        const defaultTaskCandidates = taskModels[taskKey] || taskModels.chat;
+
+        let targetModels: string[];
+        if (modelOverride && modelOverride !== 'any') {
+            // Put explicit modelOverride first, then fall back to task-appropriate models
+            targetModels = [
+                modelOverride,
+                ...defaultTaskCandidates.filter(m => m !== modelOverride)
+            ];
+        } else {
+            targetModels = [...defaultTaskCandidates];
             
             // If the prompt contains an image, prioritize vision-capable models (e.g. Gemini 3.1, Gemma 4)
             const hasImage = messages.some(m => 
@@ -685,10 +693,9 @@ export class LLMExecutor {
                     
                     // Only use this provider if it supports the specific model we want to run
                     const supportsModel = p.models.some((m: any) => m.id === modelId);
-                    if (modelOverride === 'any' ? supportsModel : p.models.some((m: any) => m.id === modelOverride)) {
+                    if (supportsModel) {
                         try {
-                            const actualModel = modelOverride === 'any' ? modelId : modelOverride;
-                            const res = await this.tryProvider(context, p.id, actualModel, options.timeoutMs || 15000);
+                            const res = await this.tryProvider(context, p.id, modelId, options.timeoutMs || 15000);
                             if (res) {
                                 this.recordProviderSuccess(p.id);
                                 return res;
@@ -701,25 +708,23 @@ export class LLMExecutor {
                 }
             }
 
-            // Ultimate fallback within the current pass (if modelOverride is 'any')
-            if (modelOverride === 'any') {
-                for (const { provider: p, score } of scoredProviders) {
-                    if (healthyOnly && score < 0) continue;
-                    if (options.google_search && p.id !== 'gemini') continue;
+            // Ultimate fallback within the current pass across any available provider models
+            for (const { provider: p, score } of scoredProviders) {
+                if (healthyOnly && score < 0) continue;
+                if (options.google_search && p.id !== 'gemini') continue;
 
-                    const fallbackModel = p.models[0]?.id;
-                    if (fallbackModel) {
-                        try {
-                            console.error(`[LLMExecutor] Routing fallback (healthyOnly=${healthyOnly}) to ${p.id}/${fallbackModel}`);
-                            const res = await this.tryProvider(context, p.id, fallbackModel, options.timeoutMs || 15000);
-                            if (res) {
-                                this.recordProviderSuccess(p.id);
-                                return res;
-                            }
-                        } catch (err: any) {
-                            this.recordProviderFailure(p.id, err.status || 500);
-                            continue;
+                const fallbackModel = p.models[0]?.id;
+                if (fallbackModel) {
+                    try {
+                        console.error(`[LLMExecutor] Routing fallback (healthyOnly=${healthyOnly}) to ${p.id}/${fallbackModel}`);
+                        const res = await this.tryProvider(context, p.id, fallbackModel, options.timeoutMs || 15000);
+                        if (res) {
+                            this.recordProviderSuccess(p.id);
+                            return res;
                         }
+                    } catch (err: any) {
+                        this.recordProviderFailure(p.id, err.status || 500);
+                        continue;
                     }
                 }
             }

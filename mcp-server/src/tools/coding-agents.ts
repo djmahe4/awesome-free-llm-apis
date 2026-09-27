@@ -58,7 +58,7 @@ export interface DiagnosticResult {
   message: string;
   severity: 'error' | 'warning' | 'info';
   code?: number;
-  source?: 'omp-lsp' | 'ast-syntactic' | 'semantic' | 'subprocess';
+  source?: 'omp-lsp' | 'ast-syntactic' | 'semantic' | 'subprocess' | 'json-syntax';
 }
 
 export interface LspActionRequest {
@@ -81,9 +81,16 @@ export interface ResolveAction {
   reason?: string;
 }
 
+export interface TaskItem {
+  id: string;
+  task: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+}
+
 export interface CodingAgentsInput {
   goal: string;
   workspaceRoot?: string;
+  targetFiles?: string[];
   dryRun?: boolean;
   topKFiles?: number;
   sessionId?: string;
@@ -91,6 +98,8 @@ export interface CodingAgentsInput {
   lspAction?: LspActionRequest;
   astEditOps?: AstEditOp[];
   resolve?: ResolveAction;
+  action?: 'plan' | 'execute' | 'resume';
+  pauseOnTaskPlan?: boolean;
 }
 
 export interface CodingAgentsResult {
@@ -103,13 +112,18 @@ export interface CodingAgentsResult {
   patchSummary: string;
   diagnostics: DiagnosticResult[];
   applied: boolean;
-  status?: 'applied' | 'rollback' | 'dry_run';
+  status?: 'applied' | 'rollback' | 'dry_run' | 'paused';
   checkpointId?: string;
   restoredFiles?: string[];
   astRewritesCount?: number;
   markdown?: string;
   content?: string;
   error?: string;
+  tasksPlan?: TaskItem[];
+  tasksFile?: string;
+  isPaused?: boolean;
+  modelUsed?: string;
+  usedFallbackModel?: boolean;
 }
 
 export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
@@ -118,12 +132,17 @@ export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
   }
 
   const lines: string[] = [];
-  const statusLabel = result.applied ? '✅ Changes Applied to Disk' : (result.patchPlan?.length ? '🔍 Proposed Plan (Dry Run)' : '⚡ Execution Completed');
+  const statusLabel = result.status === 'paused'
+    ? '⏸️ Workflow Paused (tasks.md)'
+    : (result.applied ? '✅ Changes Applied to Disk' : (result.patchPlan?.length ? '🔍 Proposed Plan (Dry Run)' : '⚡ Execution Completed'));
   lines.push(`### 🤖 Coding Agent: ${statusLabel}\n`);
   lines.push(`- **Goal:** ${result.goal}`);
   lines.push(`- **Pipeline Stage:** \`${result.pipelineStage || 'completed'}\``);
   if (result.checkpointId) {
     lines.push(`- **CAS Checkpoint:** \`${result.checkpointId}\``);
+  }
+  if (result.modelUsed) {
+    lines.push(`- **Model Used:** \`${result.modelUsed}\`${result.usedFallbackModel ? ' _(cloud fallback)_' : ''}`);
   }
   if (result.relevantFiles?.length) {
     lines.push(`- **Target Files:** ${result.relevantFiles.map(f => `\`${f}\``).join(', ')}`);
@@ -134,10 +153,24 @@ export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
   if (result.astRewritesCount) {
     lines.push(`- **AST Structural Rewrites:** ${result.astRewritesCount}`);
   }
+  if (result.tasksPlan?.length) {
+    const doneCount = result.tasksPlan.filter(t => t.status === 'completed').length;
+    lines.push(`\n#### 📋 Tasks DAG (${doneCount}/${result.tasksPlan.length} completed)`);
+    for (const t of result.tasksPlan) {
+      const check = t.status === 'completed' ? '[x]' : (t.status === 'in_progress' ? '[~]' : '[ ]');
+      lines.push(`- ${check} \`${t.id}\`: ${t.task}`);
+    }
+  }
+  if (result.isPaused) {
+    lines.push(`\n> ⏸️ **Workflow Paused**: \`${result.tasksFile || 'tasks.md'}\` created. Pass \`action: "resume"\` to execute next pending task.`);
+  }
 
-  if (result.diagnostics?.length) {
-    lines.push(`\n#### 🩺 Diagnostics (${result.diagnostics.length})`);
-    for (const d of result.diagnostics) {
+  const actionableDiagnostics = (result.diagnostics || []).filter(
+    d => d.severity !== 'info' || !d.message.toLowerCase().includes('skipped')
+  );
+  if (actionableDiagnostics.length) {
+    lines.push(`\n#### 🩺 Diagnostics (${actionableDiagnostics.length})`);
+    for (const d of actionableDiagnostics) {
       const icon = d.severity === 'error' ? '❌' : (d.severity === 'warning' ? '⚠️' : 'ℹ️');
       const loc = d.filePath ? `\`${d.filePath}${d.line ? `:${d.line}` : ''}\`` : '';
       lines.push(`- ${icon} **${d.severity.toUpperCase()}** ${loc}: ${d.message}`);
@@ -261,6 +294,111 @@ async function applyStructuralRewrite(
 
   // 2. Fallback to safe pattern regex
   return applyPatternRewrite(content, pat, out);
+}
+
+/**
+ * Generates genuine unified diff hunks with standard git-style `---`, `+++`, `@@ -start,orig +start,repl @@`,
+ * line deletions (-), additions (+), and unchanged context lines.
+ */
+function generateUnifiedDiff(
+  relPath: string,
+  hashTag: string,
+  originalLines: string[],
+  patchedLines: string[],
+  maxDiffLines = 100
+): { unifiedDiff: string; origSnippet: string; replSnippet: string; startLine: number } {
+  // 1. Identify common prefix and common suffix
+  let prefix = 0;
+  while (
+    prefix < originalLines.length &&
+    prefix < patchedLines.length &&
+    originalLines[prefix] === patchedLines[prefix]
+  ) {
+    prefix++;
+  }
+
+  let origSuffix = originalLines.length - 1;
+  let patchSuffix = patchedLines.length - 1;
+  while (
+    origSuffix >= prefix &&
+    patchSuffix >= prefix &&
+    originalLines[origSuffix] === patchedLines[patchSuffix]
+  ) {
+    origSuffix--;
+    patchSuffix--;
+  }
+
+  // Context padding (3 lines of context around change)
+  const contextPad = 3;
+  const origStart = Math.max(0, prefix - contextPad);
+  const origEnd = Math.min(originalLines.length, origSuffix + 1 + contextPad);
+  const patchStart = Math.max(0, prefix - contextPad);
+  const patchEnd = Math.min(patchedLines.length, patchSuffix + 1 + contextPad);
+
+  const origCount = origEnd - origStart;
+  const patchCount = patchEnd - patchStart;
+  const startLine = origStart + 1;
+
+  const hunkLines: string[] = [];
+  hunkLines.push(`--- ${relPath} ${hashTag}`);
+  hunkLines.push(`+++ ${relPath} (proposed)`);
+  hunkLines.push(`@@ -${startLine},${origCount} +${patchStart + 1},${patchCount} @@`);
+
+  // Leading context
+  for (let i = origStart; i < prefix; i++) {
+    hunkLines.push(` ${originalLines[i]}`);
+  }
+
+  // Deleted lines from original
+  const delCount = origSuffix - prefix + 1;
+  if (delCount > 0) {
+    if (delCount > maxDiffLines) {
+      for (let i = prefix; i < prefix + 15; i++) {
+        hunkLines.push(`-${originalLines[i]}`);
+      }
+      hunkLines.push(`- ... [${delCount - 25} lines omitted] ...`);
+      for (let i = origSuffix - 9; i <= origSuffix; i++) {
+        hunkLines.push(`-${originalLines[i]}`);
+      }
+    } else {
+      for (let i = prefix; i <= origSuffix; i++) {
+        hunkLines.push(`-${originalLines[i]}`);
+      }
+    }
+  }
+
+  // Added lines in patch
+  const addCount = patchSuffix - prefix + 1;
+  if (addCount > 0) {
+    if (addCount > maxDiffLines) {
+      for (let i = prefix; i < prefix + 15; i++) {
+        hunkLines.push(`+${patchedLines[i]}`);
+      }
+      hunkLines.push(`+ ... [${addCount - 25} lines omitted] ...`);
+      for (let i = patchSuffix - 9; i <= patchSuffix; i++) {
+        hunkLines.push(`+${patchedLines[i]}`);
+      }
+    } else {
+      for (let i = prefix; i <= patchSuffix; i++) {
+        hunkLines.push(`+${patchedLines[i]}`);
+      }
+    }
+  }
+
+  // Trailing context
+  for (let i = origSuffix + 1; i < origEnd; i++) {
+    hunkLines.push(` ${originalLines[i]}`);
+  }
+
+  const origSnippet = originalLines.slice(origStart, origEnd).join('\n');
+  const replSnippet = patchedLines.slice(patchStart, patchEnd).join('\n');
+
+  return {
+    unifiedDiff: hunkLines.join('\n') + '\n',
+    origSnippet,
+    replSnippet,
+    startLine,
+  };
 }
 
 /**
@@ -557,13 +695,34 @@ async function dispatchLspDiagnostics(
     return runRustcCheck(patch.filePath, content);
   }
 
-  // Unknown extension — explicitly document the skip (not silently swallow)
-  return [{
-    filePath: patch.filePath,
-    message: `Diagnostic check skipped — no LSP dispatcher for ${ext || 'unknown'} files`,
-    severity: 'info',
-    source: 'omp-lsp',
-  }];
+  if (ext === '.json') {
+    try {
+      JSON.parse(content);
+      return [];
+    } catch (err: any) {
+      let line = 1;
+      const match = err?.message?.match(/position (\d+)/i);
+      if (match) {
+        const pos = parseInt(match[1], 10);
+        line = content.slice(0, pos).split('\n').length;
+      }
+      return [{
+        filePath: patch.filePath,
+        line,
+        message: `JSON syntax error: ${err.message || String(err)}`,
+        severity: 'error',
+        source: 'json-syntax',
+      }];
+    }
+  }
+
+  // Non-code documentation, markup, and config files: clean skip, no LSP noise
+  if (/\.(md|markdown|txt|rst|yaml|yml|toml|ini|env|csv|html|htm|css|scss|less|svg|xml)$/.test(ext)) {
+    return [];
+  }
+
+  // Unknown extension — cleanly skip without diagnostic clutter
+  return [];
 }
 
 function hasCommand(cmd: string): boolean {
@@ -578,11 +737,102 @@ function hasCommand(cmd: string): boolean {
   }
 }
 
+function decomposeGoalToTasks(goal: string): TaskItem[] {
+  const lines = goal.split('\n').map(l => l.trim()).filter(Boolean);
+  const items: string[] = [];
+  for (const line of lines) {
+    const clean = line.replace(/^\s*(?:\d+[.)\-]|[-*])\s+/, '').trim();
+    if (clean) items.push(clean);
+  }
+  const taskStrings = items.length >= 2 ? items : [goal];
+  return taskStrings.map((task, idx) => ({
+    id: `task-${idx + 1}`,
+    task,
+    status: 'pending' as const,
+  }));
+}
+
+function serializeTasksMarkdown(goal: string, tasks: TaskItem[]): string {
+  const firstLine = goal.split('\n')[0].replace(/^#+\s*/, '');
+  const lines = [`# Tasks Plan: ${firstLine}\n`];
+  for (const t of tasks) {
+    const check = t.status === 'completed' ? '[x]' : (t.status === 'in_progress' ? '[~]' : '[ ]');
+    lines.push(`- ${check} [${t.id}] ${t.task}`);
+  }
+  return lines.join('\n');
+}
+
+function parseTasksMarkdown(content: string): TaskItem[] {
+  const lines = content.split('\n');
+  const tasks: TaskItem[] = [];
+  for (const line of lines) {
+    const match = line.match(/^-\s*\[([ xX~])\]\s*(?:\[([^\]]+)\])?\s*(.+)$/);
+    if (match) {
+      const mark = match[1].toLowerCase();
+      const status: TaskItem['status'] = mark === 'x' ? 'completed' : (mark === '~' ? 'in_progress' : 'pending');
+      const id = match[2] || `task-${tasks.length + 1}`;
+      const task = match[3].trim();
+      tasks.push({ id, task, status });
+    }
+  }
+  return tasks;
+}
+
+function extractCodeBlock(text: string): string {
+  const fenced = text.match(/```(?:[a-zA-Z0-9_+-]*)\r?\n([\s\S]*?)```/);
+  return fenced ? fenced[1] : text;
+}
+
+async function generateCodePatchWithCloudLLM(
+  filePath: string,
+  instruction: string,
+  currentContent: string,
+  workspaceRoot: string,
+  sessionId: string
+): Promise<string | null> {
+  try {
+    const { useFreeLLM } = await import('./use-free-llm.js');
+    const filename = path.basename(filePath);
+    const prompt = [
+      `You are patching a single file: ${filename}.`,
+      `Apply the instruction and return the COMPLETE updated file content only, inside a single code fence.`,
+      `Do not include conversational text or explanations outside the code fence.`,
+      `## Instruction\n${instruction}`,
+      `## Current Content of ${filename}\n\`\`\`\n${currentContent}\n\`\`\``
+    ].join('\n\n');
+
+    const res = await useFreeLLM({
+      messages: [
+        { role: 'system', content: 'You are an elite coding assistant. Return only the full updated file in a code block.' },
+        { role: 'user', content: prompt }
+      ],
+      keywords: ['coding', 'qwen', 'deepseek', 'codellama', 'coder'],
+      taskType: 'coding',
+      workspace_root: workspaceRoot,
+      sessionId,
+      isOnePass: true,
+      skipIndexing: true,
+    });
+
+    const raw = res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
+    if (raw && typeof raw === 'string') {
+      return extractCodeBlock(raw);
+    }
+    return null;
+  } catch (err: any) {
+    console.warn(`[coding-agents] Cloud LLM fallback generation failed for ${filePath}: ${err.message}`);
+    return null;
+  }
+}
+
 async function scanCodeFiles(dir: string, maxFiles = 100): Promise<string[]> {
   const result: string[] = [];
   const queue = [dir];
-  const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.venv', 'venv', '.cache', 'coverage']);
-  const EXT = /\.(ts|js|tsx|jsx|mjs|cjs|json|py|go|rs|md)$/i;
+  const SKIP = new Set([
+    'node_modules', '.git', 'dist', 'build', '.venv', 'venv', '.cache', 'coverage',
+    'docs', 'documentation', 'site', 'specs', 'man', 'manual', 'wiki', 'notes', '.github', '.agents'
+  ]);
+  const EXT = /\.(ts|js|tsx|jsx|mjs|cjs|json|py|go|rs|c|cpp|h|hpp|java|cs|rb|php|swift|kt)$/i;
 
   while (queue.length > 0 && result.length < maxFiles) {
     const current = queue.shift()!;
@@ -653,6 +903,40 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
 
     if (!input.goal) throw new Error('Goal is required for coding_agents planning');
 
+    const tasksFilePath = path.join(workspaceRoot, 'tasks.md');
+
+    // ── Handle Action: 'plan' or pauseOnTaskPlan ─────────────────────────────
+    if (input.action === 'plan' || input.pauseOnTaskPlan) {
+      const tasks = decomposeGoalToTasks(input.goal);
+      await fs.writeFile(tasksFilePath, serializeTasksMarkdown(input.goal, tasks), 'utf-8');
+      result.pipelineStage = 'completed';
+      result.tasksPlan = tasks;
+      result.tasksFile = 'tasks.md';
+      result.isPaused = true;
+      result.status = 'paused';
+      result.patchSummary = `Created tasks.md with ${tasks.length} task(s) and paused. Call with action="resume" to proceed.`;
+      result.content = formatCodingAgentsMarkdown(result);
+      result.markdown = result.content;
+      return result;
+    }
+
+    let activeGoal = input.goal;
+    let loadedTasks: TaskItem[] | undefined;
+    let nextPendingTask: TaskItem | undefined;
+
+    // ── Handle Action: 'resume' ──────────────────────────────────────────────
+    if (input.action === 'resume') {
+      if (await fs.pathExists(tasksFilePath)) {
+        const tasksContent = await fs.readFile(tasksFilePath, 'utf-8');
+        loadedTasks = parseTasksMarkdown(tasksContent);
+        nextPendingTask = loadedTasks.find(t => t.status === 'pending');
+        if (nextPendingTask) {
+          nextPendingTask.status = 'in_progress';
+          activeGoal = nextPendingTask.task;
+        }
+      }
+    }
+
     // ── Step 1: Enumerate ────────────────────────────────────────────────────
     const codeFiles: string[] = await scanCodeFiles(workspaceRoot, 100);
 
@@ -671,10 +955,14 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       } catch { /* Skip unreadable files */ }
     }
 
-    await store.index(docNodes);
-    const searchMatches = await store.query(input.goal, topK);
-    const matchedPaths = searchMatches.map(m => m.id);
-    result.relevantFiles = matchedPaths.length > 0 ? matchedPaths : codeFiles.slice(0, topK);
+    if (input.targetFiles && input.targetFiles.length > 0) {
+      result.relevantFiles = input.targetFiles.map(f => path.normalize(f).replace(/\\/g, '/'));
+    } else {
+      await store.index(docNodes);
+      const searchMatches = await store.query(activeGoal, topK);
+      const matchedPaths = searchMatches.map(m => m.id);
+      result.relevantFiles = matchedPaths.length > 0 ? matchedPaths : codeFiles.slice(0, topK);
+    }
 
     // ── Step 3: Anchor [PATH#SHA8] ───────────────────────────────────────────
     result.pipelineStage = 'anchor';
@@ -682,7 +970,6 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
     const patches: LineAnchoredPatch[] = [];
 
     // Hoist model resolution — avoid N×listLocalModels HTTP calls (one per file)
-    // Code-reviewer finding #12: hoist before loop
     let resolvedModel: string | null = null;
     if (!dryRun) {
       try {
@@ -691,7 +978,7 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
         const ranked = rankCandidateModels(models);
         resolvedModel = ranked[0] ?? null;
       } catch {
-        console.warn('[coding-agents] Ollama unreachable — LLM patches disabled for this session');
+        console.warn('[coding-agents] Ollama unreachable — will route to cloud model fallback');
       }
     }
 
@@ -702,8 +989,9 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       const fullPath = path.resolve(workspaceRoot, relPath);
       assertSafe(fullPath, workspaceRoot); // security: block path traversal
 
-      const originalContent = await fs.readFile(fullPath, 'utf-8');
-      const lines = originalContent.split('\n');
+      const fileExists = await fs.pathExists(fullPath);
+      const originalContent = fileExists ? await fs.readFile(fullPath, 'utf-8') : '';
+      const lines = originalContent ? originalContent.split('\n') : [];
       const tag = computeTag(originalContent);
       const hashTag = `[${relPath}#${tag}]`;
 
@@ -717,20 +1005,45 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       let patchedContent = originalContent;
       let rewrites = 0;
 
-      // 4a. LLM generation via localLlmPatch (if no explicit astEditOps or requested)
-      if (!dryRun && resolvedModel && (!input.astEditOps || input.astEditOps.length === 0)) {
-        try {
-          const llmResult = await localLlmPatch({
-            filePath: fullPath,
-            instruction: input.goal,
-            workspace_root: workspaceRoot,
-            sessionId,
-          });
-          if (llmResult.success && llmResult.patch?.trim()) {
-            patchedContent = llmResult.patch;
+      // 4a. LLM generation via localLlmPatch with seamless cloud fallback
+      if (!dryRun && (!input.astEditOps || input.astEditOps.length === 0)) {
+        let appliedPatch = false;
+
+        // Try local model first if available
+        if (resolvedModel) {
+          try {
+            const llmResult = await localLlmPatch({
+              filePath: fullPath,
+              instruction: activeGoal,
+              workspace_root: workspaceRoot,
+              sessionId,
+            });
+            if (llmResult.success && llmResult.patch?.trim()) {
+              patchedContent = llmResult.patch;
+              result.modelUsed = resolvedModel;
+              result.usedFallbackModel = false;
+              appliedPatch = true;
+            }
+          } catch (llmErr: any) {
+            console.warn(`[coding-agents] Local LLM patch failed for ${relPath}: ${llmErr.message}`);
           }
-        } catch (llmErr: any) {
-          console.warn(`[coding-agents] LLM patch skipped for ${relPath}: ${llmErr.message}`);
+        }
+
+        // If local model not available or failed, fallback to cloud model
+        if (!appliedPatch) {
+          const cloudPatch = await generateCodePatchWithCloudLLM(
+            fullPath,
+            activeGoal,
+            patchedContent,
+            workspaceRoot,
+            sessionId
+          );
+          if (cloudPatch?.trim()) {
+            patchedContent = cloudPatch;
+            result.modelUsed = 'cloud-free-llm';
+            result.usedFallbackModel = true;
+            appliedPatch = true;
+          }
         }
       }
 
@@ -741,16 +1054,25 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
           if (matchCount > 0) {
             patchedContent = rewritten;
             rewrites += matchCount;
+          } else {
+            // Validate AST edits: flag zero-match as diagnostic warning
+            result.diagnostics.push({
+              filePath: relPath,
+              message: `AST pattern "${op.pat}" matched 0 occurrences in ${relPath}`,
+              severity: 'warning',
+              source: 'ast-syntactic',
+            });
           }
         }
       }
 
       const replacementLines = patchedContent.split('\n');
-      const windowSize = 12;
-      const { origSnippet, replSnippet, startLine: windowStartLine } = computeWindowedSnippet(lines, replacementLines, windowSize);
-      
-      const origCount = origSnippet ? origSnippet.split('\n').length : 0;
-      const replCount = replSnippet ? replSnippet.split('\n').length : 0;
+      const { unifiedDiff, origSnippet, replSnippet, startLine: windowStartLine } = generateUnifiedDiff(
+        relPath,
+        hashTag,
+        lines,
+        replacementLines
+      );
 
       patches.push({
         filePath: relPath,
@@ -760,7 +1082,7 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
         originalSnippet: origSnippet,
         replacementSnippet: replSnippet,
         fullPatchedContent: patchedContent, // full content for diagnostics & writes
-        unifiedDiff: `--- ${relPath} ${hashTag}\n+++ ${relPath} (proposed)\n@@ -${windowStartLine},${origCount} +${windowStartLine},${replCount} @@\n${replSnippet}\n`,
+        unifiedDiff,
       });
 
       result.astRewritesCount = (result.astRewritesCount || 0) + rewrites;
@@ -831,18 +1153,33 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       }
     }
 
-    result.diagnostics = diagnosticsList;
+    result.diagnostics.push(...diagnosticsList);
     result.pipelineStage = 'completed';
     // applied = true only when patches were actually written to disk
     result.applied = !dryRun && input.resolve?.action === 'apply';
+
+    // Update tasks.md state if executing a tasks DAG
+    if (loadedTasks && nextPendingTask) {
+      nextPendingTask.status = 'completed';
+      await fs.writeFile(tasksFilePath, serializeTasksMarkdown(input.goal, loadedTasks), 'utf-8');
+      result.tasksPlan = loadedTasks;
+      result.tasksFile = 'tasks.md';
+      const remaining = loadedTasks.filter(t => t.status === 'pending');
+      if (remaining.length > 0) {
+        result.isPaused = true;
+        result.status = 'paused';
+      }
+    }
 
   } catch (err: any) {
     result.error = err.message || String(err);
   }
 
-  result.status = (result.restoredFiles && result.restoredFiles.length > 0)
-    ? 'rollback'
-    : (result.applied ? 'applied' : 'dry_run');
+  if (result.status !== 'paused') {
+    result.status = (result.restoredFiles && result.restoredFiles.length > 0)
+      ? 'rollback'
+      : (result.applied ? 'applied' : 'dry_run');
+  }
 
   result.content = formatCodingAgentsMarkdown(result);
   result.markdown = result.content;

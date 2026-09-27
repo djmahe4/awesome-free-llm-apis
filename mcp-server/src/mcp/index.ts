@@ -549,14 +549,15 @@ export async function createMCPServer(): Promise<Server> {
       },
       {
         name: 'local_llm_patch',
-        description: 'Single-file code patching tool using a locally running Ollama instance. Ranks installed local coding models, enriches the request with local workspace context, and returns a single-file replacement patch.',
+        description: '[DEPRECATED: Prefer coding_agents] Single-file code patching and creation tool using a locally running Ollama instance. Ranks installed local coding models, enriches the request with local workspace context, and returns proposed patch or file content.',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            filePath: { type: 'string', description: 'Relative or absolute path to the file to be patched' },
+            filePath: { type: 'string', description: 'Relative or absolute path to the file to be patched or created' },
             instruction: { type: 'string', description: 'Instruction explaining what edits or additions to make' },
             workspace_root: { type: 'string', description: 'Optional root workspace directory for context enrichment' },
-            sessionId: { type: 'string', description: 'Optional session identifier for audit logging' }
+            sessionId: { type: 'string', description: 'Optional session identifier for audit logging' },
+            allowCreate: { type: 'boolean', description: 'Allow creating a new file if target does not exist (default true)' }
           },
           required: ['filePath', 'instruction']
         }
@@ -570,6 +571,7 @@ export async function createMCPServer(): Promise<Server> {
             goal: { type: 'string', description: 'The refactoring, feature addition, or bugfix goal' },
             workspaceRoot: { type: 'string', description: 'Workspace root path (defaults to current working directory)' },
             dryRun: { type: 'boolean', description: 'Whether to return the line-anchored patch plan without mutating disk (default true)' },
+            targetFiles: { type: 'array', items: { type: 'string' }, description: 'Explicit list of target file paths to edit or create (bypasses RAG location)' },
             topKFiles: { type: 'number', description: 'Maximum candidate files to locate with VectorStore RAG (default 5)' },
             sessionId: { type: 'string', description: 'Session identifier for audit logging and snapshot caching' },
             verifyLspDiagnostics: { type: 'boolean', description: 'Verify syntactic/AST diagnostics before completing plan (default true)' }
