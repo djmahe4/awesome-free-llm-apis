@@ -51,6 +51,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
         Memory
       </button>
+      <button class="tab-btn" data-tab="dagmemory" role="tab" aria-selected="false" id="tab-dagmemory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.2 7.2L10.5 16M15.8 7.2L13.5 16M8.5 6h7"/></svg>
+        Memory Graph
+      </button>
       <button class="tab-btn" data-tab="wiki" role="tab" aria-selected="false" id="tab-wiki">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
         Wiki
@@ -66,10 +70,6 @@
       <button class="tab-btn" data-tab="steering" role="tab" aria-selected="false" id="tab-steering">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="4"/></svg>
         Keyword & Prompt Steering
-      </button>
-      <button class="tab-btn" data-tab="dagmemory" role="tab" aria-selected="false" id="tab-dagmemory">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.2 7.2L10.5 16M15.8 7.2L13.5 16M8.5 6h7"/></svg>
-        Memory Graph
       </button>
     </nav>
 
@@ -918,7 +918,12 @@
         <div class="card-body">
           <div class="session-controls">
             <label class="field-label" style="margin:0;white-space:nowrap;" for="dagmem-workspace-input">Workspace</label>
-            <input type="text" id="dagmem-workspace-input" class="session-input" placeholder="workspace path used to scope the graph">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="dagmem-workspace-input" class="session-input" placeholder="workspace path used to scope the graph" style="width:260px;">
+              <button type="button" id="dagmem-folder-btn" class="btn btn-outline btn-sm" title="Pick workspace folder" style="padding:3px 7px;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              </button>
+            </div>
             <button class="btn btn-primary btn-sm" id="dagmem-load-btn">Load Graph</button>
             <input type="text" id="dagmem-filter-input" class="session-input" placeholder="Filter nodes by id/content/tag…" style="max-width:220px;">
           </div>

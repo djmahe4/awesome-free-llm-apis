@@ -246,9 +246,11 @@ function computeTag(content: string): string {
 function buildPatternRegex(pat: string): { regex: RegExp; hasCapture: boolean } {
   const SENTINEL = '\x00__OAGENT_WC__\x00'; // unique enough to avoid collisions
   const hasCapture = /\$\$\$[A-Z0-9_]*/.test(pat);
-  const processed = pat
+  const normalizedPat = pat.replace(/\r\n/g, '\n');
+  const processed = normalizedPat
     .replace(/\$\$\$[A-Z0-9_]*/g, SENTINEL)  // A: mark wildcards
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')  // B: escape specials
+    .replace(/\n/g, '\\r?\\n')              // Handle CRLF / LF transparently
     .replace(/\x00__OAGENT_WC__\x00/g, '([\\s\\S]*?)'); // C: restore as capture group
   return { regex: new RegExp(processed, 'g'), hasCapture };
 }

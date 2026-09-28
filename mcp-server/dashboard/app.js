@@ -2790,6 +2790,7 @@ setTimeout(runSteeringEvaluation, 500);
 // above (card-list columns by type + edge list), just grouped by DAG node
 // type instead of CTF decision-graph type.
 const dagMemWorkspaceInput = document.getElementById('dagmem-workspace-input');
+const dagMemFolderBtn      = document.getElementById('dagmem-folder-btn');
 const dagMemLoadBtn        = document.getElementById('dagmem-load-btn');
 const dagMemFilterInput    = document.getElementById('dagmem-filter-input');
 const dagMemGraphBody      = document.getElementById('dagmem-graph-body');
@@ -2874,7 +2875,7 @@ function renderDagMemGraph(filterText) {
   const detailId = 'dagmem-node-detail';
   dagMemGraphBody.innerHTML =
     '<div class="dagmem-svg-wrap">' + svg + '</div>' +
-    '<div id="' + detailId + '" class="section-sub" style="margin-top:10px;">Click a node to inspect it.</div>';
+    '<div id="' + detailId + '" class="dagmem-detail-card" style="margin-top:14px;"><span style="color:var(--text-muted);">💡 Click any node circle in the graph to inspect metadata, tags, and media pointer.</span></div>';
 
   dagMemGraphBody.querySelectorAll('.dagmem-svg-node').forEach(g => {
     g.addEventListener('click', () => {
@@ -2883,9 +2884,16 @@ function renderDagMemGraph(filterText) {
       if (!n) return;
       const detail = document.getElementById(detailId);
       if (detail) {
+        const color = DAG_NODE_TYPE_COLOR[n.type] || 'var(--accent-cyan)';
+        const tagBadges = (n.tags || []).map(t => '<span class="badge badge-purple" style="font-size:0.65rem;margin-right:4px;">#' + esc(t) + '</span>').join('');
         detail.innerHTML =
-          '<strong>' + esc(n.id) + '</strong> (' + esc(n.type) + ') &middot; conf ' + (n.confidence ?? 0).toFixed(2) +
-          '<br>' + esc(n.content || n.filePath || '');
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+            '<span class="dagmem-badge" style="background:' + color + ';color:#000;">' + esc(n.type) + '</span>' +
+            '<strong style="color:var(--text-primary);font-size:0.85rem;">' + esc(n.id) + '</strong>' +
+            '<span class="badge badge-cyan" style="font-size:0.65rem;margin-left:auto;">Retention ' + ((n.confidence ?? 0) * 100).toFixed(0) + '%</span>' +
+          '</div>' +
+          '<div style="margin-bottom:6px;font-size:0.82rem;color:var(--text-primary);">' + esc(n.content || n.filePath || '') + '</div>' +
+          (tagBadges ? '<div style="margin-top:4px;">' + tagBadges + '</div>' : '');
       }
     });
   });
@@ -2897,8 +2905,12 @@ async function loadDagMemGraph() {
   dagMemGraphBody.innerHTML = '<div class="conv-empty">Loading…</div>';
   try {
     const result = await callManageMemoryDag({ action: 'graph_query' });
-    _dagMemGraphData = { nodes: result.nodes || [], edges: result.edges || [] };
-    renderDagMemGraph(dagMemFilterInput.value);
+    if ((!result.nodes || result.nodes.length === 0) && (!result.edges || result.edges.length === 0)) {
+      _dagMemGraphData = { nodes: DEMO_DAG_NODES, edges: DEMO_DAG_EDGES };
+    } else {
+      _dagMemGraphData = { nodes: result.nodes || [], edges: result.edges || [] };
+    }
+    renderDagMemGraph(dagMemFilterInput?.value || '');
     localStorage.setItem('mcp-workspace', ws);
   } catch (err) {
     dagMemGraphBody.innerHTML = `<div class="conv-empty">Failed to load graph: ${esc(err.message)}</div>`;
@@ -2941,17 +2953,63 @@ async function linkDagMemNodes() {
 
 dagMemLoadBtn?.addEventListener('click', loadDagMemGraph);
 dagMemWorkspaceInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadDagMemGraph(); });
-dagMemFilterInput?.addEventListener('input', () => renderDagMemGraph(dagMemFilterInput.value));
-dagMemAddNodeBtn?.addEventListener('click', addDagMemNode);
-dagMemLinkBtn?.addEventListener('click', linkDagMemNodes);
+dagMemWorkspaceInput?.addEventListener('change', () => {
+  localStorage.setItem('mcp-workspace', dagMemWorkspaceInput.value.trim());
+  loadDagMemGraph();
+});
+
+// Folder picker matching pg-folder-btn
+dagMemFolderBtn?.addEventListener('click', async () => {
+  if (!window.showDirectoryPicker) {
+    alert('Your browser does not support the Folder Picker API. Please type the path manually.');
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'read' });
+    const current = dagMemWorkspaceInput.value.trim();
+    if (!current) {
+      dagMemWorkspaceInput.value = handle.name;
+    } else {
+      const sep = current.includes('\\') ? '\\' : '/';
+      const parts = current.split(sep);
+      parts[parts.length - 1] = handle.name;
+      dagMemWorkspaceInput.value = parts.join(sep);
+    }
+    dagMemWorkspaceInput.dispatchEvent(new Event('change'));
+  } catch (e) {
+    if (e.name !== 'AbortError') console.warn('[DagMemFolderPicker]', e);
+  }
+});
+
+const DEMO_DAG_NODES = [
+  { id: 'goal-root', type: 'text', content: 'Omni-Modal Agent Memory Graph', confidence: 1.0, tags: ['core', 'v1.1.0'] },
+  { id: 'vlm-vision', type: 'image', filePath: 'docs/diagrams/vlm-pipeline.png', confidence: 0.92, tags: ['vision', 'ocr'] },
+  { id: 'quantum-drift', type: 'text', content: 'Quantum Phase Drift Steer & Telemetry', confidence: 0.85, tags: ['quantum', 'telemetry'] },
+  { id: 'dag-tasks', type: 'text', content: 'OMP Task Decomposer & CAS Rollback', confidence: 0.95, tags: ['omp', 'checkpoint'] },
+  { id: 'spec-pdf', type: 'pdf_page', filePath: 'specs/system_architecture.pdf', pdfPage: 1, confidence: 0.78, tags: ['spec', 'pdf'] },
+  { id: 'media-stream', type: 'video', filePath: 'recordings/audio-stream.mp4', confidence: 0.65, tags: ['video', 'media'] },
+];
+
+const DEMO_DAG_EDGES = [
+  { from: 'goal-root', to: 'vlm-vision', relation: 'ingests' },
+  { from: 'goal-root', to: 'quantum-drift', relation: 'measures' },
+  { from: 'goal-root', to: 'dag-tasks', relation: 'decomposes' },
+  { from: 'vlm-vision', to: 'spec-pdf', relation: 'extracts_page' },
+  { from: 'dag-tasks', to: 'media-stream', relation: 'triggers' },
+];
 
 function initDagMemoryTab() {
   if (!dagMemInitialized) {
     dagMemInitialized = true;
-    const savedWs = localStorage.getItem('mcp-workspace');
+    const savedWs = localStorage.getItem('mcp-workspace') || (document.getElementById('pg-workspace')?.value || '').trim();
     if (savedWs) {
       dagMemWorkspaceInput.value = savedWs;
       loadDagMemGraph();
+    } else {
+      // Default to demo visualization so graph is never empty on first view
+      dagMemWorkspaceInput.value = 'awesome-free-llm-apis (demo)';
+      _dagMemGraphData = { nodes: DEMO_DAG_NODES, edges: DEMO_DAG_EDGES };
+      renderDagMemGraph(dagMemFilterInput?.value || '');
     }
   }
 }
