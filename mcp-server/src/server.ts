@@ -484,6 +484,7 @@ export function createExpressApp(): express.Express {
                 durationMinutes: params.durationMinutes,
                 aborted: params.aborted,
                 pomodoroLimit: params.pomodoroLimit,
+                autoClassify: params.autoClassify,
               });
               break;
             case 'index_workspace':
