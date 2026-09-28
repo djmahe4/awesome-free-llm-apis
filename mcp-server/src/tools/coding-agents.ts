@@ -1218,13 +1218,62 @@ function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
 // (clean, no-op) way regardless of whether that gate is enabled.
 const STRAY_MARKER_RE = /^(?:<{5,}|={5,}|>{5,})\s*(?:SEARCH|REPLACE)?\s*$/m;
 
+/**
+ * Finds where `searchLines` occurs in `workingLines`, trying progressively
+ * looser matching so verbatim-quoting drift (the single biggest observed
+ * cause of "SEARCH text not found" — a weak model reproducing a block with
+ * different indentation/trailing whitespace but otherwise-correct content)
+ * doesn't fail a block that a human would recognize as an unambiguous match.
+ * Splitting on /\r?\n/ before this is ever called already makes line
+ * boundaries CRLF-agnostic, so the tiers below are about per-line content
+ * drift, not line-ending drift.
+ *   Tier 1: exact line-for-line match.
+ *   Tier 2: match after trimming each line (indentation/trailing-space only).
+ * Each tier independently requires exactly one match — an exact match always
+ * wins over a trimmed one, and a tier is never consulted if the previous
+ * tier already found (even an ambiguous) match, so loosening the match never
+ * silently overrides a real exact hit elsewhere in the file.
+ */
+function findLineBlockMatch(
+  workingLines: string[],
+  searchLines: string[]
+): { index: number; ambiguous: boolean } {
+  const tryTier = (project: (l: string) => string): number[] => {
+    const hits: number[] = [];
+    const projSearch = searchLines.map(project);
+    for (let i = 0; i + searchLines.length <= workingLines.length; i++) {
+      let matches = true;
+      for (let j = 0; j < searchLines.length; j++) {
+        if (project(workingLines[i + j]) !== projSearch[j]) { matches = false; break; }
+      }
+      if (matches) hits.push(i);
+    }
+    return hits;
+  };
+
+  const exact = tryTier(l => l);
+  if (exact.length > 0) return { index: exact[0], ambiguous: exact.length > 1 };
+
+  const trimmed = tryTier(l => l.trim());
+  if (trimmed.length > 0) return { index: trimmed[0], ambiguous: trimmed.length > 1 };
+
+  return { index: -1, ambiguous: false };
+}
+
 function applySearchReplaceBlocks(
   content: string,
   blocks: SearchReplaceBlock[]
 ): { content: string; appliedCount: number; failures: string[] } {
-  let working = content;
+  // CRLF-agnostic by construction (each line's own ending is discarded by
+  // the split), and rejoined with whichever ending the original file
+  // predominantly used, so touching a couple of lines doesn't flip the
+  // whole file's line endings (this repo has files with mixed endings).
+  const usesCrlf = /\r\n/.test(content);
+  const eol = usesCrlf ? '\r\n' : '\n';
+  let workingLines = content.split(/\r?\n/);
   let appliedCount = 0;
   const failures: string[] = [];
+
   for (const { search, replace } of blocks) {
     if (!search) {
       failures.push('Empty SEARCH block (nothing to match)');
@@ -1234,17 +1283,50 @@ function applySearchReplaceBlocks(
       failures.push('Block contains a stray SEARCH/REPLACE marker line (malformed/nested response) — not applied');
       continue;
     }
-    const occurrences = working.split(search).length - 1;
-    if (occurrences === 0) {
-      failures.push(`SEARCH text not found verbatim: ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
-    } else if (occurrences > 1) {
-      failures.push(`SEARCH text matched ${occurrences} times (ambiguous, must be unique): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
+    const searchLines = search.split(/\r?\n/);
+    const { index, ambiguous } = findLineBlockMatch(workingLines, searchLines);
+    if (index === -1) {
+      failures.push(`SEARCH text not found (even with whitespace-tolerant matching): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
+    } else if (ambiguous) {
+      failures.push(`SEARCH text matched multiple times (ambiguous, must be unique): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
     } else {
-      working = working.replace(search, replace);
+      const replaceLines = replace.split(/\r?\n/);
+      workingLines = [
+        ...workingLines.slice(0, index),
+        ...replaceLines,
+        ...workingLines.slice(index + searchLines.length),
+      ];
       appliedCount++;
     }
   }
-  return { content: working, appliedCount, failures };
+  return { content: workingLines.join(eol), appliedCount, failures };
+}
+
+/**
+ * Error-delta gate for TS/JS SEARCH/REPLACE results: a batch of blocks can
+ * each individually match and apply cleanly while the COMBINATION leaves the
+ * file in a worse state than before — observed live: fixing one method's
+ * signature to async without simultaneously updating its call sites turned
+ * 8 compiler errors into 18. Since ts-morph's in-memory check is cheap and
+ * synchronous-enough to run inline, accept a SEARCH/REPLACE result for TS/JS
+ * only if it doesn't increase the real (syntax + semantic) error count
+ * relative to the pre-patch content — otherwise reject the whole batch
+ * atomically rather than leaving a partially-migrated, worse-than-before file.
+ * Non-TS/JS files skip this (no ts-morph checker available) and rely solely
+ * on the guards above.
+ */
+async function searchReplaceRegressesTsErrors(
+  filePath: string,
+  beforeContent: string,
+  afterContent: string
+): Promise<boolean> {
+  if (!/\.(ts|tsx|js|jsx|mjs|cjs)$/i.test(filePath)) return false;
+  const countErrors = (diags: DiagnosticResult[]) => diags.filter(d => d.severity === 'error').length;
+  const [before, after] = await Promise.all([
+    runTsMorphCheck(filePath, beforeContent),
+    runTsMorphCheck(filePath, afterContent),
+  ]);
+  return countErrors(after) > countErrors(before);
 }
 
 function looksLikeHallucinatedReplacement(originalContent: string, patchedContent: string): boolean {
@@ -1911,7 +1993,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
                 // independent of whatever window was shown to the model, so
                 // there's no line-offset bookkeeping to get wrong.
                 const { content, appliedCount, failures } = applySearchReplaceBlocks(patchedContent, blocks);
-                if (appliedCount > 0) {
+                const regressed = appliedCount > 0 && await searchReplaceRegressesTsErrors(relPath, patchedContent, content);
+                if (appliedCount > 0 && !regressed) {
                   patchedContent = content;
                   result.modelUsed = resolvedModel;
                   result.usedFallbackModel = false;
@@ -1924,6 +2007,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
                       source: 'llm-patch',
                     });
                   }
+                } else if (regressed) {
+                  lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: ${appliedCount} block(s) matched, but applying them increases the file's compiler error count — rejected atomically (partial async/signature migrations are worse than no change)`;
                 } else {
                   lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: no blocks applied (${failures.join('; ') || 'unknown reason'})`;
                 }
@@ -2051,7 +2136,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
                 return res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
               }
             );
-            if (srResult.appliedCount > 0) {
+            const cloudRegressed = srResult.appliedCount > 0
+              && await searchReplaceRegressesTsErrors(relPath, patchedContent, srResult.content);
+            if (srResult.appliedCount > 0 && !cloudRegressed) {
               patchedContent = srResult.content;
               result.modelUsed = 'cloud-free-llm';
               result.usedFallbackModel = true;
@@ -2064,6 +2151,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
                   source: 'llm-patch',
                 });
               }
+            } else if (cloudRegressed) {
+              lastFailureReason = `Cloud model SEARCH/REPLACE: ${srResult.appliedCount} block(s) matched, but applying them increases the file's compiler error count — rejected atomically`;
             }
           } catch {
             // Fall through to the older cloud strategy below regardless of why.
