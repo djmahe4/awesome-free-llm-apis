@@ -31,6 +31,15 @@ export interface LocalLlmPatchInput {
   workspace_root?: string;
   sessionId?: string;
   allowCreate?: boolean;
+  // Sliding-window support (orchestrated by coding_agents): when the caller
+  // already knows the file is large and has located the relevant region,
+  // it passes just that excerpt here instead of letting this function read
+  // and send the whole file. Asking a model to reproduce hundreds of
+  // unchanged lines verbatim is what causes full-file truncation/hallucination
+  // on large files — sending only the excerpt removes that failure mode
+  // entirely, since the model never sees (and can't corrupt) the rest.
+  contentOverride?: string;
+  excerptRange?: { startLine: number; endLine: number; totalLines: number };
 }
 
 export interface LocalLlmPatchResult {
@@ -111,7 +120,12 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
 
     const candidateModels = rankCandidateModels(availableModels);
 
-    const fileContent = fileExists ? await fs.readFile(absPath, 'utf-8') : '';
+    // A windowed excerpt (see excerptRange) stands in for reading the real
+    // file — the caller has already located the relevant region and is
+    // asking the model to edit only that slice, so skip the disk read.
+    const fileContent = input.contentOverride !== undefined
+      ? input.contentOverride
+      : (fileExists ? await fs.readFile(absPath, 'utf-8') : '');
     const workspaceRoot = input.workspace_root || path.dirname(absPath);
 
     let context: string[] = [];
@@ -128,7 +142,10 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
       '.rb', '.php', '.swift', '.kt', '.scala', '.ex', '.exs',
     ]);
     const targetExt = path.extname(absPath).toLowerCase();
-    const shouldGatherContext = fileExists && CODE_CONTEXT_EXTS.has(targetExt);
+    // A windowed excerpt already IS the relevant region — skip whole-repo
+    // context gathering, which would only dilute a prompt that's already
+    // scoped down to exactly what needs editing.
+    const shouldGatherContext = fileExists && CODE_CONTEXT_EXTS.has(targetExt) && !input.excerptRange;
 
     if (shouldGatherContext) {
       try {
@@ -150,13 +167,21 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
       ? `\n\n## Related workspace context\n${context.join('\n\n')}`
       : '';
 
-    const fileNotice = fileExists
-      ? `You are patching a single file. Apply the instruction and return the COMPLETE new file content only, wrapped in a single code fence. Do not include explanations outside the fence.`
-      : `You are creating a new file: ${path.basename(absPath)}. Implement the instruction and return the COMPLETE file content only, wrapped in a single code fence. Do not include explanations outside the fence.`;
+    // Excerpt wording explicitly forbids reproducing the rest of the file —
+    // this is the actual fix: a model asked for "the complete file" on a
+    // 1000-line file will truncate/hallucinate the parts it doesn't touch;
+    // asking for just the excerpt removes that temptation entirely.
+    const fileNotice = input.excerptRange
+      ? `You are editing a specific section of ${path.basename(absPath)} (${input.excerptRange.totalLines} lines total). The excerpt below is lines ${input.excerptRange.startLine}–${input.excerptRange.endLine} of the file (${input.excerptRange.endLine - input.excerptRange.startLine + 1} lines). Your reply REPLACES this excerpt verbatim, line for line — reproduce every unchanged line exactly as shown, and only alter the specific line(s) the instruction targets. Do NOT summarize, abbreviate, or omit any line, and do NOT return just the changed line(s) alone — that would delete the rest of the excerpt. Wrap the full ${input.excerptRange.endLine - input.excerptRange.startLine + 1}-line reply in a single code fence with no other commentary. The file's content outside this excerpt is separate and must NOT be reproduced.`
+      : fileExists
+        ? `You are patching a single file. Apply the instruction and return the COMPLETE new file content only, wrapped in a single code fence. Do not include explanations outside the fence.`
+        : `You are creating a new file: ${path.basename(absPath)}. Implement the instruction and return the COMPLETE file content only, wrapped in a single code fence. Do not include explanations outside the fence.`;
 
     const prompt = [
       fileNotice,
-      `## File: ${path.basename(absPath)}`,
+      input.excerptRange
+        ? `## Excerpt: lines ${input.excerptRange.startLine}–${input.excerptRange.endLine} of ${path.basename(absPath)}`
+        : `## File: ${path.basename(absPath)}`,
       '```',
       fileContent,
       '```',
@@ -177,7 +202,12 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
       const candidate = candidateModels[i];
       try {
         chatResult = await chatLocal(candidate, [
-          { role: 'system', content: 'You are a precise code-editing assistant. Return only the complete new file content in a single code fence.' },
+          {
+            role: 'system',
+            content: input.excerptRange
+              ? 'You are a precise code-editing assistant. Return ONLY the updated excerpt lines inside one code fence. Do NOT return the rest of the file.'
+              : 'You are a precise code-editing assistant. Return only the complete new file content in a single code fence.',
+          },
           { role: 'user', content: prompt },
         ]);
         modelUsed = candidate;

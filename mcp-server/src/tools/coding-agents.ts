@@ -1147,6 +1147,35 @@ function extractWindowForInstruction(
  * *somewhere* in the replacement, or it's treated as a hallucinated
  * replacement rather than a real edit.
  */
+/**
+ * Sliding-window fidelity guard: a model can honor "don't touch anything
+ * outside the excerpt" while still mangling the excerpt itself in ways a
+ * mere line-count check misses — observed live, twice, on the same 120-line
+ * window: once collapsed down to ~2 lines, once kept a near-identical total
+ * line count but with rows duplicated near the boundary and the actual
+ * target line silently dropped in the shuffle. Because the loss/shift is
+ * small relative to the WHOLE file, looksLikeHallucinatedReplacement's
+ * overlap check on the spliced full content doesn't catch either case.
+ * This compares the window in isolation via multiset line overlap: a real
+ * targeted edit changes a line or two and reproduces everything else
+ * byte-for-byte, so overlap should be near-total regardless of whether the
+ * counts happen to match.
+ */
+function windowReplyIsSuspicious(originalWindowLines: string[], replyLines: string[]): boolean {
+  if (originalWindowLines.length < 5) return false;
+  const available = new Map<string, number>();
+  for (const line of originalWindowLines) available.set(line, (available.get(line) || 0) + 1);
+  let kept = 0;
+  for (const line of replyLines) {
+    const remaining = available.get(line) || 0;
+    if (remaining > 0) {
+      available.set(line, remaining - 1);
+      kept++;
+    }
+  }
+  return kept / originalWindowLines.length < 0.85;
+}
+
 function looksLikeHallucinatedReplacement(originalContent: string, patchedContent: string): boolean {
   // A stray leading markdown fence marker means extractCodeBlock's stripping
   // didn't fully work (e.g. an unclosed/truncated fence) — the content itself
@@ -1277,10 +1306,21 @@ async function generateCodePatchWithCloudLLM(
       const extracted = extractCodeBlock(raw);
       if (extracted?.trim()) {
         if (windowInfo) {
+          const patchedWindowLines = extracted.split(/\r?\n/);
+          const origLines = currentContent.split(/\r?\n/);
+          const originalWindowLines = origLines.slice(windowInfo.startIdx, windowInfo.endIdx);
+          // Same window-fidelity check as the local-model path: a reply that
+          // mangles the excerpt (collapses, duplicates, or drops lines) still
+          // clears the whole-file overlap check below (the loss is small
+          // relative to the WHOLE file), so it must be caught here first.
+          if (windowReplyIsSuspicious(originalWindowLines, patchedWindowLines)) {
+            return {
+              patch: null,
+              failureReason: `Cloud model mangled a ${originalWindowLines.length}-line excerpt instead of reproducing it verbatim (duplicated/dropped/reordered lines) — not used.`,
+            };
+          }
           // Splice the patched window back into the full file content.
           // Result ≈ original + small edit → looksLikeHallucinatedReplacement passes.
-          const origLines = currentContent.split(/\r?\n/);
-          const patchedWindowLines = extracted.split(/\r?\n/);
           const spliced = [
             ...origLines.slice(0, windowInfo.startIdx),
             ...patchedWindowLines,
@@ -1703,17 +1743,44 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         // manual resume retry instead of auto-escalating within one call.
         if (resolvedModel) {
           try {
+            // Same sliding-window fix already used for the cloud fallback below:
+            // asking a local model to reproduce a large non-module file (HTML,
+            // classic browser JS with no `export`s) in full is what causes
+            // truncation/hallucination. Locate the ~120-line region the
+            // instruction actually targets and send only that; local_llm_patch
+            // splices nothing itself, so the excerpt is spliced back here,
+            // right before the corruption guard runs on the reconstructed
+            // full content — matching the cloud path's guard timing exactly.
+            const hasExports = /^\s*export\s+/m.test(patchedContent);
+            const windowInfo = !hasExports ? extractWindowForInstruction(patchedContent, activeGoal) : null;
             const llmResult = await localLlmPatch({
               filePath: fullPath,
               instruction: augmentedInstruction,
               workspace_root: workspaceRoot,
               sessionId,
+              contentOverride: windowInfo ? windowInfo.window : undefined,
+              excerptRange: windowInfo
+                ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }
+                : undefined,
             });
             if (llmResult.success && llmResult.patch?.trim()) {
-              if (originalContent && looksLikeHallucinatedReplacement(originalContent, llmResult.patch)) {
+              const replyLines = llmResult.patch.split(/\r?\n/);
+              const fullLines = patchedContent.split(/\r?\n/);
+              const originalWindowLines = windowInfo ? fullLines.slice(windowInfo.startIdx, windowInfo.endIdx) : [];
+              const windowMangled = windowInfo && windowReplyIsSuspicious(originalWindowLines, replyLines);
+              const candidatePatch = windowInfo
+                ? [
+                    ...fullLines.slice(0, windowInfo.startIdx),
+                    ...replyLines,
+                    ...fullLines.slice(windowInfo.endIdx),
+                  ].join('\n')
+                : llmResult.patch;
+              if (windowMangled) {
+                lastFailureReason = `Local model (${resolvedModel}) mangled a ${originalWindowLines.length}-line excerpt instead of reproducing it verbatim (duplicated/dropped/reordered lines) — not used`;
+              } else if (originalContent && looksLikeHallucinatedReplacement(originalContent, candidatePatch)) {
                 lastFailureReason = `Local model (${resolvedModel}) produced a full-file replacement with no trace of the original file's content — likely hallucinated, not used`;
               } else {
-                patchedContent = llmResult.patch;
+                patchedContent = candidatePatch;
                 result.modelUsed = resolvedModel;
                 result.usedFallbackModel = false;
                 appliedPatch = true;
