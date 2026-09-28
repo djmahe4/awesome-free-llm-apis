@@ -1206,6 +1206,18 @@ function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
  * Sequential: each block's replace is applied before the next block's
  * search runs, so later blocks can target text a prior block just wrote.
  */
+// Matches a stray protocol marker line (<<<<<<<, =======, >>>>>>>) inside a
+// block's own text — real code should never contain these, so their
+// presence means the model's response got tangled (nested/malformed blocks,
+// or it echoed the format instructions back as content) rather than
+// producing a real edit. Observed live: a REPLACE payload containing a
+// marker line got spliced straight into a .ts file, producing a literal
+// "Merge conflict marker encountered" compiler error — caught by the LSP
+// auto-rollback gate that time, but only because verifyLspDiagnostics
+// happened to be on for that call. This guard makes it fail the same
+// (clean, no-op) way regardless of whether that gate is enabled.
+const STRAY_MARKER_RE = /^(?:<{5,}|={5,}|>{5,})\s*(?:SEARCH|REPLACE)?\s*$/m;
+
 function applySearchReplaceBlocks(
   content: string,
   blocks: SearchReplaceBlock[]
@@ -1216,6 +1228,10 @@ function applySearchReplaceBlocks(
   for (const { search, replace } of blocks) {
     if (!search) {
       failures.push('Empty SEARCH block (nothing to match)');
+      continue;
+    }
+    if (STRAY_MARKER_RE.test(search) || STRAY_MARKER_RE.test(replace)) {
+      failures.push('Block contains a stray SEARCH/REPLACE marker line (malformed/nested response) — not applied');
       continue;
     }
     const occurrences = working.split(search).length - 1;
