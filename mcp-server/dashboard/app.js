@@ -599,19 +599,33 @@ const TOOLS = [
     id: 'load_skill_prompt', label: 'load_skill_prompt', icon: '📥',
     tag: 'Skill Loading',
     fields: [
-      { id: 'type',         label: 'Action Type', type: 'select', options: ['load', 'search'] },
+      { id: 'type',         label: 'Action Type', type: 'select', options: ['load', 'search', 'list'] },
       { id: 'name',         label: 'Skill Name', type: 'text', placeholder: 'tdd-workflow' },
       { id: 'keywords',     label: 'Keywords (comma-separated for search)', type: 'text', placeholder: 'tdd, testing' },
-      { id: 'workspaceDir', label: 'Workspace Directory (optional)', type: 'text', placeholder: 'C:/path/to/workspace' }
+      { id: 'workspaceDir', label: 'Workspace Directory (optional)', type: 'text', placeholder: 'C:/path/to/workspace' },
+      { id: 'source',       label: 'Source (optional)', type: 'select', options: ['', 'agentic-awesome', 'hermes'] },
+      { id: 'sessionId',    label: 'Session ID (for background download polling)', type: 'text', placeholder: 'load-1' },
+      { id: 'pollAction',   label: 'Poll Action (optional)', type: 'select', options: ['', 'run', 'status'] },
     ]
   },
   {
     id: 'manage_memory', label: 'manage_memory', icon: '🧠',
     tag: 'Memory',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['search','list','stats','clear'] },
-      { id: 'query',  label: 'Query (for search)', type: 'text', placeholder: 'authentication patterns' },
-      { id: 'limit',  label: 'Limit (results)', type: 'number', placeholder: '5' },
+      { id: 'action',         label: 'Action', type: 'select', options: ['search','list','stats','clear','wiki_search','wiki_write','wiki_list','wiki_read','node_add','node_link','node_list','node_get','graph_query'] },
+      { id: 'query',          label: 'Query (for search / wiki_search)', type: 'text', placeholder: 'authentication patterns' },
+      { id: 'limit',          label: 'Limit (results)', type: 'number', placeholder: '5' },
+      { id: 'title',          label: 'Title (for wiki_write / wiki_read)', type: 'text', placeholder: 'Auth Overview' },
+      { id: 'content',        label: 'Content (for wiki_write)', type: 'textarea', placeholder: 'Page content...' },
+      { id: 'tags',           label: 'Tags (comma-separated; node_list filters by tags[0])', type: 'text', placeholder: 'auth, security' },
+      { id: 'links',          label: 'Links (comma-separated, for wiki_write)', type: 'text', placeholder: 'Related Page' },
+      { id: 'persona',        label: 'Persona (for wiki_search)', type: 'text', placeholder: 'coder' },
+      { id: 'namespace',      label: 'Namespace (for wiki_*)', type: 'text', placeholder: 'global-cyber-tools' },
+      { id: 'node',           label: 'Node JSON (for node_add)', type: 'textarea', placeholder: '{"type":"text","content":"auth uses JWT","tags":["auth"]}' },
+      { id: 'nodeId',         label: 'Node ID (for node_get)', type: 'text', placeholder: 'a1b2c3...' },
+      { id: 'from',           label: 'From Node ID (for node_link)', type: 'text', placeholder: 'a1b2c3...' },
+      { id: 'to',             label: 'To Node ID (for node_link)', type: 'text', placeholder: 'd4e5f6...' },
+      { id: 'relation',       label: 'Relation Label (for node_link)', type: 'text', placeholder: 'relates-to' },
     ]
   },
   {
@@ -635,7 +649,7 @@ const TOOLS = [
     id: 'cyber_tool', label: 'cyber_tool', icon: '🛡️',
     tag: 'Cyber Security',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['osint', 'list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory'] },
+      { id: 'action', label: 'Action', type: 'select', options: ['osint', 'osint_status', 'list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory'] },
       { id: 'target', label: 'Target (for osint)', type: 'text', placeholder: 'example.com or johndoe' },
       { id: 'osintType', label: 'OSINT Type (for osint)', type: 'select', options: ['all', 'domain', 'ip', 'username'] },
       { id: 'autoSearch', label: 'Auto Search Recon Dorks (osint)', type: 'select', options: ['false', 'true'] },
@@ -660,6 +674,11 @@ const TOOLS = [
       { id: 'what',        label: 'What was done (one item per line)', type: 'textarea', placeholder: 'Added verify-migrations.sh\nIntegrated schema diff checks' },
       { id: 'why',         label: 'Why', type: 'text', placeholder: 'Prevent schema drift during deployments' },
       { id: 'files',       label: 'Files (comma-separated)', type: 'text', placeholder: 'scripts/verify-migrations.sh' },
+      { id: 'example',     label: 'Example (optional)', type: 'textarea', placeholder: 'Code snippet or usage example' },
+      { id: 'script_instructions', label: 'Script Instructions JSON (optional, triggers background generation)', type: 'textarea', placeholder: '{"verify.py":"Diff Prisma schema against live DB"}' },
+      { id: 'workspace_root', label: 'Workspace Root (required)', type: 'text', placeholder: 'C:/path/to/project' },
+      { id: 'sessionId',   label: 'Session ID (for background generation polling)', type: 'text', placeholder: 'skill-gen-1' },
+      { id: 'pollAction',  label: 'Poll Action (optional)', type: 'select', options: ['', 'run', 'status', 'abort'] },
     ]
   },
   {
@@ -694,6 +713,13 @@ const TOOLS = [
       { id: 'dryRun', label: 'Dry Run Mode (simulate only)', type: 'toggle', default: true },
       { id: 'topKFiles', label: 'Candidate Files Count (RAG)', type: 'number', placeholder: '5' },
       { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'coding-session-1' },
+      { id: 'action', label: 'Action', type: 'select', options: ['', 'plan', 'execute', 'resume', 'status', 'abort'] },
+      { id: 'pauseOnTaskPlan', label: 'Pause On Task Plan', type: 'toggle' },
+      { id: 'targetFiles', label: 'Target Files (comma-separated)', type: 'text', placeholder: 'src/foo.ts, src/bar.ts' },
+      { id: 'verifyLspDiagnostics', label: 'Verify LSP Diagnostics', type: 'toggle', default: true },
+      { id: 'astEditOps', label: 'AST Edit Ops JSON (optional)', type: 'textarea', placeholder: '[{"pat":"old($$A)","out":"new($$A)"}]' },
+      { id: 'resolve', label: 'Resolve JSON (optional)', type: 'textarea', placeholder: '{"action":"apply"}' },
+      { id: 'lspAction', label: 'LSP Action JSON (optional)', type: 'textarea', placeholder: '{"action":"diagnostics"}' },
     ]
   },
   {
@@ -850,9 +876,9 @@ const TOOL_WHEN_TO_USE = {
     <div>Manage persistent long-term memory, project architectural decision records (ADRs), and workspace wiki documentation.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
-      <li><code>action: "search"</code> / <code>"save"</code> / <code>"delete"</code> — Vector semantic search across long-term facts.</li>
-      <li><code>action: "read_adr"</code> / <code>"write_adr"</code> — Maintain architectural decisions in <code>.free-llm-mcp/wiki/adr/</code>.</li>
-      <li><code>action: "wiki_read"</code> / <code>"wiki_write"</code> / <code>"wiki_list"</code> — Maintain technical wiki guides.</li>
+      <li><code>action: "search"</code> / <code>"list"</code> / <code>"stats"</code> / <code>"clear"</code> — Workspace key-value memory.</li>
+      <li><code>action: "wiki_search"</code> / <code>"wiki_write"</code> / <code>"wiki_list"</code> / <code>"wiki_read"</code> — Maintain technical wiki guides.</li>
+      <li><code>action: "node_add"</code> / <code>"node_link"</code> / <code>"node_list"</code> / <code>"node_get"</code> / <code>"graph_query"</code> — DAG memory node/edge graph with Ebbinghaus decay.</li>
     </ul>`,
 
   index_workspace: `

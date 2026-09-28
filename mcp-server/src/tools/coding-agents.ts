@@ -854,9 +854,17 @@ function hasCommand(cmd: string): boolean {
 
 function decomposeGoalToTasks(goal: string): TaskItem[] {
   const lines = goal.split('\n').map(l => l.trim()).filter(Boolean);
+  const listMarker = /^\s*(?:\d+[.)\-]|[-*])\s+/;
   const items: string[] = [];
   for (const line of lines) {
-    const clean = line.replace(/^\s*(?:\d+[.)\-]|[-*])\s+/, '').trim();
+    // Only lines actually PREFIXED with a numbered/bulleted marker count as
+    // separate items — a plain prose line (e.g. an intro sentence before the
+    // numbered list) previously fell through .replace() unchanged and still
+    // got pushed as its own bogus task, since replace() on a non-match is a
+    // no-op, not a skip. Observed live: a goal like "Do these N fixes:\n1. ..."
+    // produced N+1 tasks, the intro line becoming a fabricated task-1.
+    if (!listMarker.test(line)) continue;
+    const clean = line.replace(listMarker, '').trim();
     if (clean) items.push(clean);
   }
   const taskStrings = items.length >= 2 ? items : [goal];
@@ -872,9 +880,29 @@ function decomposeGoalToTasks(goal: string): TaskItem[] {
  * LLM-driven subtask decomposition. Uses the cloud model (useFreeLLM), not the
  * local coder model — this is a planning/reasoning task, and the local model
  * (already proven weak at multi-file/architectural reasoning elsewhere in this
- * pipeline) is the wrong tool for it. Falls back to decomposeGoalToTasks' naive
- * line-split on any failure (unreachable providers, malformed JSON, empty
- * goal) so plan creation never hard-fails just because the planner call did.
+ * pipeline) is the wrong tool for it.
+ *
+ * Two-phase, not one LLM call that both splits AND annotates:
+ *   Phase 1 (deterministic): if the goal is already an explicit enumerated
+ *     list (numbered/bulleted lines, >=2 items), extract those items VERBATIM
+ *     via decomposeGoalToTasks — plain text parsing, zero hallucination risk.
+ *     The LLM never gets a chance to drop, reorder, or invent items when the
+ *     caller already told us exactly what they are.
+ *   Phase 2 (LLM, annotation-only): ask the model only to fill in
+ *     targetFile/context for that FIXED list, one line per index, and
+ *     validate the response has exactly the same number of entries in the
+ *     same order before trusting any of it — a malformed or wrong-length
+ *     response is discarded wholesale rather than partially applied,
+ *     falling back to un-annotated tasks (still the full correct set).
+ * Only when the goal is a single unstructured paragraph (no explicit list)
+ * does the LLM get to propose the task breakdown itself — genuinely
+ * ambiguous input has no safe deterministic alternative.
+ *
+ * Observed live: a goal with 5 explicitly numbered subtasks, decomposed via
+ * the old single-call approach, came back with 2 of the 5 dropped and 2
+ * unrelated ones invented in their place — this two-phase split exists
+ * specifically to make that failure mode structurally impossible for any
+ * goal that already enumerates its own subtasks.
  */
 async function decomposeGoalIntelligently(
   goal: string,
@@ -882,6 +910,13 @@ async function decomposeGoalIntelligently(
   candidateFiles: string[],
   sessionId: string,
 ): Promise<TaskItem[]> {
+  const naiveTasks = decomposeGoalToTasks(goal);
+  const goalIsExplicitlyEnumerated = naiveTasks.length >= 2;
+
+  if (goalIsExplicitlyEnumerated) {
+    return await annotateFixedTaskList(naiveTasks, workspaceRoot, candidateFiles, sessionId);
+  }
+
   try {
     const { useFreeLLM } = await import('./use-free-llm.js');
     const fileList = candidateFiles.slice(0, 60).join('\n');
@@ -929,7 +964,67 @@ async function decomposeGoalIntelligently(
     return tasks;
   } catch (err: any) {
     console.warn(`[coding-agents] Intelligent decomposition failed, falling back to naive split: ${err.message}`);
-    return decomposeGoalToTasks(goal);
+    return naiveTasks;
+  }
+}
+
+/** Phase 2 of decomposeGoalIntelligently: annotate an already-fixed task list
+ * with targetFile/context, without letting the LLM change the list itself. */
+async function annotateFixedTaskList(
+  tasks: TaskItem[],
+  workspaceRoot: string,
+  candidateFiles: string[],
+  sessionId: string,
+): Promise<TaskItem[]> {
+  try {
+    const { useFreeLLM } = await import('./use-free-llm.js');
+    const fileList = candidateFiles.slice(0, 60).join('\n');
+    const taskList = tasks.map((t, i) => `${i}: ${t.task}`).join('\n');
+    const prompt = [
+      `These ${tasks.length} subtasks are already fixed and final — do not add, remove, reorder, merge, or reword any of them.`,
+      `For EACH one, in the same order, provide only its target file and short context.`,
+      `Return ONLY a JSON array of exactly ${tasks.length} elements, no prose, no code fence. Element i corresponds to subtask i:`,
+      `{ "targetFile": "<relative path from the candidate list, or null if this subtask has no single target file>", "context": "<1-3 sentences: why this file, what it must respect or not break, dependencies on other subtasks>" }`,
+      `## Fixed subtasks (index: text)\n${taskList}`,
+      `## Candidate files in this workspace (pick from these when possible)\n${fileList || '(none enumerated)'}`,
+    ].join('\n\n');
+
+    const res = await useFreeLLM({
+      messages: [
+        { role: 'system', content: 'You annotate an already-decided task list with file/context metadata only. You never change the list itself. Output strict JSON only.' },
+        { role: 'user', content: prompt },
+      ],
+      taskType: 'reasoning',
+      workspace_root: workspaceRoot,
+      sessionId,
+      isOnePass: true,
+      skipIndexing: true,
+    } as any);
+
+    const raw = res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
+    if (!raw || typeof raw !== 'string') throw new Error('Empty annotator response');
+
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) throw new Error('Annotator response contained no JSON array');
+    const parsed = JSON.parse(jsonMatch[0]);
+    // Wrong length is discarded wholesale, not zipped partially — a
+    // mismatched-length response means the model didn't follow the fixed-list
+    // constraint and can't be trusted to have kept index alignment either.
+    if (!Array.isArray(parsed) || parsed.length !== tasks.length) {
+      throw new Error(`Annotator returned ${Array.isArray(parsed) ? parsed.length : 'non-array'}, expected exactly ${tasks.length}`);
+    }
+
+    return tasks.map((t, i) => {
+      const ann = parsed[i];
+      return {
+        ...t,
+        targetFile: ann?.targetFile ? path.normalize(String(ann.targetFile).trim()).replace(/\\/g, '/') : undefined,
+        context: ann?.context ? String(ann.context).trim() : undefined,
+      };
+    });
+  } catch (err: any) {
+    console.warn(`[coding-agents] Task annotation failed, using un-annotated (but complete and correct) task list: ${err.message}`);
+    return tasks;
   }
 }
 
@@ -1494,7 +1589,14 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           ? `${activeGoal}\n\n[DAG Context]\n${tasksContext}`
           : activeGoal;
 
-        // Try local model first if available
+        // Try local model first if available. The corruption guard runs on
+        // ITS result immediately — not after the fact — because a local
+        // "success" that's actually a hallucinated replacement must NOT skip
+        // the cloud fallback below the way a genuine success would. Without
+        // this, a local model that reliably produces garbage (rather than
+        // erroring) would set appliedPatch=true and permanently starve cloud
+        // fallback of ever being tried, forcing identical failures on every
+        // manual resume retry instead of auto-escalating within one call.
         if (resolvedModel) {
           try {
             const llmResult = await localLlmPatch({
@@ -1504,10 +1606,14 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
               sessionId,
             });
             if (llmResult.success && llmResult.patch?.trim()) {
-              patchedContent = llmResult.patch;
-              result.modelUsed = resolvedModel;
-              result.usedFallbackModel = false;
-              appliedPatch = true;
+              if (originalContent && looksLikeHallucinatedReplacement(originalContent, llmResult.patch)) {
+                lastFailureReason = `Local model (${resolvedModel}) produced a full-file replacement with no trace of the original file's content — likely hallucinated, not used`;
+              } else {
+                patchedContent = llmResult.patch;
+                result.modelUsed = resolvedModel;
+                result.usedFallbackModel = false;
+                appliedPatch = true;
+              }
             } else if (llmResult.error) {
               lastFailureReason = `Local model (${resolvedModel}) failed: ${llmResult.error}`;
             }
@@ -1517,7 +1623,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           }
         }
 
-        // If local model not available or failed, fallback to cloud model
+        // If local model was unavailable, errored, or produced a hallucinated
+        // result, fall back to cloud model — same guard applied to its output.
         if (!appliedPatch) {
           const localReason = lastFailureReason;
           const { patch: cloudPatch, failureReason } = await generateCodePatchWithCloudLLM(
@@ -1528,7 +1635,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
             sessionId,
             tasksContext
           );
-          if (cloudPatch?.trim()) {
+          if (cloudPatch?.trim() && originalContent && looksLikeHallucinatedReplacement(originalContent, cloudPatch)) {
+            lastFailureReason = `${localReason ? `${localReason} ` : ''}Cloud fallback also produced a full-file replacement with no trace of the original file's content — likely hallucinated, not used`;
+          } else if (cloudPatch?.trim()) {
             patchedContent = cloudPatch;
             result.modelUsed = 'cloud-free-llm';
             result.usedFallbackModel = true;
@@ -1539,19 +1648,6 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
               ? `${localReason} (Cloud fallback also failed: ${failureReason || 'no response'})`
               : (failureReason || 'No valid code patch produced by LLM');
           }
-        }
-
-        // Corruption guard: an LLM "success" that replaced an existing file's
-        // content with something unrelated (see looksLikeHallucinatedReplacement
-        // doc comment) is worse than a failure — it silently destroys the file.
-        // Revert to the original content and report it the same way as a
-        // generation failure, rather than let it proceed to be written to disk.
-        if (appliedPatch && originalContent && looksLikeHallucinatedReplacement(originalContent, patchedContent)) {
-          patchedContent = originalContent;
-          appliedPatch = false;
-          lastFailureReason = `${result.modelUsed} produced a full-file replacement with no trace of the original file's declared symbols — likely an unrelated/hallucinated result, not applied`;
-          result.modelUsed = undefined;
-          result.usedFallbackModel = undefined;
         }
 
         if (!appliedPatch && lastFailureReason) {
@@ -1581,6 +1677,16 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
               source: 'ast-syntactic',
             });
           }
+        }
+        // A zero-match astEditOps call is a no-op, not a success — the file
+        // is unchanged, but this only ever surfaced as a 'warning' diagnostic,
+        // which taskHadFailure doesn't check (only 'error'/'llm-patch' does).
+        // Without this, a DAG task resumed with a pattern that doesn't match
+        // gets marked 'completed' on the blackboard despite accomplishing
+        // nothing, and the DAG moves on instead of retrying with a corrected
+        // pattern.
+        if (rewrites === 0) {
+          taskHadFailure = true;
         }
       }
 
