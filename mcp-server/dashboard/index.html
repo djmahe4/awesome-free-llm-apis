@@ -963,6 +963,52 @@
           <div class="conv-empty">Enter a workspace and click Load Graph.</div>
         </div>
       </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="color:var(--accent-amber);">&#9200; Due-Review Queue (Ebbinghaus)</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span id="dagmem-bb-count" style="background:var(--accent-amber);color:#000;border-radius:12px;padding:2px 8px;font-size:12px;font-weight:700;">0</span>
+            <button id="dagmem-bb-refresh" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;">&#x1F504; Refresh Queue</button>
+          </div>
+        </div>
+        <div class="card-body" id="dagmem-blackboard-container" style="min-height:60px;">
+          <div class="conv-empty">Load graph above, then click Refresh Queue to see due-review nodes.</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="color:var(--accent-purple);">&#128202; Eisenhower Matrix</span>
+          <button id="eis-refresh" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;">&#x1F504; Refresh</button>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
+            <input type="text" id="eis-task-input" placeholder="New task..." style="flex:1;min-width:200px;">
+            <label style="display:flex;align-items:center;gap:4px;font-size:.8rem;white-space:nowrap;"><input type="checkbox" id="eis-urgent"> Urgent</label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:.8rem;white-space:nowrap;"><input type="checkbox" id="eis-important"> Important</label>
+            <button id="eis-add-btn" class="btn btn-primary btn-sm">Add</button>
+          </div>
+          <div id="eis-matrix" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="conv-empty">Load a workspace above, then click Refresh.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header">
+          <span class="card-title" style="color:var(--accent-red);">&#9203; Pomodoro Timer</span>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="text" id="pomo-label-input" placeholder="What are you working on?" style="flex:1;min-width:180px;">
+            <input type="number" id="pomo-duration-input" value="25" min="1" style="width:70px;" title="Duration in minutes">
+            <button id="pomo-start-btn" class="btn btn-primary btn-sm">Start</button>
+            <button id="pomo-stop-btn" class="btn btn-secondary btn-sm" style="display:none;">Stop</button>
+            <span id="pomo-display" style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;margin-left:auto;"></span>
+          </div>
+        </div>
+      </div>
     </section>
 
   </main>
@@ -993,5 +1039,7 @@
   </footer>
 
   <script src="/app.js"></script>
+  <script src="/dag-blackboard.js"></script>
+  <script src="/productivity-ui.js"></script>
 </body>
 </html>
