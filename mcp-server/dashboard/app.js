@@ -802,10 +802,11 @@ const TOOL_WHEN_TO_USE = {
     <div>Autonomous multi-file software engineer based on the OMP (oh-my-pi) pattern. Searches your codebase, writes hash-anchored patches, performs AST rewrites, verifies compiler diagnostics, and commits or rolls back changes.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
-      <li><code>action: "run"</code> — Executes full refactoring pipeline (Vector RAG grep &rarr; Hashline diffs &rarr; Polyglot LSP checks).</li>
-      <li><code>resolve: "apply"</code> — Confirms and saves patched files to disk.</li>
-      <li><code>resolve: "discard"</code> — Rejects staged changes without writing to disk.</li>
-      <li><code>resolve: "rollback"</code> — Instantly restores previous state using Content-Addressable Storage (CAS) snapshots.</li>
+      <li><code>action: "plan"</code> — Decomposes the goal into tasks.md and pauses; <code>"resume"</code> executes the next pending task.</li>
+      <li><code>action: "execute"</code> (default) — Executes full refactoring pipeline (Vector RAG grep &rarr; Hashline diffs &rarr; Polyglot LSP checks).</li>
+      <li><code>action: "status"</code> / <code>"abort"</code> — Poll or cancel a background run started by a prior dryRun:false call.</li>
+      <li><code>resolve: {action: "apply", checkpointId?}</code> — Confirms and saves patched files to disk.</li>
+      <li><code>resolve: {action: "rollback", checkpointId?}</code> — Instantly restores previous state using Content-Addressable Storage (CAS) snapshots.</li>
     </ul>`,
 
   local_llm_patch: `
@@ -834,7 +835,7 @@ const TOOL_WHEN_TO_USE = {
     <div>Security coaching assistant, passive OSINT reconnaissance engine, and decision-graph tracker for authorized CTF challenges and educational penetration testing.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
-      <li><code>action: "osint"</code> — Passive DNS & infrastructure reconnaissance (A, AAAA, MX, TXT, NS), search dork generation, and automatic Markdown report creation in the cyber wiki. Supports <code>autoSearch: true</code> for automated multi-step search recon.</li>
+      <li><code>action: "osint"</code> — Passive DNS & infrastructure reconnaissance (A, AAAA, MX, TXT, NS), search dork generation, and automatic Markdown report creation in the cyber wiki. Supports <code>autoSearch: true</code> to run recon dorks in the background — poll results with <code>action: "osint_status"</code> (same sessionId/target).</li>
       <li><code>action: "lookup"</code> / <code>"get_tool"</code> — Query CLI flags and syntax for security tools (nmap, sqlmap, gobuster, etc.).</li>
       <li><code>action: "coach"</code> — Receive strategic next test steps based on target recon findings.</li>
       <li><code>action: "save_graph"</code> & <code>"load_graph"</code> — Create or visualize hypothesis nodes on the persistent engagement graph.</li>
@@ -867,8 +868,8 @@ const TOOL_WHEN_TO_USE = {
     <div>Search and load ready-to-use system prompts from the local repository or bundled Hermes catalog without running the LLM.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
-      <li><code>type: "skill"</code> — Load a specific skill's system instructions.</li>
-      <li><code>type: "persona"</code> — Load a specialized persona prompt (e.g., Coder, Security Auditor, Researcher).</li>
+      <li><code>type: "load"</code> / <code>"search"</code> / <code>"list"</code> — Load a specific skill, search by keyword, or list bundled skills.</li>
+      <li><code>source: "agentic-awesome"</code> / <code>"hermes"</code> — Which skill catalog to use; agentic-awesome downloads run in the background — poll with <code>pollAction: "status"</code> (same sessionId).</li>
     </ul>`,
 
   manage_memory: `
@@ -892,10 +893,11 @@ const TOOL_WHEN_TO_USE = {
 
   store_workspace_skill: `
     <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
-    <div>Save custom reusable AI skills and workflow guides directly into your repository's <code>.agents/</code> folder.</div>
+    <div>Save custom reusable AI skills, and optionally generate scripts for them via an internal LLM, into the workspace's skill directory.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
-      <li>Provide <code>skill_name</code>, <code>description</code>, and Markdown <code>content</code> following the Agent Skills spec.</li>
+      <li>Provide <code>name</code>, <code>description</code>, <code>what</code>, and <code>workspace_root</code> (required) to write SKILL.md.</li>
+      <li><code>script_instructions</code> (JSON map filename→instruction) triggers background script generation — poll with <code>pollAction: "status"</code> (same sessionId); <code>pollAction: "abort"</code> cancels an in-flight run.</li>
     </ul>`,
 
   validate_provider: `
