@@ -203,11 +203,19 @@ async function onPomodoroPhaseComplete(state) {
   await callPomodoro('pomodoro_stop', { sessionRefId: state.sessionId, aborted: false });
 
   if (state.phase === 'work') {
-    showPomodoroOverlay('Work session complete! Time for a 5-minute break.', 'Start Break', async () => {
-      const data = await callPomodoro('pomodoro_start', { label: 'Break', durationMinutes: POMO_BREAK_MINUTES });
+    const breakInput = document.getElementById('pomo-break-duration-input');
+    let breakMinutes = breakInput ? parseInt(breakInput.value, 10) : NaN;
+    if (isNaN(breakMinutes) || breakMinutes <= 0) breakMinutes = POMO_BREAK_MINUTES;
+    showPomodoroOverlay(`Work session complete! Time for a ${breakMinutes}-minute break.`, 'Start Break', async () => {
+      const data = await callPomodoro('pomodoro_start', { label: 'Break', durationMinutes: breakMinutes });
       const sessionId = data && data.result && data.result.session ? data.result.session.id : null;
-      if (!sessionId) { savePomodoroState(null); setPomodoroRunningUI(false); return; }
-      runPomodoroPhase({ phase: 'break', sessionId, endTimestamp: Date.now() + POMO_BREAK_MINUTES * 60000 });
+      if (!sessionId) {
+        savePomodoroState(null);
+        setPomodoroRunningUI(false);
+        showPomoStatus('Failed to start break session.');
+        return;
+      }
+      runPomodoroPhase({ phase: 'break', sessionId, endTimestamp: Date.now() + breakMinutes * 60000 });
     });
     // Leave the running-UI/overlay up rather than resetting to idle — the
     // user explicitly starts the break via the overlay button, so a second
@@ -222,24 +230,44 @@ async function onPomodoroPhaseComplete(state) {
   }
 }
 
+// Every early-return below used to be silent — no countdown starts, no
+// button changes, nothing — which is indistinguishable from the click not
+// registering at all. Each now leaves a visible reason in #pomo-display,
+// since that's this card's existing status-text spot.
+function showPomoStatus(message) {
+  const el = document.getElementById('pomo-display');
+  if (el) el.textContent = message;
+}
+
 const pomoStartBtn = document.getElementById('pomo-start-btn');
 if (pomoStartBtn) pomoStartBtn.addEventListener('click', async () => {
   // Global single-instance guard: re-read localStorage (not just in-tab
   // state) so a second tab/window can't start a concurrent session either.
-  if (loadPomodoroState()) return;
+  if (loadPomodoroState()) {
+    showPomoStatus('A pomodoro is already running.');
+    return;
+  }
 
   const el = document.getElementById('dagmem-workspace-input');
   if (!el) return;
   const workspacePath = el.value.trim();
-  if (!workspacePath) return;
+  if (!workspacePath) {
+    showPomoStatus('Set a workspace path above first.');
+    return;
+  }
 
   const label = document.getElementById('pomo-label-input').value.trim() || 'Focus session';
   let durationMinutes = parseInt(document.getElementById('pomo-duration-input').value, 10);
   if (isNaN(durationMinutes) || durationMinutes <= 0) durationMinutes = POMO_WORK_MINUTES_DEFAULT;
 
+  showPomoStatus('Starting…');
   const data = await callPomodoro('pomodoro_start', { label, durationMinutes });
   const sessionId = data && data.result && data.result.session ? data.result.session.id : null;
-  if (!sessionId) return;
+  if (!sessionId) {
+    const errMsg = data && data.error ? data.error : 'no response from server';
+    showPomoStatus(`Failed to start: ${errMsg}`);
+    return;
+  }
   runPomodoroPhase({ phase: 'work', sessionId, endTimestamp: Date.now() + durationMinutes * 60000 });
 });
 

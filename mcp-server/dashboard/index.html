@@ -1002,7 +1002,12 @@
         <div class="card-body">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <input type="text" id="pomo-label-input" placeholder="What are you working on?" style="flex:1;min-width:180px;">
-            <input type="number" id="pomo-duration-input" value="25" min="1" style="width:70px;" title="Duration in minutes">
+            <label style="display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-muted);white-space:nowrap;">Work
+              <input type="number" id="pomo-duration-input" value="25" min="1" style="width:60px;" title="Work duration in minutes">
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-muted);white-space:nowrap;">Break
+              <input type="number" id="pomo-break-duration-input" value="5" min="1" style="width:60px;" title="Break duration in minutes">
+            </label>
             <button id="pomo-start-btn" class="btn btn-primary btn-sm">Start</button>
             <button id="pomo-stop-btn" class="btn btn-secondary btn-sm" style="display:none;">Stop</button>
             <span id="pomo-display" style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;margin-left:auto;"></span>
