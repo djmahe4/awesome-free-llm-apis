@@ -2807,43 +2807,60 @@ function renderDagMemGraph(filterText) {
   const q = (filterText || '').trim().toLowerCase();
   const matches = (n) => !q || n.id.toLowerCase().includes(q) || (n.content || '').toLowerCase().includes(q) || (n.tags || []).some(t => t.toLowerCase().includes(q));
 
-  const nodesByType = {};
-  for (const n of nodes) {
-    const t = n.type || 'text';
-    (nodesByType[t] = nodesByType[t] || []).push(n);
-  }
+  const width = 600;
+  const height = 360;
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = Math.min(width, height) / 2 - 60;
 
-  const columns = ['text', 'image', 'video', 'audio', 'pdf_page']
-    .filter(t => nodesByType[t]?.length)
-    .map(t => {
-      const cards = nodesByType[t].map(n => {
-        const dim = !matches(n);
-        const color = DAG_NODE_TYPE_COLOR[t] || 'var(--accent-cyan)';
-        const label = (n.content || n.filePath || n.id).slice(0, 60);
-        return `
-          <div class="provider-card" data-node-id="${esc(n.id)}" style="opacity:${dim ? 0.3 : 1};border-left:3px solid ${color};margin-bottom:8px;">
-            <div class="provider-name" style="font-size:.78rem;">${esc(label)}</div>
-            <div class="provider-id">${esc(n.id)} · conf ${(n.confidence ?? 0).toFixed(2)}</div>
-          </div>`;
-      }).join('');
-      return `
-        <div style="flex:1;min-width:180px;">
-          <div class="section-sub" style="text-transform:uppercase;font-size:.68rem;letter-spacing:.05em;margin-bottom:8px;color:${DAG_NODE_TYPE_COLOR[t] || 'var(--text-muted)'};">${esc(t)} (${nodesByType[t].length})</div>
-          ${cards}
-        </div>`;
-    }).join('');
+  const positions = {};
+  nodes.forEach((n, i) => {
+    const angle = (2 * Math.PI * i) / nodes.length - Math.PI / 2;
+    positions[n.id] = { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) };
+  });
 
-  const edgeLines = edges
-    .filter(e => !q || matches({ id: e.from, content: '', tags: [] }) || matches({ id: e.to, content: '', tags: [] }))
-    .map(e => `<div style="font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--text-muted);">${esc(e.from)} → ${esc(e.to)} <span style="color:var(--text-muted-2,var(--text-muted));">(${esc(e.relation)})</span></div>`)
-    .join('');
+  let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '">';
+  svg += '<defs><marker id="dagmem-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--glass-border)"></path></marker></defs>';
 
-  dagMemGraphBody.innerHTML = `
-    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;">${columns}</div>
-    <div style="padding-top:12px;border-top:1px solid var(--glass-border);">
-      <div class="section-sub" style="margin-bottom:6px;">Edges (${edges.length})</div>
-      ${edgeLines || '<div class="conv-empty">No edges yet.</div>'}
-    </div>`;
+  edges.forEach(e => {
+    const from = positions[e.from];
+    const to = positions[e.to];
+    if (!from || !to) return;
+    const dimEdge = q && !matches({ id: e.from, content: '', tags: [] }) && !matches({ id: e.to, content: '', tags: [] });
+    svg += '<line class="dagmem-svg-edge" x1="' + from.x + '" y1="' + from.y + '" x2="' + to.x + '" y2="' + to.y + '" opacity="' + (dimEdge ? 0.15 : 1) + '"><title>' + esc(e.from) + ' -&gt; ' + esc(e.to) + ' (' + esc(e.relation) + ')</title></line>';
+  });
+
+  nodes.forEach(n => {
+    const pos = positions[n.id];
+    const dim = !matches(n);
+    const color = DAG_NODE_TYPE_COLOR[n.type] || 'var(--accent-cyan)';
+    const label = (n.content || n.filePath || n.id).slice(0, 18);
+    svg += '<g class="dagmem-svg-node' + (dim ? ' dim' : '') + '" data-node-id="' + esc(n.id) + '">';
+    svg += '<circle cx="' + pos.x + '" cy="' + pos.y + '" r="14" fill="' + color + '"><title>' + esc(n.id) + '</title></circle>';
+    svg += '<text x="' + pos.x + '" y="' + (pos.y + 26) + '" text-anchor="middle">' + esc(label) + '</text>';
+    svg += '</g>';
+  });
+
+  svg += '</svg>';
+
+  const detailId = 'dagmem-node-detail';
+  dagMemGraphBody.innerHTML =
+    '<div class="dagmem-svg-wrap">' + svg + '</div>' +
+    '<div id="' + detailId + '" class="section-sub" style="margin-top:10px;">Click a node to inspect it.</div>';
+
+  dagMemGraphBody.querySelectorAll('.dagmem-svg-node').forEach(g => {
+    g.addEventListener('click', () => {
+      const id = g.getAttribute('data-node-id');
+      const n = nodes.find(x => x.id === id);
+      if (!n) return;
+      const detail = document.getElementById(detailId);
+      if (detail) {
+        detail.innerHTML =
+          '<strong>' + esc(n.id) + '</strong> (' + esc(n.type) + ') &middot; conf ' + (n.confidence ?? 0).toFixed(2) +
+          '<br>' + esc(n.content || n.filePath || '');
+      }
+    });
+  });
 }
 
 async function loadDagMemGraph() {

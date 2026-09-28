@@ -99,6 +99,14 @@ export interface TaskItem {
   id: string;
   task: string;
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  /** File this subtask targets — set by intelligent decomposition; naive fallback leaves it unset. */
+  targetFile?: string;
+  /** Why this file/subtask, constraints, dependencies on other subtasks — from the planner. */
+  context?: string;
+  /** Blackboard: append-only record of what actually happened each time this task was resumed
+   * (files touched, model used, applied outcome, diagnostic count) — the AI-agent <-> local_llm_patch
+   * interaction history, not just a checkbox. */
+  log?: string[];
 }
 
 export interface CodingAgentsInput {
@@ -856,7 +864,73 @@ function decomposeGoalToTasks(goal: string): TaskItem[] {
     id: `task-${idx + 1}`,
     task,
     status: 'pending' as const,
+    log: [],
   }));
+}
+
+/**
+ * LLM-driven subtask decomposition. Uses the cloud model (useFreeLLM), not the
+ * local coder model — this is a planning/reasoning task, and the local model
+ * (already proven weak at multi-file/architectural reasoning elsewhere in this
+ * pipeline) is the wrong tool for it. Falls back to decomposeGoalToTasks' naive
+ * line-split on any failure (unreachable providers, malformed JSON, empty
+ * goal) so plan creation never hard-fails just because the planner call did.
+ */
+async function decomposeGoalIntelligently(
+  goal: string,
+  workspaceRoot: string,
+  candidateFiles: string[],
+  sessionId: string,
+): Promise<TaskItem[]> {
+  try {
+    const { useFreeLLM } = await import('./use-free-llm.js');
+    const fileList = candidateFiles.slice(0, 60).join('\n');
+    const prompt = [
+      `Break the following goal into an ordered list of small, independent subtasks, one per file that needs to change.`,
+      `Return ONLY a JSON array, no prose, no code fence, no explanation. Each element:`,
+      `{ "task": "<imperative, self-contained instruction for this one subtask>", "targetFile": "<relative path from the candidate list, omit if this subtask has no single target file>", "context": "<1-3 sentences: why this file, what it must respect or not break, dependencies on other subtasks>" }`,
+      `If the goal is already a single small single-file change, return a single-element array.`,
+      `## Goal\n${goal}`,
+      `## Candidate files in this workspace (pick from these when possible)\n${fileList || '(none enumerated)'}`,
+    ].join('\n\n');
+
+    const res = await useFreeLLM({
+      messages: [
+        { role: 'system', content: 'You are a senior engineer decomposing a coding goal into an execution plan. Output strict JSON only.' },
+        { role: 'user', content: prompt },
+      ],
+      taskType: 'reasoning',
+      workspace_root: workspaceRoot,
+      sessionId,
+      isOnePass: true,
+      skipIndexing: true,
+    } as any);
+
+    const raw = res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
+    if (!raw || typeof raw !== 'string') throw new Error('Empty planner response');
+
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) throw new Error('Planner response contained no JSON array');
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('Planner returned an empty/invalid array');
+
+    const tasks: TaskItem[] = parsed
+      .map((item: any, idx: number): TaskItem => ({
+        id: `task-${idx + 1}`,
+        task: String(item?.task || '').trim(),
+        status: 'pending' as const,
+        targetFile: item?.targetFile ? path.normalize(String(item.targetFile).trim()).replace(/\\/g, '/') : undefined,
+        context: item?.context ? String(item.context).trim() : undefined,
+        log: [],
+      }))
+      .filter(t => t.task.length > 0);
+
+    if (tasks.length === 0) throw new Error('Planner returned no usable tasks');
+    return tasks;
+  } catch (err: any) {
+    console.warn(`[coding-agents] Intelligent decomposition failed, falling back to naive split: ${err.message}`);
+    return decomposeGoalToTasks(goal);
+  }
 }
 
 function serializeTasksMarkdown(goal: string, tasks: TaskItem[]): string {
@@ -865,21 +939,46 @@ function serializeTasksMarkdown(goal: string, tasks: TaskItem[]): string {
   for (const t of tasks) {
     const check = t.status === 'completed' ? '[x]' : (t.status === 'in_progress' ? '[~]' : '[ ]');
     lines.push(`- ${check} [${t.id}] ${t.task}`);
+    if (t.targetFile) lines.push(`  - file: ${t.targetFile}`);
+    if (t.context) lines.push(`  - context: ${t.context}`);
+    if (t.log && t.log.length > 0) {
+      lines.push(`  - log:`);
+      for (const entry of t.log) lines.push(`    - ${entry}`);
+    }
   }
   return lines.join('\n');
 }
 
+/** Parses tasks.md back, including the per-task file/context metadata and the
+ * blackboard log — a simple line-state-machine since each task can span
+ * several indented lines, not just its own checkbox line. */
 function parseTasksMarkdown(content: string): TaskItem[] {
-  const lines = content.split('\n');
+  const lines = content.split(/\r?\n/);
   const tasks: TaskItem[] = [];
+  let current: TaskItem | null = null;
+  let inLog = false;
   for (const line of lines) {
-    const match = line.match(/^-\s*\[([ xX~])\]\s*(?:\[([^\]]+)\])?\s*(.+)$/);
-    if (match) {
-      const mark = match[1].toLowerCase();
+    const taskMatch = line.match(/^-\s*\[([ xX~])\]\s*(?:\[([^\]]+)\])?\s*(.+)$/);
+    if (taskMatch) {
+      const mark = taskMatch[1].toLowerCase();
       const status: TaskItem['status'] = mark === 'x' ? 'completed' : (mark === '~' ? 'in_progress' : 'pending');
-      const id = match[2] || `task-${tasks.length + 1}`;
-      const task = match[3].trim();
-      tasks.push({ id, task, status });
+      const id = taskMatch[2] || `task-${tasks.length + 1}`;
+      const task = taskMatch[3].trim();
+      current = { id, task, status, log: [] };
+      tasks.push(current);
+      inLog = false;
+      continue;
+    }
+    if (!current) continue;
+    const fileMatch = line.match(/^\s{2}-\s*file:\s*(.+)$/);
+    if (fileMatch) { current.targetFile = fileMatch[1].trim(); inLog = false; continue; }
+    const contextMatch = line.match(/^\s{2}-\s*context:\s*(.+)$/);
+    if (contextMatch) { current.context = contextMatch[1].trim(); inLog = false; continue; }
+    if (/^\s{2}-\s*log:\s*$/.test(line)) { inLog = true; continue; }
+    const logEntryMatch = line.match(/^\s{4}-\s*(.+)$/);
+    if (inLog && logEntryMatch) {
+      (current.log ??= []).push(logEntryMatch[1].trim());
+      continue;
     }
   }
   return tasks;
@@ -1239,7 +1338,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
 
     // ── Handle Action: 'plan' or pauseOnTaskPlan ─────────────────────────────
     if (input.action === 'plan' || input.pauseOnTaskPlan) {
-      const tasks = decomposeGoalToTasks(input.goal);
+      const planCandidateFiles = await scanCodeFiles(workspaceRoot, 100);
+      const tasks = await decomposeGoalIntelligently(input.goal, workspaceRoot, planCandidateFiles, sessionId);
       await fs.writeFile(tasksFilePath, serializeTasksMarkdown(input.goal, tasks), 'utf-8');
       result.pipelineStage = 'completed';
       result.tasksPlan = tasks;
@@ -1256,6 +1356,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     let loadedTasks: TaskItem[] | undefined;
     let nextPendingTask: TaskItem | undefined;
     let planGoal = input.goal;
+    let taskResumeCount = 0;
 
     // ── Handle Action: 'resume' ──────────────────────────────────────────────
     if (input.action === 'resume') {
@@ -1265,11 +1366,24 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         planGoal = extractGoalFromTasksMarkdown(tasksContent) || input.goal;
         nextPendingTask = loadedTasks.find(t => t.status === 'pending');
         if (nextPendingTask) {
+          taskResumeCount = (nextPendingTask.log?.length || 0) + 1;
           nextPendingTask.status = 'in_progress';
-          activeGoal = nextPendingTask.task;
+          // Blackboard: fold the planner's own context (why this file, what
+          // not to break, cross-task dependencies) into what local_llm_patch
+          // actually sees, not just the bare task string.
+          activeGoal = nextPendingTask.context
+            ? `${nextPendingTask.task}\n\n[Planner context]\n${nextPendingTask.context}`
+            : nextPendingTask.task;
         }
       }
     }
+
+    // A planner-assigned targetFile scopes this resume to that one file, same
+    // as an explicit input.targetFiles — but input.targetFiles (if the caller
+    // passed one) always wins.
+    const effectiveTargetFiles = (input.targetFiles && input.targetFiles.length > 0)
+      ? input.targetFiles
+      : (nextPendingTask?.targetFile ? [nextPendingTask.targetFile] : undefined);
 
     // ── Step 1: Enumerate ────────────────────────────────────────────────────
     const codeFiles: string[] = await scanCodeFiles(workspaceRoot, 100);
@@ -1289,8 +1403,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       } catch { /* Skip unreadable files */ }
     }
 
-    if (input.targetFiles && input.targetFiles.length > 0) {
-      result.relevantFiles = input.targetFiles.map(f => path.normalize(f).replace(/\\/g, '/'));
+    if (effectiveTargetFiles && effectiveTargetFiles.length > 0) {
+      result.relevantFiles = effectiveTargetFiles.map(f => path.normalize(f).replace(/\\/g, '/'));
     } else {
       await store.index(docNodes);
       const searchMatches = await store.query(activeGoal, topK);
@@ -1337,6 +1451,11 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     // ── Step 4: Edit (AST rewrites + LLM generation) ─────────────────────────
     result.pipelineStage = 'edit';
     if (run) run.totalCount = result.relevantFiles.length;
+    // Blackboard tracking: did any file in this resume fail to produce a real
+    // patch (LLM generation failure or hallucinated-replacement guard)? Used
+    // to decide whether the task actually completed or should stay pending
+    // for another resume attempt.
+    let taskHadFailure = false;
 
     for (const relPath of result.relevantFiles) {
       if (run?.controller.signal.aborted) break;
@@ -1436,6 +1555,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         }
 
         if (!appliedPatch && lastFailureReason) {
+          taskHadFailure = true;
           result.diagnostics.push({
             filePath: relPath,
             message: `${lastFailureReason}. You can continue by re-running coding_agents with action: "resume" or providing astEditOps.`,
@@ -1581,6 +1701,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         d.severity === 'error' && !(d.source === 'ast-syntactic' && typeof d.code === 'number' && d.code >= 2000)
       );
       if (hasErrorDiagnostics) {
+        taskHadFailure = true;
         try {
           const { restoredCount, files } = await globalCasStore.restoreCheckpointToDisk(result.checkpointId, workspaceRoot);
           // The CAS checkpoint only captures files that existed BEFORE this run
@@ -1610,9 +1731,25 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       }
     }
 
-    // Update tasks.md state if executing a tasks DAG
+    // Update tasks.md state if executing a tasks DAG. Blackboard: record what
+    // actually happened this resume (not just flip a checkbox) — a failed
+    // attempt stays 'pending' so the next resume retries the SAME task, with
+    // this attempt's outcome visible in its log rather than silently lost.
     if (loadedTasks && nextPendingTask) {
-      nextPendingTask.status = 'completed';
+      const succeeded = !taskHadFailure && !result.error;
+      nextPendingTask.status = succeeded ? 'completed' : 'pending';
+      const outcomeParts = [
+        `resume#${taskResumeCount}`,
+        `files=[${result.relevantFiles.join(', ')}]`,
+        result.modelUsed ? `model=${result.modelUsed}` : 'model=none',
+        `applied=${!!result.applied}`,
+        `diagnostics=${result.diagnostics.length}`,
+      ];
+      if (!succeeded) {
+        outcomeParts.push(result.error ? `error="${result.error}"` : 'outcome=failed (see diagnostics)');
+      }
+      (nextPendingTask.log ??= []).push(`${new Date().toISOString()} ${outcomeParts.join(' ')}`);
+
       await fs.writeFile(tasksFilePath, serializeTasksMarkdown(planGoal, loadedTasks), 'utf-8');
       result.tasksPlan = loadedTasks;
       result.tasksFile = 'tasks.md';
