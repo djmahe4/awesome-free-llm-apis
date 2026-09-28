@@ -1949,6 +1949,20 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         // being tried, forcing identical failures on every manual resume
         // retry instead of auto-escalating within one call.
         if (resolvedModel && !appliedPatch) {
+          // Visible record that SEARCH/REPLACE failed and the pipeline is
+          // dropping to a strategy that can't structurally prevent scope
+          // drift — observed live: SR failed here (a vision-language model
+          // wrongly entered the candidate pool, see rankCandidateModels),
+          // full-file regen "fixed" the reported compile errors but also
+          // silently renamed/deleted methods the goal never asked to touch.
+          // The corruption guards below catch wholesale hallucination, not
+          // this — a real, syntactically valid, but scope-violating rewrite.
+          // Folded into lastFailureReason (rather than a separate diagnostic
+          // entry) so it surfaces in the single final diagnostic if this
+          // fallback also fails, matching this function's existing
+          // localReason-chaining style instead of adding a second entry.
+          const srFailureNote = lastFailureReason;
+          lastFailureReason = undefined;
           try {
             // Same sliding-window fix already used for the cloud fallback below:
             // asking a local model to reproduce a large non-module file (HTML,
@@ -1998,6 +2012,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           } catch (llmErr: any) {
             lastFailureReason = `Local model (${resolvedModel}) failed: ${llmErr.message}`;
             console.warn(`[coding-agents] ${lastFailureReason}`);
+          }
+          if (!appliedPatch && srFailureNote) {
+            lastFailureReason = `SEARCH/REPLACE attempt failed (${srFailureNote}); full-file fallback also failed: ${lastFailureReason || 'unknown reason'}`;
           }
         }
 

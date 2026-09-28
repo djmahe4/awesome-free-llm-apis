@@ -88,10 +88,21 @@ export async function listLocalModels(): Promise<string[]> {
  * failure IS the chat-capability check, not a name guess.
  */
 export function rankCandidateModels(availableModels: string[]): string[] {
+  // local_llm_patch / coding_agents never send image content — they're
+  // pure-text code-editing tools — so a vision-tuned model brings no
+  // benefit and has demonstrated real harm: observed live, when the top
+  // coding-pattern candidate errored mid-call, the fallback loop landed on
+  // a vision-language model (qwen2.5vl:3b) for a strict text-format
+  // (SEARCH/REPLACE) request, which degenerated into a repetition loop and
+  // never produced a valid response. Excluded outright, not just
+  // deprioritized, since no text-editing task ever benefits from one.
+  const visionPatterns = [/vision/i, /llava/i, /vl[:\-]/i];
+  const textModels = availableModels.filter(m => !visionPatterns.some(p => p.test(m)));
+
   const codingPatterns = [/codellama/i, /qwen.*coder/i, /devstral/i, /deepseek.*coder/i, /coder/i];
   const preferred: string[] = [];
   const rest: string[] = [];
-  for (const m of availableModels) {
+  for (const m of textModels) {
     if (codingPatterns.some(p => p.test(m))) preferred.push(m);
     else rest.push(m);
   }
