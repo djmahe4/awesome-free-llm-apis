@@ -149,9 +149,17 @@ Analyze local images or remote image URLs in single-pass (`isOnePass: true`) or 
 ---
 
 ### `manage_memory`
-Manage persistent, workspace-aware memory across sessions.
-- `search`: Find prior decisions or research findings.
-- `clear`: Flush all cached memory for a workspace.
+Manage persistent, workspace-aware memory across sessions — key-value memory, wiki pages, a DAG node/edge graph with Ebbinghaus decay, architecture decision records, an Eisenhower priority matrix, and Pomodoro focus-session tracking. Full reference in [manage_memory.md](references/manage_memory.md).
+
+> [!IMPORTANT]
+> **Before planning or acting on a non-trivial task**: call `adr_list` (past architecture decisions) and `eisenhower_list` (open backlog). Cheap checks that prevent re-deciding or duplicating existing work — treat this as a standard pre-planning step for any workspace task, the same way you'd `search` memory first.
+
+- `search` / `list` / `stats` / `clear`: Key-value workspace memory and compression stats.
+- `wiki_write` / `wiki_search` / `wiki_list` / `wiki_read`: Persistent markdown wiki pages.
+- `node_add` / `node_link` / `node_list` / `node_get` / `node_review` / `graph_query`: DAG memory node/edge graph.
+- `adr_write` / `adr_list`: Architecture decision records (wiki pages in a dedicated `adr/` subdir, excluded from `wiki_search`/`wiki_list`).
+- `eisenhower_add` / `eisenhower_list` / `eisenhower_complete`: Priority matrix (do/schedule/delegate/delete). `eisenhower_add` takes explicit `urgent`/`important` by default, or `autoClassify: true` to have an LLM infer them from the task text — off by default, never triggers implicitly.
+- `pomodoro_start` / `pomodoro_stop` / `pomodoro_list`: Focus-session timer tracking.
 
 ---
 
