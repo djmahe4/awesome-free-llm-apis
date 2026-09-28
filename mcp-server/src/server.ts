@@ -473,6 +473,17 @@ export function createExpressApp(): express.Express {
                 from: params.from,
                 to: params.to,
                 relation: params.relation,
+                task: params.task,
+                urgent: params.urgent,
+                important: params.important,
+                quadrant: params.quadrant,
+                includeCompleted: params.includeCompleted,
+                taskId: params.taskId,
+                sessionRefId: params.sessionRefId,
+                label: params.label,
+                durationMinutes: params.durationMinutes,
+                aborted: params.aborted,
+                pomodoroLimit: params.pomodoroLimit,
               });
               break;
             case 'index_workspace':

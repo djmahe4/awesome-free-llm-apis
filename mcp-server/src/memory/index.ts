@@ -4,6 +4,7 @@ import { ShortTermMemory } from './short-term.js';
 import { LongTermMemory } from './long-term.js';
 import { WikiMemory } from './wiki.js';
 import { DagMemory } from './dag.js';
+import { ProductivityMemory } from './productivity.js';
 import { vectorStore, VectorEntry } from './vector.js';
 import { Sanitizer } from '../utils/Sanitizer.js';
 
@@ -55,6 +56,7 @@ export class MemoryManager {
   longTerm: LongTermMemory;
   private wikis = new Map<string, WikiMemory>();
   private dags = new Map<string, DagMemory>();
+  private productivityStores = new Map<string, ProductivityMemory>();
 
   constructor(storePath?: string) {
     this.shortTerm = new ShortTermMemory();
@@ -80,6 +82,16 @@ export class MemoryManager {
       this.dags.set(cacheKey, dag);
     }
     return dag;
+  }
+
+  getProductivity(workspaceHash: string, workspaceRoot?: string): ProductivityMemory {
+    const cacheKey = workspaceRoot ? `${workspaceHash}:local` : workspaceHash;
+    let store = this.productivityStores.get(cacheKey);
+    if (!store) {
+      store = new ProductivityMemory(workspaceHash, workspaceRoot);
+      this.productivityStores.set(cacheKey, store);
+    }
+    return store;
   }
 
   createMemoryEntry(content: string, confidence: number = 0.5) {

@@ -5,7 +5,9 @@ import { quantumCompressWithAnchors } from '../utils/quantum-compression.js';
 
 export interface ManageMemoryInput {
     action: 'search' | 'list' | 'stats' | 'clear' | 'wiki_search' | 'wiki_write' | 'wiki_list' | 'wiki_read'
-        | 'node_add' | 'node_link' | 'node_list' | 'node_get' | 'graph_query';
+        | 'node_add' | 'node_link' | 'node_list' | 'node_get' | 'node_review' | 'graph_query'
+        | 'eisenhower_add' | 'eisenhower_list' | 'eisenhower_complete'
+        | 'pomodoro_start' | 'pomodoro_stop' | 'pomodoro_list';
     workspace_root?: string;
     query?: string;
     limit?: number;
@@ -32,14 +34,76 @@ export interface ManageMemoryInput {
     from?: string;
     to?: string;
     relation?: string;
+    /** For eisenhower_add: the task description. */
+    task?: string;
+    /** For eisenhower_add: explicit urgency/importance flags — omit both to let the tool prompt for them rather than guess. */
+    urgent?: boolean;
+    important?: boolean;
+    /** For eisenhower_list: filter to one quadrant. Omit to list all open (non-completed) tasks. */
+    quadrant?: 'do' | 'schedule' | 'delegate' | 'delete';
+    /** For eisenhower_list: include already-completed tasks (default false). */
+    includeCompleted?: boolean;
+    /** For eisenhower_complete/pomodoro_stop: the task/session id to update. */
+    taskId?: string;
+    sessionRefId?: string;
+    /** For pomodoro_start: a label for the session and its duration (default 25). */
+    label?: string;
+    durationMinutes?: number;
+    /** For pomodoro_stop: true if the session was abandoned rather than completed. */
+    aborted?: boolean;
+    /** For pomodoro_list: how many recent sessions to return (default 20). */
+    pomodoroLimit?: number;
 }
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
 export async function manageMemory(input: ManageMemoryInput) {
-    const { action, workspace_root: workspaceRoot, query, limit = 10, title, content, tags, links, persona, namespace, node, nodeId, from, to, relation } = input;
+    const {
+        action, workspace_root: workspaceRoot, query, limit = 10, title, content, tags, links, persona, namespace, node, nodeId, from, to, relation,
+        task, urgent, important, quadrant, includeCompleted, taskId, sessionRefId, label, durationMinutes, aborted, pomodoroLimit,
+    } = input;
     const wsHash = await workspaceScanner.getWorkspaceHash(workspaceRoot);
     switch (action) {
+        case 'eisenhower_add': {
+            if (!task) throw new Error('eisenhower_add requires `task`.');
+            // Explicit urgent/important is the "without LLM help" path — required
+            // for now since classifying from text alone (the "with LLM help" path)
+            // is separately-scoped work, not built in this pass.
+            if (urgent === undefined || important === undefined) {
+                throw new Error('eisenhower_add requires explicit `urgent` and `important` booleans.');
+            }
+            const productivity = memoryManager.getProductivity(wsHash, workspaceRoot);
+            const created = await productivity.addTask(task, urgent, important, tags);
+            return { success: true, task: created };
+        }
+        case 'eisenhower_list': {
+            const productivity = memoryManager.getProductivity(wsHash, workspaceRoot);
+            const foundTasks = await productivity.listTasks(quadrant, includeCompleted ?? false);
+            return { tasks: foundTasks };
+        }
+        case 'eisenhower_complete': {
+            if (!taskId) throw new Error('eisenhower_complete requires `taskId`.');
+            const productivity = memoryManager.getProductivity(wsHash, workspaceRoot);
+            const updatedTask = await productivity.completeTask(taskId);
+            return { success: true, task: updatedTask ?? null };
+        }
+        case 'pomodoro_start': {
+            if (!label) throw new Error('pomodoro_start requires `label`.');
+            const productivity = memoryManager.getProductivity(wsHash, workspaceRoot);
+            const session = await productivity.startPomodoro(label, durationMinutes);
+            return { success: true, session };
+        }
+        case 'pomodoro_stop': {
+            if (!sessionRefId) throw new Error('pomodoro_stop requires `sessionRefId`.');
+            const productivity = memoryManager.getProductivity(wsHash, workspaceRoot);
+            const stopped = await productivity.stopPomodoro(sessionRefId, aborted ?? false);
+            return { success: true, session: stopped ?? null };
+        }
+        case 'pomodoro_list': {
+            const productivity = memoryManager.getProductivity(wsHash, workspaceRoot);
+            const sessions = await productivity.listPomodoros(pomodoroLimit);
+            return { sessions };
+        }
         case 'node_add': {
             if (!node) throw new Error('node_add requires `node`.');
             const dag = memoryManager.getDag(wsHash, workspaceRoot);
@@ -64,6 +128,12 @@ export async function manageMemory(input: ManageMemoryInput) {
             const dag = memoryManager.getDag(wsHash, workspaceRoot);
             const foundNode = await dag.getNode(nodeId);
             return { node: foundNode ?? null };
+        }
+        case 'node_review': {
+            if (!nodeId) throw new Error('node_review requires `nodeId`.');
+            const dag = memoryManager.getDag(wsHash, workspaceRoot);
+            const updatedNode = await dag.reviewNode(nodeId);
+            return { success: true, node: updatedNode ?? null };
         }
         case 'graph_query': {
             const dag = memoryManager.getDag(wsHash, workspaceRoot);
