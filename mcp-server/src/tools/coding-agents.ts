@@ -1089,7 +1089,47 @@ function extractGoalFromTasksMarkdown(content: string): string | undefined {
 
 function extractCodeBlock(text: string): string {
   const fenced = text.match(/```(?:[a-zA-Z0-9_+-]*)\r?\n([\s\S]*?)```/);
-  return fenced ? fenced[1] : text;
+  if (fenced) return fenced[1];
+  // No closing fence found (truncated cloud response) — regex above needs
+  // BOTH fences to match at all, so an unclosed opening fence previously fell
+  // through to returning `text` completely unstripped, leaving a literal
+  // "```\n<!DOCTYPE html>..." at the top of the applied file. Strip a leading
+  // opening-fence line on its own even with no matching close.
+  const openOnly = text.match(/^```[a-zA-Z0-9_+-]*\r?\n([\s\S]*)$/);
+  return openOnly ? openOnly[1] : text;
+}
+
+/**
+ * Sliding-window context extractor for large non-module files (HTML, classic JS).
+ * Scores each line by how many instruction terms it contains, then returns
+ * the best ~120-line window + the surrounding line indices so the caller can
+ * splice the patched window back into the full content.
+ * Returns null when the file is small enough to send whole.
+ */
+function extractWindowForInstruction(
+  content: string,
+  instruction: string,
+  windowSize = 120
+): { window: string; startIdx: number; endIdx: number; lineCount: number } | null {
+  const lines = content.split(/\r?\n/);
+  if (lines.length <= windowSize) return null;
+
+  const terms = (instruction.match(/\b[a-zA-Z][a-zA-Z0-9_-]{4,}\b/g) ?? [])
+    .map(t => t.toLowerCase());
+  const uniqueTerms = [...new Set(terms)].slice(0, 12);
+
+  let bestScore = 0;
+  let bestLine = Math.floor(lines.length / 2);
+  for (let i = 0; i < lines.length; i++) {
+    const lower = lines[i].toLowerCase();
+    const score = uniqueTerms.filter(t => lower.includes(t)).length;
+    if (score > bestScore) { bestScore = score; bestLine = i; }
+  }
+
+  const half = Math.floor(windowSize / 2);
+  const startIdx = Math.max(0, bestLine - half);
+  const endIdx = Math.min(lines.length, bestLine + half);
+  return { window: lines.slice(startIdx, endIdx).join('\n'), startIdx, endIdx, lineCount: lines.length };
 }
 
 /**
@@ -1108,6 +1148,22 @@ function extractCodeBlock(text: string): string {
  * replacement rather than a real edit.
  */
 function looksLikeHallucinatedReplacement(originalContent: string, patchedContent: string): boolean {
+  // A stray leading markdown fence marker means extractCodeBlock's stripping
+  // didn't fully work (e.g. an unclosed/truncated fence) — the content itself
+  // can be otherwise faithful, so the symbol/overlap checks below wouldn't
+  // catch it, but "```" is never valid as the first line of any real source
+  // file this pipeline targets. Reject outright rather than write it to disk.
+  if (/^```/.test(patchedContent.trimStart())) return true;
+  // Cloud models sometimes "regenerate" a large file but elide unchanged
+  // stretches with a literal three-dot placeholder ("...") instead of
+  // reproducing them — silently deleting real sections (nav tabs, attrs,
+  // whole blocks). Real source/markup in this repo never contains a bare
+  // "..." token (legitimate ellipsis text uses the single Unicode "…" char),
+  // so any INCREASE in literal "..." occurrences vs the original is a
+  // reliable truncation signal — independent of overall line-overlap %,
+  // which this failure mode can otherwise still clear on a large file.
+  const countEllipsis = (s: string) => (s.match(/(?<!\.)\.{3}(?!\.)/g) || []).length;
+  if (countEllipsis(patchedContent) > countEllipsis(originalContent)) return true;
   // `export` is only legal at module top level in TS/JS — never inside a
   // function or class method body — so requiring it (rather than making it
   // optional) restricts anchors to real public symbols and excludes generic
@@ -1120,9 +1176,16 @@ function looksLikeHallucinatedReplacement(originalContent: string, patchedConten
   while ((m = declPattern.exec(originalContent)) !== null) {
     anchors.add(m[1]);
   }
-  // No exported symbols (CSS, HTML, classic non-module scripts): fall back to
-  // line overlap. An edit/append keeps most original lines; a hallucinated
-  // wholesale replacement keeps almost none.
+  // Also extract top-level function declarations for non-module scripts
+  // (classic browser JS: `function foo(`, `async function bar(`).
+  // These are stable landmarks that survive any real edit.
+  const jsFnPattern = /^(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/gm;
+  while ((m = jsFnPattern.exec(originalContent)) !== null) {
+    anchors.add(m[1]);
+  }
+  // No exported symbols AND no top-level functions (pure HTML/CSS):
+  // fall back to line overlap. An edit/append keeps most original lines;
+  // a hallucinated wholesale replacement keeps almost none.
   if (anchors.size === 0) {
     const origLines = originalContent.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 3);
     if (origLines.length < 10) return false;
@@ -1147,18 +1210,45 @@ async function generateCodePatchWithCloudLLM(
   try {
     const { useFreeLLM } = await import('./use-free-llm.js');
     const filename = path.basename(filePath);
-    const prompt = [
-      `You are patching a single file: ${filename}.`,
-      `Apply the instruction and return the COMPLETE updated file content only, inside a single code fence.`,
-      `Do not include conversational text, pleasantries, apologies, or explanations outside the code fence.`,
-      tasksContext ? `## Active Task & DAG Plan\n${tasksContext}` : '',
-      `## Instruction\n${instruction}`,
-      `## Current Content of ${filename}\n\`\`\`\n${currentContent}\n\`\`\``
-    ].filter(Boolean).join('\n\n');
+
+    // For large non-module files (HTML, classic browser JS — no `export` declarations),
+    // asking for COMPLETE file causes LLMs to truncate → hallucination guard fires.
+    // Instead, use a sliding window: extract ~120 lines around the best anchor,
+    // ask LLM to patch ONLY that window, then splice back into the full content.
+    // The spliced result keeps 99%+ original lines → guard passes automatically.
+    const hasExports = /^\s*export\s+/m.test(currentContent);
+    const windowInfo = !hasExports ? extractWindowForInstruction(currentContent, instruction) : null;
+
+    let prompt: string;
+    let systemContent: string;
+
+    if (windowInfo) {
+      const { window, startIdx, endIdx, lineCount } = windowInfo;
+      prompt = [
+        `You are editing a specific section of ${filename} (${lineCount} lines total).`,
+        `Edit ONLY the lines shown below (lines ${startIdx + 1}–${endIdx} of the file).`,
+        `Return ONLY those lines — no omission markers, no extra commentary. Wrap in one code fence.`,
+        `The surrounding file content outside this window is preserved unchanged.`,
+        tasksContext ? `## Active Task & DAG Plan\n${tasksContext}` : '',
+        `## Instruction\n${instruction}`,
+        `## Lines ${startIdx + 1}–${endIdx} of ${filename}\n\`\`\`\n${window}\n\`\`\``,
+      ].filter(Boolean).join('\n\n');
+      systemContent = 'You are an elite coding assistant. Return ONLY the updated window lines inside one code fence. Do NOT return the rest of the file.';
+    } else {
+      prompt = [
+        `You are patching a single file: ${filename}.`,
+        `Apply the instruction and return the COMPLETE updated file content only, inside a single code fence.`,
+        `Do not include conversational text, pleasantries, apologies, or explanations outside the code fence.`,
+        tasksContext ? `## Active Task & DAG Plan\n${tasksContext}` : '',
+        `## Instruction\n${instruction}`,
+        `## Current Content of ${filename}\n\`\`\`\n${currentContent}\n\`\`\``,
+      ].filter(Boolean).join('\n\n');
+      systemContent = 'You are an elite coding assistant. Return only the full updated file in a code block.';
+    }
 
     const res = await useFreeLLM({
       messages: [
-        { role: 'system', content: 'You are an elite coding assistant. Return only the full updated file in a code block.' },
+        { role: 'system', content: systemContent },
         { role: 'user', content: prompt }
       ],
       keywords: ['coding', 'qwen', 'deepseek', 'codellama', 'coder'],
@@ -1186,6 +1276,18 @@ async function generateCodePatchWithCloudLLM(
 
       const extracted = extractCodeBlock(raw);
       if (extracted?.trim()) {
+        if (windowInfo) {
+          // Splice the patched window back into the full file content.
+          // Result ≈ original + small edit → looksLikeHallucinatedReplacement passes.
+          const origLines = currentContent.split(/\r?\n/);
+          const patchedWindowLines = extracted.split(/\r?\n/);
+          const spliced = [
+            ...origLines.slice(0, windowInfo.startIdx),
+            ...patchedWindowLines,
+            ...origLines.slice(windowInfo.endIdx),
+          ].join('\n');
+          return { patch: spliced };
+        }
         return { patch: extracted };
       }
       return { patch: null, failureReason: 'Model response contained no code block' };
