@@ -40,6 +40,13 @@ export interface LocalLlmPatchInput {
   // entirely, since the model never sees (and can't corrupt) the rest.
   contentOverride?: string;
   excerptRange?: { startLine: number; endLine: number; totalLines: number };
+  // 'search-replace' asks the model for <<<<<<< SEARCH/=======/>>>>>>> REPLACE
+  // blocks instead of full file/excerpt content — the caller (coding_agents)
+  // parses and applies them against its own full copy of the file. Unlike
+  // 'full', the model never has to reproduce unchanged text at all, so it
+  // can't collapse/duplicate/truncate it. `patch` on success is the model's
+  // raw response text (the blocks), not file content.
+  outputFormat?: 'full' | 'search-replace';
 }
 
 export interface LocalLlmPatchResult {
@@ -167,15 +174,32 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
       ? `\n\n## Related workspace context\n${context.join('\n\n')}`
       : '';
 
+    const isSearchReplace = input.outputFormat === 'search-replace';
+
     // Excerpt wording explicitly forbids reproducing the rest of the file —
     // this is the actual fix: a model asked for "the complete file" on a
     // 1000-line file will truncate/hallucinate the parts it doesn't touch;
     // asking for just the excerpt removes that temptation entirely.
-    const fileNotice = input.excerptRange
-      ? `You are editing a specific section of ${path.basename(absPath)} (${input.excerptRange.totalLines} lines total). The excerpt below is lines ${input.excerptRange.startLine}–${input.excerptRange.endLine} of the file (${input.excerptRange.endLine - input.excerptRange.startLine + 1} lines). Your reply REPLACES this excerpt verbatim, line for line — reproduce every unchanged line exactly as shown, and only alter the specific line(s) the instruction targets. Do NOT summarize, abbreviate, or omit any line, and do NOT return just the changed line(s) alone — that would delete the rest of the excerpt. Wrap the full ${input.excerptRange.endLine - input.excerptRange.startLine + 1}-line reply in a single code fence with no other commentary. The file's content outside this excerpt is separate and must NOT be reproduced.`
-      : fileExists
-        ? `You are patching a single file. Apply the instruction and return the COMPLETE new file content only, wrapped in a single code fence. Do not include explanations outside the fence.`
-        : `You are creating a new file: ${path.basename(absPath)}. Implement the instruction and return the COMPLETE file content only, wrapped in a single code fence. Do not include explanations outside the fence.`;
+    const fileNotice = isSearchReplace
+      ? `You are editing ${path.basename(absPath)}${input.excerptRange ? ` (an excerpt is shown below, lines ${input.excerptRange.startLine}–${input.excerptRange.endLine} of ${input.excerptRange.totalLines} total)` : ''}. The content below is shown ONLY so you can find exact text to change — you do not need to reproduce it.`
+      : input.excerptRange
+        ? `You are editing a specific section of ${path.basename(absPath)} (${input.excerptRange.totalLines} lines total). The excerpt below is lines ${input.excerptRange.startLine}–${input.excerptRange.endLine} of the file (${input.excerptRange.endLine - input.excerptRange.startLine + 1} lines). Your reply REPLACES this excerpt verbatim, line for line — reproduce every unchanged line exactly as shown, and only alter the specific line(s) the instruction targets. Do NOT summarize, abbreviate, or omit any line, and do NOT return just the changed line(s) alone — that would delete the rest of the excerpt. Wrap the full ${input.excerptRange.endLine - input.excerptRange.startLine + 1}-line reply in a single code fence with no other commentary. The file's content outside this excerpt is separate and must NOT be reproduced.`
+        : fileExists
+          ? `You are patching a single file. Apply the instruction and return the COMPLETE new file content only, wrapped in a single code fence. Do not include explanations outside the fence.`
+          : `You are creating a new file: ${path.basename(absPath)}. Implement the instruction and return the COMPLETE file content only, wrapped in a single code fence. Do not include explanations outside the fence.`;
+
+    const searchReplaceFormatBlock = isSearchReplace
+      ? [
+          '## Output format',
+          'Return one or more blocks in EXACTLY this format and nothing else — no explanations, no code fence around the blocks:',
+          '<<<<<<< SEARCH',
+          '(exact existing text to find, copied verbatim character-for-character from above, including original whitespace/indentation)',
+          '=======',
+          '(the replacement text)',
+          '>>>>>>> REPLACE',
+          'Rules: SEARCH text must match the shown content exactly and must be unique (usually 1–5 lines — include just enough surrounding text to make it unambiguous). Do not paraphrase or reformat SEARCH text. Emit multiple blocks if the instruction requires edits in more than one place.',
+        ].join('\n')
+      : '';
 
     const prompt = [
       fileNotice,
@@ -187,6 +211,7 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
       '```',
       `## Instruction\n${input.instruction}`,
       contextBlock,
+      searchReplaceFormatBlock,
     ].filter(Boolean).join('\n\n');
 
     // Try candidates in rankCandidateModels' preference order, calling the
@@ -204,9 +229,11 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
         chatResult = await chatLocal(candidate, [
           {
             role: 'system',
-            content: input.excerptRange
-              ? 'You are a precise code-editing assistant. Return ONLY the updated excerpt lines inside one code fence. Do NOT return the rest of the file.'
-              : 'You are a precise code-editing assistant. Return only the complete new file content in a single code fence.',
+            content: isSearchReplace
+              ? 'You are a precise code-editing assistant. Reply with ONLY the requested SEARCH/REPLACE blocks.'
+              : input.excerptRange
+                ? 'You are a precise code-editing assistant. Return ONLY the updated excerpt lines inside one code fence. Do NOT return the rest of the file.'
+                : 'You are a precise code-editing assistant. Return only the complete new file content in a single code fence.',
           },
           { role: 'user', content: prompt },
         ]);
@@ -222,7 +249,10 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
       throw new Error(`No candidate model could handle /api/chat. Tried: ${attemptErrors.join('; ')}`);
     }
 
-    const patch = extractCodeFromResponse(chatResult.content);
+    // SEARCH/REPLACE blocks aren't wrapped in a code fence (the format
+    // explicitly forbids one) — extractCodeFromResponse would find no fence
+    // and return the text unchanged anyway, but skip it outright for clarity.
+    const patch = isSearchReplace ? chatResult.content : extractCodeFromResponse(chatResult.content);
 
     // Guard against canned refusal responses ("I'm sorry, but I can't assist with that request.")
     const refusalPatterns = [

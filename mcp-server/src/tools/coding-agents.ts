@@ -1176,6 +1176,61 @@ function windowReplyIsSuspicious(originalWindowLines: string[], replyLines: stri
   return kept / originalWindowLines.length < 0.85;
 }
 
+/**
+ * SEARCH/REPLACE block patching (Aider-style) — the actual fix for the
+ * class of failure the window-fidelity guard above can only detect, not
+ * prevent: every prior strategy (full-file, sliding window) asks the model
+ * to REPRODUCE unchanged text, and weak local models fail at verbatim copy
+ * even over a 120-line excerpt (observed: collapsed excerpts, duplicated/
+ * dropped rows). This asks for zero reproduction — the model emits only the
+ * exact text to find and its replacement; unchanged content never passes
+ * through the model at all, so collapse/duplication/ellipsis-elision are
+ * structurally impossible, not just caught after the fact.
+ */
+interface SearchReplaceBlock { search: string; replace: string }
+
+function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
+  const blocks: SearchReplaceBlock[] = [];
+  const re = /<{5,}\s*SEARCH\r?\n([\s\S]*?)\r?\n={5,}\r?\n([\s\S]*?)\r?\n>{5,}\s*REPLACE/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    blocks.push({ search: m[1], replace: m[2] });
+  }
+  return blocks;
+}
+
+/**
+ * Applies blocks via exact substring match — each SEARCH text must occur
+ * exactly once in the current content (0 matches = anchor drifted/model
+ * misquoted; >1 matches = ambiguous, could edit the wrong occurrence).
+ * Sequential: each block's replace is applied before the next block's
+ * search runs, so later blocks can target text a prior block just wrote.
+ */
+function applySearchReplaceBlocks(
+  content: string,
+  blocks: SearchReplaceBlock[]
+): { content: string; appliedCount: number; failures: string[] } {
+  let working = content;
+  let appliedCount = 0;
+  const failures: string[] = [];
+  for (const { search, replace } of blocks) {
+    if (!search) {
+      failures.push('Empty SEARCH block (nothing to match)');
+      continue;
+    }
+    const occurrences = working.split(search).length - 1;
+    if (occurrences === 0) {
+      failures.push(`SEARCH text not found verbatim: ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
+    } else if (occurrences > 1) {
+      failures.push(`SEARCH text matched ${occurrences} times (ambiguous, must be unique): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
+    } else {
+      working = working.replace(search, replace);
+      appliedCount++;
+    }
+  }
+  return { content: working, appliedCount, failures };
+}
+
 function looksLikeHallucinatedReplacement(originalContent: string, patchedContent: string): boolean {
   // A stray leading markdown fence marker means extractCodeBlock's stripping
   // didn't fully work (e.g. an unclosed/truncated fence) — the content itself
@@ -1226,6 +1281,78 @@ function looksLikeHallucinatedReplacement(originalContent: string, patchedConten
     if (patchedContent.includes(name)) return false;
   }
   return true;
+}
+
+const REFUSAL_PATTERNS = [
+  /I(?:'m| am)? sorry(?:,| but)? I can(?:'t| not) assist/i,
+  /I cannot fulfill this request/i,
+  /I am unable to assist with/i,
+  /as an ai language model/i,
+];
+
+/**
+ * Generates a patch via SEARCH/REPLACE blocks instead of full-content
+ * reproduction — see parseSearchReplaceBlocks/applySearchReplaceBlocks above
+ * for why. Used for the cloud fallback path in Step 4a — the local-model
+ * attempt goes through localLlmPatch's own outputFormat:'search-replace'
+ * instead, to share its model-invocation/refusal-detection/test-mock seam.
+ * `chat` abstracts over whichever backend calls this. A window is still
+ * used to keep the PROMPT small on large files, but unlike the old
+ * windowed-splice approach, applySearchReplaceBlocks matches against the
+ * FULL current content by exact text — there's no line-offset bookkeeping
+ * to get wrong, and no requirement that the model reproduce anything.
+ */
+async function generateSearchReplacePatch(
+  currentContent: string,
+  instruction: string,
+  filename: string,
+  tasksContext: string | undefined,
+  chat: (prompt: string) => Promise<string>
+): Promise<{ content: string; appliedCount: number; failures: string[]; hardFailure?: string }> {
+  const hasExports = /^\s*export\s+/m.test(currentContent);
+  const windowInfo = !hasExports ? extractWindowForInstruction(currentContent, instruction) : null;
+  const contextText = windowInfo ? windowInfo.window : currentContent;
+  const contextLabel = windowInfo
+    ? `lines ${windowInfo.startIdx + 1}–${windowInfo.endIdx} of ${filename} (${windowInfo.lineCount} lines total)`
+    : filename;
+
+  const prompt = [
+    `You are editing ${filename}. Shown below is ${windowInfo ? 'an excerpt of' : 'the content of'} the file — ONLY so you can find exact text to change. You do not need to reproduce it.`,
+    tasksContext ? `## Active Task & DAG Plan\n${tasksContext}` : '',
+    `## Instruction\n${instruction}`,
+    `## ${windowInfo ? 'Excerpt' : 'Content'} (${contextLabel})\n\`\`\`\n${contextText}\n\`\`\``,
+    [
+      '## Output format',
+      'Return one or more blocks in EXACTLY this format and nothing else — no explanations, no code fence around the blocks themselves:',
+      '<<<<<<< SEARCH',
+      '(exact existing text to find, copied verbatim character-for-character from above, including original whitespace/indentation)',
+      '=======',
+      '(the replacement text)',
+      '>>>>>>> REPLACE',
+      'Rules: SEARCH text must match the shown content exactly and must be unique (usually 1–5 lines — include just enough surrounding text to make it unambiguous). Do not paraphrase or reformat SEARCH text. Emit multiple blocks if the instruction requires edits in more than one place.',
+    ].join('\n'),
+  ].filter(Boolean).join('\n\n');
+
+  let raw: string;
+  try {
+    raw = await chat(prompt);
+  } catch (err: any) {
+    return { content: currentContent, appliedCount: 0, failures: [], hardFailure: `LLM call failed: ${err.message}` };
+  }
+  if (!raw?.trim()) {
+    return { content: currentContent, appliedCount: 0, failures: [], hardFailure: 'Empty response from LLM' };
+  }
+  if (REFUSAL_PATTERNS.some(p => p.test(raw))) {
+    return { content: currentContent, appliedCount: 0, failures: [], hardFailure: `Model refused request ("${raw.trim().slice(0, 200)}")` };
+  }
+
+  const blocks = parseSearchReplaceBlocks(raw);
+  if (blocks.length === 0) {
+    return { content: currentContent, appliedCount: 0, failures: [], hardFailure: 'No SEARCH/REPLACE blocks found in response' };
+  }
+
+  const { content, appliedCount, failures } = applySearchReplaceBlocks(currentContent, blocks);
+  return { content, appliedCount, failures };
 }
 
 async function generateCodePatchWithCloudLLM(
@@ -1733,15 +1860,79 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           ? `${activeGoal}\n\n[DAG Context]\n${tasksContext}`
           : activeGoal;
 
-        // Try local model first if available. The corruption guard runs on
-        // ITS result immediately — not after the fact — because a local
-        // "success" that's actually a hallucinated replacement must NOT skip
-        // the cloud fallback below the way a genuine success would. Without
-        // this, a local model that reliably produces garbage (rather than
-        // erroring) would set appliedPatch=true and permanently starve cloud
-        // fallback of ever being tried, forcing identical failures on every
-        // manual resume retry instead of auto-escalating within one call.
+        // Try SEARCH/REPLACE first, local model then cloud — see
+        // generateSearchReplacePatch: unchanged content never passes through
+        // the model, so it can't be collapsed/duplicated/hallucinated the
+        // way full-file or windowed-splice replies can. Only fall through to
+        // those older (guarded, but strictly weaker) strategies if no block
+        // parses or every block fails to match — e.g. the model ignores the
+        // requested format entirely.
         if (resolvedModel) {
+          try {
+            // Routed through localLlmPatch (not a direct chatLocal call) so
+            // this shares the exact same model-invocation, context-gathering,
+            // and refusal-detection code as the full-content path below —
+            // including the same test/mock seam.
+            const hasExports = /^\s*export\s+/m.test(patchedContent);
+            const windowInfo = !hasExports ? extractWindowForInstruction(patchedContent, augmentedInstruction) : null;
+            const srLlmResult = await localLlmPatch({
+              filePath: fullPath,
+              instruction: augmentedInstruction,
+              workspace_root: workspaceRoot,
+              sessionId,
+              outputFormat: 'search-replace',
+              contentOverride: windowInfo ? windowInfo.window : patchedContent,
+              excerptRange: windowInfo
+                ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }
+                : undefined,
+            });
+            if (srLlmResult.success && srLlmResult.patch?.trim()) {
+              const blocks = parseSearchReplaceBlocks(srLlmResult.patch);
+              if (blocks.length === 0) {
+                lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: no blocks found in response`;
+              } else {
+                // Apply against the FULL current content by exact text match —
+                // independent of whatever window was shown to the model, so
+                // there's no line-offset bookkeeping to get wrong.
+                const { content, appliedCount, failures } = applySearchReplaceBlocks(patchedContent, blocks);
+                if (appliedCount > 0) {
+                  patchedContent = content;
+                  result.modelUsed = resolvedModel;
+                  result.usedFallbackModel = false;
+                  appliedPatch = true;
+                  if (failures.length > 0) {
+                    result.diagnostics.push({
+                      filePath: relPath,
+                      message: `Local model (${resolvedModel}) SEARCH/REPLACE: ${appliedCount} block(s) applied, ${failures.length} skipped: ${failures.join('; ')}`,
+                      severity: 'warning',
+                      source: 'llm-patch',
+                    });
+                  }
+                } else {
+                  lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: no blocks applied (${failures.join('; ') || 'unknown reason'})`;
+                }
+              }
+            } else if (srLlmResult.error) {
+              lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: ${srLlmResult.error}`;
+            }
+          } catch (srErr: any) {
+            lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE failed: ${srErr.message}`;
+          }
+        }
+
+        // Fall back to the older full-file / windowed-splice strategy —
+        // weaker (relies on post-hoc corruption guards rather than making
+        // corruption structurally impossible) but kept as a second attempt
+        // in case the model can't/won't follow the SEARCH/REPLACE format.
+        // The corruption guard runs on ITS result immediately — not after
+        // the fact — because a local "success" that's actually a
+        // hallucinated replacement must NOT skip the cloud fallback below
+        // the way a genuine success would. Without this, a local model that
+        // reliably produces garbage (rather than erroring) would set
+        // appliedPatch=true and permanently starve cloud fallback of ever
+        // being tried, forcing identical failures on every manual resume
+        // retry instead of auto-escalating within one call.
+        if (resolvedModel && !appliedPatch) {
           try {
             // Same sliding-window fix already used for the cloud fallback below:
             // asking a local model to reproduce a large non-module file (HTML,
@@ -1796,6 +1987,56 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
 
         // If local model was unavailable, errored, or produced a hallucinated
         // result, fall back to cloud model — same guard applied to its output.
+        if (!appliedPatch) {
+          const localReason = lastFailureReason;
+
+          // Same SEARCH/REPLACE attempt as the local model above, tried
+          // first on cloud too, before falling back to full-file/windowed
+          // generation — a stronger cloud model is more likely to follow
+          // the format correctly, and success here is unconditionally safe
+          // (unchanged content never passed through the model).
+          try {
+            const { useFreeLLM } = await import('./use-free-llm.js');
+            const srResult = await generateSearchReplacePatch(
+              patchedContent,
+              activeGoal,
+              relPath,
+              tasksContext,
+              async (prompt) => {
+                const res = await useFreeLLM({
+                  messages: [
+                    { role: 'system', content: 'You are a precise code-editing assistant. Reply with ONLY the requested SEARCH/REPLACE blocks.' },
+                    { role: 'user', content: prompt },
+                  ],
+                  keywords: ['coding', 'qwen', 'deepseek', 'codellama', 'coder'],
+                  taskType: 'coding',
+                  workspace_root: workspaceRoot,
+                  sessionId,
+                  isOnePass: true,
+                  skipIndexing: true,
+                });
+                return res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
+              }
+            );
+            if (srResult.appliedCount > 0) {
+              patchedContent = srResult.content;
+              result.modelUsed = 'cloud-free-llm';
+              result.usedFallbackModel = true;
+              appliedPatch = true;
+              if (srResult.failures.length > 0) {
+                result.diagnostics.push({
+                  filePath: relPath,
+                  message: `Cloud model SEARCH/REPLACE: ${srResult.appliedCount} block(s) applied, ${srResult.failures.length} skipped: ${srResult.failures.join('; ')}`,
+                  severity: 'warning',
+                  source: 'llm-patch',
+                });
+              }
+            }
+          } catch {
+            // Fall through to the older cloud strategy below regardless of why.
+          }
+        }
+
         if (!appliedPatch) {
           const localReason = lastFailureReason;
           const { patch: cloudPatch, failureReason } = await generateCodePatchWithCloudLLM(
