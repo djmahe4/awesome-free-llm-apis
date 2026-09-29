@@ -837,6 +837,15 @@ export class TextRouterMiddleware implements Middleware {
                     case TaskType.Summarization:
                         alignment = cap * 1.2;
                         break;
+                    case TaskType.Chat:
+                        // Plain chat carries no signal that it needs reasoning-tier power —
+                        // alignment = cap alone let the highest-capability (flagship
+                        // reasoning) models always win a trivial "ping"/"say hello", since
+                        // nothing in this formula ever asked whether the prompt needed it.
+                        // Cap at a "chat-sufficient" ceiling so cheap/fast models compete
+                        // evenly; genuinely-classified Reasoning/Coding keep full cap above.
+                        alignment = Math.min(cap, 0.6);
+                        break;
                     default:
                         alignment = cap;
                         break;

@@ -563,7 +563,19 @@ export class WorkspaceContextMiddleware implements Middleware {
         // Only inject a system prompt when NOT in agentic mode.
         // In agentic mode, AgenticMiddleware owns the system prompt to prevent
         // double-injection which garbles model responses.
-        if (!isAgentic) {
+        //
+        // `!isAgentic` alone used to be the only gate — every plain one-shot
+        // chat got the full persona/role + grounding-gate + "HIGH-LEVEL STEPS"
+        // system prompt injected regardless of whether there was anything to
+        // ground it in. A bare "say hello" with no workspaceRoot, no keywords,
+        // and empty memory/grep context still got the whole block — pure
+        // token bloat with nothing to cite, plus unsolicited task-framing
+        // instructions on a request that named no task. Require actual signal
+        // to ground the injection before paying for it.
+        const hasGroundingSignal = !!(context.workspaceRoot || memoryContext || (context as any).grepContext
+            || (context.keywords && context.keywords.length > 0));
+
+        if (!isAgentic && hasGroundingSignal) {
             try {
                 const isSubtask = (context as any).isSubtask === true;
                 const dynamicPrompt = await getIntelligentSystemPrompt({
