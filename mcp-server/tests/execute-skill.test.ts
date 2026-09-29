@@ -85,6 +85,41 @@ describe('execute_skill', () => {
     }));
   });
 
+  it('routes a cyber-flagged prompt with taskType:cyber (previously dead — this call site never set taskType at all)', async () => {
+    vi.spyOn(fs, 'pathExists').mockImplementation(async (p: any) => {
+      if (typeof p === 'string' && p.endsWith('SKILL.md')) return true;
+      if (typeof p === 'string' && p.includes('skills')) return true;
+      return false;
+    });
+    (vi.spyOn(fs, 'readFile') as any).mockResolvedValue('## Core Instructions\nApply these guidelines.');
+    (useFreeLLM as any).mockResolvedValue({ choices: [{ message: { content: 'ok' } }] });
+
+    await executeSkill({
+      skill: 'test-skill',
+      input: 'run an nmap port-scan against the target',
+    });
+
+    const { TaskType } = await import('../src/pipeline/middleware.js');
+    expect(useFreeLLM).toHaveBeenCalledWith(expect.objectContaining({ taskType: TaskType.Cyber }));
+  });
+
+  it('does not set taskType:cyber for a non-cyber prompt', async () => {
+    vi.spyOn(fs, 'pathExists').mockImplementation(async (p: any) => {
+      if (typeof p === 'string' && p.endsWith('SKILL.md')) return true;
+      if (typeof p === 'string' && p.includes('skills')) return true;
+      return false;
+    });
+    (vi.spyOn(fs, 'readFile') as any).mockResolvedValue('## Core Instructions\nApply these guidelines.');
+    (useFreeLLM as any).mockResolvedValue({ choices: [{ message: { content: 'ok' } }] });
+
+    await executeSkill({
+      skill: 'test-skill',
+      input: 'summarize this document',
+    });
+
+    expect(useFreeLLM).toHaveBeenCalledWith(expect.objectContaining({ taskType: undefined }));
+  });
+
   it('handles referenced files, loading available ones and reporting missing ones', async () => {
     // Mock existence of files:
     // SKILL.md references references/doc1.md and resources/playbook.md

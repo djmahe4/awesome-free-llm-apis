@@ -8,6 +8,8 @@ import { memoryManager } from '../memory/index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
 import { findHermesSkill, loadHermesSkillContent } from '../hermes/loader.js';
 import { toMarkdownResponse } from '../utils/markdown.js';
+import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
+import { TaskType } from '../pipeline/middleware.js';
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
@@ -259,6 +261,13 @@ async function executeWithSystemPrompt(
   sessionId: string | undefined,
   skillLabel: string
 ): Promise<ExecuteSkillResult> {
+  // Cyber-classified skill invocations get routed with taskType:'cyber' so
+  // the free-provider router's existing TaskType.Cyber-ranked model list
+  // (previously dead for skill calls — this was the only call site that
+  // never set taskType at all) actually applies to skill-driven prompts,
+  // not just cyber_tool's own direct coach path.
+  const isCyberTask = CYBER_TERMS_REGEX.test(skillLabel) || CYBER_TERMS_REGEX.test(userPrompt);
+
   const result = await useFreeLLM({
     model,
     messages: [
@@ -268,7 +277,8 @@ async function executeWithSystemPrompt(
     workspace_root,
     sessionId,
     agentic: false, // Disable auto-enrichment to prevent double-enrichment and token waste
-    isOnePass: true
+    isOnePass: true,
+    taskType: isCyberTask ? TaskType.Cyber : undefined
   });
 
   const responseText = result?.choices?.[0]?.message?.content;
