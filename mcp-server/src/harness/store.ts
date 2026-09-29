@@ -39,6 +39,7 @@ export class HarnessStore {
   private runPath: string;
   private approvalsPath: string;
   private tracePath: string;
+  private tasksPath: string;
   private seqCounter: number | null = null;
 
   constructor(runId: string, baseDir?: string) {
@@ -46,6 +47,30 @@ export class HarnessStore {
     this.runPath = path.join(this.dir, 'run.json');
     this.approvalsPath = path.join(this.dir, 'approvals.json');
     this.tracePath = path.join(this.dir, 'trace.jsonl');
+    this.tasksPath = path.join(this.dir, 'tasks.md');
+  }
+
+  /**
+   * Reuses coding_agents' exact tasks.md format/blackboard convention (see
+   * src/tools/coding-agents.ts's serializeTasksMarkdown/parseTasksMarkdown,
+   * exported for this) for tracking subagent/role invocations across a run
+   * — same per-task append-only log, same pending/in_progress/completed/
+   * failed status semantics, same reason a failed attempt stays 'pending'
+   * rather than 'completed' so the next resume retries it.
+   */
+  async saveTasksMarkdown(content: string): Promise<void> {
+    await ensureDir(this.dir);
+    await withFileLock(this.tasksPath, async () => {
+      await fs.writeFile(this.tasksPath, content, 'utf-8');
+    });
+  }
+
+  async loadTasksMarkdown(): Promise<string | null> {
+    try {
+      return await fs.readFile(this.tasksPath, 'utf-8');
+    } catch {
+      return null;
+    }
   }
 
   async saveRun(run: HarnessRun): Promise<void> {

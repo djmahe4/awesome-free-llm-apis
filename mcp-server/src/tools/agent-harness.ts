@@ -2,9 +2,10 @@ import crypto from 'node:crypto';
 import { deployHarness, resumeHarness, abortHarness } from '../harness/runner.js';
 import { HarnessStore } from '../harness/store.js';
 import { loadHarnessDeclaration } from '../harness/declaration.js';
+import { parseTasksMarkdown } from './coding-agents.js';
 
 export interface AgentHarnessInput {
-  action: 'deploy' | 'resume' | 'status' | 'approvals' | 'approve' | 'reject' | 'trace' | 'abort';
+  action: 'deploy' | 'resume' | 'status' | 'approvals' | 'approve' | 'reject' | 'trace' | 'tasks' | 'abort';
   runId?: string;              // required for all actions except deploy (which generates one)
   harness?: string;            // declaration name, default 'research-analysis'
   goal?: string;                // required for deploy
@@ -67,6 +68,13 @@ export async function agentHarness(input: AgentHarnessInput) {
       if (!input.runId) throw new Error('trace requires `runId`.');
       const store = new HarnessStore(input.runId, input.workspace_root);
       return { events: await store.readTrace(input.limit ?? 200) };
+    }
+    case 'tasks': {
+      if (!input.runId) throw new Error('tasks requires `runId`.');
+      const store = new HarnessStore(input.runId, input.workspace_root);
+      const raw = await store.loadTasksMarkdown();
+      if (!raw) return { tasksFile: null, tasks: [] };
+      return { tasksFile: raw, tasks: parseTasksMarkdown(raw) };
     }
     case 'abort': {
       if (!input.runId) throw new Error('abort requires `runId`.');

@@ -1030,7 +1030,7 @@ async function annotateFixedTaskList(
   }
 }
 
-function serializeTasksMarkdown(goal: string, tasks: TaskItem[]): string {
+export function serializeTasksMarkdown(goal: string, tasks: TaskItem[]): string {
   const firstLine = goal.split('\n')[0].replace(/^#+\s*/, '');
   const lines = [`# Tasks Plan: ${firstLine}\n`];
   for (const t of tasks) {
@@ -1049,7 +1049,7 @@ function serializeTasksMarkdown(goal: string, tasks: TaskItem[]): string {
 /** Parses tasks.md back, including the per-task file/context metadata and the
  * blackboard log — a simple line-state-machine since each task can span
  * several indented lines, not just its own checkbox line. */
-function parseTasksMarkdown(content: string): TaskItem[] {
+export function parseTasksMarkdown(content: string): TaskItem[] {
   const lines = content.split(/\r?\n/);
   const tasks: TaskItem[] = [];
   let current: TaskItem | null = null;
@@ -1082,7 +1082,7 @@ function parseTasksMarkdown(content: string): TaskItem[] {
 }
 
 /** Recovers the original plan goal recorded in a tasks.md header, so resume calls don't overwrite it with a per-task or stale `input.goal`. */
-function extractGoalFromTasksMarkdown(content: string): string | undefined {
+export function extractGoalFromTasksMarkdown(content: string): string | undefined {
   const match = content.match(/^#\s*Tasks Plan:\s*(.+)$/m);
   return match ? match[1].trim() : undefined;
 }

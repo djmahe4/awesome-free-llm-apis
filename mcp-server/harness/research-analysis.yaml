@@ -7,6 +7,12 @@ harness:
     maxToolCalls: 40
     maxWallMinutes: 20
     supervisorShareMax: 0.2
+  # Unset/empty = unrestricted (any workspace_root a caller supplies is
+  # accepted, matching coding_agents' current default posture). Set this to
+  # scope every run under this declaration to specific project directories:
+  # allowedWorkspaceRoots:
+  #   - C:\Users\me\projects\my-project
+  allowedWorkspaceRoots: []
   approval:
     timeoutMinutes: 60
     standingRules: []

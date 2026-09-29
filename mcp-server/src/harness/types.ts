@@ -23,6 +23,15 @@ export interface HarnessDeclaration {
       maxWallMinutes: number;
       supervisorShareMax: number;
     };
+    /**
+     * Absolute path prefixes a run may touch. Unset/empty = unrestricted
+     * (matches coding_agents' current behavior — assertSafe there guards
+     * traversal WITHIN a workspaceRoot but never validates workspaceRoot
+     * itself against an allowlist). Declaring this list is how a harness
+     * deployment gets scoped to specific project directories instead of
+     * accepting any absolute path a caller supplies.
+     */
+    allowedWorkspaceRoots?: string[];
     approval: {
       timeoutMinutes: number;
       standingRules: AllowRule[];

@@ -2,10 +2,57 @@ import { RunRegistry } from '../pipeline/middlewares/RunRegistry.js';
 import { ContextManager } from '../utils/ContextManager.js';
 import { HarnessStore } from './store.js';
 import { loadHarnessDeclaration, selectRole } from './declaration.js';
-import { evaluate, hashArgs } from './policy.js';
+import { evaluate, hashArgs, assertWorkspaceRootAllowed } from './policy.js';
+import { serializeTasksMarkdown, parseTasksMarkdown, type TaskItem } from '../tools/coding-agents.js';
 import type { HarnessDeclaration, HarnessRun } from './types.js';
 
 const contextManager = new ContextManager();
+
+/**
+ * Reuses coding_agents' own tasks.md blackboard (see store.ts's
+ * saveTasksMarkdown/loadTasksMarkdown) to track each role's attempts across
+ * this run — same append-only per-task log, same pending/in_progress/
+ * completed/failed semantics. In this P3 vertical slice there's exactly one
+ * task (the single role selected for the run), but the mechanism is the
+ * real one P4's multi-role handoff chain will add more tasks onto, not a
+ * bespoke parallel tracker.
+ */
+async function loadOrInitTasks(store: HarnessStore, goal: string, role: string): Promise<TaskItem[]> {
+  const raw = await store.loadTasksMarkdown();
+  if (raw) return parseTasksMarkdown(raw);
+  return [{ id: role, task: goal, status: 'pending', log: [] }];
+}
+
+async function saveTasks(store: HarnessStore, goal: string, tasks: TaskItem[]): Promise<void> {
+  await store.saveTasksMarkdown(serializeTasksMarkdown(goal, tasks)).catch(() => {});
+}
+
+async function beginTaskAttempt(store: HarnessStore, goal: string, role: string, note: string): Promise<void> {
+  const tasks = await loadOrInitTasks(store, goal, role);
+  let task = tasks.find(t => t.id === role);
+  if (!task) {
+    task = { id: role, task: goal, status: 'pending', log: [] };
+    tasks.push(task);
+  }
+  task.status = 'in_progress';
+  (task.log ??= []).push(`${new Date().toISOString()} ${note}`);
+  await saveTasks(store, goal, tasks);
+}
+
+async function endTaskAttempt(store: HarnessStore, goal: string, role: string, outcome: TaskItem['status'], note: string): Promise<void> {
+  const tasks = await loadOrInitTasks(store, goal, role);
+  const task = tasks.find(t => t.id === role);
+  if (task) {
+    task.status = outcome;
+    (task.log ??= []).push(`${new Date().toISOString()} ${note}`);
+  }
+  await saveTasks(store, goal, tasks);
+}
+
+/** A failure/pause is always retryable (task stays 'pending', matching coding_agents' "failed resume leaves the task pending" rule) — only a genuine success marks 'completed'. */
+function taskOutcomeFor(status: HarnessRun['status']): TaskItem['status'] {
+  return status === 'complete' ? 'completed' : status === 'failed' ? 'failed' : 'pending';
+}
 
 export interface DeployInput {
   runId: string;
@@ -189,6 +236,7 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
   }
 
   const decl = await loadHarnessDeclaration(input.harness);
+  assertWorkspaceRootAllowed(decl, input.workspaceRoot);
   const role = selectRole(decl, input.goal);
   const registryKey = `harness:${input.runId}`;
 
@@ -213,16 +261,20 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
 
   const runInfo = RunRegistry.start(registryKey);
 
+  await beginTaskAttempt(store, input.goal, role, `deploy: attempting via use_free_llm`);
+
   (async () => {
     try {
       const goalTokens = contextManager.countStringTokens(input.goal);
       const callResult = await runResearchStep(store, run, decl, role, input.goal, input.workspaceRoot, registryKey);
       const { content } = applyResearchResult(run, role, callResult, goalTokens, runInfo.controller.signal.aborted);
+      await endTaskAttempt(store, input.goal, role, taskOutcomeFor(run.status), `deploy: ${run.status}${run.error ? ` (${run.error})` : ''}`);
       await finalizeRun(store, run, role, registryKey, content);
     } catch (err: any) {
       run.status = 'failed';
       run.error = err?.message || String(err);
       await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'error', data: { message: run.error } }).catch(() => {});
+      await endTaskAttempt(store, input.goal, role, 'failed', `deploy: failed (${run.error})`);
       await finalizeRun(store, run, role, registryKey, undefined);
     }
   })().catch(() => {});
@@ -247,6 +299,10 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
   }
 
   const decl = await loadHarnessDeclaration(run.declarationName);
+  // Re-validated on resume too — a declaration edited between deploy and
+  // resume (e.g. allowedWorkspaceRoots tightened) must not grandfather in a
+  // workspace_root that would no longer be permitted.
+  assertWorkspaceRootAllowed(decl, run.workspaceRoot);
   const role = selectRole(decl, run.goal);
   const registryKey = `harness:${runId}`;
 
@@ -256,16 +312,20 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
 
   const runInfo = RunRegistry.start(registryKey);
 
+  await beginTaskAttempt(store, run.goal, role, `resume: retrying via use_free_llm`);
+
   (async () => {
     try {
       const goalTokens = contextManager.countStringTokens(run.goal);
       const callResult = await runResearchStep(store, run, decl, role, run.goal, run.workspaceRoot, registryKey);
       const { content } = applyResearchResult(run, role, callResult, goalTokens, runInfo.controller.signal.aborted);
+      await endTaskAttempt(store, run.goal, role, taskOutcomeFor(run.status), `resume: ${run.status}${run.error ? ` (${run.error})` : ''}`);
       await finalizeRun(store, run, role, registryKey, content);
     } catch (err: any) {
       run.status = 'failed';
       run.error = err?.message || String(err);
       await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'error', data: { message: run.error } }).catch(() => {});
+      await endTaskAttempt(store, run.goal, role, 'failed', `resume: failed (${run.error})`);
       await finalizeRun(store, run, role, registryKey, undefined);
     }
   })().catch(() => {});

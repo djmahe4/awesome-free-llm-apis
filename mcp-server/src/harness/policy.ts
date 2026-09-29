@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
 import type { AllowRule, HarnessDeclaration, PolicyDecision } from './types.js';
 
 /**
@@ -73,4 +74,28 @@ export function evaluate(
   }
 
   return { kind: 'needs_approval', reason: `No allowlist rule for tool='${tool}' action='${action ?? ''}' under role '${role}'` };
+}
+
+/**
+ * Validates a workspace_root against the declaration's `allowedWorkspaceRoots`
+ * — a boundary check, not an allowlist rule, so it's a hard throw (like
+ * coding-agents.ts's assertSafe for path traversal WITHIN a workspace root)
+ * rather than a `needs_approval` a human could rubber-stamp around. Unset/
+ * empty list means the declaration hasn't opted into this restriction —
+ * unrestricted, matching today's default posture, not fail-closed.
+ */
+export function assertWorkspaceRootAllowed(decl: HarnessDeclaration, workspaceRoot: string | undefined): void {
+  const allowed = decl.harness.allowedWorkspaceRoots;
+  if (!allowed || allowed.length === 0) return;
+  if (!workspaceRoot) {
+    throw new Error(`Harness '${decl.harness.name}' requires workspace_root to be one of: ${allowed.join(', ')}`);
+  }
+  const resolved = path.resolve(workspaceRoot);
+  const ok = allowed.some(root => {
+    const resolvedRoot = path.resolve(root);
+    return resolved === resolvedRoot || resolved.startsWith(resolvedRoot + path.sep);
+  });
+  if (!ok) {
+    throw new Error(`workspace_root '${workspaceRoot}' is not permitted by harness '${decl.harness.name}' (allowed: ${allowed.join(', ')})`);
+  }
 }
