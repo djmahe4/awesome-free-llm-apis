@@ -145,8 +145,17 @@ export async function gatedCall(
   }
 }
 
-/** The single research step both deploy and resume execute — factored out so a resume re-attempts with the IDENTICAL real payload (same argsHash) an approval was granted for. */
-async function runResearchStep(
+/**
+ * The single role step both deploy and resume execute — factored out so a
+ * resume re-attempts with the IDENTICAL real payload (same argsHash) an
+ * approval was granted for. Dispatches by the role's DECLARED tool instead
+ * of always calling use_free_llm — a role declaring `load_skill_prompt` or
+ * `execute_skill` as its allowlisted tool previously still only ever got
+ * use_free_llm called, regardless of what the YAML said (confirmed dead
+ * config; policy.evaluate() already matched any declared tool name fine,
+ * the gap was entirely here).
+ */
+async function runRoleStep(
   store: HarnessStore,
   run: HarnessRun,
   decl: HarnessDeclaration,
@@ -155,13 +164,14 @@ async function runResearchStep(
   workspaceRoot: string | undefined,
   registryKey: string
 ): Promise<GatedResult> {
-  const { useFreeLLM } = await import('../tools/use-free-llm.js');
   const goalTokens = contextManager.countStringTokens(goal);
-  const estimate = goalTokens + 2000; // rough input+output reserve for one research call
+  const estimate = goalTokens + 2000; // rough input+output reserve for one role step
 
-  // This exact object is both hashed for approval-binding and passed to
-  // useFreeLLM — one source of truth, so what a human approves is what runs.
-  const payload = {
+  const toolName = decl.roles[role]?.tools?.[0]?.tool || 'use_free_llm';
+
+  // This exact object is both hashed for approval-binding and passed to the
+  // tool — one source of truth, so what a human approves is what runs.
+  const useFreeLlmPayload = {
     messages: [
       { role: 'system', content: 'You are a research agent. Answer with grounded findings only; cite sources inline. Do not fabricate citations.' },
       { role: 'user', content: goal },
@@ -171,10 +181,40 @@ async function runResearchStep(
     sessionId: registryKey,
     isOnePass: true,
   };
+  const loadSkillPromptPayload = {
+    type: 'search',
+    keywords: goal.split(/\s+/).filter(Boolean).slice(0, 8),
+    workspaceDir: workspaceRoot,
+    sessionId: registryKey,
+  };
+  const executeSkillPayload = {
+    skill: 'general-purpose',
+    input: goal,
+    workspace_root: workspaceRoot,
+    sessionId: registryKey,
+  };
+
+  const dispatchMap: Record<string, { payload: any; execute: () => Promise<any> }> = {
+    use_free_llm: {
+      payload: useFreeLlmPayload,
+      execute: async () => (await import('../tools/use-free-llm.js')).useFreeLLM(useFreeLlmPayload as any),
+    },
+    load_skill_prompt: {
+      payload: loadSkillPromptPayload,
+      execute: async () => (await import('../tools/load-skill-prompt.js')).loadSkillPrompt(loadSkillPromptPayload as any),
+    },
+    execute_skill: {
+      payload: executeSkillPayload,
+      execute: async () => (await import('../tools/execute-skill.js')).executeSkill(executeSkillPayload as any),
+    },
+  };
+
+  const resolved = dispatchMap[toolName] || dispatchMap.use_free_llm;
+  const resolvedToolName = dispatchMap[toolName] ? toolName : 'use_free_llm';
 
   return gatedCall(
-    store, run, decl, role, 'use_free_llm', undefined, payload, estimate, 'research-1',
-    async () => useFreeLLM(payload as any)
+    store, run, decl, role, resolvedToolName, undefined, resolved.payload, estimate, 'research-1',
+    resolved.execute
   );
 }
 
@@ -266,7 +306,7 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
   (async () => {
     try {
       const goalTokens = contextManager.countStringTokens(input.goal);
-      const callResult = await runResearchStep(store, run, decl, role, input.goal, input.workspaceRoot, registryKey);
+      const callResult = await runRoleStep(store, run, decl, role, input.goal, input.workspaceRoot, registryKey);
       const { content } = applyResearchResult(run, role, callResult, goalTokens, runInfo.controller.signal.aborted);
       await endTaskAttempt(store, input.goal, role, taskOutcomeFor(run.status), `deploy: ${run.status}${run.error ? ` (${run.error})` : ''}`);
       await finalizeRun(store, run, role, registryKey, content);
@@ -317,7 +357,7 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
   (async () => {
     try {
       const goalTokens = contextManager.countStringTokens(run.goal);
-      const callResult = await runResearchStep(store, run, decl, role, run.goal, run.workspaceRoot, registryKey);
+      const callResult = await runRoleStep(store, run, decl, role, run.goal, run.workspaceRoot, registryKey);
       const { content } = applyResearchResult(run, role, callResult, goalTokens, runInfo.controller.signal.aborted);
       await endTaskAttempt(store, run.goal, role, taskOutcomeFor(run.status), `resume: ${run.status}${run.error ? ` (${run.error})` : ''}`);
       await finalizeRun(store, run, role, registryKey, content);
