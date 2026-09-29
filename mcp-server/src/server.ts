@@ -540,6 +540,15 @@ export function createExpressApp(): express.Express {
               result = await CodingAgentsHandler(params);
               break;
             }
+            case 'agent_harness': {
+              // Forwarded wholesale (not field-by-field) deliberately — a
+              // per-field whitelist here is exactly what silently dropped new
+              // manage_memory fields twice this session. New agent_harness
+              // params never need a matching edit in this route again.
+              const { agentHarness } = await import('./tools/agent-harness.js');
+              result = await agentHarness(params);
+              break;
+            }
             default:
               res.status(400).json({ error: `Unknown tool: ${tool}` });
               return;

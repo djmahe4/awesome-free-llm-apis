@@ -765,6 +765,77 @@ export async function createMCPServer(): Promise<Server> {
           },
           required: ['goal']
         }
+      },
+      {
+        name: 'agent_harness',
+        description: [
+          'Deploys a background research/analysis agent under a declarative allowlist,',
+          'token budget, and human-in-the-loop approval queue. Research-first: content depth',
+          'is abstract -> html -> pdf, deterministic, never an LLM choice. Coding tools',
+          '(coding_agents, local_llm_patch) are always gated behind explicit approval,',
+          'regardless of the harness declaration.',
+          '',
+          'USER STORY: Kick off unattended research/scraping/analysis work that runs in the',
+          'background under a strict token budget, with every tool call outside the declared',
+          'allowlist parked in an approval queue instead of executing — poll status, review',
+          'and decide pending approvals, then resume.',
+          '',
+          'WHEN TO USE: A research/analysis/scraping task you want running in the background',
+          'with hard limits on cost and blast radius, not a synchronous one-shot call.',
+          '',
+          'INPUTS:',
+          '  action (required)   — "deploy" | "status" | "approvals" | "approve" | "reject" | "trace" | "abort".',
+          '  runId (optional for deploy, required otherwise) — Identifies the run; deploy generates one if omitted.',
+          '  harness (optional)  — Declaration name (default "research-analysis").',
+          '  goal (required for deploy) — The research/analysis objective.',
+          '  workspace_root (optional) — Scopes memory writes and the run\'s on-disk state.',
+          '  maxTokens (optional) — Override the declaration\'s default per-run token budget.',
+          '  approvalId (required for approve/reject) — From a prior "approvals" call.',
+          '  note (optional)     — Attached to an approve/reject decision.',
+          '  limit (optional)    — Max trace events to return (default 200).',
+          '',
+          'ACTION DETAILS:',
+          '  deploy    → Starts a background run (single research role in this version), returns',
+          '              immediately with the initial run record. Poll with "status".',
+          '  status    → Run state, budget usage, and pending-approval count.',
+          '  approvals → Lists all approval requests for a run (pending/approved/rejected/expired).',
+          '  approve/reject → Decides one pending approval by id. Binds to the EXACT call it was',
+          '              requested for (runId+callId+argsHash) — approving one call never authorizes',
+          '              a different call, even to the same tool.',
+          '  trace     → Tails the run\'s append-only debug/trace log (policy decisions, tool calls,',
+          '              budget events, handoffs, errors).',
+          '  abort     → Cancels a running run.',
+          '',
+          'OUTPUTS:',
+          '  deploy         → { success:true, run }',
+          '  status         → { success:true, run, pendingApprovals }',
+          '  approvals      → { approvals: ApprovalRequest[] }',
+          '  approve/reject → { success:true, approval } (false if the id doesn\'t exist)',
+          '  trace          → { events: TraceEvent[] }',
+          '  abort          → { success: boolean }',
+          '',
+          'FAILURE STATES:',
+          '  - run.status:"paused_approval" — a call outside the allowlist is waiting in the',
+          '    approval queue; call "approvals" then "approve"/"reject", then re-deploy to continue.',
+          '  - run.status:"paused_budget" — the token or tool-call budget would be exceeded;',
+          '    increase maxTokens on a fresh deploy or accept the partial result in run.result.',
+          '  - run.status:"failed" — see run.error and the trace\'s last "error" event.',
+        ].join('\n'),
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            action: { type: 'string', enum: ['deploy', 'status', 'approvals', 'approve', 'reject', 'trace', 'abort'] },
+            runId: { type: 'string', description: 'Run identifier. Required for every action except deploy (which generates one if omitted).' },
+            harness: { type: 'string', description: 'Harness declaration name (default "research-analysis")' },
+            goal: { type: 'string', description: 'Research/analysis objective (required for deploy)' },
+            workspace_root: { type: 'string', description: 'Absolute workspace path — scopes memory writes and on-disk run state' },
+            maxTokens: { type: 'number', description: 'Override the declaration\'s default per-run token budget' },
+            approvalId: { type: 'string', description: 'Approval request id (required for approve/reject)' },
+            note: { type: 'string', description: 'Optional note attached to an approve/reject decision' },
+            limit: { type: 'number', description: 'Max trace events to return (default 200)' },
+          },
+          required: ['action'],
+        },
       }
     ],
   }));
@@ -878,6 +949,13 @@ export async function createMCPServer(): Promise<Server> {
         response = {
           content: [{ type: 'text' as const, text: toMarkdownResponse(result.content || result.markdown || '') }],
           isError: !result.applied && !!result.error,
+        };
+      } else if (name === 'agent_harness') {
+        const { agentHarness } = await import('../tools/agent-harness.js');
+        const result = await agentHarness(args as any);
+        response = {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          isError: result?.success === false,
         };
       } else {
         throw new Error(`Unknown tool: ${name}`);
