@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚡ Free LLM APIs — Dashboard</title>
+  <meta name="description" content="Real-time monitoring and tool playground for the Free LLM APIs MCP Server. View provider quotas, memory state, and call any tool live.">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+    window.__mermaid = mermaid;
+  </script>
+</head>
+<body>
+
+  <!-- ─── Hero Header ─────────────────────────────────────────── -->
+  <header class="hero-header">
+    <div class="hero-strip"></div>
+    <div class="hero-inner">
+      <div>
+        <div class="logo">⚡ FREE-LLM-MCP</div>
+        <div class="logo-sub">v1.1.0 · Orchestration Dashboard</div>
+      </div>
+      <div class="header-spacer"></div>
+      <div id="status-pill" class="status-pill offline">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-label">Connecting…</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─── Main Content ─────────────────────────────────────────── -->
+  <main class="container">
+
+    <!-- Tabs Navigation -->
+    <nav class="tabs-bar" role="tablist" aria-label="Dashboard sections">
+      <button class="tab-btn active" data-tab="overview" role="tab" aria-selected="true" id="tab-overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Overview
+      </button>
+      <button class="tab-btn" data-tab="providers" role="tab" aria-selected="false" id="tab-providers">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+        Providers
+      </button>
+      <button class="tab-btn" data-tab="playground" role="tab" aria-selected="false" id="tab-playground">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Tool Playground
+      </button>
+      <button class="tab-btn" data-tab="memory" role="tab" aria-selected="false" id="tab-memory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
+        Memory
+      </button>
+      <button class="tab-btn" data-tab="dagmemory" role="tab" aria-selected="false" id="tab-dagmemory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.2 7.2L10.5 16M15.8 7.2L13.5 16M8.5 6h7"/></svg>
+        Memory Graph
+      </button>
+      <button class="tab-btn" data-tab="wiki" role="tab" aria-selected="false" id="tab-wiki">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        Wiki
+      </button>
+      <button class="tab-btn" data-tab="profile" role="tab" aria-selected="false" id="tab-profile">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Profile & Leaderboard
+      </button>
+      <button class="tab-btn" data-tab="quickstart" role="tab" aria-selected="false" id="tab-quickstart">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+        Quick Start
+      </button>
+      <button class="tab-btn" data-tab="steering" role="tab" aria-selected="false" id="tab-steering">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="4"/></svg>
+        Keyword & Prompt Steering
+      </button>
+    </nav>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 1: OVERVIEW
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel active" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
+
+      <!-- Stat Cards -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label c-purple">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            Active Providers
+          </div>
+          <div class="stat-value c-purple" id="stat-providers">--</div>
+          <div class="stat-sub">Ready for routing</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label c-amber">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+            Today's Requests
+          </div>
+          <div class="stat-value c-amber" id="stat-daily-req">0</div>
+          <div class="stat-sub">System-wide daily total</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label c-cyan">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Today's Tokens
+          </div>
+          <div class="stat-value c-cyan" id="stat-daily-tok">0</div>
+          <div class="stat-sub">Aggregated usage today</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label c-green">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+            Lifetime Requests
+          </div>
+          <div class="stat-value c-green" id="stat-lifetime">0</div>
+          <div class="stat-sub">Total since install</div>
+        </div>
+      </div>
+
+      <!-- System Features -->
+      <div class="card">
+        <div class="card-header">
+          <span class="section-title" style="margin:0;font-size:.9rem;">Intelligent Orchestration — Active Features</span>
+        </div>
+        <div class="card-body">
+          <div class="feature-list">
+            <div class="feature-row">
+              <div><div class="feature-name">Token Estimation</div><div class="feature-sub">Proactive counting via js-tiktoken before each call</div></div>
+              <span class="badge badge-green">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Quantum Scoring</div><div class="feature-sub">Probabilistic model selection with deepseek-r1 baseline (1.0)</div></div>
+              <span class="badge badge-purple">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Circuit Breaker</div><div class="feature-sub">Adaptive cooldown (15s rate-limit · 60s server errors)</div></div>
+              <span class="badge badge-cyan">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Header Sync</div><div class="feature-sub">Real-time quota drift correction from API response headers</div></div>
+              <span class="badge badge-green">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Subtask Visual Grounding</div><div class="feature-sub">file:/// → base64 image conversion for TDD agentic runs</div></div>
+              <span class="badge badge-purple">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Auto-Fallback Cascade</div><div class="feature-sub">2-pass routing across all healthy → cooling providers</div></div>
+              <span class="badge badge-green">Active</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 2: PROVIDERS
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-providers" role="tabpanel" aria-labelledby="tab-providers">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div class="section-title">Real-time Provider Quotas</div>
+          <div class="section-sub">Auto-refreshes every 5 seconds · Click Verify to health-check credentials</div>
+        </div>
+        <button class="btn btn-outline btn-sm" id="refresh-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.43"/></svg>
+          Refresh Now
+        </button>
+      </div>
+      <div class="providers-grid" id="providers-grid">
+        <div style="grid-column:1/-1;text-align:center;padding:60px 0;color:var(--text-muted);">
+          <div class="spinner" style="width:24px;height:24px;margin:0 auto 12px;"></div>
+          Connecting to MCP server…
+        </div>
+      </div>
+
+      <!-- Search Providers (v1.0.9 SearchRouterMiddleware) -->
+      <div style="margin-top:32px;">
+        <div class="section-title">Search Providers</div>
+        <div class="section-sub">Fallback chain: Parallel AI → Tavily → Jina → Brave → SearXNG · used by <code>google_search</code>/semantic-search requests</div>
+      </div>
+      <div class="providers-grid" id="search-providers-grid" style="margin-top:12px;">
+        <div style="grid-column:1/-1;text-align:center;padding:24px 0;color:var(--text-muted);">Loading…</div>
+      </div>
+
+      <div style="margin-top:28px;">
+        <div class="section-title">Recent Search Queries</div>
+        <div class="section-sub">Last 25 searches served through SearchRouterMiddleware, newest first</div>
+      </div>
+      <div class="card" style="margin-top:12px;">
+        <div class="card-body" style="padding:0;">
+          <table class="qs-table" id="search-logs-table" style="width:100%;">
+            <thead>
+              <tr><th>Time</th><th>Query</th><th>Provider</th><th>Count</th><th>Results</th></tr>
+            </thead>
+            <tbody id="search-logs-tbody">
+              <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 3: TOOL PLAYGROUND
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-playground" role="tabpanel" aria-labelledby="tab-playground">
+
+      <div class="pg-chat-layout">
+
+        <!-- LEFT: Tool Selector + Param Panel -->
+        <div class="pg-sidebar" id="pg-sidebar">
+          
+          <!-- Conversations Card -->
+          <div class="card" style="margin-bottom:12px; display:flex; flex-direction:column; max-height:280px; min-height:160px;">
+            <div class="card-header" style="padding:10px 16px; flex-shrink:0; display:flex; justify-content:space-between; align-items:center;">
+              <span class="card-title" style="font-size:.82rem; display:flex; align-items:center; gap:6px;">
+                <span>🗂</span> Conversations
+              </span>
+              <button id="pg-new-conv-btn" class="btn btn-primary btn-sm" style="padding:2px 8px; font-size:.7rem; display:flex; align-items:center; gap:3px;" title="Start a new conversation">+ New</button>
+            </div>
+            <div class="card-body" style="padding:8px; display:flex; flex-direction:column; overflow:hidden; flex:1; min-height:0;">
+              <input type="text" id="pg-conv-search" placeholder="Search sessions..." style="font-size:.75rem; padding:6px 10px; margin-bottom:8px; border-radius:6px; flex-shrink:0; width:100%; border:1px solid var(--glass-border); background:rgba(255,255,255,0.03); color:var(--text-primary);">
+              <div id="pg-conv-list" class="conv-list" style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:4px;">
+                <div class="conv-empty">Loading conversations...</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:12px;">
+            <div class="card-header" style="padding:12px 16px;">
+              <span class="card-title" style="font-size:.82rem;">Select Tool</span>
+            </div>
+            <div class="card-body" style="padding:8px;">
+              <div class="tool-selector-list" id="tool-list"></div>
+            </div>
+          </div>
+
+          <!-- Params card -->
+          <div class="card" id="pg-params-card">
+            <div class="card-header" style="padding:10px 16px;cursor:pointer;" id="pg-params-toggle">
+              <span class="card-title" id="pg-tool-title" style="font-size:.82rem;">use_free_llm</span>
+              <svg id="pg-params-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .2s;margin-left:auto;"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div id="pg-params-body" class="card-body" style="padding:12px;">
+              <div id="pg-form" class="playground-form"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: Chat Log + Send Bar -->
+        <div class="pg-chat-main">
+
+          <!-- Chat header -->
+          <div class="pg-chat-header">
+            <div style="display:flex;flex-direction:column;gap:2px;">
+              <span id="pg-chat-session-label" style="font-size:.8rem;color:var(--text-muted);">No workspace — one-shot mode</span>
+              <span id="pg-chat-mode-badge" class="badge badge-amber" style="width:fit-content;font-size:.65rem;">⚡ One-shot</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <!-- Workspace input inline -->
+              <div style="display:flex;gap:6px;align-items:center;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);flex-shrink:0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <input type="text" id="pg-workspace" placeholder="workspace path (enables memory/grounding)" style="width:220px;font-size:.78rem;" title="Set workspace root — saved automatically. Changing this starts a new conversation.">
+                <button type="button" id="pg-folder-btn" class="btn btn-outline btn-sm" title="Pick workspace folder" style="padding:3px 7px;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                </button>
+              </div>
+              <!-- Agentic is opt-in, independent of whether a workspace is set — workspace
+                   memory/context grounding and file/pdf reference resolution both already
+                   work without it. Agentic adds subtask decomposition + a pre-emptive
+                   full-workspace re-index, which is unnecessary overhead (and can mangle
+                   simple reference-only requests) unless you actually want multi-step
+                   planning. -->
+              <label style="display:flex;gap:5px;align-items:center;font-size:.78rem;color:var(--text-muted);cursor:pointer;" title="Enable subtask decomposition + pre-emptive workspace re-indexing. Leave off for simple grounded Q&A, including PDF/file/image references — those already work via the workspace above.">
+                <input type="checkbox" id="pg-agentic-toggle" style="cursor:pointer;">
+                🧠 Agentic
+              </label>
+              <button class="btn btn-outline btn-sm" id="pg-clear-btn" title="Clear conversation">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Chat log -->
+          <div class="pg-chat-log" id="pg-chat-log" aria-live="polite">
+            <div class="chat-empty-state" id="pg-chat-empty">
+              <div style="font-size:2rem;margin-bottom:8px;">🛠</div>
+              <div style="font-weight:600;color:var(--text-primary);margin-bottom:4px;">Tool Playground</div>
+              <div style="font-size:.8rem;color:var(--text-muted);max-width:320px;text-align:center;">Fill in params on the left and send a message. Set a workspace root above to enable agentic multi-step execution.</div>
+            </div>
+          </div>
+
+          <!-- Attachments row -->
+          <div class="pg-attachments" id="pg-attachments"></div>
+
+          <!-- Send bar -->
+          <div class="pg-send-bar">
+            <input type="file" id="pg-file-input" accept="image/*,application/pdf" style="display:none;">
+            <button class="btn btn-outline btn-sm" id="pg-attach-btn" title="Attach image or PDF">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            </button>
+            <span id="pg-status" style="font-size:.72rem;color:var(--text-muted);"></span>
+            <span id="pg-latency" class="latency-badge" style="display:none;"></span>
+            <button class="btn btn-primary" id="pg-run-btn" style="margin-left:auto;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              Send
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB: WIKI
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-wiki" role="tabpanel" aria-labelledby="tab-wiki">
+      <div class="section-title">📖 Workspace Wiki</div>
+      <div class="section-sub">Browse pages the agent has written to memory for a workspace. Click a page or a related-page chip to navigate.</div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-body">
+          <div class="session-controls">
+            <label class="field-label" style="margin:0;white-space:nowrap;" for="wiki-workspace-input">Workspace</label>
+            <input type="text" id="wiki-workspace-input" class="session-input" placeholder="workspace path used to look up its wiki">
+            <button class="btn btn-primary btn-sm" id="wiki-load-btn">Load Wiki</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="wiki-layout">
+        <div class="card wiki-sidebar">
+          <div class="card-header" style="padding:10px 16px;">
+            <span class="card-title" style="font-size:.82rem;">Pages</span>
+          </div>
+          <div class="card-body wiki-page-list" id="wiki-page-list">
+            <div class="conv-empty">Load a workspace to see its wiki pages.</div>
+          </div>
+        </div>
+
+        <div class="card wiki-content-pane">
+          <div class="card-header" style="padding:10px 16px;">
+            <span class="card-title" id="wiki-page-title" style="font-size:.82rem;">No page selected</span>
+          </div>
+          <div class="card-body" id="wiki-page-body">
+            <div class="conv-empty">Select a page from the list.</div>
+          </div>
+          <div class="wiki-related" id="wiki-related"></div>
+        </div>
+      </div>
+
+      <!-- Cyber Tool Decision Graph (v1.0.9) -->
+      <div style="margin-top:28px;">
+        <div class="section-title">🕸 Cyber Tool Decision Graph</div>
+        <div class="section-sub">Visualizes the goal/hypothesis/action/finding/dead-end graph a <code>cyber_tool</code> coaching session built via <code>save_graph</code>/<code>load_graph</code>.</div>
+      </div>
+      <div class="card" style="margin-top:12px;margin-bottom:12px;">
+        <div class="card-body">
+          <div class="session-controls">
+            <label class="field-label" style="margin:0;white-space:nowrap;" for="cyber-graph-session-input">Session ID</label>
+            <input type="text" id="cyber-graph-session-input" class="session-input" placeholder="cyber_tool sessionId">
+            <button class="btn btn-primary btn-sm" id="cyber-graph-load-btn">Load Graph</button>
+            <input type="text" id="cyber-graph-search-input" class="session-input" placeholder="Filter nodes by label/id…" style="max-width:220px;">
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body" id="cyber-graph-body">
+          <div class="conv-empty">Enter a session ID and click Load Graph.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 4: MEMORY
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-memory" role="tabpanel" aria-labelledby="tab-memory">
+      <div class="section-title">🧠 Session Memory Buffers</div>
+      <div class="section-sub">Live content of <code>knowledge.md</code> and momentum queues for a selected agentic session.</div>
+
+      <!-- Session selector -->
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-body">
+          <div class="session-controls">
+            <label class="field-label" style="margin:0;white-space:nowrap;" for="mem-session-input">Session ID</label>
+            <input type="text" id="mem-session-input" class="session-input" placeholder="e.g. ws-abc123 or my-project">
+            <button class="btn btn-primary btn-sm" id="mem-load-btn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Load
+            </button>
+            <select id="mem-session-select" class="session-select">
+              <option value="">— pick active session —</option>
+            </select>
+            <span id="mem-updated" style="font-size:.72rem;color:var(--text-muted);margin-left:auto;"></span>
+            <button class="btn btn-outline btn-sm" id="mem-refresh-btn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.43"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Knowledge.md -->
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-header">
+          <span class="card-title">knowledge.md <span id="mem-session-label" style="font-family:'JetBrains Mono',monospace;font-weight:400;color:var(--text-muted);"></span></span>
+        </div>
+        <div class="card-body">
+          <textarea id="mem-knowledge" class="knowledge-box" readonly placeholder="Select a session above to view knowledge.md…"></textarea>
+        </div>
+      </div>
+
+      <!-- HITL pause banner — mirrors the chat-side "⚠️ Pipeline Paused" banner so the
+           dashboard shows the same paused/promptId state, not just the raw chat text. -->
+      <div id="mem-paused-banner" style="display:none;margin-bottom:16px;padding:10px 16px;border-radius:var(--radius-sm);background:rgba(234,179,8,.12);border:1px solid var(--accent-yellow, #eab308);color:var(--text-primary);font-size:.82rem;">
+        ⚠️ <strong>Pipeline Paused</strong> — reply <code id="mem-paused-promptid"></code> to resume.
+      </div>
+
+      <!-- Momentum Queues -->
+      <div class="memory-grid">
+        <div class="card">
+          <div class="card-header"><span class="card-title c-green" style="color:var(--accent-green);">▶ Now Queue</span></div>
+          <div class="card-body"><div class="queue-list" id="queue-now"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title" style="color:var(--accent-cyan);">⏭ Next Queue</span></div>
+          <div class="card-body"><div class="queue-list" id="queue-next"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title" style="color:var(--accent-red);">⛔ Blocked</span></div>
+          <div class="card-body"><div class="queue-list" id="queue-blocked"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title" style="color:var(--accent-purple);">✨ Improve Queue</span></div>
+          <div class="card-body"><div class="queue-list" id="queue-improve"></div></div>
+        </div>
+      </div>
+
+      <!-- Subtask History -->
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header">
+          <span class="card-title" style="color:var(--accent-purple);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:middle;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Subtask Execution History
+          </span>
+        </div>
+        <!-- Filter bar — always visible, full-width -->
+        <div style="display:flex;gap:8px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,.02);">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="history-filter" placeholder="Search subtask history…" style="flex:1;font-size:.8rem;padding:4px 8px;background:transparent;border:none;outline:none;color:var(--text-primary);" autocomplete="off">
+          <button class="btn btn-outline btn-sm" id="history-toggle-all" style="white-space:nowrap;flex-shrink:0;">Expand All</button>
+        </div>
+        <div class="card-body">
+          <div id="queue-history" style="display:flex;flex-direction:column;gap:8px;">
+            <div class="queue-empty">Select a session above to view history…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 6: PROFILE & LEADERBOARD
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-profile" role="tabpanel" aria-labelledby="tab-profile">
+      <div style="display:grid;grid-template-columns: 1fr 1fr; gap:20px;margin-bottom:28px;" class="profile-grid">
+        
+        <!-- Profile Config -->
+        <div class="card">
+          <div class="card-header"><span class="card-title">👤 Telemetry Profile Settings</span></div>
+          <div class="card-body">
+            <form id="profile-form" class="playground-form" onsubmit="event.preventDefault();">
+              <div>
+                <label class="field-label" for="profile-username">Username</label>
+                <input type="text" id="profile-username" placeholder="e.g. dev-hero">
+                <div class="stat-sub" style="margin-top:4px;">3-20 alphanumeric characters, underscores or hyphens.</div>
+              </div>
+              <div class="toggle-row" style="margin-top:14px;">
+                <label class="toggle">
+                  <input type="checkbox" id="profile-telemetry">
+                  <span class="toggle-slider"></span>
+                </label>
+                <span style="font-size:.8rem;color:var(--text-secondary);">Opt out of anonymous telemetry & Firestore sync</span>
+              </div>
+              <div style="margin-top:18px;">
+                <button class="btn btn-primary btn-sm" id="profile-save-btn">Save Settings</button>
+                <span id="profile-status" style="font-size:.78rem;margin-left:10px;"></span>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Leaderboard -->
+        <div class="card">
+          <div class="card-header"><span class="card-title">🏆 Global Leaderboard (Lifetime Tokens)</span></div>
+          <div class="card-body">
+            <div class="feature-list" id="leaderboard-list">
+              <div style="text-align:center;padding:20px 0;color:var(--text-muted);">Loading leaderboard…</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <style>
+      .profile-grid { @media (max-width:768px) { grid-template-columns: 1fr !important; } }
+    </style>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 5: QUICK START
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-quickstart" role="tabpanel" aria-labelledby="tab-quickstart">
+      <div class="section-title">⚙️ Quick Start</div>
+      <div class="section-sub">Get API keys, learn the tool schemas, and steer prompts effectively.</div>
+
+      <!-- Provider API Keys -->
+      <div class="section-title" style="margin-bottom:14px;">🔑 Provider API Keys</div>
+      <div class="section-sub" style="margin-bottom:14px;">Add these to your <code>.env</code> file. Only providers with a key set will be active — the rest run in offline/unavailable state.</div>
+      <div class="card" style="margin-bottom:28px;">
+        <div class="card-body" style="overflow-x:auto;">
+          <table class="qs-table" id="qs-provider-table">
+            <thead><tr><th>Provider</th><th>Env Var</th><th>Get API Key</th></tr></thead>
+            <tbody>
+              <tr><td>Cohere</td><td><code>CO_API_KEY</code></td><td><a href="https://dashboard.cohere.com/api-keys" target="_blank" rel="noopener noreferrer">dashboard.cohere.com/api-keys</a></td></tr>
+              <tr><td>Google Gemini</td><td><code>GEMINI_API_KEY</code></td><td><a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/app/apikey</a></td></tr>
+              <tr><td>Mistral AI</td><td><code>MISTRAL_API_KEY</code></td><td><a href="https://console.mistral.ai/api-keys" target="_blank" rel="noopener noreferrer">console.mistral.ai/api-keys</a></td></tr>
+              <tr><td>Z AI (Zhipu AI)</td><td><code>ZHIPU_API_KEY</code></td><td><a href="https://open.bigmodel.cn/usercenter/apikeys" target="_blank" rel="noopener noreferrer">open.bigmodel.cn/usercenter/apikeys</a></td></tr>
+              <tr><td>Cerebras</td><td><code>CEREBRAS_API_KEY</code></td><td><a href="https://cloud.cerebras.ai/" target="_blank" rel="noopener noreferrer">cloud.cerebras.ai</a></td></tr>
+              <tr><td>Cloudflare Workers AI</td><td><code>CLOUDFLARE_API_TOKEN</code> + <code>CLOUDFLARE_ACCOUNT_ID</code></td><td><a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">dash.cloudflare.com/profile/api-tokens</a></td></tr>
+              <tr><td>Groq</td><td><code>GROQ_API_KEY</code></td><td><a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">console.groq.com/keys</a></td></tr>
+              <tr><td>Hugging Face</td><td><code>HF_TOKEN</code></td><td><a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">huggingface.co/settings/tokens</a></td></tr>
+              <tr><td>Kilo Code</td><td><code>KILO_API_KEY</code></td><td><a href="https://kilo.ai" target="_blank" rel="noopener noreferrer">kilo.ai</a></td></tr>
+              <tr><td>LLM7.io</td><td><code>LLM7_API_KEY</code></td><td><a href="https://token.llm7.io" target="_blank" rel="noopener noreferrer">token.llm7.io</a></td></tr>
+              <tr><td>ModelScope</td><td><code>MODELSCOPE_API_KEY</code></td><td><a href="https://modelscope.cn/my/myaccesstoken" target="_blank" rel="noopener noreferrer">modelscope.cn/my/myaccesstoken</a></td></tr>
+              <tr><td>NVIDIA NIM</td><td><code>NVIDIA_API_KEY</code></td><td><a href="https://build.nvidia.com/explore/discover" target="_blank" rel="noopener noreferrer">build.nvidia.com/explore/discover</a></td></tr>
+              <tr><td>Ollama Cloud</td><td><code>OLLAMA_API_KEY</code></td><td><a href="https://ollama.com/settings/keys" target="_blank" rel="noopener noreferrer">ollama.com/settings/keys</a></td></tr>
+              <tr><td>OpenRouter</td><td><code>OPENROUTER_API_KEY</code></td><td><a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">openrouter.ai/keys</a></td></tr>
+              <tr><td>SiliconFlow</td><td><code>SILICONFLOW_API_KEY</code></td><td><a href="https://cloud.siliconflow.cn/account/ak" target="_blank" rel="noopener noreferrer">cloud.siliconflow.cn/account/ak</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Search & Web Grounding Providers -->
+      <div class="section-title" style="margin-bottom:14px;">🌐 Search & Web Grounding Providers</div>
+      <div class="section-sub" style="margin-bottom:14px;">Used automatically by <code>SearchRouterMiddleware</code> and web search tools with multi-provider fallback.</div>
+      <div class="card" style="margin-bottom:28px;">
+        <div class="card-body" style="overflow-x:auto;">
+          <table class="qs-table" id="qs-search-provider-table">
+            <thead><tr><th>Search Provider</th><th>Env Var</th><th>URL / Get API Key</th><th>Type & Notes</th></tr></thead>
+            <tbody>
+              <tr><td>Parallel AI</td><td><code>PARALLEL_API_KEY</code></td><td><a href="https://parallel.ai" target="_blank" rel="noopener noreferrer">parallel.ai</a></td><td><span class="badge badge-green">Keyless / Optional Key</span> High-throughput AI search</td></tr>
+              <tr><td>Tavily Search</td><td><code>TAVILY_API_KEY</code></td><td><a href="https://app.tavily.com/home" target="_blank" rel="noopener noreferrer">app.tavily.com/home</a></td><td><span class="badge badge-purple">Free API Key</span> 2-phase search & page extraction</td></tr>
+              <tr><td>TinyFish Search</td><td><code>TINYFISH_API_KEY</code></td><td><a href="https://tinyfish.ai" target="_blank" rel="noopener noreferrer">tinyfish.ai</a></td><td><span class="badge badge-purple">Free API Key</span> 30 RPM search & 150 RPM fetch</td></tr>
+              <tr><td>Jina AI</td><td><code>JINA_API_KEY</code></td><td><a href="https://jina.ai" target="_blank" rel="noopener noreferrer">jina.ai</a></td><td><span class="badge badge-green">Keyless / Optional Key</span> Search (`s.jina.ai`) + Reader (`r.jina.ai`)</td></tr>
+              <tr><td>Brave Search</td><td><code>BRAVE_API_KEY</code></td><td><a href="https://brave.com/search/api" target="_blank" rel="noopener noreferrer">brave.com/search/api</a></td><td><span class="badge badge-purple">Free API Key</span> Privacy-first web search API</td></tr>
+              <tr><td>SearXNG (Self-Hosted)</td><td><code>SEARXNG_URL</code> / <code>SEARXNG_BASE_URL</code></td><td><a href="https://docs.searxng.org" target="_blank" rel="noopener noreferrer">docs.searxng.org</a> &bull; <code>http://localhost:8080</code></td><td><span class="badge badge-cyan">Self-Hosted</span> Unlimited terminal fallback</td></tr>
+              <tr><td>DuckDuckGo (DDGS)</td><td><code>(Keyless)</code></td><td><a href="https://duckduckgo.com" target="_blank" rel="noopener noreferrer">duckduckgo.com</a></td><td><span class="badge badge-green">Keyless</span> Instant answer search engine</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- MCP Tool Usage Schemas -->
+      <div class="section-title" style="margin-bottom:14px;">🛠️ MCP Tool Schemas</div>
+      <div class="section-sub" style="margin-bottom:14px;">Every tool exposed by this MCP server, with its parameters as actually defined in the server's tool schema.</div>
+      <div class="qs-tool-list" id="qs-tool-list">
+        <details class="qs-tool-card" open>
+          <summary><span class="qs-tool-name">use_free_llm</span><span class="qs-tool-desc">Chat completion with agentic grounding & background lifecycle execution</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>messages</code></td><td>array&lt;{role, content}&gt;</td><td>✓</td><td>Chat history, OpenAI-style</td></tr>
+              <tr><td><code>model</code></td><td>string</td><td></td><td>Explicit model override (default: auto-routed)</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Absolute path — enables codebase context, memory, and indexing</td></tr>
+              <tr><td><code>agentic</code></td><td>boolean</td><td></td><td>Enables subtask decomposition + workspace memory</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session identifier (defaults to stable <code>ws-&lt;hash&gt;</code>)</td></tr>
+              <tr><td><code>action</code></td><td>enum: run | continue | status | abort</td><td></td><td>Background lifecycle control for long-running agentic tasks</td></tr>
+              <tr><td><code>resume_input</code></td><td>string</td><td></td><td>Instructions appended when resuming a paused task (<code>action: continue</code>)</td></tr>
+              <tr><td><code>skipIndexing</code></td><td>boolean</td><td></td><td>Skip pre-emptive workspace re-indexing pass for fast single-file queries</td></tr>
+              <tr><td><code>keywords</code></td><td>string[]</td><td></td><td>Steers which reference-doc sections get prioritized</td></tr>
+              <tr><td><code>skill</code></td><td>string</td><td></td><td>Load a named skill's instructions before executing</td></tr>
+              <tr><td><code>google_search</code></td><td>boolean</td><td></td><td>Triggers web grounding cascade across search providers</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">coding_agents</span><span class="qs-tool-desc">Autonomous multi-file refactoring, VectorStore TF-IDF RAG, AST rewrites & LSP verification</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>goal</code></td><td>string</td><td>✓</td><td>Refactoring or feature implementation objective</td></tr>
+              <tr><td><code>workspaceRoot</code></td><td>string</td><td></td><td>Target workspace directory (default: CWD)</td></tr>
+              <tr><td><code>dryRun</code></td><td>boolean</td><td></td><td>Default <code>true</code>. Simulate patch plan and LSP checks without writing to disk</td></tr>
+              <tr><td><code>topKFiles</code></td><td>number</td><td></td><td>Candidate files count to retrieve via TF-IDF vector index (default: 5)</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session identifier for CAS checkpointing and history</td></tr>
+              <tr><td><code>astEditOps</code></td><td>array&lt;{pat, out}&gt;</td><td></td><td>OMP-style <code>$$$VAR</code> structural AST rewriting operations</td></tr>
+              <tr><td><code>verifyLspDiagnostics</code></td><td>boolean</td><td></td><td>Run polyglot LSP pre-emit diagnostics (ts-morph, Python AST, go vet, rustc)</td></tr>
+              <tr><td><code>resolve</code></td><td>{action: 'apply' | 'discard'}</td><td></td><td>Commit staged patch plan with atomic CAS checkpoint or rollback</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">local_llm_patch</span><span class="qs-tool-desc">Offline single-file patching powered by local Ollama coding models with 0 API cost</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>filePath</code></td><td>string</td><td>✓</td><td>Target file path relative to workspace or absolute</td></tr>
+              <tr><td><code>instruction</code></td><td>string</td><td>✓</td><td>Code edit or bugfix instruction for local model</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace boundary for path traversal security check</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session key for chat logging</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">browser_tool</span><span class="qs-tool-desc">Headless Chrome DevTools automation: dynamic exploration, API replay & structured scraping</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>navigate | snapshot | click | scroll | wait | evaluate | network | api_replay | extract | deep_scrape | screenshot | checkpoint | session</td></tr>
+              <tr><td><code>url</code></td><td>string</td><td>for navigate/deep_scrape</td><td>Target webpage URL</td></tr>
+              <tr><td><code>userInstructions</code></td><td>string</td><td>for extract/deep_scrape</td><td>Extraction prompt to structure into JSON</td></tr>
+              <tr><td><code>selector</code> / <code>text</code></td><td>string</td><td>for click/scroll</td><td>Target DOM CSS selector or visible text</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Browser session pool key</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">cyber_tool</span><span class="qs-tool-desc">Security tool registry, passive OSINT reconnaissance, CTF coaching, and decision-graph builder</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>osint | list_tools | get_tool | register_tool | wiki_lookup | learn | coach | save_graph | load_graph | tool_memory</td></tr>
+              <tr><td><code>target</code></td><td>string</td><td>for osint</td><td>Target domain, host, or username (e.g. <code>example.com</code>, <code>johndoe</code>)</td></tr>
+              <tr><td><code>osintType</code></td><td>enum</td><td></td><td><code>all</code> | <code>domain</code> | <code>ip</code> | <code>username</code></td></tr>
+              <tr><td><code>autoSearch</code></td><td>boolean</td><td></td><td>Execute top generated reconnaissance dorks via SearchProvider fallback</td></tr>
+              <tr><td><code>allowPrivateIps</code></td><td>boolean</td><td></td><td>Bypass SSRF link-local & private subnet filter for internal testing</td></tr>
+              <tr><td><code>toolName</code></td><td>string</td><td>for get_tool/register</td><td>Security binary name (e.g. <code>sqlmap</code>, <code>nmap</code>)</td></tr>
+              <tr><td><code>observation</code></td><td>string</td><td>for coach</td><td>Observed port/service outputs to analyze</td></tr>
+              <tr><td><code>graphNode</code></td><td>object</td><td>for save_graph</td><td>Decision node ({ id, type, label, from })</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Engagement identifier</td></tr>
+            </tbody>
+          </table>
+          <div style="margin-top:8px;font-size:0.75rem;color:var(--accent-red,#ff5555);">
+            🛡️ <b>SSRF Policy:</b> Target resolution automatically blocks <code>169.254.169.254</code> (cloud metadata), <code>localhost</code>, and private RFC1918 subnets unless <code>allowPrivateIps: true</code>.
+          </div>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">quantum_tool</span><span class="qs-tool-desc">Multi-branch/persona reasoning aid with parameterized quantum rotation gates and state collapse</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>setup | step | pause | continue | modify | reset | status | get_state | analyze</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td>✓</td><td>Quantum session identifier</td></tr>
+              <tr><td><code>presetCircuit</code></td><td>enum</td><td>for setup</td><td>superposition_exploration | adversarial_debate | consensus_alignment | grover_amplification | entangled_verification</td></tr>
+              <tr><td><code>gates</code></td><td>array&lt;{qubit, column, gate, param}&gt;</td><td>for modify</td><td>Custom quantum rotation operations (H, X, Y, Z, RY, RZ, CNOT, CZ, SWAP, MEASURE)</td></tr>
+              <tr><td><code>query</code></td><td>string</td><td>for analyze</td><td>Hypothesis synthesis question</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">vision_tool</span><span class="qs-tool-desc">Analyze a local image or screenshot via a vision-capable free model</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>image_path</code></td><td>string</td><td>✓</td><td><code>file:///</code> URI to local image file</td></tr>
+              <tr><td><code>prompt</code></td><td>string</td><td></td><td>Analysis prompt accompanying the image</td></tr>
+              <tr><td><code>model</code></td><td>string</td><td></td><td>Explicit vision model override</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace boundary check</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">execute_skill</span><span class="qs-tool-desc">Execute a prompt using a specialized local skill's instructions + reference files</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>skill</code></td><td>string</td><td>✓</td><td>Skill directory name under <code>.free-llm-mcp/skills/</code></td></tr>
+              <tr><td><code>input</code></td><td>string</td><td>✓</td><td>Task prompt/instruction to run</td></tr>
+              <tr><td><code>model</code></td><td>string</td><td></td><td>Explicit model override</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace root directory</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">load_skill_prompt</span><span class="qs-tool-desc">Search or dynamically load skill system prompts from catalog</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>type</code></td><td>enum: load | search</td><td>✓</td><td>Action type</td></tr>
+              <tr><td><code>name</code></td><td>string</td><td>if load</td><td>Skill name/ID to load</td></tr>
+              <tr><td><code>keywords</code></td><td>string[]</td><td>if search</td><td>Search terms against skills catalog</td></tr>
+              <tr><td><code>workspaceDir</code></td><td>string</td><td></td><td>Target workspace directory</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">manage_memory</span><span class="qs-tool-desc">Search, list, query, or clear long-term workspace vector memory & wiki notes</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum: search | list | stats | clear</td><td>✓</td><td>Action operation</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace directory root</td></tr>
+              <tr><td><code>query</code></td><td>string</td><td>for search</td><td>Search terms for semantic lookup</td></tr>
+              <tr><td><code>limit</code></td><td>number</td><td></td><td>Maximum returned items (default 10)</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">store_workspace_skill</span><span class="qs-tool-desc">Persist structured knowledge, decisions, and scripts into workspace</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>name</code></td><td>string</td><td>✓</td><td>Lowercase-hyphenated skill name</td></tr>
+              <tr><td><code>description</code></td><td>string</td><td>✓</td><td>Summary description</td></tr>
+              <tr><td><code>what</code></td><td>string[]</td><td>✓</td><td>Key decisions / implementation details</td></tr>
+              <tr><td><code>why</code></td><td>string</td><td></td><td>Design rationale</td></tr>
+              <tr><td><code>files</code></td><td>string[]</td><td></td><td>Referenced file paths</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace root directory</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">index_workspace</span><span class="qs-tool-desc">Proactively index workspace files for vector embeddings and TF-IDF search</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>workspace_root</code></td><td>string</td><td>✓</td><td>Target workspace directory</td></tr>
+              <tr><td><code>force</code></td><td>boolean</td><td></td><td>Re-index even if an existing index cache is present</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">validate_provider</span><span class="qs-tool-desc">Live health-check + credential validation for one provider</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>providerId</code></td><td>string</td><td>✓</td><td>e.g. <code>"groq"</code>, <code>"gemini"</code>, <code>"openrouter"</code>, <code>"cerebras"</code></td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">get_token_stats</span><span class="qs-tool-desc">Real-time per-provider token/request usage and global server totals</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td colspan="4">No parameters required. Returns detailed live and persisted metrics across all registered providers.</td></tr>
+            </tbody>
+          </table>
+        </details>
+      </div>
+
+      <!-- Prompting & Steering Guide -->
+      <div class="section-title" style="margin-top:28px;margin-bottom:14px;">🧭 Prompting & Steering</div>
+      <div class="section-sub" style="margin-bottom:14px;">Four independent mechanisms change how a prompt is processed — combine any of them.</div>
+      <div class="qs-tool-list">
+        <details class="qs-tool-card" open>
+          <summary><span class="qs-tool-name">"override" keyword</span><span class="qs-tool-desc">In-prompt text — bypasses .gitignore during context gathering</span></summary>
+          <div class="qs-guide-body">
+            Typing the literal word <code>override</code> (or <code>all files</code>, <code>gitignored</code>, <code>ignored</code>) anywhere in your prompt makes the workspace context gatherer scan <strong>every file, including <code>.gitignore</code>d ones</strong> — useful for inspecting build output, <code>node_modules</code> config, or <code>.env</code> templates. It only changes which files are visible to context-gathering; it does not affect model choice, persona, or task type.
+            <div class="code-block" style="margin-top:10px;font-size:.75rem;">"Check the override — read all files under dist/ for the compiled output"</div>
+          </div>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">Task-lane DSL prefixes</span><span class="qs-tool-desc">In-prompt text — forces sequential vs. parallel subtask order</span></summary>
+          <div class="qs-guide-body">
+            Prefix individual lines in a multi-step prompt to override the automatic planner's heuristics:
+            <ul style="margin:8px 0 0 18px;">
+              <li><code>&gt;</code> — run in <strong>parallel</strong> (auto-downgraded to sequential if two parallel tasks share the same classified task type)</li>
+              <li><code>-</code>, <code>*</code>, or <code>1.</code> — run <strong>sequentially</strong></li>
+            </ul>
+            <div class="code-block" style="margin-top:10px;font-size:.75rem;">&gt; read auth.ts
+&gt; search for API keys
+- implement new middleware</div>
+          </div>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">Persona auto-detection</span><span class="qs-tool-desc">In-prompt phrasing — changes context ranking and response style</span></summary>
+          <div class="qs-guide-body">
+            The server classifies every prompt into a persona by scanning its text for phrase patterns, first match wins, checked in this order:
+            <table class="qs-table" style="margin-top:10px;">
+              <thead><tr><th>Persona</th><th>Triggered by phrases like...</th></tr></thead>
+              <tbody>
+                <tr><td><code>debugger</code></td><td>error, exception, bug, crash, stack trace, leak, broken, "why does", type error, undefined, null, failed, issue, schema, variable, parameter</td></tr>
+                <tr><td><code>researcher</code></td><td><code>pdf://</code>, paper, citation, arxiv, research, study, thesis, literature</td></tr>
+                <tr><td><code>student</code></td><td>"explain how", "how to", tutorial, "what is", learn, teaching, concept</td></tr>
+                <tr><td><code>marketer</code></td><td>seo, marketing, campaign, keyword, traffic, ad</td></tr>
+                <tr><td><code>planner</code></td><td>plan, roadmap, timeline, milestone, phase, step</td></tr>
+                <tr><td><code>coder</code></td><td>implement, refactor, class, function, method, interface, module, compile, run, build, test, package.json, tsconfig.json</td></tr>
+                <tr><td><code>generic</code></td><td>fallback — none of the above matched</td></tr>
+              </tbody>
+            </table>
+            <div style="margin-top:10px;">Pin a persona explicitly (always wins over heuristics) by adding this line to your workspace's <code>.agents/AGENTS.md</code> (canonical location — auto-created there, walks up to a monorepo root if nested; falls back to a legacy root-level <code>AGENTS.md</code> if that's all that exists):</div>
+            <div class="code-block" style="margin-top:6px;font-size:.75rem;">preferred persona: coder</div>
+          </div>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">keywords parameter</span><span class="qs-tool-desc">API param on use_free_llm — steers doc-section selection, not persona</span></summary>
+          <div class="qs-guide-body">
+            <code>keywords</code> is a <code>string[]</code> field passed on the tool call itself (not typed in the prompt). It boosts which sections of injected reference documentation get prioritized when the system prompt is assembled. It has no effect on persona or task-lane routing — those are driven entirely by the prompt text mechanisms above.
+            <div class="code-block" style="margin-top:10px;font-size:.75rem;">{
+  "messages": [{ "role": "user", "content": "Add rate limiting to the login endpoint" }],
+  "keywords": ["security", "jwt", "rate-limit"],
+  "agentic": true,
+  "workspace_root": "c:/Users/mahes/project"
+}</div>
+          </div>
+        </details>
+      </div>
+
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 8: KEYWORD & PROMPT STEERING
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-steering" role="tabpanel" aria-labelledby="tab-steering">
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-header">
+          <span class="section-title" style="margin:0;font-size:1rem;color:var(--accent-purple);">🎯 Keyword-Driven System Prompt Steering & Memory Hierarchy Studio</span>
+        </div>
+        <div class="card-body">
+          <div style="font-size:.82rem;color:var(--text-secondary);margin-bottom:16px;line-height:1.5;">
+            Inspect how user prompts and <code>keywords[]</code> trigger targeted external sections from <code>prompt.json</code>, prioritize the 5-layer workspace memory hierarchy (L1 Session &rarr; L2 ADR &rarr; L3 Wiki &rarr; L4 Code Grep &rarr; L5 Prompts), and build exact system prompts in single-pass and multi-pass agentic execution.
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:16px;margin-bottom:16px;">
+            <div>
+              <label style="display:block;font-size:.78rem;font-weight:600;color:var(--text-primary);margin-bottom:6px;">Sample User Query / Subtask Goal:</label>
+              <input type="text" id="steering-query-input" class="form-input" value="Fix bug in auth middleware and check security rate limiting" placeholder="Type prompt query..." style="width:100%;">
+            </div>
+            <div>
+              <label style="display:block;font-size:.78rem;font-weight:600;color:var(--text-primary);margin-bottom:6px;">Explicit keywords[] Array:</label>
+              <input type="text" id="steering-keywords-input" class="form-input" value="security, auth, rate-limit, debug" placeholder="e.g. security, auth, rate-limit" style="width:100%;">
+            </div>
+            <div>
+              <label style="display:block;font-size:.78rem;font-weight:600;color:var(--text-primary);margin-bottom:6px;">Workspace Root Folder Path:</label>
+              <input type="text" id="steering-workspace-input" class="form-input" value="." placeholder="Workspace directory path..." style="width:100%;">
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px;">
+            <label style="display:inline-flex;align-items:center;gap:8px;font-size:.82rem;cursor:pointer;">
+              <input type="checkbox" id="steering-agentic-toggle">
+              <span style="font-weight:600;">Enable agentic: true (Multi-Pass Subtask Engine)</span>
+            </label>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div id="steering-persona-badge" class="badge badge-purple" style="font-size:.78rem;padding:4px 10px;">Mapped Persona: <code>coder</code></div>
+              <button id="btn-run-steering-eval" class="btn btn-purple btn-sm">Inspect Live Ingestion & Telemetry</button>
+            </div>
+          </div>
+
+          <!-- Live Token & Context Comparison Cards -->
+          <div class="stats-grid" style="margin-bottom:20px;">
+            <div class="stat-card">
+              <div class="stat-label c-purple">System Prompt Overhead</div>
+              <div class="stat-value c-purple" id="steering-sys-tokens">0 tok</div>
+              <div class="stat-sub" id="steering-sys-desc">Single-Pass Mode (isOnePass: true)</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label c-cyan">Total Injected Context</div>
+              <div class="stat-value c-cyan" id="steering-payload-tokens">0 tok</div>
+              <div class="stat-sub">Live 5-layer memory footprint</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label c-green">Net Token Savings</div>
+              <div class="stat-value c-green" id="steering-token-savings">0.0%</div>
+              <div class="stat-sub" id="steering-savings-desc">0 tokens saved vs Agentic</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label c-amber">Context Bloat Guard</div>
+              <div class="stat-value c-amber" id="steering-bloat-status">READY ⚡</div>
+              <div class="stat-sub">Live telemetry connected</div>
+            </div>
+          </div>
+
+          <!-- Matched prompt.json Sections -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div class="section-title" style="font-size:.88rem;margin:0;">📄 Injected External prompt.json Sections</div>
+            <span style="font-size:.72rem;color:var(--text-muted);">Expand section to inspect injected prompt text</span>
+          </div>
+          <div id="steering-matched-sections" style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;">
+            <!-- Rendered by JS -->
+          </div>
+
+          <!-- 5-Layer Memory Priority Hierarchy Deck -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div class="section-title" style="font-size:.88rem;margin:0;">🧠 5-Layer Workspace Memory Hierarchy & Ingestion Gates</div>
+            <span style="font-size:.72rem;color:var(--text-muted);">Priority ordered: P1 (Top) &rarr; P5 (Base)</span>
+          </div>
+          <div id="steering-memory-gates" style="display:flex;flex-direction:column;gap:10px;margin-bottom:24px;">
+            <!-- Rendered by JS -->
+          </div>
+
+          <!-- Subtask Context & Multi-Tab Raw Inspector -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div class="section-title" style="font-size:.88rem;margin:0;">🔍 Assembled Prompt & Workspace Context Inspector</div>
+            <div style="display:flex;gap:6px;">
+              <button class="btn btn-outline btn-xs active" id="btn-inspect-tab-prompt" onclick="switchSteeringInspectTab('prompt')">📑 Assembled Prompt</button>
+              <button class="btn btn-outline btn-xs" id="btn-inspect-tab-workspace" onclick="switchSteeringInspectTab('workspace')">📂 Extracted Workspace & Tree</button>
+              <button class="btn btn-outline btn-xs" id="btn-inspect-tab-history" onclick="switchSteeringInspectTab('history')">💬 Chat & Session Turns</button>
+            </div>
+          </div>
+          <div style="background:rgba(0,0,0,.3);border:1px solid var(--glass-border);border-radius:6px;padding:12px;">
+            <div id="steering-subtask-view" style="font-size:.78rem;color:var(--accent-purple);margin-bottom:8px;font-weight:600;display:none;"></div>
+            <pre id="steering-raw-prompt-view" style="font-size:.72rem;color:var(--text-secondary);max-height:300px;overflow-y:auto;white-space:pre-wrap;margin:0;font-family:monospace;background:rgba(10,10,15,.6);padding:10px;border-radius:4px;">(Click "Inspect Live Ingestion & Telemetry" or edit inputs to load assembled system prompt...)</pre>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB: DAG MEMORY GRAPH
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-dagmemory" role="tabpanel" aria-labelledby="tab-dagmemory">
+      <div class="section-title">DAG Memory Graph</div>
+      <div class="section-sub">Nodes and edges stored via <code>manage_memory</code>'s <code>node_add</code>/<code>node_link</code>/<code>graph_query</code> actions for a workspace, with Ebbinghaus decay confidence.</div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-body">
+          <div class="session-controls">
+            <label class="field-label" style="margin:0;white-space:nowrap;" for="dagmem-workspace-input">Workspace</label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="dagmem-workspace-input" class="session-input" placeholder="workspace path used to scope the graph" style="width:260px;">
+              <button type="button" id="dagmem-folder-btn" class="btn btn-outline btn-sm" title="Pick workspace folder" style="padding:3px 7px;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              </button>
+            </div>
+            <button class="btn btn-primary btn-sm" id="dagmem-load-btn">Load Graph</button>
+            <input type="text" id="dagmem-filter-input" class="session-input" placeholder="Filter nodes by id/content/tag…" style="max-width:220px;">
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-header" style="padding:10px 16px;">
+          <span class="card-title" style="font-size:.82rem;">Add Node</span>
+        </div>
+        <div class="card-body">
+          <div class="session-controls" style="flex-wrap:wrap;">
+            <select id="dagmem-node-type" class="session-input" style="max-width:120px;">
+              <option value="text">text</option>
+              <option value="image">image</option>
+              <option value="video">video</option>
+              <option value="audio">audio</option>
+              <option value="pdf_page">pdf_page</option>
+            </select>
+            <input type="text" id="dagmem-node-content" class="session-input" placeholder="content / thought text" style="flex:2;">
+            <input type="text" id="dagmem-node-tags" class="session-input" placeholder="tags, comma-separated" style="max-width:200px;">
+            <button class="btn btn-primary btn-sm" id="dagmem-add-node-btn">Add Node</button>
+          </div>
+          <div class="section-sub" style="margin-top:10px;">Link two nodes:</div>
+          <div class="session-controls" style="flex-wrap:wrap;">
+            <input type="text" id="dagmem-link-from" class="session-input" placeholder="from node id" style="max-width:200px;">
+            <input type="text" id="dagmem-link-to" class="session-input" placeholder="to node id" style="max-width:200px;">
+            <input type="text" id="dagmem-link-relation" class="session-input" placeholder="relation label" style="max-width:160px;">
+            <button class="btn btn-primary btn-sm" id="dagmem-link-btn">Link</button>
+          </div>
+          <div id="dagmem-form-status" class="section-sub" style="margin-top:8px;"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body" id="dagmem-graph-body">
+          <div class="conv-empty">Enter a workspace and click Load Graph.</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="color:var(--accent-amber);">&#9200; Due-Review Queue (Ebbinghaus)</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span id="dagmem-bb-count" style="background:var(--accent-amber);color:#000;border-radius:12px;padding:2px 8px;font-size:12px;font-weight:700;">0</span>
+            <button id="dagmem-bb-refresh" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;">&#x1F504; Refresh Queue</button>
+          </div>
+        </div>
+        <div class="card-body" id="dagmem-blackboard-container" style="min-height:60px;">
+          <div class="conv-empty">Load graph above, then click Refresh Queue to see due-review nodes.</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="color:var(--accent-purple);">&#128202; Eisenhower Matrix</span>
+          <button id="eis-refresh" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;">&#x1F504; Refresh</button>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
+            <input type="text" id="eis-task-input" placeholder="New task..." style="flex:1;min-width:200px;">
+            <label style="display:flex;align-items:center;gap:4px;font-size:.8rem;white-space:nowrap;"><input type="checkbox" id="eis-urgent"> Urgent</label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:.8rem;white-space:nowrap;"><input type="checkbox" id="eis-important"> Important</label>
+            <button id="eis-add-btn" class="btn btn-primary btn-sm">Add</button>
+          </div>
+          <div id="eis-matrix" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="conv-empty">Load a workspace above, then click Refresh.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header">
+          <span class="card-title" style="color:var(--accent-red);">&#9203; Pomodoro Timer</span>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="text" id="pomo-label-input" placeholder="What are you working on?" style="flex:1;min-width:180px;">
+            <label style="display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-muted);white-space:nowrap;">Work
+              <input type="number" id="pomo-duration-input" value="25" min="1" style="width:60px;" title="Work duration in minutes">
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-muted);white-space:nowrap;">Break
+              <input type="number" id="pomo-break-duration-input" value="5" min="1" style="width:60px;" title="Break duration in minutes">
+            </label>
+            <button id="pomo-start-btn" class="btn btn-primary btn-sm">Start</button>
+            <button id="pomo-stop-btn" class="btn btn-secondary btn-sm" style="display:none;">Stop</button>
+            <span id="pomo-display" style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;margin-left:auto;"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ─── Tool Documentation Modal ──────────────────────────────── -->
+  <div id="tool-docs-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-tool-title" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span id="modal-tool-icon" style="font-size:1.4rem;">📖</span>
+          <div>
+            <h3 id="modal-tool-title" class="modal-title">Tool Documentation</h3>
+            <span id="modal-tool-tag" class="badge badge-purple" style="font-size:0.65rem;">Reference</span>
+          </div>
+        </div>
+        <button id="modal-close-btn" class="modal-close-btn" aria-label="Close modal">&times;</button>
+      </div>
+      <div class="modal-when-to-use" id="modal-when-to-use"></div>
+      <div class="modal-body" id="modal-tool-body">
+        <div class="conv-empty">Loading documentation…</div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    Free LLM APIs MCP Dashboard &bull; Built with ❤️ &bull;
+    <a href="https://github.com/djmahe4/awesome-free-llm-apis" target="_blank" rel="noopener">GitHub Repo</a>
+  </footer>
+
+  <script src="/app.js"></script>
+  <script src="/dag-blackboard.js"></script>
+  <script src="/productivity-ui.js"></script>
+</body>
+</html>
