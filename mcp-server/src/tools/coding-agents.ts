@@ -1234,10 +1234,20 @@ const STRAY_MARKER_RE = /^(?:<{5,}|={5,}|>{5,})\s*(?:SEARCH|REPLACE)?\s*$/m;
  * tier already found (even an ambiguous) match, so loosening the match never
  * silently overrides a real exact hit elsewhere in the file.
  */
-function findLineBlockMatch(
+// Matches a leading `L<number>: ` annotation — the format context-gatherer.ts
+// uses to present grep excerpts to the model (`L${line}: ${content}`,
+// context-gatherer.ts's grep-context formatting). Observed live: the model
+// echoed this presentation-only annotation into BOTH the SEARCH and REPLACE
+// text of a block ("L268: const callResult = ..."), so the exact/trimmed
+// tiers correctly found zero matches (the real file has no such literal
+// text) and the whole batch failed safely — but it's a real, generalizable
+// failure mode worth a dedicated tolerant tier rather than just failing.
+const LINE_NUMBER_PREFIX_RE = /^\s*L\d+:\s?/;
+
+export function findLineBlockMatch(
   workingLines: string[],
   searchLines: string[]
-): { index: number; ambiguous: boolean } {
+): { index: number; ambiguous: boolean; usedLineNumberStrip: boolean } {
   const tryTier = (project: (l: string) => string): number[] => {
     const hits: number[] = [];
     const projSearch = searchLines.map(project);
@@ -1252,15 +1262,23 @@ function findLineBlockMatch(
   };
 
   const exact = tryTier(l => l);
-  if (exact.length > 0) return { index: exact[0], ambiguous: exact.length > 1 };
+  if (exact.length > 0) return { index: exact[0], ambiguous: exact.length > 1, usedLineNumberStrip: false };
 
   const trimmed = tryTier(l => l.trim());
-  if (trimmed.length > 0) return { index: trimmed[0], ambiguous: trimmed.length > 1 };
+  if (trimmed.length > 0) return { index: trimmed[0], ambiguous: trimmed.length > 1, usedLineNumberStrip: false };
 
-  return { index: -1, ambiguous: false };
+  // Only worth trying when the SEARCH text itself actually carries the
+  // annotation — otherwise this tier is identical to the trimmed one above
+  // and would just re-do the same scan for nothing.
+  if (searchLines.some(l => LINE_NUMBER_PREFIX_RE.test(l))) {
+    const lineNumberStripped = tryTier(l => l.trim().replace(LINE_NUMBER_PREFIX_RE, ''));
+    if (lineNumberStripped.length > 0) return { index: lineNumberStripped[0], ambiguous: lineNumberStripped.length > 1, usedLineNumberStrip: true };
+  }
+
+  return { index: -1, ambiguous: false, usedLineNumberStrip: false };
 }
 
-function applySearchReplaceBlocks(
+export function applySearchReplaceBlocks(
   content: string,
   blocks: SearchReplaceBlock[]
 ): { content: string; appliedCount: number; failures: string[] } {
@@ -1284,13 +1302,18 @@ function applySearchReplaceBlocks(
       continue;
     }
     const searchLines = search.split(/\r?\n/);
-    const { index, ambiguous } = findLineBlockMatch(workingLines, searchLines);
+    const { index, ambiguous, usedLineNumberStrip } = findLineBlockMatch(workingLines, searchLines);
     if (index === -1) {
       failures.push(`SEARCH text not found (even with whitespace-tolerant matching): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
     } else if (ambiguous) {
       failures.push(`SEARCH text matched multiple times (ambiguous, must be unique): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
     } else {
-      const replaceLines = replace.split(/\r?\n/);
+      // If the match only succeeded after stripping a bogus "L<N>: " prefix
+      // from SEARCH, the model very likely echoed the same annotation into
+      // REPLACE too (observed live, symmetric on both sides of the block) —
+      // strip it there as well, or the "fix" would insert that literal
+      // presentation-only text into the real file.
+      const replaceLines = (usedLineNumberStrip ? replace.replace(new RegExp(LINE_NUMBER_PREFIX_RE.source, 'gm'), '') : replace).split(/\r?\n/);
       workingLines = [
         ...workingLines.slice(0, index),
         ...replaceLines,
