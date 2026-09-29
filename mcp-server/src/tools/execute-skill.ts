@@ -10,6 +10,7 @@ import { findHermesSkill, loadHermesSkillContent } from '../hermes/loader.js';
 import { toMarkdownResponse } from '../utils/markdown.js';
 import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
 import { TaskType } from '../pipeline/middleware.js';
+import { logToolCall } from '../utils/ChatLogger.js';
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
@@ -116,9 +117,33 @@ async function resolveReferences(
 }
 
 /**
- * Execute a prompt using a specific local skill's instructions and reference files.
+ * Thin logging wrapper around executeSkillInner — kept separate so the
+ * inner function's many early returns (security guard, Hermes lookup,
+ * download fallback, etc.) don't need restructuring into a single
+ * try/finally. Mirrors cyber-tool.ts's logToolCall wrapping (cyber-tool.ts,
+ * around its `try { ... } finally { await logToolCall(...) }` pattern),
+ * which execute_skill never had despite sessionId already threading
+ * through every call.
  */
 export async function executeSkill(input: ExecuteSkillInput): Promise<ExecuteSkillResult> {
+  const start = Date.now();
+  const sessionId = input.sessionId || 'skill_session';
+  let result: ExecuteSkillResult;
+  try {
+    result = await executeSkillInner(input);
+  } catch (err: any) {
+    result = { success: false, error: err?.message || 'Unknown error occurred during skill execution.' };
+    await logToolCall(sessionId, `execute_skill:${input.skill}`, input, result, Date.now() - start, true).catch(() => {});
+    throw err;
+  }
+  await logToolCall(sessionId, `execute_skill:${input.skill}`, input, result, Date.now() - start, !result.success).catch(() => {});
+  return result;
+}
+
+/**
+ * Execute a prompt using a specific local skill's instructions and reference files.
+ */
+async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkillResult> {
   const { skill, input: userPrompt, model, workspace_root, sessionId, source } = input;
 
   // 1. Path traversal security guard

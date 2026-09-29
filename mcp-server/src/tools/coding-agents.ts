@@ -1106,7 +1106,7 @@ function extractCodeBlock(text: string): string {
  * splice the patched window back into the full content.
  * Returns null when the file is small enough to send whole.
  */
-function extractWindowForInstruction(
+export function extractWindowForInstruction(
   content: string,
   instruction: string,
   windowSize = 120
@@ -1118,12 +1118,30 @@ function extractWindowForInstruction(
     .map(t => t.toLowerCase());
   const uniqueTerms = [...new Set(terms)].slice(0, 12);
 
-  let bestScore = 0;
+  const perLineScore = lines.map(line => {
+    const lower = line.toLowerCase();
+    return uniqueTerms.filter(t => lower.includes(t)).length;
+  });
+
+  // A single keyword-dense line (e.g. one ternary chaining status/complete/
+  // failed) can outscore the real target whose matching terms are spread
+  // across several lines of a multi-line block — sum scores over a local
+  // neighborhood instead of picking the single highest-scoring line, so
+  // sustained relevance beats one coincidentally dense outlier line.
+  // Observed live: this picked a 120-line window around an unrelated
+  // one-liner in finalizeRun instead of the real multi-line target in
+  // applyResearchResult, and the model then hallucinated an edit to the only
+  // thing it could see — applied cleanly (real text, no TS regression),
+  // reported success, and silently missed the actual requested change.
+  const neighborhood = 6;
+  let bestScore = -1;
   let bestLine = Math.floor(lines.length / 2);
   for (let i = 0; i < lines.length; i++) {
-    const lower = lines[i].toLowerCase();
-    const score = uniqueTerms.filter(t => lower.includes(t)).length;
-    if (score > bestScore) { bestScore = score; bestLine = i; }
+    let windowScore = 0;
+    for (let j = Math.max(0, i - neighborhood); j <= Math.min(lines.length - 1, i + neighborhood); j++) {
+      windowScore += perLineScore[j];
+    }
+    if (windowScore > bestScore) { bestScore = windowScore; bestLine = i; }
   }
 
   const half = Math.floor(windowSize / 2);

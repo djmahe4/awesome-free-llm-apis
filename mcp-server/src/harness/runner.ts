@@ -234,9 +234,22 @@ function applyResearchResult(run: HarnessRun, role: string, callResult: GatedRes
     run.error = callResult.detail;
     return {};
   }
-  const content: string = callResult.result?.choices?.[0]?.message?.content ?? '';
+  // Different dispatched tools return content under different keys
+  // (use_free_llm: choices[0].message.content, execute_skill: response,
+  // load_skill_prompt: prompt) — checking only the use_free_llm shape made
+  // every non-use_free_llm success look like an empty result.
+  const content: string =
+    callResult.result?.choices?.[0]?.message?.content ??
+    callResult.result?.response ??
+    callResult.result?.prompt ??
+    '';
   run.budget.used += contextManager.countStringTokens(content) + goalTokens;
   run.result = content;
+  if (!content) {
+    run.status = 'failed';
+    run.error = 'Role step completed without error but produced no content.';
+    return {};
+  }
   run.status = 'complete';
   return { content };
 }

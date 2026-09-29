@@ -62,9 +62,13 @@ describe('harness runner — role-declared tool dispatch (integration)', () => {
     expect(loadSkillPromptMock).toHaveBeenCalledTimes(1);
     expect(useFreeLLMMock).not.toHaveBeenCalled();
 
+    // loadSkillPromptMock's result has no .prompt/.response — no content
+    // field applyResearchResult knows how to extract — so this is correctly
+    // 'failed' (silent-zero fix), not a false 'complete' with an empty
+    // run.result indistinguishable from a real finding.
     const store = new HarnessStore('disp-1', tmpDir);
     const run = await store.loadRun();
-    expect(run?.status).toBe('complete');
+    expect(run?.status).toBe('failed');
 
     const events = await store.readTrace();
     const toolCallEvent = events.find(e => e.type === 'tool_call');
@@ -80,6 +84,15 @@ describe('harness runner — role-declared tool dispatch (integration)', () => {
 
     expect(executeSkillMock).toHaveBeenCalledTimes(1);
     expect(useFreeLLMMock).not.toHaveBeenCalled();
+
+    // executeSkillMock's result carries content under .response, not
+    // .choices[0].message.content — completes successfully (multi-shape
+    // extraction), not a false empty-content failure.
+    const { HarnessStore } = await import('../src/harness/store.js');
+    const store = new HarnessStore('disp-2', tmpDir);
+    const run = await store.loadRun();
+    expect(run?.status).toBe('complete');
+    expect(run?.result).toBe('mock skill executed');
   });
 
   it('still dispatches to use_free_llm when the role declares it (unchanged default path)', async () => {
