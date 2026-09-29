@@ -1,9 +1,10 @@
 import crypto from 'node:crypto';
-import { deployHarness, abortHarness } from '../harness/runner.js';
+import { deployHarness, resumeHarness, abortHarness } from '../harness/runner.js';
 import { HarnessStore } from '../harness/store.js';
+import { loadHarnessDeclaration } from '../harness/declaration.js';
 
 export interface AgentHarnessInput {
-  action: 'deploy' | 'status' | 'approvals' | 'approve' | 'reject' | 'trace' | 'abort';
+  action: 'deploy' | 'resume' | 'status' | 'approvals' | 'approve' | 'reject' | 'trace' | 'abort';
   runId?: string;              // required for all actions except deploy (which generates one)
   harness?: string;            // declaration name, default 'research-analysis'
   goal?: string;                // required for deploy
@@ -28,6 +29,11 @@ export async function agentHarness(input: AgentHarnessInput) {
       });
       return { success: true, run };
     }
+    case 'resume': {
+      if (!input.runId) throw new Error('resume requires `runId`.');
+      const run = await resumeHarness(input.runId, input.workspace_root);
+      return { success: true, run };
+    }
     case 'status': {
       if (!input.runId) throw new Error('status requires `runId`.');
       const store = new HarnessStore(input.runId, input.workspace_root);
@@ -40,7 +46,12 @@ export async function agentHarness(input: AgentHarnessInput) {
     case 'approvals': {
       if (!input.runId) throw new Error('approvals requires `runId`.');
       const store = new HarnessStore(input.runId, input.workspace_root);
-      await store.expireStale(60);
+      // Use the run's own declared timeout rather than a hardcoded stand-in —
+      // a declaration with a longer timeout was having its approvals expired
+      // early just from listing them.
+      const run = await store.loadRun();
+      const timeoutMinutes = run ? (await loadHarnessDeclaration(run.declarationName)).harness.approval.timeoutMinutes : 60;
+      await store.expireStale(timeoutMinutes);
       return { approvals: await store.listApprovals() };
     }
     case 'approve':

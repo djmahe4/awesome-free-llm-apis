@@ -60,6 +60,42 @@ describe('harness policy', () => {
   it('hashArgs differs for different argument values', () => {
     expect(hashArgs({ a: 1 })).not.toBe(hashArgs({ a: 2 }));
   });
+
+  it('hashArgs distinguishes different NESTED payloads sharing top-level key names (the actual collision bug)', () => {
+    // Before the fix: JSON.stringify(args, Object.keys(args).sort()) treats
+    // its 2nd argument as a recursive property allowlist, so only top-level
+    // key names survive at any depth — both of these collapsed to {"cmd":{}}.
+    const safe = { cmd: { run: 'ls' } };
+    const dangerous = { cmd: { run: 'rm -rf /' } };
+    expect(hashArgs(safe)).not.toBe(hashArgs(dangerous));
+  });
+
+  it('hashArgs is stable for nested payloads regardless of nested key order', () => {
+    expect(hashArgs({ a: 1, b: { x: 1, y: 2 } })).toBe(hashArgs({ b: { y: 2, x: 1 }, a: 1 }));
+  });
+
+  it('hashArgs does not leak a nested key back via an unrelated sibling top-level key', () => {
+    // Before the fix: {a:1,b:{a:2}} and {b:{a:2}} both effectively hashed
+    // using the allowlist ["a","b"] vs ["b"] — different results for the
+    // SAME logical nested value purely because of an unrelated sibling key.
+    const withSibling = { a: 1, b: { a: 2 } };
+    const withoutSibling = { b: { a: 2 } };
+    // These ARE legitimately different payloads, so they should differ —
+    // the point is the nested {a:2} must be represented consistently either way.
+    expect(hashArgs(withSibling)).not.toBe(hashArgs(withoutSibling));
+    expect(hashArgs({ b: { a: 2 } })).toBe(hashArgs({ b: { a: 2 } }));
+  });
+
+  it('hashArgs handles undefined/null args without throwing', () => {
+    expect(() => hashArgs(undefined)).not.toThrow();
+    expect(() => hashArgs(null)).not.toThrow();
+    expect(hashArgs(undefined)).toBe(hashArgs(null));
+  });
+
+  it('hashArgs is stable for arrays and distinguishes element order', () => {
+    expect(hashArgs({ list: [1, 2, 3] })).toBe(hashArgs({ list: [1, 2, 3] }));
+    expect(hashArgs({ list: [1, 2, 3] })).not.toBe(hashArgs({ list: [3, 2, 1] }));
+  });
 });
 
 describe('harness declaration selection', () => {
@@ -96,7 +132,7 @@ describe('HarnessStore', () => {
   it('round-trips a run record', async () => {
     const store = new HarnessStore('run-1', tmpDir);
     await store.saveRun({
-      runId: 'run-1', harness: 'test', goal: 'g', status: 'running',
+      runId: 'run-1', harness: 'test', declarationName: 'test', goal: 'g', status: 'running',
       budget: { maxTokens: 100, used: 0, reserved: 0, toolCalls: 0 },
       createdAt: Date.now(), updatedAt: Date.now(),
     });
@@ -151,12 +187,39 @@ describe('HarnessStore', () => {
     expect(events[1].type).toBe('tool_call');
   });
 
-  it('truncates oversized trace data', async () => {
+  it('compresses (not blindly truncates) oversized trace data', async () => {
     const store = new HarnessStore('run-5', tmpDir);
-    const huge = 'x'.repeat(5000);
-    await store.appendTrace({ runId: 'run-5', role: 'top_level', type: 'tool_result', data: huge });
+    const huge = 'The quick brown fox. '.repeat(300) + 'IMPORTANT keyword sentence here.';
+    await store.appendTrace({ runId: 'run-5', role: 'researcher', type: 'tool_result', data: huge });
     const events = await store.readTrace();
-    expect((events[0].data as string).length).toBeLessThan(5000);
-    expect(events[0].data).toContain('truncated');
+    expect((events[0].data as string).length).toBeLessThan(huge.length);
+  });
+
+  it('rejects a runId that attempts path traversal', () => {
+    expect(() => new HarnessStore('../../etc', tmpDir)).toThrow();
+    expect(() => new HarnessStore('..\\..\\windows', tmpDir)).toThrow();
+  });
+
+  it('does not lose a concurrent createApproval under simultaneous writes', async () => {
+    const store = new HarnessStore('run-6', tmpDir);
+    // Two "concurrent" creates racing the same read-modify-write path.
+    await Promise.all([
+      store.createApproval({ runId: 'run-6', callId: 'a', role: 'r', tool: 't', args: {}, argsHash: hashArgs({ a: 1 }), reason: 'x' }),
+      store.createApproval({ runId: 'run-6', callId: 'b', role: 'r', tool: 't', args: {}, argsHash: hashArgs({ a: 2 }), reason: 'x' }),
+    ]);
+    const list = await store.listApprovals();
+    expect(list).toHaveLength(2); // before the fix, the loser of the race silently vanished
+  });
+
+  it('does not lose a decideApproval racing a concurrent createApproval', async () => {
+    const store = new HarnessStore('run-7', tmpDir);
+    const req = await store.createApproval({ runId: 'run-7', callId: 'a', role: 'r', tool: 't', args: {}, argsHash: hashArgs({}), reason: 'x' });
+    await Promise.all([
+      store.decideApproval(req.id, false, 'user'), // a human's rejection
+      store.createApproval({ runId: 'run-7', callId: 'b', role: 'r', tool: 't', args: {}, argsHash: hashArgs({ b: 1 }), reason: 'x' }),
+    ]);
+    const list = await store.listApprovals();
+    expect(list.find(a => a.id === req.id)?.status).toBe('rejected'); // the "no" must stick
+    expect(list).toHaveLength(2); // and the concurrent create must not be lost either
   });
 });

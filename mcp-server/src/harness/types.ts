@@ -79,7 +79,8 @@ export interface TraceEvent {
 
 export interface HarnessRun {
   runId: string;
-  harness: string;
+  harness: string;             // decl.harness.name — human-readable display name
+  declarationName: string;     // the loadHarnessDeclaration() name (e.g. 'research-analysis') — needed to reload the same declaration on resume
   goal: string;
   workspaceRoot?: string;
   status: 'running' | 'paused_approval' | 'paused_budget' | 'complete' | 'failed' | 'aborted';
