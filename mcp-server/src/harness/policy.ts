@@ -31,10 +31,25 @@ export function hashArgs(args: unknown): string {
   return crypto.createHash('sha256').update(stableStringify(args ?? null)).digest('hex').slice(0, 24);
 }
 
+/**
+ * Array-valued constraint = membership, not equality. `{skillTags:['cyber']}`
+ * means "args.skillTags (or args.skillTag) must contain/equal one of these",
+ * not "must strictly equal the array" — lets a rule express an allowlist set
+ * (e.g. skill-tag gating) instead of pinning one exact value.
+ */
 function constraintsMatch(constraints: Record<string, unknown> | undefined, args: any): boolean {
   if (!constraints) return true;
   for (const [key, expected] of Object.entries(constraints)) {
-    if (args?.[key] !== expected) return false;
+    const actual = args?.[key];
+    if (Array.isArray(expected)) {
+      if (Array.isArray(actual)) {
+        if (!actual.some(v => expected.includes(v))) return false;
+      } else if (!expected.includes(actual)) {
+        return false;
+      }
+    } else if (actual !== expected) {
+      return false;
+    }
   }
   return true;
 }

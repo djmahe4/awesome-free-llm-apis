@@ -4,6 +4,7 @@ import { HarnessStore } from './store.js';
 import { loadHarnessDeclaration, selectRole } from './declaration.js';
 import { evaluate, hashArgs, assertWorkspaceRootAllowed } from './policy.js';
 import { serializeTasksMarkdown, parseTasksMarkdown, type TaskItem } from '../tools/coding-agents.js';
+import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
 import type { HarnessDeclaration, HarnessRun } from './types.js';
 
 const contextManager = new ContextManager();
@@ -187,11 +188,16 @@ async function runRoleStep(
     workspaceDir: workspaceRoot,
     sessionId: registryKey,
   };
+  // skillTags rides in the same payload that's both hashed and dispatched, so
+  // a YAML rule like {tool:'execute_skill', constraints:{skillTags:['cyber']}}
+  // (policy.ts's array-membership constraintsMatch) can actually gate this
+  // call by tag instead of only by tool name.
   const executeSkillPayload = {
     skill: 'general-purpose',
     input: goal,
     workspace_root: workspaceRoot,
     sessionId: registryKey,
+    skillTags: CYBER_TERMS_REGEX.test(goal) ? ['cyber'] : [],
   };
 
   const dispatchMap: Record<string, { payload: any; execute: () => Promise<any> }> = {
