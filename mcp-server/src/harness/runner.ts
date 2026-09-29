@@ -294,7 +294,7 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
     throw new Error(`Run '${input.runId}' already exists (status: ${existing.status}). Use action:'resume' to continue a paused run, or deploy with a different runId.`);
   }
 
-  const decl = await loadHarnessDeclaration(input.harness);
+  const decl = await loadHarnessDeclaration(input.harness, input.workspaceRoot);
   assertWorkspaceRootAllowed(decl, input.workspaceRoot);
   const role = selectRole(decl, input.goal);
   const registryKey = `harness:${input.runId}`;
@@ -357,7 +357,7 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
     throw new Error(`Run '${runId}' is not paused for approval (status: '${run.status}')`);
   }
 
-  const decl = await loadHarnessDeclaration(run.declarationName);
+  const decl = await loadHarnessDeclaration(run.declarationName, run.workspaceRoot);
   // Re-validated on resume too — a declaration edited between deploy and
   // resume (e.g. allowedWorkspaceRoots tightened) must not grandfather in a
   // workspace_root that would no longer be permitted.
