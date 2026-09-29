@@ -150,6 +150,18 @@ export class DagMemory {
     return edge;
   }
 
+  async reviewNode(id: string): Promise<DagNode | null> {
+    const nodes = await this.loadNodes();
+    const node = nodes.find(n => n.id === id);
+    if (node) {
+      node.lastReviewedAt = Date.now();
+      node.confidence = Math.min(1.0, node.confidence + 0.15);
+      await this.saveNodes(nodes);
+      return node;
+    }
+    return null;
+  }
+
   async graphQuery(): Promise<{ nodes: DagNode[]; edges: DagEdge[] }> {
     const [nodes, edges] = await Promise.all([this.loadNodes(), this.loadEdges()]);
     return { nodes, edges };
