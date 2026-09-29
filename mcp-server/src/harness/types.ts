@@ -81,7 +81,8 @@ export interface TraceEvent {
     | 'budget'
     | 'handoff'
     | 'error'
-    | 'run_end';
+    | 'run_end'
+    | 'trace_truncated';
   data: unknown;
   tokens?: { input: number; output: number; reservedRemaining: number };
 }

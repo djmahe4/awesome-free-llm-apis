@@ -41,6 +41,7 @@ export class HarnessStore {
   private tracePath: string;
   private tasksPath: string;
   private seqCounter: number | null = null;
+  private truncationMarked = false;
 
   constructor(runId: string, baseDir?: string) {
     this.dir = runDir(baseDir ?? process.cwd(), runId);
@@ -166,7 +167,26 @@ export class HarnessStore {
       try {
         size = (await fs.stat(this.tracePath)).size;
       } catch { /* file doesn't exist yet */ }
-      if (size > MAX_TRACE_FILE_BYTES) return; // trace bloat guard — drop further events rather than grow unbounded
+      if (size > MAX_TRACE_FILE_BYTES) {
+        // Previously a silent drop — a consumer reading the trace had no way
+        // to tell "nothing happened" apart from "events happened but were
+        // dropped." Write exactly one marker (not one per subsequent dropped
+        // event, which would itself blow past the cap) and surface it to the
+        // server's own logs too, so it's observable without having to read
+        // this specific trace.jsonl file.
+        if (!this.truncationMarked) {
+          this.truncationMarked = true;
+          const marker = `${event.runId}\ttrace truncated at ${MAX_TRACE_FILE_BYTES} bytes — further events are dropped`;
+          console.error(`[agent_harness] ${marker}`);
+          try {
+            await fs.appendFile(this.tracePath, JSON.stringify({
+              runId: event.runId, seq: this.seqCounter ?? -1, ts: Date.now(), role: 'top_level',
+              type: 'trace_truncated', data: { maxBytes: MAX_TRACE_FILE_BYTES },
+            }) + '\n', 'utf-8').catch(() => {});
+          } catch { /* best-effort marker write past the cap */ }
+        }
+        return;
+      }
 
       if (this.seqCounter === null) {
         // Seed once from disk, then keep it in memory — re-reading and
