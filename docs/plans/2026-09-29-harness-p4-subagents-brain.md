@@ -5,13 +5,13 @@ Builds on: [2026-09-29-agent-harness.md](2026-09-29-agent-harness.md) (P0–P3),
 
 ## Where we are
 
-What works today (verified by tests + live run): background runs, default-deny policy with bound approvals, resume after approval, workspace-root scoping, trace log, tasks.md blackboard (one task per run).
+What works today (verified by tests + live run): background runs, default-deny policy with bound approvals, resume after approval, workspace-root scoping, trace log, tasks.md blackboard (one task per run). Caveat: until the dispatch fix below landed, only the researcher/analyst/top_level roles (all use_free_llm) ever actually reached the policy gate in a live run — scraper and coder were allowlisted on paper but structurally unreachable, so "default-deny, verified" covered 3 of 5 roles, not the system as a whole.
 
 What the audit said doesn't exist, and still doesn't:
 
 | Capability | Today |
 |---|---|
-| Subagents | One role per run, picked once by trigger words. The runner always calls `use_free_llm` whatever the role is, so `scraper` parks on an approval it can never satisfy and `coder` is unreachable. |
+| Subagents | One role per run, picked once by trigger words (P4's step engine below is still not built). UPDATE: the runner-always-calls-use_free_llm bug this row originally described is fixed (`runResearchStep` renamed `runRoleStep`, dispatches by the role's declared tool) — scraper and coder are reachable now, not just allowlisted on paper. |
 | Research | One plain chat call. No web search flag, no `browser_tool`, no `pdf://`, no abstract→html→pdf ladder (declared in YAML, never read). |
 | Brain / wiki | `manage_memory` is never called. `writes` allowlist is dead config. |
 | Decay recall | Ebbinghaus retention formula exists only in the browser (`dashboard/dag-blackboard.js`). Server never recalls or reinforces anything. |
