@@ -59,14 +59,16 @@ export class MonitorRegistry {
   }
 
   /**
-   * Boot reconciliation (D5) — RunRegistry itself is in-memory, so a server
-   * restart silently drops every handle. Anything still 'running' at boot
-   * (before any real attach has happened yet in this process) is by
-   * definition orphaned from a prior process — never a real live monitor,
-   * since this Map is empty until this process attaches something itself.
-   * Call once at server startup, mirroring run.json's own
-   * running->paused boot reconciliation (still not implemented for runs
-   * either — same fix, applied here first).
+   * D5 orphan marking — NOT a boot hook (correction from this function's
+   * original design note): this Map is in-memory only and starts empty
+   * every process start, so a real server restart has nothing left in it
+   * to reconcile by the time this process's own startup code could call
+   * it — that would be a no-op dressed up as a fix. run.json's own
+   * boot reconciliation (store.ts's reconcileRunsOnBoot) is the real one,
+   * since run.json persists to disk across restarts and this Map doesn't.
+   * This stays useful as a manually-triggerable admin action or for tests
+   * that hold a stale in-memory reference across some other lifecycle
+   * event — not for the restart case D5 originally described.
    */
   static markAllOrphaned(): MonitorEntry[] {
     const orphaned: MonitorEntry[] = [];

@@ -1388,6 +1388,26 @@ async function main() {
     // Initialize telemetry / session manager
     await initTelemetry(true);
 
+    // Harness boot reconciliation (P4 plan's own self-review point, never
+    // wired until now): a run.json left 'running' by a prior crash/restart
+    // must never look identical to one still legitimately in progress —
+    // run.json persists to disk, so this is real work at boot. Best-effort,
+    // never blocks server startup. MonitorRegistry.markAllOrphaned() is
+    // deliberately NOT called here: its Map is in-memory only and starts
+    // empty every process start, so at true boot there is nothing in it to
+    // reconcile — calling it here would be a no-op dressed up as a fix. It
+    // stays available for callers that actually hold a stale reference
+    // across some other lifecycle event (tests, an admin action).
+    try {
+      const { reconcileRunsOnBoot } = await import('./harness/store.js');
+      const reconciled = await reconcileRunsOnBoot();
+      if (reconciled.length > 0) {
+        console.error(`[harness] Boot reconciliation: ${reconciled.length} orphaned run(s) marked failed.`);
+      }
+    } catch (err: any) {
+      console.error('[harness] Boot reconciliation failed (non-fatal):', err?.message || err);
+    }
+
     // Periodically check/sync telemetry every hour (supports continuous server runs)
     const telemetryInterval = setInterval(async () => {
       try {

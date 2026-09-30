@@ -228,3 +228,51 @@ export class HarnessStore {
     }
   }
 }
+
+/**
+ * Boot reconciliation (P4 plan's own self-review point, never implemented
+ * until now): a `running` run.json left over from a server crash/restart
+ * looks identical to one still legitimately in progress — nothing currently
+ * distinguishes them, so a status query for an orphaned run would report
+ * "running" forever. Marks every `running` run under `baseDir` as `failed`
+ * with a clear reason, exactly matching MonitorRegistry.markAllOrphaned()'s
+ * choice for the same situation on the monitor side.
+ *
+ * Real limitation, stated plainly rather than glossed over: this only
+ * covers ONE `baseDir` (the harness has no global index of every
+ * workspaceRoot a caller has ever deployed a run under — there's nothing to
+ * enumerate beyond that). Call this once at server startup for the
+ * server's own default working directory; a run deployed under a different
+ * workspace_root is not reconciled by this call. Closing that gap for real
+ * would need a new global run index — out of scope here, and not something
+ * to fake by guessing at other directories.
+ */
+export async function reconcileRunsOnBoot(baseDir: string = process.cwd()): Promise<{ runId: string }[]> {
+  const harnessDir = path.resolve(baseDir, '.free-llm-mcp', 'harness');
+  let entries: string[];
+  try {
+    entries = await fs.readdir(harnessDir);
+  } catch {
+    return []; // no harness dir yet — nothing to reconcile
+  }
+
+  const reconciled: { runId: string }[] = [];
+  for (const runId of entries) {
+    if (!RUN_ID_PATTERN.test(runId)) continue; // skip anything that isn't a real run directory
+    try {
+      const store = new HarnessStore(runId, baseDir);
+      const run = await store.loadRun();
+      if (!run || run.status !== 'running') continue;
+      run.status = 'failed';
+      run.error = 'Orphaned on restart — server exited mid-run.';
+      run.updatedAt = Date.now();
+      await store.saveRun(run);
+      await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'error', data: { message: run.error } }).catch(() => {});
+      reconciled.push({ runId });
+    } catch {
+      // A malformed/corrupt run.json for one runId must never block
+      // reconciling the rest.
+    }
+  }
+  return reconciled;
+}
