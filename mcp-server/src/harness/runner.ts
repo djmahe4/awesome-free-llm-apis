@@ -261,6 +261,7 @@ async function recallMemoryContext(
       async () => (await import('../tools/manage-memory.js')).manageMemory(payload as any)
     );
     if (!result.ok) return undefined;
+    trackTopLevelTokens(run, 300);
     const nodes: any[] = result.result?.nodes ?? [];
     if (nodes.length === 0) return undefined;
 
@@ -315,9 +316,10 @@ async function writeBackToMemory(
 
   const nodePayload = { action: 'node_add', workspace_root: workspaceRoot, node: { type: 'text' as const, content: content.slice(0, 2000), tags: [goalSlug] } };
   if (evaluate(decl, 'top_level', 'manage_memory', 'node_add', nodePayload).kind === 'allow') {
-    await gatedCall(store, run, decl, 'top_level', 'manage_memory', 'node_add', nodePayload, 300, 's-2:writeback:node', async () =>
+    const r = await gatedCall(store, run, decl, 'top_level', 'manage_memory', 'node_add', nodePayload, 300, 's-2:writeback:node', async () =>
       (await import('../tools/manage-memory.js')).manageMemory(nodePayload as any)
-    ).catch(() => {});
+    ).catch(() => ({ ok: false } as GatedResult));
+    if (r.ok) trackTopLevelTokens(run, 300);
   }
 
   const wikiPayload = { action: 'wiki_write', workspace_root: workspaceRoot, title: `Harness run: ${goalSlug}`, content, tags: [goalSlug] };
@@ -628,6 +630,13 @@ async function runSteps(
     lastRole = role;
     const callId = `s${i}:${role}`;
 
+    if (wallBudgetExceeded(run, decl)) {
+      run.status = 'paused_budget';
+      run.error = `Wall-clock budget exceeded (maxWallMinutes: ${decl.harness.budget.maxWallMinutes})`;
+      await store.appendTrace({ runId: run.runId, role, type: 'budget', data: { reason: 'maxWallMinutes exceeded' } }).catch(() => {});
+      return { content: lastContent, lastRole, finalHandoff: handoff };
+    }
+
     let callResult: GatedResult;
     let goalTokens = 0;
     let stepContent: string | undefined;
@@ -748,6 +757,47 @@ async function runSteps(
   return { content: lastContent, lastRole, finalHandoff: handoff };
 }
 
+/** P4f per-role tracking for top_level's own enrichment calls (recall/write-back) — the same bucket applyResearchResult writes to for research-lane steps, so supervisorShareMax reflects top_level's REAL total cost, not just its research-step share. */
+function trackTopLevelTokens(run: HarnessRun, tokens: number): void {
+  run.budget.perRole = run.budget.perRole ?? {};
+  run.budget.perRole.top_level = (run.budget.perRole.top_level ?? 0) + tokens;
+}
+
+/**
+ * P4f wall-clock budget (D6/"Enforce what's declared-but-dead today":
+ * maxWallMinutes). Checked once per step boundary — a step already in
+ * flight isn't interrupted mid-call, matching the plan's own "checked
+ * between steps" wording. `maxWallMinutes` unset/0 means no limit, same
+ * "declaring nothing keeps old behavior" posture as the other P4e/P4f
+ * additions.
+ */
+function wallBudgetExceeded(run: HarnessRun, decl: HarnessDeclaration): boolean {
+  const maxWallMinutes = decl.harness.budget.maxWallMinutes;
+  if (!maxWallMinutes) return false;
+  return (Date.now() - run.createdAt) / 60000 > maxWallMinutes;
+}
+
+/**
+ * P4f supervisor-share telemetry: WARNS via a trace event when top_level's
+ * own share of total tokens exceeds supervisorShareMax — never blocks or
+ * fails the run, since orchestration overhead being high is a signal to
+ * look at, not by itself a budget violation the way maxTokens/maxToolCalls
+ * are.
+ */
+async function checkSupervisorShare(store: HarnessStore, run: HarnessRun, decl: HarnessDeclaration): Promise<void> {
+  const shareMax = decl.harness.budget.supervisorShareMax;
+  const total = run.budget.used;
+  const topLevel = run.budget.perRole?.top_level ?? 0;
+  if (!shareMax || total <= 0) return;
+  const share = topLevel / total;
+  if (share > shareMax) {
+    await store.appendTrace({
+      runId: run.runId, role: 'top_level', type: 'budget',
+      data: { reason: 'supervisor share exceeded', share, supervisorShareMax: shareMax, topLevelTokens: topLevel, totalTokens: total },
+    }).catch(() => {});
+  }
+}
+
 function applyResearchResult(run: HarnessRun, role: string, callResult: GatedResult, goalTokens: number, aborted: boolean): { content?: string } {
   if (aborted) {
     run.status = 'aborted';
@@ -771,7 +821,13 @@ function applyResearchResult(run: HarnessRun, role: string, callResult: GatedRes
     callResult.result?.prompt ??
     (typeof browserData === 'string' ? browserData : browserData ? JSON.stringify(browserData) : undefined) ??
     '';
-  run.budget.used += contextManager.countStringTokens(content) + goalTokens;
+  const stepTokens = contextManager.countStringTokens(content) + goalTokens;
+  run.budget.used += stepTokens;
+  // Per-role breakdown (P4f) — makes the supervisorShareMax metric real
+  // instead of only declared config nobody reads; role was already in
+  // scope here, just never recorded against it before.
+  run.budget.perRole = run.budget.perRole ?? {};
+  run.budget.perRole[role] = (run.budget.perRole[role] ?? 0) + stepTokens;
   run.result = content;
   if (!content) {
     run.status = 'failed';
@@ -856,6 +912,7 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
       if (run.status === 'complete' && content) {
         await writeBackToMemory(store, run, decl, input.goal, content, recall?.recalledNodes ?? [], input.workspaceRoot);
         if (finalHandoff) await submitOpenQuestions(store, run, decl, input.goal, finalHandoff, input.workspaceRoot);
+        await checkSupervisorShare(store, run, decl);
       }
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
@@ -923,6 +980,7 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
       if (run.status === 'complete' && content) {
         await writeBackToMemory(store, run, decl, run.goal, content, recall?.recalledNodes ?? [], run.workspaceRoot);
         if (finalHandoff) await submitOpenQuestions(store, run, decl, run.goal, finalHandoff, run.workspaceRoot);
+        await checkSupervisorShare(store, run, decl);
       }
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {

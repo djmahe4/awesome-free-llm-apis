@@ -97,7 +97,7 @@ export interface HarnessRun {
   goal: string;
   workspaceRoot?: string;
   status: 'running' | 'paused_approval' | 'paused_budget' | 'complete' | 'failed' | 'aborted';
-  budget: { maxTokens: number; used: number; reserved: number; toolCalls: number };
+  budget: { maxTokens: number; used: number; reserved: number; toolCalls: number; perRole?: Record<string, number> };
   result?: string;
   error?: string;
   createdAt: number;
