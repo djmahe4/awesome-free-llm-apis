@@ -277,20 +277,40 @@ async function loadStepRoles(store: HarnessStore, decl: HarnessDeclaration, goal
  * of this slice — deferred, same as this session's other disclosed partial-
  * scope commits, rather than rushing a third branch untested.
  */
+/**
+ * pdf checked BEFORE html: a `.pdf`/`pdf://` source shouldn't be web-scraped
+ * via browser_tool — resolvePdfRef reads it directly and is the more
+ * accurate depth level for that source type, matching the plan's
+ * abstract->html->pdf ladder ordering (contentDepth.order). Deviates from
+ * D6's own sketch (`pdf_read` as one of researcher's OWN tools) — kept as
+ * its own pseudo-role ('pdf'), same precedent as 'scraper' for html, so the
+ * existing task-id-is-the-role-name invariant (P4a) holds without a role
+ * ever running twice in one lane.
+ */
 function decideEscalation(decl: HarnessDeclaration, role: string, handoff: Handoff): string | null {
-  if (role !== 'researcher') return null; // only escalate off the abstract-level pass, not off analyst/scraper output
-  if (!decl.roles.scraper) return null;
+  if (role !== 'researcher') return null; // only escalate off the abstract-level pass, not off analyst/scraper/pdf output
   if (handoff.status !== 'complete') return null;
   const threshold = decl.handoff?.lowConfidenceThreshold ?? 0.7;
   if (handoff.confidence >= threshold) return null;
-  if (!extractFirstUrl(handoff)) return null;
-  return 'scraper';
+
+  if (decl.roles.pdf && extractFirstPdfRef(handoff)) return 'pdf';
+  if (decl.roles.scraper && extractFirstUrl(handoff)) return 'scraper';
+  return null;
 }
 
 function extractFirstUrl(handoff: Handoff): string | null {
   const text = handoff.findings.map(f => f.claim).join(' ');
   const match = text.match(/https?:\/\/[^\s)\]"'>]+/);
   return match ? match[0] : null;
+}
+
+/** Matches `pdf://<path>[:page]` first (the researcher role's own trigger convention), else a bare `<path>.pdf[:page]`. */
+function extractFirstPdfRef(handoff: Handoff): string | null {
+  const text = handoff.findings.map(f => f.claim).join(' ');
+  const schemed = text.match(/pdf:\/\/([^\s)\]"'>]+)/);
+  if (schemed) return schemed[1];
+  const bare = text.match(/[^\s)\]"'>]+\.pdf(?::\d+)?/i);
+  return bare ? bare[0] : null;
 }
 
 /** First step gets the raw goal (plus recalled memory context, if any); a later step gets a synthesis prompt built from the prior step's real (validated) handoff — never the raw prior goal again. */
@@ -731,6 +751,39 @@ async function runSteps(
       }
       await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via browser_tool (navigate+extract) on ${url}`);
       callResult = await runScraperStep(store, run, decl, role, callId, url, registryKey);
+      stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
+    } else if (role === 'pdf') {
+      // P4b pdf escalation (previously deferred): its input is a pdf ref
+      // extracted from the prior handoff, resolved via resolvePdfRef — a
+      // single synchronous call (unlike the scraper branch's navigate+
+      // extract pair), so this is one ordinary gatedCall, not gatedDetach.
+      const pdfRef = handoff ? extractFirstPdfRef(handoff) : null;
+      if (!pdfRef) {
+        run.status = 'failed';
+        run.error = `pdf step '${callId}' has no pdf ref to resolve (escalation inserted without one — should not happen)`;
+        await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
+        await endTaskAttempt(store, originalGoal, role, 'failed', run.error);
+        return { content: lastContent, lastRole, finalHandoff: handoff };
+      }
+      const pdfPayload = { uriPath: pdfRef, workspaceRoot };
+      const pdfArgsHash = hashArgs(pdfPayload);
+      if (await hasRepeatedSuccess(store, callId, pdfArgsHash)) {
+        run.status = 'failed';
+        run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
+        await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
+        await endTaskAttempt(store, originalGoal, role, 'failed', `repeat detected: ${run.error}`);
+        return { content: lastContent, lastRole, finalHandoff: handoff };
+      }
+      await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via resolvePdfRef on ${pdfRef}`);
+      callResult = await gatedCall(store, run, decl, role, 'pdf_read', undefined, pdfPayload, 500, callId, async () => {
+        const { resolvePdfRef } = await import('../tools/use-free-llm.js');
+        const resolved = await resolvePdfRef(pdfRef, workspaceRoot);
+        // No throw on a miss — applyResearchResult's existing empty-content
+        // handling (silent-zero fix) already turns '' into a clean 'failed'
+        // status, same as every other tool here; a thrown error would skip
+        // that path and bypass endTaskAttempt's normal bookkeeping.
+        return { response: resolved?.resolvedContent ?? '' };
+      });
       stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
     } else {
       const stepGoal = stepInputText(i, originalGoal, handoff, i === startIndex ? memoryContext : undefined);
