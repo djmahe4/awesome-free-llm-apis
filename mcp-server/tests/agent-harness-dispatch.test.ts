@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import os from 'os';
 import type { HarnessDeclaration } from '../src/harness/types.js';
+import { waitForSettled } from './helpers/wait-for-run.js';
 
 // Verifies runRoleStep actually dispatches by the role's DECLARED tool
 // instead of always calling use_free_llm regardless of what the YAML says —
@@ -57,7 +58,8 @@ describe('harness runner — role-declared tool dispatch (integration)', () => {
     const { HarnessStore } = await import('../src/harness/store.js');
 
     await deployHarness({ runId: 'disp-1', goal: 'find a research skill', workspaceRoot: tmpDir });
-    await new Promise(r => setTimeout(r, 300));
+    const store = new HarnessStore('disp-1', tmpDir);
+    const run = await waitForSettled(store);
 
     expect(loadSkillPromptMock).toHaveBeenCalledTimes(1);
     expect(useFreeLLMMock).not.toHaveBeenCalled();
@@ -66,8 +68,6 @@ describe('harness runner — role-declared tool dispatch (integration)', () => {
     // field applyResearchResult knows how to extract — so this is correctly
     // 'failed' (silent-zero fix), not a false 'complete' with an empty
     // run.result indistinguishable from a real finding.
-    const store = new HarnessStore('disp-1', tmpDir);
-    const run = await store.loadRun();
     expect(run?.status).toBe('failed');
 
     const events = await store.readTrace();
@@ -80,7 +80,9 @@ describe('harness runner — role-declared tool dispatch (integration)', () => {
     const { deployHarness } = await import('../src/harness/runner.js');
 
     await deployHarness({ runId: 'disp-2', goal: 'run a skill', workspaceRoot: tmpDir });
-    await new Promise(r => setTimeout(r, 300));
+    const { HarnessStore } = await import('../src/harness/store.js');
+    const store = new HarnessStore('disp-2', tmpDir);
+    const run = await waitForSettled(store);
 
     expect(executeSkillMock).toHaveBeenCalledTimes(1);
     expect(useFreeLLMMock).not.toHaveBeenCalled();
@@ -88,9 +90,6 @@ describe('harness runner — role-declared tool dispatch (integration)', () => {
     // executeSkillMock's result carries content under .response, not
     // .choices[0].message.content — completes successfully (multi-shape
     // extraction), not a false empty-content failure.
-    const { HarnessStore } = await import('../src/harness/store.js');
-    const store = new HarnessStore('disp-2', tmpDir);
-    const run = await store.loadRun();
     expect(run?.status).toBe('complete');
     expect(run?.result).toBe('mock skill executed');
   });
@@ -100,7 +99,8 @@ describe('harness runner — role-declared tool dispatch (integration)', () => {
     const { deployHarness } = await import('../src/harness/runner.js');
 
     await deployHarness({ runId: 'disp-3', goal: 'research something', workspaceRoot: tmpDir });
-    await new Promise(r => setTimeout(r, 300));
+    const { HarnessStore } = await import('../src/harness/store.js');
+    await waitForSettled(new HarnessStore('disp-3', tmpDir));
 
     expect(useFreeLLMMock).toHaveBeenCalledTimes(1);
     expect(loadSkillPromptMock).not.toHaveBeenCalled();
@@ -113,7 +113,7 @@ describe('harness runner — role-declared tool dispatch (integration)', () => {
     const { HarnessStore } = await import('../src/harness/store.js');
 
     await deployHarness({ runId: 'disp-4', goal: 'g', workspaceRoot: tmpDir });
-    await new Promise(r => setTimeout(r, 300));
+    await waitForSettled(new HarnessStore('disp-4', tmpDir));
 
     // Not executed — the resolved executor is use_free_llm, but the role's
     // allowlist only names 'some_future_tool_not_in_dispatch_map', so policy

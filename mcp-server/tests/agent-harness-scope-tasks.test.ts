@@ -4,6 +4,7 @@ import path from 'path';
 import os from 'os';
 import { assertWorkspaceRootAllowed } from '../src/harness/policy.js';
 import type { HarnessDeclaration } from '../src/harness/types.js';
+import { waitForSettled } from './helpers/wait-for-run.js';
 
 vi.mock('../src/tools/use-free-llm.js', () => ({
   useFreeLLM: vi.fn(async () => ({ choices: [{ message: { content: 'Mocked research finding.' } }] })),
@@ -89,12 +90,13 @@ describe('harness runner — workspace scoping enforcement (integration)', () =>
   it('deploy succeeds when workspace_root is inside the declared allowlist', async () => {
     (globalThis as any).__testDecl = makeAllowedDecl([tmpProjectDir]);
     const { deployHarness } = await import('../src/harness/runner.js');
+    const { HarnessStore } = await import('../src/harness/store.js');
     const run = await deployHarness({ runId: 'ws-2', goal: 'g', workspaceRoot: tmpProjectDir });
     expect(run.status).toBe('running');
     // Let the detached background work settle before afterEach removes
     // tmpProjectDir — otherwise the in-flight write races the directory
     // removal (ENOTEMPTY), a test-cleanup race, not a bug in the code under test.
-    await new Promise(r => setTimeout(r, 200));
+    await waitForSettled(new HarnessStore('ws-2', tmpProjectDir));
   });
 });
 
@@ -112,9 +114,10 @@ describe('harness runner — tasks.md blackboard (integration)', () => {
   it('creates a tasks.md entry for the selected role and marks it completed on success', async () => {
     const { deployHarness } = await import('../src/harness/runner.js');
     const { agentHarness } = await import('../src/tools/agent-harness.js');
+    const { HarnessStore } = await import('../src/harness/store.js');
 
     await deployHarness({ runId: 'tk-1', goal: 'research the CAP theorem', workspaceRoot: tmpProjectDir });
-    await new Promise(r => setTimeout(r, 200));
+    await waitForSettled(new HarnessStore('tk-1', tmpProjectDir));
 
     const { tasksFile, tasks } = await agentHarness({ action: 'tasks', runId: 'tk-1', workspace_root: tmpProjectDir }) as { tasksFile: string | null; tasks: any[] };
     expect(tasksFile).toContain('research the CAP theorem');
@@ -143,17 +146,17 @@ describe('harness runner — tasks.md blackboard (integration)', () => {
     const { HarnessStore } = await import('../src/harness/store.js');
     const { agentHarness } = await import('../src/tools/agent-harness.js');
 
+    const store = new HarnessStore('tk-2', tmpProjectDir);
     await deployHarness({ runId: 'tk-2', goal: 'goal needing approval', workspaceRoot: tmpProjectDir });
-    await new Promise(r => setTimeout(r, 200));
+    await waitForSettled(store);
 
     const afterDeploy = await agentHarness({ action: 'tasks', runId: 'tk-2', workspace_root: tmpProjectDir });
     expect((afterDeploy as any).tasks[0].status).toBe('pending'); // paused, not completed — must stay retryable
 
-    const store = new HarnessStore('tk-2', tmpProjectDir);
     const [pending] = await store.listApprovals();
     await store.decideApproval(pending.id, true, 'user');
     await resumeHarness('tk-2', tmpProjectDir);
-    await new Promise(r => setTimeout(r, 200));
+    await waitForSettled(store);
 
     const afterResume = await agentHarness({ action: 'tasks', runId: 'tk-2', workspace_root: tmpProjectDir });
     expect((afterResume as any).tasks[0].status).toBe('completed');

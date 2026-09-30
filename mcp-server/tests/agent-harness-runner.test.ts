@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import os from 'os';
 import type { HarnessDeclaration } from '../src/harness/types.js';
+import { waitForSettled } from './helpers/wait-for-run.js';
 
 vi.mock('../src/tools/use-free-llm.js', () => ({
   useFreeLLM: vi.fn(async () => ({ choices: [{ message: { content: 'Mocked research finding.' } }] })),
@@ -50,11 +51,8 @@ describe('harness runner — approval binding and resume (integration)', () => {
     const run = await deployHarness({ runId: 'rt-1', goal: 'find the CAP theorem', workspaceRoot: tmpDir });
     expect(run.status).toBe('running'); // deploy returns before the detached work settles
 
-    // Wait for the detached async work to reach paused_approval.
-    await new Promise(r => setTimeout(r, 200));
-
     const store = new HarnessStore('rt-1', tmpDir);
-    const finished = await store.loadRun();
+    const finished = await waitForSettled(store);
     expect(finished?.status).toBe('paused_approval');
 
     const approvals = await store.listApprovals();
@@ -69,10 +67,8 @@ describe('harness runner — approval binding and resume (integration)', () => {
     const { HarnessStore } = await import('../src/harness/store.js');
 
     await deployHarness({ runId: 'rt-2', goal: 'find the CAP theorem', workspaceRoot: tmpDir });
-    await new Promise(r => setTimeout(r, 200));
-
     const store = new HarnessStore('rt-2', tmpDir);
-    const paused = await store.loadRun();
+    const paused = await waitForSettled(store);
     expect(paused?.status).toBe('paused_approval');
 
     const [pending] = await store.listApprovals();
@@ -84,9 +80,7 @@ describe('harness runner — approval binding and resume (integration)', () => {
     expect(stillPaused?.status).toBe('paused_approval');
 
     await resumeHarness('rt-2', tmpDir);
-    await new Promise(r => setTimeout(r, 200));
-
-    const completed = await store.loadRun();
+    const completed = await waitForSettled(store);
     expect(completed?.status).toBe('complete');
     expect(completed?.result).toContain('Mocked research finding');
   });
@@ -96,9 +90,9 @@ describe('harness runner — approval binding and resume (integration)', () => {
     const { HarnessStore } = await import('../src/harness/store.js');
 
     await deployHarness({ runId: 'rt-3', goal: 'goal A', workspaceRoot: tmpDir });
-    await new Promise(r => setTimeout(r, 200));
-
     const store = new HarnessStore('rt-3', tmpDir);
+    await waitForSettled(store);
+
     const [pending] = await store.listApprovals();
     await store.decideApproval(pending.id, true, 'user');
 
@@ -112,8 +106,7 @@ describe('harness runner — approval binding and resume (integration)', () => {
     // resume re-hashes the ORIGINAL persisted goal, so the prior approval
     // (for "goal A") still matches and this completes normally.
     await resumeHarness('rt-3', tmpDir);
-    await new Promise(r => setTimeout(r, 200));
-    const completed = await store.loadRun();
+    const completed = await waitForSettled(store);
     expect(completed?.status).toBe('complete');
     expect(completed?.goal).toBe('goal A');
   });
