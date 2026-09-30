@@ -115,7 +115,9 @@ async function renderMarkdown(text) {
       .replace(/\[\[([^\]]+)\]\]/g, (_, title) => `<a href="#" class="wiki-link" data-title="${title.replace(/"/g, '&quot;')}">${title}</a>`)
       // Markdown links: [text](url) — only http(s) URLs become real links, everything else stays plain text
       .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, text, url) => `<a href="${url.replace(/"/g, '&quot;')}" target="_blank" rel="noopener noreferrer">${text}</a>`)
-      // H1-H3
+      // H1-H5 (matched in descending order of hashes)
+      .replace(/^##### (.+)$/gm, '<h5 style="font-size:.78rem;font-weight:600;color:var(--text-primary);margin:8px 0 2px;">$1</h5>')
+      .replace(/^#### (.+)$/gm, '<h4 style="font-size:.82rem;font-weight:600;color:var(--text-primary);margin:9px 0 3px;">$1</h4>')
       .replace(/^### (.+)$/gm, '<h3 style="font-size:.85rem;color:var(--text-primary);margin:10px 0 4px;">$1</h3>')
       .replace(/^## (.+)$/gm, '<h2 style="font-size:.95rem;color:var(--text-primary);margin:12px 0 6px;">$1</h2>')
       .replace(/^# (.+)$/gm, '<h1 style="font-size:1.05rem;color:var(--accent-purple);margin:14px 0 8px;">$1</h1>')
@@ -326,6 +328,7 @@ tabBtns.forEach(btn => {
     if (target === 'playground') ensureModels();
     if (target === 'profile')  { fetchUserConfig(); fetchLeaderboard(); }
     if (target === 'wiki')     { initWikiTab(); }
+    if (target === 'dagmemory') { initDagMemoryTab(); }
   });
 });
 
@@ -596,19 +599,33 @@ const TOOLS = [
     id: 'load_skill_prompt', label: 'load_skill_prompt', icon: '📥',
     tag: 'Skill Loading',
     fields: [
-      { id: 'type',         label: 'Action Type', type: 'select', options: ['load', 'search'] },
+      { id: 'type',         label: 'Action Type', type: 'select', options: ['load', 'search', 'list'] },
       { id: 'name',         label: 'Skill Name', type: 'text', placeholder: 'tdd-workflow' },
       { id: 'keywords',     label: 'Keywords (comma-separated for search)', type: 'text', placeholder: 'tdd, testing' },
-      { id: 'workspaceDir', label: 'Workspace Directory (optional)', type: 'text', placeholder: 'C:/path/to/workspace' }
+      { id: 'workspaceDir', label: 'Workspace Directory (optional)', type: 'text', placeholder: 'C:/path/to/workspace' },
+      { id: 'source',       label: 'Source (optional)', type: 'select', options: ['', 'agentic-awesome', 'hermes'] },
+      { id: 'sessionId',    label: 'Session ID (for background download polling)', type: 'text', placeholder: 'load-1' },
+      { id: 'pollAction',   label: 'Poll Action (optional)', type: 'select', options: ['', 'run', 'status'] },
     ]
   },
   {
     id: 'manage_memory', label: 'manage_memory', icon: '🧠',
     tag: 'Memory',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['search','list','stats','clear'] },
-      { id: 'query',  label: 'Query (for search)', type: 'text', placeholder: 'authentication patterns' },
-      { id: 'limit',  label: 'Limit (results)', type: 'number', placeholder: '5' },
+      { id: 'action',         label: 'Action', type: 'select', options: ['search','list','stats','clear','wiki_search','wiki_write','wiki_list','wiki_read','node_add','node_link','node_list','node_get','graph_query'] },
+      { id: 'query',          label: 'Query (for search / wiki_search)', type: 'text', placeholder: 'authentication patterns' },
+      { id: 'limit',          label: 'Limit (results)', type: 'number', placeholder: '5' },
+      { id: 'title',          label: 'Title (for wiki_write / wiki_read)', type: 'text', placeholder: 'Auth Overview' },
+      { id: 'content',        label: 'Content (for wiki_write)', type: 'textarea', placeholder: 'Page content...' },
+      { id: 'tags',           label: 'Tags (comma-separated; node_list filters by tags[0])', type: 'text', placeholder: 'auth, security' },
+      { id: 'links',          label: 'Links (comma-separated, for wiki_write)', type: 'text', placeholder: 'Related Page' },
+      { id: 'persona',        label: 'Persona (for wiki_search)', type: 'text', placeholder: 'coder' },
+      { id: 'namespace',      label: 'Namespace (for wiki_*)', type: 'text', placeholder: 'global-cyber-tools' },
+      { id: 'node',           label: 'Node JSON (for node_add)', type: 'textarea', placeholder: '{"type":"text","content":"auth uses JWT","tags":["auth"]}' },
+      { id: 'nodeId',         label: 'Node ID (for node_get)', type: 'text', placeholder: 'a1b2c3...' },
+      { id: 'from',           label: 'From Node ID (for node_link)', type: 'text', placeholder: 'a1b2c3...' },
+      { id: 'to',             label: 'To Node ID (for node_link)', type: 'text', placeholder: 'd4e5f6...' },
+      { id: 'relation',       label: 'Relation Label (for node_link)', type: 'text', placeholder: 'relates-to' },
     ]
   },
   {
@@ -632,7 +649,7 @@ const TOOLS = [
     id: 'cyber_tool', label: 'cyber_tool', icon: '🛡️',
     tag: 'Cyber Security',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['osint', 'list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory'] },
+      { id: 'action', label: 'Action', type: 'select', options: ['osint', 'osint_status', 'list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory'] },
       { id: 'target', label: 'Target (for osint)', type: 'text', placeholder: 'example.com or johndoe' },
       { id: 'osintType', label: 'OSINT Type (for osint)', type: 'select', options: ['all', 'domain', 'ip', 'username'] },
       { id: 'autoSearch', label: 'Auto Search Recon Dorks (osint)', type: 'select', options: ['false', 'true'] },
@@ -657,6 +674,11 @@ const TOOLS = [
       { id: 'what',        label: 'What was done (one item per line)', type: 'textarea', placeholder: 'Added verify-migrations.sh\nIntegrated schema diff checks' },
       { id: 'why',         label: 'Why', type: 'text', placeholder: 'Prevent schema drift during deployments' },
       { id: 'files',       label: 'Files (comma-separated)', type: 'text', placeholder: 'scripts/verify-migrations.sh' },
+      { id: 'example',     label: 'Example (optional)', type: 'textarea', placeholder: 'Code snippet or usage example' },
+      { id: 'script_instructions', label: 'Script Instructions JSON (optional, triggers background generation)', type: 'textarea', placeholder: '{"verify.py":"Diff Prisma schema against live DB"}' },
+      { id: 'workspace_root', label: 'Workspace Root (required)', type: 'text', placeholder: 'C:/path/to/project' },
+      { id: 'sessionId',   label: 'Session ID (for background generation polling)', type: 'text', placeholder: 'skill-gen-1' },
+      { id: 'pollAction',  label: 'Poll Action (optional)', type: 'select', options: ['', 'run', 'status', 'abort'] },
     ]
   },
   {
@@ -691,6 +713,13 @@ const TOOLS = [
       { id: 'dryRun', label: 'Dry Run Mode (simulate only)', type: 'toggle', default: true },
       { id: 'topKFiles', label: 'Candidate Files Count (RAG)', type: 'number', placeholder: '5' },
       { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'coding-session-1' },
+      { id: 'action', label: 'Action', type: 'select', options: ['', 'plan', 'execute', 'resume', 'status', 'abort'] },
+      { id: 'pauseOnTaskPlan', label: 'Pause On Task Plan', type: 'toggle' },
+      { id: 'targetFiles', label: 'Target Files (comma-separated)', type: 'text', placeholder: 'src/foo.ts, src/bar.ts' },
+      { id: 'verifyLspDiagnostics', label: 'Verify LSP Diagnostics', type: 'toggle', default: true },
+      { id: 'astEditOps', label: 'AST Edit Ops JSON (optional)', type: 'textarea', placeholder: '[{"pat":"old($$A)","out":"new($$A)"}]' },
+      { id: 'resolve', label: 'Resolve JSON (optional)', type: 'textarea', placeholder: '{"action":"apply"}' },
+      { id: 'lspAction', label: 'LSP Action JSON (optional)', type: 'textarea', placeholder: '{"action":"diagnostics"}' },
     ]
   },
   {
@@ -773,10 +802,11 @@ const TOOL_WHEN_TO_USE = {
     <div>Autonomous multi-file software engineer based on the OMP (oh-my-pi) pattern. Searches your codebase, writes hash-anchored patches, performs AST rewrites, verifies compiler diagnostics, and commits or rolls back changes.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
-      <li><code>action: "run"</code> — Executes full refactoring pipeline (Vector RAG grep &rarr; Hashline diffs &rarr; Polyglot LSP checks).</li>
-      <li><code>resolve: "apply"</code> — Confirms and saves patched files to disk.</li>
-      <li><code>resolve: "discard"</code> — Rejects staged changes without writing to disk.</li>
-      <li><code>resolve: "rollback"</code> — Instantly restores previous state using Content-Addressable Storage (CAS) snapshots.</li>
+      <li><code>action: "plan"</code> — Decomposes the goal into tasks.md and pauses; <code>"resume"</code> executes the next pending task.</li>
+      <li><code>action: "execute"</code> (default) — Executes full refactoring pipeline (Vector RAG grep &rarr; Hashline diffs &rarr; Polyglot LSP checks).</li>
+      <li><code>action: "status"</code> / <code>"abort"</code> — Poll or cancel a background run started by a prior dryRun:false call.</li>
+      <li><code>resolve: {action: "apply", checkpointId?}</code> — Confirms and saves patched files to disk.</li>
+      <li><code>resolve: {action: "rollback", checkpointId?}</code> — Instantly restores previous state using Content-Addressable Storage (CAS) snapshots.</li>
     </ul>`,
 
   local_llm_patch: `
@@ -805,7 +835,7 @@ const TOOL_WHEN_TO_USE = {
     <div>Security coaching assistant, passive OSINT reconnaissance engine, and decision-graph tracker for authorized CTF challenges and educational penetration testing.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
-      <li><code>action: "osint"</code> — Passive DNS & infrastructure reconnaissance (A, AAAA, MX, TXT, NS), search dork generation, and automatic Markdown report creation in the cyber wiki. Supports <code>autoSearch: true</code> for automated multi-step search recon.</li>
+      <li><code>action: "osint"</code> — Passive DNS & infrastructure reconnaissance (A, AAAA, MX, TXT, NS), search dork generation, and automatic Markdown report creation in the cyber wiki. Supports <code>autoSearch: true</code> to run recon dorks in the background — poll results with <code>action: "osint_status"</code> (same sessionId/target).</li>
       <li><code>action: "lookup"</code> / <code>"get_tool"</code> — Query CLI flags and syntax for security tools (nmap, sqlmap, gobuster, etc.).</li>
       <li><code>action: "coach"</code> — Receive strategic next test steps based on target recon findings.</li>
       <li><code>action: "save_graph"</code> & <code>"load_graph"</code> — Create or visualize hypothesis nodes on the persistent engagement graph.</li>
@@ -838,8 +868,8 @@ const TOOL_WHEN_TO_USE = {
     <div>Search and load ready-to-use system prompts from the local repository or bundled Hermes catalog without running the LLM.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
-      <li><code>type: "skill"</code> — Load a specific skill's system instructions.</li>
-      <li><code>type: "persona"</code> — Load a specialized persona prompt (e.g., Coder, Security Auditor, Researcher).</li>
+      <li><code>type: "load"</code> / <code>"search"</code> / <code>"list"</code> — Load a specific skill, search by keyword, or list bundled skills.</li>
+      <li><code>source: "agentic-awesome"</code> / <code>"hermes"</code> — Which skill catalog to use; agentic-awesome downloads run in the background — poll with <code>pollAction: "status"</code> (same sessionId).</li>
     </ul>`,
 
   manage_memory: `
@@ -847,9 +877,9 @@ const TOOL_WHEN_TO_USE = {
     <div>Manage persistent long-term memory, project architectural decision records (ADRs), and workspace wiki documentation.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
-      <li><code>action: "search"</code> / <code>"save"</code> / <code>"delete"</code> — Vector semantic search across long-term facts.</li>
-      <li><code>action: "read_adr"</code> / <code>"write_adr"</code> — Maintain architectural decisions in <code>.free-llm-mcp/wiki/adr/</code>.</li>
-      <li><code>action: "wiki_read"</code> / <code>"wiki_write"</code> / <code>"wiki_list"</code> — Maintain technical wiki guides.</li>
+      <li><code>action: "search"</code> / <code>"list"</code> / <code>"stats"</code> / <code>"clear"</code> — Workspace key-value memory.</li>
+      <li><code>action: "wiki_search"</code> / <code>"wiki_write"</code> / <code>"wiki_list"</code> / <code>"wiki_read"</code> — Maintain technical wiki guides.</li>
+      <li><code>action: "node_add"</code> / <code>"node_link"</code> / <code>"node_list"</code> / <code>"node_get"</code> / <code>"graph_query"</code> — DAG memory node/edge graph with Ebbinghaus decay.</li>
     </ul>`,
 
   index_workspace: `
@@ -863,10 +893,11 @@ const TOOL_WHEN_TO_USE = {
 
   store_workspace_skill: `
     <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
-    <div>Save custom reusable AI skills and workflow guides directly into your repository's <code>.agents/</code> folder.</div>
+    <div>Save custom reusable AI skills, and optionally generate scripts for them via an internal LLM, into the workspace's skill directory.</div>
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
-      <li>Provide <code>skill_name</code>, <code>description</code>, and Markdown <code>content</code> following the Agent Skills spec.</li>
+      <li>Provide <code>name</code>, <code>description</code>, <code>what</code>, and <code>workspace_root</code> (required) to write SKILL.md.</li>
+      <li><code>script_instructions</code> (JSON map filename→instruction) triggers background script generation — poll with <code>pollAction: "status"</code> (same sessionId); <code>pollAction: "abort"</code> cancels an in-flight run.</li>
     </ul>`,
 
   validate_provider: `
@@ -1425,6 +1456,7 @@ function addSubtaskResponseBubble(taskText, outputText, ts, contextInjected, mod
   div.style.opacity = '0.85';
   
   const uniqueId = 'subtask-' + Math.random().toString(36).substring(2, 9);
+  const outputContainerId = 'subtask-out-' + Math.random().toString(36).substring(2, 9);
   
   const contextHtml = Array.isArray(contextInjected) && contextInjected.length > 0
     ? `<details style="margin-top:8px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.04);">
@@ -1447,8 +1479,8 @@ function addSubtaskResponseBubble(taskText, outputText, ts, contextInjected, mod
           </span>
           <span style="font-size:.7rem; color:var(--text-muted);">click to view output</span>
         </summary>
-        <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); font-size:.75rem; font-family:'JetBrains Mono', monospace; overflow-x:auto; max-height:200px; white-space:pre-wrap; color:var(--text-muted);">
-          ${esc(outputText || 'No output details recorded.')}
+        <div id="${outputContainerId}" style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); font-size:.75rem; font-family:'JetBrains Mono', monospace; overflow-x:auto; max-height:350px; white-space:pre-wrap; color:var(--text-muted);">
+          <pre style="margin:0; font-family:inherit; white-space:pre-wrap;">${esc(outputText || 'No output details recorded.')}</pre>
         </div>
       </details>
       ${contextHtml}
@@ -1457,6 +1489,16 @@ function addSubtaskResponseBubble(taskText, outputText, ts, contextInjected, mod
       ${modelBadge(model, provider)}<span>Subagent Execution</span>
       <span>${new Date(ts || Date.now()).toLocaleTimeString()}</span>
     </div>`;
+
+  if (outputText) {
+    renderMarkdown(outputText).then(html => {
+      const container = div.querySelector(`#${outputContainerId}`);
+      if (container) {
+        container.innerHTML = html;
+        container.style.whiteSpace = 'normal';
+      }
+    }).catch(() => {});
+  }
   
   chatLog.appendChild(div);
   scrollChatBottom();
@@ -2756,4 +2798,234 @@ steeringAgenticToggle?.addEventListener('change', runSteeringEvaluation);
 // Initial run on script load
 runSteeringEvaluation();
 setTimeout(runSteeringEvaluation, 500);
+
+// ─── DAG Memory Graph (memory_tool storage+DAG core) ─────────────
+// Renders manage_memory's node/edge graph (node_add/node_link/graph_query
+// actions) for a workspace — mirrors the Cyber Tool Decision Graph pattern
+// above (card-list columns by type + edge list), just grouped by DAG node
+// type instead of CTF decision-graph type.
+const dagMemWorkspaceInput = document.getElementById('dagmem-workspace-input');
+const dagMemFolderBtn      = document.getElementById('dagmem-folder-btn');
+const dagMemLoadBtn        = document.getElementById('dagmem-load-btn');
+const dagMemFilterInput    = document.getElementById('dagmem-filter-input');
+const dagMemGraphBody      = document.getElementById('dagmem-graph-body');
+const dagMemNodeType       = document.getElementById('dagmem-node-type');
+const dagMemNodeContent    = document.getElementById('dagmem-node-content');
+const dagMemNodeTags       = document.getElementById('dagmem-node-tags');
+const dagMemAddNodeBtn     = document.getElementById('dagmem-add-node-btn');
+const dagMemLinkFrom       = document.getElementById('dagmem-link-from');
+const dagMemLinkTo         = document.getElementById('dagmem-link-to');
+const dagMemLinkRelation   = document.getElementById('dagmem-link-relation');
+const dagMemLinkBtn        = document.getElementById('dagmem-link-btn');
+const dagMemFormStatus     = document.getElementById('dagmem-form-status');
+
+let _dagMemGraphData = { nodes: [], edges: [] };
+let dagMemInitialized = false;
+
+const DAG_NODE_TYPE_COLOR = {
+  text: 'var(--accent-cyan)',
+  image: 'var(--accent-purple)',
+  video: 'var(--accent-amber)',
+  audio: 'var(--accent-green)',
+  pdf_page: 'var(--accent-red)',
+};
+
+async function callManageMemoryDag(params) {
+  const r = await fetch('/api/tool', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool: 'manage_memory', params: { ...params, workspace_root: dagMemWorkspaceInput.value.trim() } })
+  });
+  const d = await r.json();
+  if (!r.ok || d.ok === false) throw new Error(d.error || d.result?.error || 'Request failed');
+  return d.result;
+}
+
+function renderDagMemGraph(filterText) {
+  const { nodes, edges } = _dagMemGraphData;
+  if (!nodes.length) {
+    dagMemGraphBody.innerHTML = '<div class="conv-empty">No DAG memory nodes for this workspace yet.</div>';
+    return;
+  }
+
+  const q = (filterText || '').trim().toLowerCase();
+  const matches = (n) => !q || n.id.toLowerCase().includes(q) || (n.content || '').toLowerCase().includes(q) || (n.tags || []).some(t => t.toLowerCase().includes(q));
+
+  const width = 600;
+  const height = 360;
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = Math.min(width, height) / 2 - 60;
+
+  const positions = {};
+  nodes.forEach((n, i) => {
+    const angle = (2 * Math.PI * i) / nodes.length - Math.PI / 2;
+    positions[n.id] = { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) };
+  });
+
+  let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '">';
+  svg += '<defs><marker id="dagmem-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--glass-border)"></path></marker></defs>';
+
+  edges.forEach(e => {
+    const from = positions[e.from];
+    const to = positions[e.to];
+    if (!from || !to) return;
+    const dimEdge = q && !matches({ id: e.from, content: '', tags: [] }) && !matches({ id: e.to, content: '', tags: [] });
+    svg += '<line class="dagmem-svg-edge" x1="' + from.x + '" y1="' + from.y + '" x2="' + to.x + '" y2="' + to.y + '" opacity="' + (dimEdge ? 0.15 : 1) + '"><title>' + esc(e.from) + ' -&gt; ' + esc(e.to) + ' (' + esc(e.relation) + ')</title></line>';
+  });
+
+  nodes.forEach(n => {
+    const pos = positions[n.id];
+    const dim = !matches(n);
+    const color = DAG_NODE_TYPE_COLOR[n.type] || 'var(--accent-cyan)';
+    const label = (n.content || n.filePath || n.id).slice(0, 18);
+    svg += '<g class="dagmem-svg-node' + (dim ? ' dim' : '') + '" data-node-id="' + esc(n.id) + '">';
+    svg += '<circle cx="' + pos.x + '" cy="' + pos.y + '" r="14" fill="' + color + '"><title>' + esc(n.id) + '</title></circle>';
+    svg += '<text x="' + pos.x + '" y="' + (pos.y + 26) + '" text-anchor="middle">' + esc(label) + '</text>';
+    svg += '</g>';
+  });
+
+  svg += '</svg>';
+
+  const detailId = 'dagmem-node-detail';
+  dagMemGraphBody.innerHTML =
+    '<div class="dagmem-svg-wrap">' + svg + '</div>' +
+    '<div id="' + detailId + '" class="dagmem-detail-card" style="margin-top:14px;"><span style="color:var(--text-muted);">💡 Click any node circle in the graph to inspect metadata, tags, and media pointer.</span></div>';
+
+  dagMemGraphBody.querySelectorAll('.dagmem-svg-node').forEach(g => {
+    g.addEventListener('click', () => {
+      const id = g.getAttribute('data-node-id');
+      const n = nodes.find(x => x.id === id);
+      if (!n) return;
+      const detail = document.getElementById(detailId);
+      if (detail) {
+        const color = DAG_NODE_TYPE_COLOR[n.type] || 'var(--accent-cyan)';
+        const tagBadges = (n.tags || []).map(t => '<span class="badge badge-purple" style="font-size:0.65rem;margin-right:4px;">#' + esc(t) + '</span>').join('');
+        detail.innerHTML =
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+            '<span class="dagmem-badge" style="background:' + color + ';color:#000;">' + esc(n.type) + '</span>' +
+            '<strong style="color:var(--text-primary);font-size:0.85rem;">' + esc(n.id) + '</strong>' +
+            '<span class="badge badge-cyan" style="font-size:0.65rem;margin-left:auto;">Retention ' + ((n.confidence ?? 0) * 100).toFixed(0) + '%</span>' +
+          '</div>' +
+          '<div style="margin-bottom:6px;font-size:0.82rem;color:var(--text-primary);">' + esc(n.content || n.filePath || '') + '</div>' +
+          (tagBadges ? '<div style="margin-top:4px;">' + tagBadges + '</div>' : '');
+      }
+    });
+  });
+}
+
+async function loadDagMemGraph() {
+  const ws = dagMemWorkspaceInput.value.trim();
+  if (!ws) return;
+  dagMemGraphBody.innerHTML = '<div class="conv-empty">Loading…</div>';
+  try {
+    const result = await callManageMemoryDag({ action: 'graph_query' });
+    if ((!result.nodes || result.nodes.length === 0) && (!result.edges || result.edges.length === 0)) {
+      _dagMemGraphData = { nodes: DEMO_DAG_NODES, edges: DEMO_DAG_EDGES };
+    } else {
+      _dagMemGraphData = { nodes: result.nodes || [], edges: result.edges || [] };
+    }
+    renderDagMemGraph(dagMemFilterInput?.value || '');
+    localStorage.setItem('mcp-workspace', ws);
+  } catch (err) {
+    dagMemGraphBody.innerHTML = `<div class="conv-empty">Failed to load graph: ${esc(err.message)}</div>`;
+  }
+}
+
+async function addDagMemNode() {
+  const content = dagMemNodeContent.value.trim();
+  if (!content) { dagMemFormStatus.textContent = 'Content is required.'; return; }
+  const tags = dagMemNodeTags.value.split(',').map(t => t.trim()).filter(Boolean);
+  dagMemFormStatus.textContent = 'Adding…';
+  try {
+    await callManageMemoryDag({ action: 'node_add', node: { type: dagMemNodeType.value, content, tags } });
+    dagMemFormStatus.textContent = 'Node added.';
+    dagMemNodeContent.value = '';
+    dagMemNodeTags.value = '';
+    loadDagMemGraph();
+  } catch (err) {
+    dagMemFormStatus.textContent = `Failed to add node: ${err.message}`;
+  }
+}
+
+async function linkDagMemNodes() {
+  const from = dagMemLinkFrom.value.trim();
+  const to = dagMemLinkTo.value.trim();
+  const relation = dagMemLinkRelation.value.trim();
+  if (!from || !to || !relation) { dagMemFormStatus.textContent = 'from, to, and relation are all required.'; return; }
+  dagMemFormStatus.textContent = 'Linking…';
+  try {
+    await callManageMemoryDag({ action: 'node_link', from, to, relation });
+    dagMemFormStatus.textContent = 'Edge added.';
+    dagMemLinkFrom.value = '';
+    dagMemLinkTo.value = '';
+    dagMemLinkRelation.value = '';
+    loadDagMemGraph();
+  } catch (err) {
+    dagMemFormStatus.textContent = `Failed to link nodes: ${err.message}`;
+  }
+}
+
+dagMemLoadBtn?.addEventListener('click', loadDagMemGraph);
+dagMemWorkspaceInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadDagMemGraph(); });
+dagMemWorkspaceInput?.addEventListener('change', () => {
+  localStorage.setItem('mcp-workspace', dagMemWorkspaceInput.value.trim());
+  loadDagMemGraph();
+});
+
+// Folder picker matching pg-folder-btn
+dagMemFolderBtn?.addEventListener('click', async () => {
+  if (!window.showDirectoryPicker) {
+    alert('Your browser does not support the Folder Picker API. Please type the path manually.');
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'read' });
+    const current = dagMemWorkspaceInput.value.trim();
+    if (!current) {
+      dagMemWorkspaceInput.value = handle.name;
+    } else {
+      const sep = current.includes('\\') ? '\\' : '/';
+      const parts = current.split(sep);
+      parts[parts.length - 1] = handle.name;
+      dagMemWorkspaceInput.value = parts.join(sep);
+    }
+    dagMemWorkspaceInput.dispatchEvent(new Event('change'));
+  } catch (e) {
+    if (e.name !== 'AbortError') console.warn('[DagMemFolderPicker]', e);
+  }
+});
+
+const DEMO_DAG_NODES = [
+  { id: 'goal-root', type: 'text', content: 'Omni-Modal Agent Memory Graph', confidence: 1.0, tags: ['core', 'v1.1.0'] },
+  { id: 'vlm-vision', type: 'image', filePath: 'docs/diagrams/vlm-pipeline.png', confidence: 0.92, tags: ['vision', 'ocr'] },
+  { id: 'quantum-drift', type: 'text', content: 'Quantum Phase Drift Steer & Telemetry', confidence: 0.85, tags: ['quantum', 'telemetry'] },
+  { id: 'dag-tasks', type: 'text', content: 'OMP Task Decomposer & CAS Rollback', confidence: 0.95, tags: ['omp', 'checkpoint'] },
+  { id: 'spec-pdf', type: 'pdf_page', filePath: 'specs/system_architecture.pdf', pdfPage: 1, confidence: 0.78, tags: ['spec', 'pdf'] },
+  { id: 'media-stream', type: 'video', filePath: 'recordings/audio-stream.mp4', confidence: 0.65, tags: ['video', 'media'] },
+];
+
+const DEMO_DAG_EDGES = [
+  { from: 'goal-root', to: 'vlm-vision', relation: 'ingests' },
+  { from: 'goal-root', to: 'quantum-drift', relation: 'measures' },
+  { from: 'goal-root', to: 'dag-tasks', relation: 'decomposes' },
+  { from: 'vlm-vision', to: 'spec-pdf', relation: 'extracts_page' },
+  { from: 'dag-tasks', to: 'media-stream', relation: 'triggers' },
+];
+
+function initDagMemoryTab() {
+  if (!dagMemInitialized) {
+    dagMemInitialized = true;
+    const savedWs = localStorage.getItem('mcp-workspace') || (document.getElementById('pg-workspace')?.value || '').trim();
+    if (savedWs) {
+      dagMemWorkspaceInput.value = savedWs;
+      loadDagMemGraph();
+    } else {
+      // Default to demo visualization so graph is never empty on first view
+      dagMemWorkspaceInput.value = 'awesome-free-llm-apis (demo)';
+      _dagMemGraphData = { nodes: DEMO_DAG_NODES, edges: DEMO_DAG_EDGES };
+      renderDagMemGraph(dagMemFilterInput?.value || '');
+    }
+  }
+}
 

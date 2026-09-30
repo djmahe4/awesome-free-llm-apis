@@ -54,6 +54,8 @@ We decided to use Redis for session management instead of JWT tokens.
 The wiki manager automatically parses all incoming agent completions for decision keywords. If a match is found, it creates/updates an ADR entry in the wiki:
 - **Triggers**: `/decided to/i`, `/chose\s+.*\s+over\s+.*/i`, `/we\s+use\s+.*\s+because/i`, `/decision:/i`.
 
+This is passive/implicit — it fires on completion text matching those patterns, with no explicit tool call. For deliberately recording or retrieving a decision (not relying on keyword-match luck), use `manage_memory`'s `adr_write`/`adr_list` actions instead — see [manage_memory.md](manage_memory.md#architecture-decision-records-adrs). Both land in the same `adr`-tagged wiki subdirectory, excluded from general `wiki_search`/`wiki_list`.
+
 ---
 
 ## 📄 PDF Index Offset Caching [NEW]

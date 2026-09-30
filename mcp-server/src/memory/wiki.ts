@@ -150,6 +150,13 @@ export class WikiMemory {
     if (lowerTags.includes('study')) {
       return path.join(this.wikiDir, 'study', filename);
     }
+    // Routes here on write; getWikiFiles already excludes this dir from
+    // general wiki search/list (architecture-decision records shouldn't
+    // dilute general codebase-wiki search), so adr_write reads it back via
+    // its own dedicated action rather than wiki_search/wiki_list.
+    if (lowerTags.includes('adr')) {
+      return path.join(this.wikiDir, 'adr', filename);
+    }
     return path.join(this.wikiDir, filename);
   }
 
@@ -180,7 +187,8 @@ export class WikiMemory {
     const paths = [
       path.join(this.wikiDir, filename),
       path.join(this.wikiDir, 'study', filename),
-      path.join(this.wikiDir, 'pdf', filename)
+      path.join(this.wikiDir, 'pdf', filename),
+      path.join(this.wikiDir, 'adr', filename)
     ];
 
     for (const p of paths) {
@@ -213,6 +221,36 @@ export class WikiMemory {
     for (const f of files) {
       try {
         const raw = await fs.readFile(f, 'utf-8');
+        const { frontmatter } = parseFrontmatter(raw);
+        pages.push({
+          title: frontmatter.title || path.basename(f, '.md'),
+          tier: frontmatter.tier || 'episodic',
+          confidence: typeof frontmatter.confidence === 'number' ? frontmatter.confidence : 0.5,
+          tags: frontmatter.tags || [],
+          updated: frontmatter.updated || '',
+          links: (frontmatter.links || []).map((l: string) => l.replace(/^\[\[|\]\]$/g, ''))
+        });
+      } catch {
+        // ignore
+      }
+    }
+    pages.sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
+    return pages;
+  }
+
+  /** ADRs live in their own subdir (excluded from list()/search() by design — see getWikiFiles). */
+  async listAdrs(): Promise<Array<Pick<WikiPage, 'title' | 'tier' | 'confidence' | 'tags' | 'updated' | 'links'>>> {
+    const adrDir = path.join(this.wikiDir, 'adr');
+    let filenames: string[] = [];
+    try {
+      filenames = (await fs.readdir(adrDir)).filter(f => f.endsWith('.md'));
+    } catch {
+      return [];
+    }
+    const pages: Array<Pick<WikiPage, 'title' | 'tier' | 'confidence' | 'tags' | 'updated' | 'links'>> = [];
+    for (const f of filenames) {
+      try {
+        const raw = await fs.readFile(path.join(adrDir, f), 'utf-8');
         const { frontmatter } = parseFrontmatter(raw);
         pages.push({
           title: frontmatter.title || path.basename(f, '.md'),

@@ -25,7 +25,27 @@
 | `save_graph` | `graphNode`, `sessionId` | `edge` | Appends a structured decision node (`hypothesis` \| `action` \| `finding` \| `deadend`) to the engagement tree. |
 | `load_graph` | `sessionId` | — | Loads the full decision graph for visualization in the Dashboard Wiki tab. |
 | `tool_memory` | `memoryOp` (`read` \| `write`) | `note`, `toolName` | Reads or appends persistent tactical notes associated with a tool or engagement. |
-| `osint` | `target` | `osintType` (`domain` \| `ip` \| `username` \| `all`), `autoSearch`, `allowPrivateIps` | Performs passive DNS/infrastructure recon (A, AAAA, MX, TXT, NS), suggests tailored search dorks, optionally executes automated multi-step search recon via SearchProvider fallback, and persists reports to the cyber wiki with built-in SSRF guards. |
+| `osint` | `target` | `osintType` (`domain` \| `ip` \| `username` \| `all`), `autoSearch`, `allowPrivateIps`, `sessionId` | Performs passive DNS/infrastructure recon (A, AAAA, MX, TXT, NS), suggests tailored search dorks, optionally kicks off automated multi-step search recon via SearchProvider fallback (see below), and persists reports to the cyber wiki with built-in SSRF guards. |
+| `osint_status` | `target` | `sessionId` | Polls a background `autoSearch` run started by a prior `osint` call — see below. |
+
+---
+
+## ⏳ Background `osint` Search (`autoSearch: true`)
+
+Search-provider lookups are network calls that can legitimately hang or run slowly, so the dork search runs **in the background** instead of blocking the `osint` call: the DNS recon and dork list still come back immediately in that same call, but `searchStatus` tells you whether the search results are ready.
+
+```jsonc
+// kick off (DNS + dorks return immediately; search runs in the background)
+{ "action": "osint", "target": "example.com", "autoSearch": true, "sessionId": "recon-1" }
+// → { searchStatus: "running", sessionId: "recon-1", pollAction: "osint_status", ... }
+
+// poll (same sessionId + target)
+{ "action": "osint_status", "target": "example.com", "sessionId": "recon-1" }
+// → { searchStatus: "running", progress: { completed: 1, total: 3, lastQuery: "..." } }
+// ... eventually ...
+// → { searchStatus: "done", searchResults: [...] }
+```
+If `sessionId` is omitted it defaults to a shared session (`cyber_tools_session`), so pass an explicit `sessionId` when running concurrent `osint` lookups for different targets.
 
 ---
 

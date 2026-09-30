@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "postbuild": "node scripts/utils/postbuild.js",
-    "start": "node dist/src/server.js",
+    "start": "node dist/server.js",
     "dev": "tsx src/server.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -60,6 +60,7 @@
     "yaml": "^2.8.3"
   },
   "devDependencies": {
+    "@ast-grep/cli": "^0.45.3",
     "@emnapi/core": "1.9.1",
     "@emnapi/runtime": "1.9.1",
     "@types/cors": "^2.8.19",

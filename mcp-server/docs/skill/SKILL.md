@@ -149,9 +149,17 @@ Analyze local images or remote image URLs in single-pass (`isOnePass: true`) or 
 ---
 
 ### `manage_memory`
-Manage persistent, workspace-aware memory across sessions.
-- `search`: Find prior decisions or research findings.
-- `clear`: Flush all cached memory for a workspace.
+Manage persistent, workspace-aware memory across sessions — key-value memory, wiki pages, a DAG node/edge graph with Ebbinghaus decay, architecture decision records, an Eisenhower priority matrix, and Pomodoro focus-session tracking. Full reference in [manage_memory.md](references/manage_memory.md).
+
+> [!IMPORTANT]
+> **Before planning or acting on a non-trivial task**: call `adr_list` (past architecture decisions) and `eisenhower_list` (open backlog). Cheap checks that prevent re-deciding or duplicating existing work — treat this as a standard pre-planning step for any workspace task, the same way you'd `search` memory first.
+
+- `search` / `list` / `stats` / `clear`: Key-value workspace memory and compression stats.
+- `wiki_write` / `wiki_search` / `wiki_list` / `wiki_read`: Persistent markdown wiki pages.
+- `node_add` / `node_link` / `node_list` / `node_get` / `node_review` / `graph_query`: DAG memory node/edge graph.
+- `adr_write` / `adr_list`: Architecture decision records (wiki pages in a dedicated `adr/` subdir, excluded from `wiki_search`/`wiki_list`).
+- `eisenhower_add` / `eisenhower_list` / `eisenhower_complete`: Priority matrix (do/schedule/delegate/delete). `eisenhower_add` takes explicit `urgent`/`important` by default, or `autoClassify: true` to have an LLM infer them from the task text — off by default, never triggers implicitly.
+- `pomodoro_start` / `pomodoro_stop` / `pomodoro_list`: Focus-session timer tracking.
 
 ---
 
@@ -233,7 +241,27 @@ Interactive learning coach tool that breaks down concepts into structured explan
 ---
 
 ### `local_llm_patch`
-Context-aware surgical code patch generator utilizing workspace grounding and fast local diff application.
+Context-aware surgical code patch generator utilizing workspace grounding and fast local diff application. Strictly intercepts canned refusals and extracts clean code blocks.
+
+---
+
+### `coding_agents` [v1.1.1]
+Autonomous multi-file refactoring and feature implementation engine implementing the **OMP (`oh-my-pi`)** architecture.
+- **DAG Workflow**: Supports `tasks.md` creation (`action: 'plan'` / `pauseOnTaskPlan: true`), pause, and resume (`action: 'resume'`) cycle with active task context passing.
+- **Target Files & Doc Filter**: Default code auto-scan ignores `docs/`, `site/`, and `.md` files; explicit `targetFiles` overrides allow targeting markdown/markup safely.
+- **Automatic Wiring Discovery**: Auto-detects parent barrel files (`index.ts`) and consumer modules when creating new target files.
+- **Multi-Tier AST Rewriting**: In-memory `ts-morph` compiler AST for TS/JS, `@ast-grep/cli` (tree-sitter) for Python/Rust/Go/C/HTML/CSS, and safe token regex for plain text.
+- **Refusal Guard**: Rejects canned refusal messages, logging actionable failure diagnostics.
+- Full reference in [coding_agents.md](references/coding_agents.md).
+
+---
+
+### `movie_tool` [v1.1.1]
+Vibe Movie Engine and multi-lane media generation orchestrator.
+- **Timeline Manifest Architecture**: JSON schema-driven clip manifest with timestamp windows, track separation, and reversible effect stacks (`_path_history`, `_original_path`).
+- **Multi-Lane Media Routers**: Specialized sub-routers for Audio/TTS (Kokoro ONNX, Pollinations), Video (Wan-2.2, CogVideoX, LTX-Video), Music (MusicGen, Lyria), Lyrics/Story, and SEO metadata.
+- **Roleplaying Model Isolation**: Uses dedicated AionLabs models (`aion-3.5`, `aion-rp-llama-3.1-8b`) strictly isolated from general reasoning/coding tasks.
+- Full reference in [movie_tool.md](references/movie_tool.md).
 
 ---
 
@@ -292,6 +320,7 @@ preferred persona: coder
   - [`quantum_tool`](references/quantum_tool.md)
   - [`local_llm_patch`](references/local_llm_patch.md)
   - [`coding_agents`](references/coding_agents.md)
+  - [`movie_tool`](references/movie_tool.md)
   - [`manage_memory`](references/manage_memory.md)
   - [`store_workspace_skill`](references/store_workspace_skill.md)
 

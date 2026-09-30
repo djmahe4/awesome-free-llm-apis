@@ -1,7 +1,10 @@
 import path from 'path';
+import crypto from 'node:crypto';
 import { ShortTermMemory } from './short-term.js';
 import { LongTermMemory } from './long-term.js';
 import { WikiMemory } from './wiki.js';
+import { DagMemory } from './dag.js';
+import { ProductivityMemory } from './productivity.js';
 import { vectorStore, VectorEntry } from './vector.js';
 import { Sanitizer } from '../utils/Sanitizer.js';
 
@@ -52,6 +55,8 @@ export class MemoryManager {
   shortTerm: ShortTermMemory;
   longTerm: LongTermMemory;
   private wikis = new Map<string, WikiMemory>();
+  private dags = new Map<string, DagMemory>();
+  private productivityStores = new Map<string, ProductivityMemory>();
 
   constructor(storePath?: string) {
     this.shortTerm = new ShortTermMemory();
@@ -67,6 +72,26 @@ export class MemoryManager {
       this.wikis.set(cacheKey, wiki);
     }
     return wiki;
+  }
+
+  getDag(workspaceHash: string, workspaceRoot?: string): DagMemory {
+    const cacheKey = workspaceRoot ? `${workspaceHash}:local` : workspaceHash;
+    let dag = this.dags.get(cacheKey);
+    if (!dag) {
+      dag = new DagMemory(workspaceHash, workspaceRoot);
+      this.dags.set(cacheKey, dag);
+    }
+    return dag;
+  }
+
+  getProductivity(workspaceHash: string, workspaceRoot?: string): ProductivityMemory {
+    const cacheKey = workspaceRoot ? `${workspaceHash}:local` : workspaceHash;
+    let store = this.productivityStores.get(cacheKey);
+    if (!store) {
+      store = new ProductivityMemory(workspaceHash, workspaceRoot);
+      this.productivityStores.set(cacheKey, store);
+    }
+    return store;
   }
 
   createMemoryEntry(content: string, confidence: number = 0.5) {
@@ -111,8 +136,31 @@ export class MemoryManager {
     };
   }
 
+  /**
+   * Cache/store key for a (toolName, input) pair. `input` can carry arbitrary,
+   * large content (e.g. use_free_llm's full prompt, including injected
+   * workspace/wiki context with real file text) — embedding JSON.stringify(input)
+   * directly in the key used to double-encode that content: the key (already
+   * one JSON.stringify pass, so any real \r\n in input became literal `\r\n`
+   * text) became a property name in the in-memory store, and persist()'s own
+   * JSON.stringify of the whole store escaped those backslashes AGAIN,
+   * corrupting anything that later got read back and treated as source text —
+   * observed live: a workspace's README.md, injected as context, round-tripped
+   * through a cache key and came back with literal `\r\n` instead of real
+   * newlines, breaking a mermaid diagram embedded in it. Hashing the arbitrary
+   * part keeps the key short, fixed-length, and immune to this whole bug
+   * class. `_ws:<hash>:` is kept as a readable prefix (not hashed) because
+   * search()/clear() below scope by matching `_ws:${workspaceHash}` as a
+   * literal substring of the key.
+   */
+  private buildToolKey(toolName: string, input: any): string {
+    const wsHash = input?._ws || input?.ws;
+    const digest = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex').slice(0, 24);
+    return `tool:${toolName}:${wsHash ? `_ws:${wsHash}:` : ''}${digest}`;
+  }
+
   async storeToolOutput(toolName: string, input: any, output: any): Promise<void> {
-    const key = `tool:${toolName}:${JSON.stringify(input)}`;
+    const key = this.buildToolKey(toolName, input);
     this.shortTerm.set(key, output);
     await this.longTerm.save(key, output);
 
@@ -159,7 +207,7 @@ export class MemoryManager {
   }
 
   async getToolOutput(toolName: string, input: unknown): Promise<unknown | undefined> {
-    const key = `tool:${toolName}:${JSON.stringify(input)}`;
+    const key = this.buildToolKey(toolName, input);
     const cached = this.shortTerm.get(key);
     if (cached !== undefined) return cached;
     return this.longTerm.load(key);

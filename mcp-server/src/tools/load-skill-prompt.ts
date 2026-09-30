@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { resolveConfigDir } from '../utils/config-path.js';
 import { listHermesSkills, findHermesSkill, loadHermesSkillContent, searchHermesSkills } from '../hermes/loader.js';
+import { RunRegistry } from '../pipeline/middlewares/RunRegistry.js';
 
 const SKILL_INDEX_URL = 'https://sickn33.github.io/agentic-awesome-skills/skills.json';
 const RAW_BASE_URL = 'https://raw.githubusercontent.com/sickn33/agentic-awesome-skills/main';
@@ -31,6 +32,10 @@ export interface LoadSkillPromptInput {
   workspaceDir?: string;
   /** 'hermes' searches/loads the bundled external/hermes/ skill set instead of the agentic-awesome index. */
   source?: 'agentic-awesome' | 'hermes';
+  /** Identifies a background multi-file download run across calls for a 'load' of a large agentic-awesome skill; defaults to the skill name. */
+  sessionId?: string;
+  /** 'run' (default) starts/returns a background download run; 'status' polls it. Mirrors use_free_llm's run/continue/status pattern — a skill with many files can legitimately take a while, so this shouldn't be killed by a hard timeout. */
+  pollAction?: 'run' | 'status';
 }
 
 export interface LoadSkillPromptResult {
@@ -42,20 +47,50 @@ export interface LoadSkillPromptResult {
   description?: string;
   terminalSetupHint?: string;
   prompt?: string;
+  status?: 'running';
+  sessionId?: string;
+  message?: string;
 }
+
+// Background agentic-awesome skill downloads, keyed by run key — a skill can have
+// many files, and fetchAllFiles() recurses through them sequentially, so a large
+// skill runs off the request/response path instead of blocking the whole call;
+// callers poll with pollAction:'status' using the same sessionId.
+const skillDownloadResultsCache = new Map<string, LoadSkillPromptResult>();
 
 function normalize(value: string): string {
   return value.trim().toLowerCase();
 }
 
+const FETCH_TIMEOUT_MS = 15_000;
+
+// fetchAllFiles() below recurses through GitHub API directory listings, calling
+// this per directory and per file — an unbounded fetch() here previously let a
+// GitHub rate-limit stall or network partition hang the whole skill load with
+// no way to abort or recover.
+async function fetchWithTimeout(url: string): Promise<import('node-fetch').Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { signal: controller.signal as any });
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Timed out fetching ${url} after ${FETCH_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url);
   if (!response.ok) throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
   return (await response.json()) as T;
 }
 
 async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url);
   if (!response.ok) throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
   return await response.text();
 }
@@ -115,20 +150,25 @@ async function searchSkills(keywords: string[], baseDir: string): Promise<{ name
   return scored.slice(0, 10).map(e => ({ name: e.name, description: e.description }));
 }
 
-async function fetchAllFiles(skillPath: string, accumulator: { path: string, content: string }[] = []): Promise<{ path: string, content: string }[]> {
-  const response = await fetch(`${API_BASE_URL}/${skillPath}`);
+async function fetchAllFiles(
+  skillPath: string,
+  accumulator: { path: string, content: string }[] = [],
+  onFile?: (count: number) => void,
+): Promise<{ path: string, content: string }[]> {
+  const response = await fetchWithTimeout(`${API_BASE_URL}/${skillPath}`);
   if (!response.ok) throw new Error(`Failed to fetch contents of ${skillPath}: HTTP ${response.status}`);
   const items = await response.json() as any[];
 
   for (const item of items) {
     if (item.type === 'dir') {
-      await fetchAllFiles(item.path, accumulator);
+      await fetchAllFiles(item.path, accumulator, onFile);
     } else if (item.type === 'file') {
       const ext = item.name.split('.').pop()?.toLowerCase();
       const textExtensions = ['md', 'txt', 'js', 'ts', 'py', 'sh', 'json', 'yml', 'yaml', 'jsx', 'tsx'];
       if (textExtensions.includes(ext || '')) {
         const content = await fetchText(item.download_url);
         accumulator.push({ path: item.path, content });
+        onFile?.(accumulator.length);
       }
     }
   }
@@ -207,6 +247,18 @@ export async function loadSkillPrompt(input: LoadSkillPromptInput): Promise<Load
     if (input.type === 'load') {
       const name = input.name || input.skill || '';
 
+      if (input.pollAction === 'status') {
+        const runKey = `load_skill_prompt:${input.sessionId || name}`;
+        const run = RunRegistry.get(runKey);
+        if (!run) {
+          return { success: false, error: `No download run found for sessionId '${input.sessionId || name}'. Call with type:'load' first.` };
+        }
+        if (!run.done) {
+          return { success: true, status: 'running', sessionId: input.sessionId || name, message: `Downloading skill files: ${run.completedCount}/${run.totalCount} (last: ${run.lastSubtask || 'n/a'})` };
+        }
+        return skillDownloadResultsCache.get(runKey) || { success: false, error: 'Run finished but no cached result was found.' };
+      }
+
       // 1. Hermes check first: if bundled Hermes skill exists, load it immediately
       if (input.source !== 'agentic-awesome') {
         const hermesFound = await findHermesSkill(name);
@@ -242,24 +294,52 @@ export async function loadSkillPrompt(input: LoadSkillPromptInput): Promise<Load
       await fs.mkdir(skillDir, { recursive: true });
 
       const skillPath = found.path.replace(/^\/+/, '');
-      const files = await fetchAllFiles(skillPath);
+      const runKey = `load_skill_prompt:${input.sessionId || name}`;
 
-      for (const file of files) {
-        const relativePath = file.path.replace(`${skillPath}/`, '');
-        const fullPath = path.join(skillDir, relativePath);
-        await fs.mkdir(path.dirname(fullPath), { recursive: true });
-        await fs.writeFile(fullPath, file.content);
+      const existingRun = RunRegistry.get(runKey);
+      if (existingRun && !existingRun.done) {
+        return { success: true, status: 'running', sessionId: input.sessionId || name, message: `Download already running: ${existingRun.completedCount}/${existingRun.totalCount}. Poll with pollAction:'status'.` };
       }
 
-      const skillMdPath = path.join(skillDir, 'SKILL.md');
-      const skillMdContent = await fs.readFile(skillMdPath, 'utf-8');
+      const run = RunRegistry.start(runKey);
+      (async () => {
+        try {
+          const files = await fetchAllFiles(skillPath, [], (count) => {
+            RunRegistry.progress(runKey, `${count} file(s) discovered`, count, Math.max(count, run.totalCount));
+          });
+          run.totalCount = files.length;
 
-      return { 
-        success: true, 
-        filePath: skillMdPath,
-        skill: found.name || found.id || name,
-        description: found.description || '',
-        prompt: skillMdContent
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const relativePath = file.path.replace(`${skillPath}/`, '');
+            const fullPath = path.join(skillDir, relativePath);
+            await fs.mkdir(path.dirname(fullPath), { recursive: true });
+            await fs.writeFile(fullPath, file.content);
+            RunRegistry.progress(runKey, relativePath, i + 1, files.length);
+          }
+
+          const skillMdPath = path.join(skillDir, 'SKILL.md');
+          const skillMdContent = await fs.readFile(skillMdPath, 'utf-8');
+
+          skillDownloadResultsCache.set(runKey, {
+            success: true,
+            filePath: skillMdPath,
+            skill: found.name || found.id || name,
+            description: found.description || '',
+            prompt: skillMdContent,
+          });
+          RunRegistry.finish(runKey);
+        } catch (err: any) {
+          skillDownloadResultsCache.set(runKey, { success: false, error: err?.message || 'Unknown error occurred.' });
+          RunRegistry.finish(runKey, err?.message);
+        }
+      })();
+
+      return {
+        success: true,
+        status: 'running',
+        sessionId: input.sessionId || name,
+        message: `Started downloading skill '${name}' in the background. Poll with pollAction:'status' and the same sessionId.`,
       };
     }
 

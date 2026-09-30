@@ -466,6 +466,25 @@ export function createExpressApp(): express.Express {
                 content: params.content,
                 tags: params.tags,
                 links: params.links,
+                persona: params.persona,
+                namespace: params.namespace,
+                node: params.node,
+                nodeId: params.nodeId,
+                from: params.from,
+                to: params.to,
+                relation: params.relation,
+                task: params.task,
+                urgent: params.urgent,
+                important: params.important,
+                quadrant: params.quadrant,
+                includeCompleted: params.includeCompleted,
+                taskId: params.taskId,
+                sessionRefId: params.sessionRefId,
+                label: params.label,
+                durationMinutes: params.durationMinutes,
+                aborted: params.aborted,
+                pomodoroLimit: params.pomodoroLimit,
+                autoClassify: params.autoClassify,
               });
               break;
             case 'index_workspace':
@@ -481,6 +500,9 @@ export function createExpressApp(): express.Express {
                 name: params.name,
                 keywords: params.keywords,
                 workspaceDir: params.workspaceDir,
+                source: params.source,
+                sessionId: params.sessionId,
+                pollAction: params.pollAction,
               });
               break;
             }
@@ -492,7 +514,11 @@ export function createExpressApp(): express.Express {
                 what: Array.isArray(params.what) ? params.what : [params.what],
                 why: params.why,
                 files: params.files,
+                example: params.example,
+                script_instructions: params.script_instructions,
                 workspace_root: params.workspace_root,
+                sessionId: params.sessionId,
+                pollAction: params.pollAction,
               });
               break;
             }

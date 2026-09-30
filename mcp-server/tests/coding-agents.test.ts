@@ -292,6 +292,48 @@ describe('CodingAgentsHandler — LSP diagnostics (ts-morph)', () => {
       expect(['subprocess', 'omp-lsp']).toContain(diag.source);
     }
   });
+
+  it('cleanly skips markdown and documentation files without emitting diagnostic noise', async () => {
+    ws = await makeTmpWorkspace({
+      'CHANGELOG.md': '# Changelog\n\n- Fix things\n',
+      'docs/plan.md': '# Plan\n\nDetailed steps.\n',
+    });
+
+    const result = await CodingAgentsHandler({
+      goal: 'update documentation and changelog',
+      workspaceRoot: ws,
+      dryRun: true,
+      topKFiles: 2,
+      verifyLspDiagnostics: true,
+    });
+
+    // Documentation files should NOT produce "Diagnostic check skipped" warnings
+    expect(result.diagnostics).toHaveLength(0);
+    expect(result.content).not.toContain('#### 🩺 Diagnostics');
+  });
+
+  it('validates JSON files and catches syntax errors', async () => {
+    ws = await makeTmpWorkspace({
+      'config.json': '{\n  "valid": true\n}\n',
+      'broken.json': '{\n  "broken": \n}\n',
+    });
+
+    const result = await CodingAgentsHandler({
+      goal: 'validate json configs',
+      workspaceRoot: ws,
+      dryRun: true,
+      topKFiles: 2,
+      verifyLspDiagnostics: true,
+    });
+
+    const brokenDiag = result.diagnostics.find(d => d.filePath === 'broken.json');
+    expect(brokenDiag).toBeDefined();
+    expect(brokenDiag!.severity).toBe('error');
+    expect(brokenDiag!.source).toBe('json-syntax');
+
+    const validDiag = result.diagnostics.find(d => d.filePath === 'config.json');
+    expect(validDiag).toBeUndefined();
+  });
 });
 
 describe('CodingAgentsHandler — error handling', () => {
@@ -410,6 +452,196 @@ describe('CodingAgentsHandler — issue fixes', () => {
       expect.stringContaining('[coding_agents] ts-morph AST structural rewrite failed'),
       expect.any(Error)
     );
+    vi.doUnmock('ts-morph');
   });
 });
+
+describe('CodingAgentsHandler — DAG tasks.md, docs filtering & AST validation', () => {
+  let ws: string;
+
+  afterEach(async () => {
+    if (ws) await fs.remove(ws);
+    vi.restoreAllMocks();
+  });
+
+  it('skips docs/, site/, and .md files during auto-scan and selects code files', async () => {
+    ws = await makeTmpWorkspace({
+      'docs/guide.md': '# Complete Guide to API router\n',
+      'site/index.html': '<html><body>docs site</body></html>\n',
+      'src/server.ts': 'export const server = "express";\n',
+    });
+
+    const result = await CodingAgentsHandler({
+      goal: 'API router guide',
+      workspaceRoot: ws,
+      dryRun: true,
+      topKFiles: 5,
+    });
+
+    // Auto-scan should skip docs/ and .md, and only index code files
+    expect(result.relevantFiles).toContain('src/server.ts');
+    expect(result.relevantFiles).not.toContain('docs/guide.md');
+    expect(result.relevantFiles).not.toContain('site/index.html');
+  });
+
+  it('respects .md and non-code files when explicitly passed via targetFiles, bypassing ts-morph', async () => {
+    ws = await makeTmpWorkspace({
+      'README.md': '# Project Alpha\nStatus: alpha\n',
+    });
+
+    const result = await CodingAgentsHandler({
+      goal: 'bump status to beta',
+      workspaceRoot: ws,
+      targetFiles: ['README.md'],
+      dryRun: true,
+      topKFiles: 1,
+      astEditOps: [
+        { pat: 'Status: alpha', out: 'Status: beta' },
+      ],
+    });
+
+    expect(result.relevantFiles).toEqual(['README.md']);
+    const patch = result.patchPlan.find(p => p.filePath === 'README.md');
+    expect(patch).toBeDefined();
+    expect(patch!.fullPatchedContent).toContain('Status: beta');
+    expect(result.diagnostics).toHaveLength(0); // Clean skip for .md, no LSP noise
+  });
+
+  it('validates AST edit operations and reports warning on 0 matches', async () => {
+    ws = await makeTmpWorkspace({
+      'src/service.ts': 'export const x = 1;\n',
+    });
+
+    const result = await CodingAgentsHandler({
+      goal: 'rename non_existent to something_else',
+      workspaceRoot: ws,
+      dryRun: true,
+      topKFiles: 1,
+      astEditOps: [
+        { pat: 'non_existent_function($$$A)', out: 'replaced_func($$$A)' },
+      ],
+    });
+
+    const zeroMatchDiag = result.diagnostics.find(d => d.message.includes('matched 0 occurrences'));
+    expect(zeroMatchDiag).toBeDefined();
+    expect(zeroMatchDiag!.severity).toBe('warning');
+  });
+
+  it('supports DAG tasks.md plan, pause, and resume cycle', async () => {
+    ws = await makeTmpWorkspace({
+      'src/config.ts': 'export const PORT = 3000;\n',
+    });
+
+    // 1. Plan action: creates tasks.md and pauses
+    const planResult = await CodingAgentsHandler({
+      goal: '- Step 1: Update PORT\n- Step 2: Add HOST',
+      workspaceRoot: ws,
+      action: 'plan',
+    });
+
+    expect(planResult.status).toBe('paused');
+    expect(planResult.isPaused).toBe(true);
+    expect(planResult.tasksPlan).toHaveLength(2);
+    expect(planResult.tasksPlan![0].status).toBe('pending');
+
+    const tasksFile = path.join(ws, 'tasks.md');
+    expect(await fs.pathExists(tasksFile)).toBe(true);
+    const tasksContent = await fs.readFile(tasksFile, 'utf-8');
+    expect(tasksContent).toContain('- [ ] [task-1] Step 1: Update PORT');
+    expect(tasksContent).toContain('- [ ] [task-2] Step 2: Add HOST');
+
+    // 2. Resume action: picks next pending task and executes it
+    const resumeResult = await CodingAgentsHandler({
+      goal: '- Step 1: Update PORT\n- Step 2: Add HOST',
+      workspaceRoot: ws,
+      action: 'resume',
+      dryRun: true,
+      targetFiles: ['src/config.ts'],
+      astEditOps: [
+        { pat: 'PORT = 3000', out: 'PORT = 8080' },
+      ],
+    });
+
+    // Task 1 should be completed, Task 2 pending, so still paused
+    expect(resumeResult.tasksPlan![0].status).toBe('completed');
+    expect(resumeResult.tasksPlan![1].status).toBe('pending');
+    expect(resumeResult.isPaused).toBe(true);
+
+    const updatedTasksContent = await fs.readFile(tasksFile, 'utf-8');
+    expect(updatedTasksContent).toContain('- [x] [task-1] Step 1: Update PORT');
+    expect(updatedTasksContent).toContain('- [ ] [task-2] Step 2: Add HOST');
+  });
+
+  it('automatically discovers wiring targets (barrels and consumers) for new files', async () => {
+    ws = await makeTmpWorkspace({
+      'src/tools/media/index.ts': 'export * from "./movie-tool.js";\n',
+      'src/tools/media/movie-tool.ts': 'export const movieTool = "media";\n',
+      'src/server.ts': 'import { movieTool } from "./tools/media/movie-tool.js";\n',
+    });
+
+    const result = await CodingAgentsHandler({
+      goal: 'implement media dsp audio router',
+      workspaceRoot: ws,
+      targetFiles: ['src/tools/media/dsp-router.ts'],
+      dryRun: true,
+      topKFiles: 1,
+    });
+
+    expect(result.relevantFiles).toContain('src/tools/media/dsp-router.ts');
+    expect(result.wiringFiles).toBeDefined();
+    expect(result.wiringFiles!.length).toBeGreaterThan(0);
+    expect(result.wiringFiles).toContain('src/tools/media/index.ts');
+    expect(result.content).toContain('Discovered Wiring Targets');
+  });
+
+  // Execution now runs in the background and this test polls for it — give it
+  // more room than vitest's 5s default.
+  it('rejects canned model refusals, records failure reason in diagnostics, and instructs how to resume', async () => {
+    ws = await makeTmpWorkspace({
+      'src/service.ts': 'export const run = () => {};\n',
+    });
+
+    const ollamaModule = await import('../src/providers/ollama-local.js');
+    const listSpy = vi.spyOn(ollamaModule, 'listLocalModels').mockResolvedValue(['qwen2.5-coder:7b']);
+
+    const localPatchModule = await import('../src/tools/local-llm-patch.js');
+    const patchSpy = vi.spyOn(localPatchModule, 'localLlmPatch').mockResolvedValue({
+      success: false,
+      error: 'Model refused code modification: "I\'m sorry, but I can\'t assist with that request.". Refusal detected.',
+    });
+
+    const sessionId = 'refusal-test-session';
+    const started = await CodingAgentsHandler({
+      goal: 'bypass security check',
+      workspaceRoot: ws,
+      targetFiles: ['src/service.ts'],
+      dryRun: false,
+      topKFiles: 1,
+      sessionId,
+    });
+
+    // Real (non-astEditOps) dryRun:false execution now runs in the background
+    // (see coding-agents.ts's CodingAgentsHandler) — poll action:'status' for the
+    // final result instead of expecting it on the initial call.
+    expect(started.status).toBe('running');
+    let result = started;
+    for (let i = 0; i < 200 && result.status === 'running'; i++) {
+      await new Promise(r => setTimeout(r, 100));
+      result = await CodingAgentsHandler({ goal: 'bypass security check', sessionId, action: 'status' });
+    }
+    expect(result.status).not.toBe('running');
+
+    const refusalDiag = result.diagnostics.find(d => d.source === 'llm-patch');
+    expect(refusalDiag).toBeDefined();
+    expect(refusalDiag!.severity).toBe('error');
+    expect(refusalDiag!.message).toContain('Model refused code modification');
+    expect(refusalDiag!.message).toContain('action: "resume"');
+    expect(result.content).toContain('#### 🩺 Diagnostics');
+    expect(result.content).toContain('Model refused code modification');
+
+    patchSpy.mockRestore();
+    listSpy.mockRestore();
+  }, 30000);
+});
+
 
