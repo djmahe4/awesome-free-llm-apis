@@ -61,13 +61,14 @@ describe('harness runner — role-declared tool dispatch (integration)', () => {
     const store = new HarnessStore('disp-1', tmpDir);
     const run = await waitForSettled(store);
 
-    expect(loadSkillPromptMock).toHaveBeenCalledTimes(1);
-    expect(useFreeLLMMock).not.toHaveBeenCalled();
-
     // loadSkillPromptMock's result has no .prompt/.response — no content
     // field applyResearchResult knows how to extract — so this is correctly
     // 'failed' (silent-zero fix), not a false 'complete' with an empty
-    // run.result indistinguishable from a real finding.
+    // run.result indistinguishable from a real finding. Called twice, not
+    // once: P4e's bounded trial-and-error retry (default maxAttemptsPerStep
+    // 2) re-attempts once on the same empty-content failure before giving up.
+    expect(loadSkillPromptMock).toHaveBeenCalledTimes(2);
+    expect(useFreeLLMMock).not.toHaveBeenCalled();
     expect(run?.status).toBe('failed');
 
     const events = await store.readTrace();

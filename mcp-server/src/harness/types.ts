@@ -41,6 +41,9 @@ export interface HarnessDeclaration {
   writes: AllowRule[];
   contentDepth: { order: string[]; default: string };
   handoff: { schemaVersion: number; lowConfidenceThreshold: number; maxDepth: number };
+  /** P4e trial-and-error bounds (docs/plans/2026-09-29-harness-p4-subagents-brain.md, D5). Both optional — absent means the pre-P4e default (2 attempts, deterministic heuristic strategy selection). */
+  limits?: { maxAttemptsPerStep?: number };
+  reasoning?: { strategy?: 'heuristic' | 'quantum' };
 }
 
 export type PolicyDecision =

@@ -6,6 +6,7 @@ import { evaluate, hashArgs, assertWorkspaceRootAllowed } from './policy.js';
 import { serializeTasksMarkdown, parseTasksMarkdown, type TaskItem } from '../tools/coding-agents.js';
 import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
 import { buildHandoff, validateHandoff, type Handoff } from './handoff.js';
+import { createReasoningStrategy, type LessonNode, type StepFailure } from './reasoning.js';
 import type { HarnessDeclaration, HarnessRun } from './types.js';
 
 const contextManager = new ContextManager();
@@ -386,6 +387,79 @@ async function submitOpenQuestions(
 }
 
 /**
+ * P4e trial-and-error (D5) — recalls past lesson nodes for this exact
+ * role+tool pairing (tagged 'lesson', filtered client-side since DagMemory's
+ * graph_query has no server-side tag filter), scored by retention.ts. Same
+ * best-effort posture as recall/write-back: an ungranted allowlist or a
+ * memory error just means "no lessons available", not a failure.
+ */
+async function recallLessons(
+  store: HarnessStore,
+  run: HarnessRun,
+  decl: HarnessDeclaration,
+  role: string,
+  tool: string,
+  workspaceRoot: string | undefined
+): Promise<LessonNode[]> {
+  const payload = { action: 'graph_query', workspace_root: workspaceRoot };
+  if (evaluate(decl, 'top_level', 'manage_memory', 'graph_query', payload).kind !== 'allow') return [];
+  try {
+    const result = await gatedCall(store, run, decl, 'top_level', 'manage_memory', 'graph_query', payload, 200, `lessons:${role}:${tool}`, async () =>
+      (await import('../tools/manage-memory.js')).manageMemory(payload as any)
+    );
+    if (!result.ok) return [];
+    const nodes: any[] = result.result?.nodes ?? [];
+    const { retentionOf } = await import('../memory/retention.js');
+    return nodes
+      .filter(n => Array.isArray(n.tags) && n.tags.includes('lesson') && n.tags.includes(role) && n.tags.includes(tool))
+      .map(n => {
+        let parsed: { failureKind?: string; strategy?: string } = {};
+        try { parsed = JSON.parse(n.content); } catch { /* malformed lesson content — treat as generic */ }
+        return {
+          id: n.id,
+          role,
+          tool,
+          failureKind: (parsed.failureKind as LessonNode['failureKind']) ?? 'tool_error',
+          strategy: parsed.strategy ?? 'retry-same',
+          retention: retentionOf({ confidence: n.confidence ?? 0.5, lastReviewedAt: n.lastReviewedAt ?? Date.now(), halfLifeDays: n.halfLifeDays ?? 7 }),
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+/** Short half-life (7 days, per D5) so a stale lesson fades and stops influencing strategy choice. */
+async function writeLessonNode(
+  store: HarnessStore,
+  run: HarnessRun,
+  decl: HarnessDeclaration,
+  role: string,
+  tool: string,
+  failureKind: StepFailure['failureKind'],
+  strategy: string,
+  workspaceRoot: string | undefined
+): Promise<void> {
+  const payload = {
+    action: 'node_add', workspace_root: workspaceRoot,
+    node: { type: 'text' as const, content: JSON.stringify({ role, tool, failureKind, strategy }), tags: ['lesson', role, tool], halfLifeDays: 7, confidence: 0.5 },
+  };
+  if (evaluate(decl, 'top_level', 'manage_memory', 'node_add', payload).kind !== 'allow') return;
+  await gatedCall(store, run, decl, 'top_level', 'manage_memory', 'node_add', payload, 200, `lesson-write:${role}:${tool}:${Date.now()}`, async () =>
+    (await import('../tools/manage-memory.js')).manageMemory(payload as any)
+  ).catch(() => {});
+}
+
+/** A lesson that was reused and then led to a successful retry gets reinforced (D5: "successful strategy after a failure -> node_review, preferred next time"). */
+async function reinforceLesson(store: HarnessStore, run: HarnessRun, decl: HarnessDeclaration, lessonId: string, workspaceRoot: string | undefined): Promise<void> {
+  const payload = { action: 'node_review', workspace_root: workspaceRoot, nodeId: lessonId };
+  if (evaluate(decl, 'top_level', 'manage_memory', 'node_review', payload).kind !== 'allow') return;
+  await gatedCall(store, run, decl, 'top_level', 'manage_memory', 'node_review', payload, 100, `lesson-reinforce:${lessonId}`, async () =>
+    (await import('../tools/manage-memory.js')).manageMemory(payload as any)
+  ).catch(() => {});
+}
+
+/**
  * Resolves a step's tool + payload WITHOUT executing or gating it — split
  * out from the old runRoleStep so the step engine can hash the payload
  * (repeat detection, D7 in the P4 plan) before deciding whether to call
@@ -556,6 +630,7 @@ async function runSteps(
 
     let callResult: GatedResult;
     let goalTokens = 0;
+    let stepContent: string | undefined;
 
     if (role === 'scraper') {
       // Escalation step (P4b): its input is a URL extracted from the prior
@@ -579,6 +654,7 @@ async function runSteps(
       }
       await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via browser_tool (navigate+extract) on ${url}`);
       callResult = await runScraperStep(store, run, decl, role, callId, url, registryKey);
+      stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
     } else {
       const stepGoal = stepInputText(i, originalGoal, handoff, i === startIndex ? memoryContext : undefined);
       const dispatch = resolveStepDispatch(decl, role, stepGoal, workspaceRoot, registryKey);
@@ -596,21 +672,52 @@ async function runSteps(
       goalTokens = contextManager.countStringTokens(stepGoal);
       const estimate = goalTokens + 2000;
       callResult = await gatedCall(store, run, decl, role, dispatch.toolName, undefined, dispatch.payload, estimate, callId, dispatch.execute);
+
+      // P4e trial-and-error (D5): a genuine failure (not a pause — needs_
+      // approval/needs_budget already returned control to the human/budget
+      // gate, they're not retried here) gets a bounded number of extra
+      // attempts, each informed by past lessons for this exact role+tool.
+      stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
+      const maxAttempts = Math.max(1, decl.limits?.maxAttemptsPerStep ?? 2);
+      let attempt = 1;
+      let statusAfterAttempt: HarnessRun['status'] = run.status;
+      while (statusAfterAttempt === 'failed' && !aborted && attempt < maxAttempts) {
+        attempt++;
+        const failure: StepFailure = { runId: run.runId, role, tool: dispatch.toolName, failureKind: 'empty_result', detail: run.error ?? '', attempt };
+        const lessons = await recallLessons(store, run, decl, role, dispatch.toolName, workspaceRoot);
+        const [chosen] = await createReasoningStrategy(decl.reasoning?.strategy ?? 'heuristic').planAlternatives(failure, lessons);
+        await writeLessonNode(store, run, decl, role, dispatch.toolName, failure.failureKind, chosen.strategy, workspaceRoot);
+
+        const retryGoal = chosen.strategy === 'stricter-json-instruction'
+          ? `${stepGoal}\n\nIMPORTANT: you must respond with substantive, non-empty content.`
+          : stepGoal;
+        const retryDispatch = resolveStepDispatch(decl, role, retryGoal, workspaceRoot, registryKey);
+        // No need to reset run.status/error here — the applyResearchResult
+        // call right below unconditionally overwrites both from this new
+        // attempt's callResult, whatever it turns out to be.
+        callResult = await gatedCall(store, run, decl, role, retryDispatch.toolName, undefined, retryDispatch.payload, estimate, `${callId}:a${attempt}`, retryDispatch.execute);
+        stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
+        statusAfterAttempt = run.status;
+
+        if (statusAfterAttempt === 'complete') {
+          const reused = lessons.find(l => l.strategy === chosen.strategy);
+          if (reused) await reinforceLesson(store, run, decl, reused.id, workspaceRoot);
+        }
+      }
     }
 
-    const { content } = applyResearchResult(run, role, callResult, goalTokens, aborted);
     await endTaskAttempt(store, originalGoal, role, taskOutcomeFor(run.status), `step ${callId}: ${run.status}${run.error ? ` (${run.error})` : ''}`);
 
     if (run.status !== 'complete') {
       // paused_approval / paused_budget / failed / aborted — later steps stay
       // untouched (still 'pending' in tasks.md) so resume picks up here.
-      return { content: lastContent ?? content, lastRole, finalHandoff: handoff };
+      return { content: lastContent ?? stepContent, lastRole, finalHandoff: handoff };
     }
 
-    lastContent = content;
+    lastContent = stepContent;
     const provisionalIsLast = i === roles.length - 1;
     const provisionalNextTo = provisionalIsLast ? 'top_level' : roles[i + 1];
-    const built = buildHandoff(role, provisionalNextTo, content ?? '');
+    const built = buildHandoff(role, provisionalNextTo, stepContent ?? '');
     const validated = validateHandoff(built);
     if (!validated.ok) {
       run.status = 'failed';
