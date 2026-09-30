@@ -85,7 +85,10 @@ export interface TraceEvent {
     | 'handoff'
     | 'error'
     | 'run_end'
-    | 'trace_truncated';
+    | 'trace_truncated'
+    | 'monitor_attached'
+    | 'monitor_progress'
+    | 'monitor_done';
   data: unknown;
   tokens?: { input: number; output: number; reservedRemaining: number };
 }

@@ -7,6 +7,7 @@ import { serializeTasksMarkdown, parseTasksMarkdown, type TaskItem } from '../to
 import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
 import { buildHandoff, validateHandoff, type Handoff } from './handoff.js';
 import { createReasoningStrategy, type LessonNode, type StepFailure } from './reasoning.js';
+import { MonitorRegistry } from './monitor.js';
 import type { HarnessDeclaration, HarnessRun } from './types.js';
 
 const contextManager = new ContextManager();
@@ -162,6 +163,73 @@ export async function gatedCall(
   } finally {
     run.budget.reserved -= estimatedTokens;
   }
+}
+
+export type GatedDetachResult =
+  | { ok: true; monitorId: string }
+  | { ok: false; reason: 'needs_approval' | 'budget' | 'denied'; detail: string };
+
+/**
+ * P5 (docs/plans/2026-09-29-harness-p5-monitor-tool.md, D1) — sibling to
+ * gatedCall, not a replacement: same budget-reserve + policy.evaluate gate
+ * (a detached process still needs an allow/approval decision before it
+ * starts, no exception), but instead of awaiting one round trip, calls
+ * `start()` which returns immediately with a handle, registers it in
+ * MonitorRegistry, and returns. Budget for the detached work itself settles
+ * incrementally via MonitorRegistry.reportProgress callers (D3), not here —
+ * nothing is spent yet besides the attach call's own estimate.
+ */
+export async function gatedDetach(
+  store: HarnessStore,
+  run: HarnessRun,
+  decl: HarnessDeclaration,
+  role: string,
+  tool: string,
+  action: string | undefined,
+  args: any,
+  estimatedTokens: number,
+  callId: string,
+  start: () => Promise<{ handle: string }>
+): Promise<GatedDetachResult> {
+  const argsHash = hashArgs(args);
+  await store.appendTrace({ runId: run.runId, role, type: 'tool_call', data: { tool, action, callId, argsHash, detached: true } });
+
+  if (run.budget.used + run.budget.reserved + estimatedTokens > run.budget.maxTokens) {
+    await store.appendTrace({ runId: run.runId, role, type: 'budget', data: { reason: 'would exceed maxTokens', estimatedTokens, remaining: run.budget.maxTokens - run.budget.used - run.budget.reserved } });
+    return { ok: false, reason: 'budget', detail: 'Token budget would be exceeded by this call' };
+  }
+  if (run.budget.toolCalls + 1 > decl.harness.budget.maxToolCalls) {
+    await store.appendTrace({ runId: run.runId, role, type: 'budget', data: { reason: 'max tool calls reached' } });
+    return { ok: false, reason: 'budget', detail: 'Max tool call count reached for this run' };
+  }
+
+  const decision = evaluate(decl, role, tool, action, args);
+  await store.appendTrace({ runId: run.runId, role, type: 'policy_decision', data: { tool, action, callId, decision: decision.kind } });
+
+  if (decision.kind === 'deny') {
+    return { ok: false, reason: 'denied', detail: decision.reason };
+  }
+  if (decision.kind === 'needs_approval') {
+    await store.expireStale(decl.harness.approval.timeoutMinutes);
+    const approved = await store.findApprovedFor(run.runId, callId, argsHash);
+    if (!approved) {
+      const pending = (await store.listApprovals()).find(
+        a => a.runId === run.runId && a.callId === callId && a.argsHash === argsHash && a.status === 'pending'
+      );
+      if (!pending) {
+        await store.createApproval({ runId: run.runId, callId, role, tool, action, args, argsHash, reason: decision.reason });
+        await store.appendTrace({ runId: run.runId, role, type: 'approval_requested', data: { tool, action, callId, reason: decision.reason } });
+      }
+      return { ok: false, reason: 'needs_approval', detail: decision.reason };
+    }
+    await store.appendTrace({ runId: run.runId, role, type: 'approval_decided', data: { tool, action, callId, status: 'approved' } });
+  }
+
+  run.budget.toolCalls += 1; // the attach itself counts as one call; the detached work's token cost settles incrementally, not here
+  const { handle } = await start();
+  MonitorRegistry.attach(callId, run.runId, role, tool, handle, run.workspaceRoot);
+  await store.appendTrace({ runId: run.runId, role, type: 'monitor_attached', data: { monitorId: callId, handle } }).catch(() => {});
+  return { ok: true, monitorId: callId };
 }
 
 /**
