@@ -121,11 +121,37 @@ export class GeminiProvider extends BaseProvider {
 
     const timeoutMs = request.timeoutMs || this.defaultTimeout;
 
+    // Gemini SDK only supports 'user' and 'model' roles (no 'system').
+    // Merge system messages into the content of the first user message as a prefix,
+    // then filter out any message with non-string, non-array content (guards against
+    // corrupted session history entries like "System.Collections.Hashtable").
+    const systemParts: string[] = [];
+    const filteredMessages: any[] = [];
+    for (const m of request.messages ?? []) {
+      if (m.role === 'system') {
+        if (typeof m.content === 'string' && m.content.trim()) {
+          systemParts.push(m.content.trim());
+        }
+      } else {
+        const c = m.content;
+        if (typeof c !== 'string' && !Array.isArray(c)) continue; // skip corrupted
+        filteredMessages.push(m);
+      }
+    }
+    // Prepend system context to the first user message
+    if (systemParts.length > 0 && filteredMessages.length > 0 && typeof filteredMessages[0].content === 'string') {
+      filteredMessages[0] = {
+        ...filteredMessages[0],
+        content: `${systemParts.join('\n\n')}\n\n${filteredMessages[0].content}`,
+      };
+    }
+    const normalizedMessages = filteredMessages.length > 0 ? filteredMessages : request.messages ?? [];
+
     let result;
     try {
       result = await this.runPythonClient({
         model: actualModel,
-        messages: request.messages,
+        messages: normalizedMessages,
         stream: false,
         temperature: request.temperature,
         response_format: request.response_format,

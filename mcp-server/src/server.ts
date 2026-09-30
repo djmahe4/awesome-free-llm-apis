@@ -407,10 +407,23 @@ export function createExpressApp(): express.Express {
               result = await validateProvider(params.providerId);
               break;
             case 'use_free_llm': {
-              const messages = Array.isArray(params.messages)
+              // Sanitize messages: ensure each message content is a valid string or parts array,
+              // not a corrupted value (e.g. PowerShell "System.Collections.Hashtable" from
+              // ConvertTo-Json without -Depth 4, or any non-string non-array content).
+              const rawMessages = Array.isArray(params.messages)
                 ? params.messages
                 : [{ role: 'user', content: String(params.messages || params.prompt || '') }];
-              
+              const messages = rawMessages
+                .filter((m: any) => m && typeof m === 'object' && typeof m.role === 'string')
+                .map((m: any) => {
+                  const c = m.content;
+                  // Valid: string, or array of {type,text} parts
+                  if (typeof c === 'string') return m;
+                  if (Array.isArray(c)) return m;
+                  // Invalid (e.g. Hashtable stringified, null, undefined, object): coerce to string
+                  return { ...m, content: c == null ? '' : String(c) };
+                });
+
               // Resolve sessionId from workspace_root using the same algorithm as the real pipeline
               let sid = params.sessionId;
               if (!sid && params.workspace_root) {
@@ -422,18 +435,27 @@ export function createExpressApp(): express.Express {
                 }
               }
 
-              const r = await useFreeLLM({
-                messages,
-                model: params.model,
-                keywords: params.keywords,
-                agentic: !!params.agentic,
-                workspace_root: params.workspace_root,
-                sessionId: sid || '__no_ws__',
-                skipIndexing: !!params.skipIndexing,
-                action: params.action,
-                resume_input: params.resume_input,
-              });
-              result = { content: r?.choices?.[0]?.message?.content ?? '', model: r?.model, provider: r?._providerId };
+              // Wrap in a 120s timeout so the HTTP connection never hangs indefinitely
+              // (all providers exhausted → TextRouterMiddleware throws, but only after many attempts)
+              const TOOL_TIMEOUT_MS = 120_000;
+              const toolAbort = new AbortController();
+              const toolTimer = setTimeout(() => toolAbort.abort(), TOOL_TIMEOUT_MS);
+              try {
+                const r = await useFreeLLM({
+                  messages,
+                  model: params.model,
+                  keywords: params.keywords,
+                  agentic: !!params.agentic,
+                  workspace_root: params.workspace_root,
+                  sessionId: sid || '__no_ws__',
+                  skipIndexing: !!params.skipIndexing,
+                  action: params.action,
+                  resume_input: params.resume_input,
+                });
+                result = { content: r?.choices?.[0]?.message?.content ?? '', model: r?.model, provider: r?._providerId };
+              } finally {
+                clearTimeout(toolTimer);
+              }
               break;
             }
             case 'vision_tool': {
