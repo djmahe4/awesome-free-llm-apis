@@ -713,6 +713,18 @@ async function runSteps(
   let lastContent: string | undefined;
   let lastRole = roles[Math.min(startIndex, roles.length - 1)] ?? roles[0];
 
+  // startIndex can equal roles.length when the caller (resumeMonitoredRun,
+  // P5) just finished the LAST step in the lane out-of-band (a monitored
+  // step resolving) and is calling this only to run the envelope tail —
+  // there's nothing left to iterate, and that's success, not a stall. Without
+  // this, the loop below simply never executes and run.status is left
+  // exactly as the caller set it going in ('running'), never becoming
+  // 'complete' — a real bug this test suite caught directly.
+  if (startIndex >= roles.length) {
+    run.status = 'complete';
+    return { content: run.result, lastRole, finalHandoff: handoff };
+  }
+
   for (let i = startIndex; i < roles.length; i++) {
     const role = roles[i];
     lastRole = role;
@@ -722,6 +734,41 @@ async function runSteps(
       run.status = 'paused_budget';
       run.error = `Wall-clock budget exceeded (maxWallMinutes: ${decl.harness.budget.maxWallMinutes})`;
       await store.appendTrace({ runId: run.runId, role, type: 'budget', data: { reason: 'maxWallMinutes exceeded' } }).catch(() => {});
+      return { content: lastContent, lastRole, finalHandoff: handoff };
+    }
+
+    // P5b — a role whose declared tool is 'cyber_tool' attaches to a
+    // detached osint scan (gatedDetach) instead of completing synchronously.
+    // Fixes the real design gap found while scoping P5b: the step engine
+    // had no way to represent "attached, still running" as a first-class
+    // pause with its own resume semantics — see HarnessRun.pendingMonitor
+    // and resumeMonitoredRun below for the other half of this.
+    if (decl.roles[role]?.tools?.[0]?.tool === 'cyber_tool') {
+      const target = stepInputText(i, originalGoal, handoff, i === startIndex ? memoryContext : undefined).trim();
+      const detachPayload = { action: 'osint', target, autoSearch: true, sessionId: registryKey };
+      const detachArgsHash = hashArgs(detachPayload);
+      if (await hasRepeatedSuccess(store, callId, detachArgsHash)) {
+        run.status = 'failed';
+        run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
+        await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
+        await endTaskAttempt(store, originalGoal, role, 'failed', `repeat detected: ${run.error}`);
+        return { content: lastContent, lastRole, finalHandoff: handoff };
+      }
+      await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attaching cyber_tool osint scan on '${target}'`);
+      const attach = await gatedDetach(store, run, decl, role, 'cyber_tool', 'osint', detachPayload, 500, callId, async () => {
+        const { cyberTool } = await import('../tools/cyber-tool.js');
+        await cyberTool(detachPayload as any); // returns almost immediately — the actual search runs detached inside cyber-tool.ts's own IIFE
+        return { handle: `osint:${registryKey}:${target}` };
+      });
+      if (!attach.ok) {
+        run.status = attach.reason === 'needs_approval' ? 'paused_approval' : 'paused_budget';
+        run.error = attach.detail;
+        await endTaskAttempt(store, originalGoal, role, 'pending', `step ${callId}: ${run.status}`);
+        return { content: lastContent, lastRole, finalHandoff: handoff };
+      }
+      run.status = 'monitoring';
+      run.pendingMonitor = { monitorId: attach.monitorId, stepIndex: i, role };
+      await endTaskAttempt(store, originalGoal, role, 'pending', `step ${callId}: attached, monitoring (${attach.monitorId})`);
       return { content: lastContent, lastRole, finalHandoff: handoff };
     }
 
@@ -979,6 +1026,35 @@ async function finalizeRun(store: HarnessStore, run: HarnessRun, registryKey: st
 }
 
 /**
+ * Shared tail for every entry point that runs the step loop to (possibly)
+ * completion — deployHarness, resumeHarness, and resumeMonitoredRun (P5).
+ * Factored out so all three apply the same write-back/eisenhower/
+ * supervisor-share envelope on a 'complete' run, instead of three
+ * hand-copied versions drifting apart over time.
+ */
+async function finishStepsAndEnvelope(
+  store: HarnessStore,
+  run: HarnessRun,
+  decl: HarnessDeclaration,
+  roles: string[],
+  startIndex: number,
+  goal: string,
+  workspaceRoot: string | undefined,
+  registryKey: string,
+  aborted: boolean,
+  priorHandoff: Handoff | undefined,
+  memoryContext: string | undefined,
+  recall: { recalledNodes: { id: string; content: string }[] } | undefined
+): Promise<void> {
+  const { content, finalHandoff } = await runSteps(store, run, decl, roles, startIndex, goal, workspaceRoot, registryKey, aborted, priorHandoff, memoryContext);
+  if (run.status === 'complete' && content) {
+    await writeBackToMemory(store, run, decl, goal, content, recall?.recalledNodes ?? [], workspaceRoot);
+    if (finalHandoff) await submitOpenQuestions(store, run, decl, goal, finalHandoff, workspaceRoot);
+    await checkSupervisorShare(store, run, decl);
+  }
+}
+
+/**
  * Deploys (starts) a background harness run: plans a lane of steps
  * (planSteps — the goal-selected role, plus 'analyst' if the declaration
  * defines one), then runs them via the step engine (runSteps), producing a
@@ -1029,12 +1105,113 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
   (async () => {
     try {
       const recall = await recallMemoryContext(store, run, decl, input.goal, input.workspaceRoot, registryKey);
-      const { content, finalHandoff } = await runSteps(store, run, decl, roles, 0, input.goal, input.workspaceRoot, registryKey, runInfo.controller.signal.aborted, undefined, recall?.context);
-      if (run.status === 'complete' && content) {
-        await writeBackToMemory(store, run, decl, input.goal, content, recall?.recalledNodes ?? [], input.workspaceRoot);
-        if (finalHandoff) await submitOpenQuestions(store, run, decl, input.goal, finalHandoff, input.workspaceRoot);
-        await checkSupervisorShare(store, run, decl);
-      }
+      await finishStepsAndEnvelope(store, run, decl, roles, 0, input.goal, input.workspaceRoot, registryKey, runInfo.controller.signal.aborted, undefined, recall?.context, recall);
+      await finalizeRun(store, run, registryKey);
+    } catch (err: any) {
+      run.status = 'failed';
+      run.error = err?.message || String(err);
+      await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'error', data: { message: run.error } }).catch(() => {});
+      await finalizeRun(store, run, registryKey);
+    }
+  })().catch(() => {});
+
+  return run;
+}
+
+/**
+ * Resumes a run parked in `monitoring` (P5) — checks MonitorRegistry for
+ * the attached process's real state instead of blindly re-attempting
+ * anything:
+ *   - entry missing (registry lost it — e.g. a server restart, since
+ *     MonitorRegistry is in-memory only): the run ends 'failed', never left
+ *     silently 'monitoring' forever with no way to ever resolve it.
+ *   - still 'running': no-op — returns the run unchanged; the caller polls
+ *     monitor_tool or calls resume again later.
+ *   - 'failed': the run ends 'failed' with the process's own error.
+ *   - 'done': its result becomes this step's content, a real handoff is
+ *     built from it, and the step loop continues from stepIndex+1 exactly
+ *     like an ordinary step completing — the monitoring pause was
+ *     transparent to every step after it.
+ */
+async function resumeMonitoredRun(store: HarnessStore, run: HarnessRun): Promise<HarnessRun> {
+  const pending = run.pendingMonitor;
+  if (!pending) {
+    throw new Error(`Run '${run.runId}' has status 'monitoring' but no pendingMonitor recorded — this should not happen.`);
+  }
+
+  const entry = MonitorRegistry.get(pending.monitorId);
+  if (!entry) {
+    run.status = 'failed';
+    run.error = `Monitor '${pending.monitorId}' is no longer tracked (registry lost it, e.g. a server restart) — cannot resolve this step.`;
+    run.pendingMonitor = undefined;
+    await store.saveRun(run);
+    await store.appendTrace({ runId: run.runId, role: pending.role, type: 'error', data: { message: run.error } }).catch(() => {});
+    await endTaskAttempt(store, run.goal, pending.role, 'failed', run.error);
+    const registryKey = `harness:${run.runId}`;
+    await finalizeRun(store, run, registryKey);
+    return run;
+  }
+  if (entry.status === 'running') {
+    return run; // still in flight — no-op, poll monitor_tool or resume again later
+  }
+
+  const decl = await loadHarnessDeclaration(run.declarationName, run.workspaceRoot);
+  assertWorkspaceRootAllowed(decl, run.workspaceRoot);
+  const roles = await loadStepRoles(store, decl, run.goal);
+  const registryKey = `harness:${run.runId}`;
+
+  if (entry.status === 'failed') {
+    run.status = 'failed';
+    run.error = entry.error || 'Detached process failed';
+    run.pendingMonitor = undefined;
+    await store.appendTrace({ runId: run.runId, role: pending.role, type: 'monitor_done', data: { monitorId: pending.monitorId, status: 'failed', error: run.error } }).catch(() => {});
+    await endTaskAttempt(store, run.goal, pending.role, 'failed', run.error);
+    await finalizeRun(store, run, registryKey);
+    return run;
+  }
+
+  // entry.status === 'done'
+  const content = typeof entry.result === 'string' ? entry.result : entry.result ? JSON.stringify(entry.result) : '';
+  await store.appendTrace({ runId: run.runId, role: pending.role, type: 'monitor_done', data: { monitorId: pending.monitorId, status: 'done' } }).catch(() => {});
+
+  if (!content) {
+    run.status = 'failed';
+    run.error = 'Detached step completed without error but produced no content.';
+    run.pendingMonitor = undefined;
+    await endTaskAttempt(store, run.goal, pending.role, 'failed', run.error);
+    await finalizeRun(store, run, registryKey);
+    return run;
+  }
+
+  const stepTokens = contextManager.countStringTokens(content);
+  run.budget.used += stepTokens;
+  run.budget.perRole = run.budget.perRole ?? {};
+  run.budget.perRole[pending.role] = (run.budget.perRole[pending.role] ?? 0) + stepTokens;
+  run.result = content;
+
+  const nextTo = pending.stepIndex === roles.length - 1 ? 'top_level' : roles[pending.stepIndex + 1];
+  const built = buildHandoff(pending.role, nextTo, content);
+  const validated = validateHandoff(built);
+  if (!validated.ok) {
+    run.status = 'failed';
+    run.error = `Malformed handoff from monitored step '${pending.monitorId}': ${validated.error}`;
+    run.pendingMonitor = undefined;
+    await store.appendTrace({ runId: run.runId, role: pending.role, type: 'error', data: { message: run.error } }).catch(() => {});
+    await endTaskAttempt(store, run.goal, pending.role, 'failed', run.error);
+    await finalizeRun(store, run, registryKey);
+    return run;
+  }
+  await store.appendTrace({ runId: run.runId, role: pending.role, type: 'handoff', data: validated.handoff }).catch(() => {});
+  await endTaskAttempt(store, run.goal, pending.role, 'completed', `monitor ${pending.monitorId} done`);
+
+  run.status = 'running';
+  run.pendingMonitor = undefined;
+  await store.saveRun(run);
+
+  const runInfo = RunRegistry.start(registryKey);
+  (async () => {
+    try {
+      await finishStepsAndEnvelope(store, run, decl, roles, pending.stepIndex + 1, run.goal, run.workspaceRoot, registryKey, runInfo.controller.signal.aborted, validated.handoff, undefined, undefined);
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
       run.status = 'failed';
@@ -1059,6 +1236,9 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
   const store = new HarnessStore(runId, workspaceRoot);
   const run = await store.loadRun();
   if (!run) throw new Error(`No run found for runId '${runId}'`);
+  if (run.status === 'monitoring') {
+    return resumeMonitoredRun(store, run);
+  }
   if (run.status !== 'paused_approval') {
     throw new Error(`Run '${runId}' is not paused for approval (status: '${run.status}')`);
   }
@@ -1097,12 +1277,7 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
       // continuing from a later step already had its chance at step 0's
       // memory context on the original deploy.
       const recall = startIndex === 0 ? await recallMemoryContext(store, run, decl, run.goal, run.workspaceRoot, registryKey) : undefined;
-      const { content, finalHandoff } = await runSteps(store, run, decl, roles, startIndex, run.goal, run.workspaceRoot, registryKey, runInfo.controller.signal.aborted, priorHandoff, recall?.context);
-      if (run.status === 'complete' && content) {
-        await writeBackToMemory(store, run, decl, run.goal, content, recall?.recalledNodes ?? [], run.workspaceRoot);
-        if (finalHandoff) await submitOpenQuestions(store, run, decl, run.goal, finalHandoff, run.workspaceRoot);
-        await checkSupervisorShare(store, run, decl);
-      }
+      await finishStepsAndEnvelope(store, run, decl, roles, startIndex, run.goal, run.workspaceRoot, registryKey, runInfo.controller.signal.aborted, priorHandoff, recall?.context, recall);
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
       run.status = 'failed';

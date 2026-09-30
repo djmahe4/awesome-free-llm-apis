@@ -99,10 +99,24 @@ export interface HarnessRun {
   declarationName: string;     // the loadHarnessDeclaration() name (e.g. 'research-analysis') — needed to reload the same declaration on resume
   goal: string;
   workspaceRoot?: string;
-  status: 'running' | 'paused_approval' | 'paused_budget' | 'complete' | 'failed' | 'aborted';
+  status: 'running' | 'paused_approval' | 'paused_budget' | 'monitoring' | 'complete' | 'failed' | 'aborted';
   budget: { maxTokens: number; used: number; reserved: number; toolCalls: number; perRole?: Record<string, number> };
   result?: string;
   error?: string;
   createdAt: number;
   updatedAt: number;
+  /**
+   * P5 — set while `status === 'monitoring'`: a step attached to a detached
+   * process (gatedDetach) instead of completing synchronously. The step
+   * engine can't build that step's handoff yet (no content exists until the
+   * process finishes), so the WHOLE run pauses here — a first-class state
+   * distinct from paused_approval/paused_budget, not a repurposing of
+   * either. resumeHarness checks MonitorRegistry for this monitorId: still
+   * running -> no-op (poll again later); done -> its result becomes this
+   * step's content and the step loop continues from stepIndex+1; the
+   * registry losing the entry (e.g. a server restart) or the process itself
+   * failing both end the run 'failed', never left silently 'monitoring'
+   * forever.
+   */
+  pendingMonitor?: { monitorId: string; stepIndex: number; role: string };
 }
