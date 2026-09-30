@@ -42,7 +42,7 @@ roles:
       - { tool: local_llm_patch }
 
 writes:
-  - { tool: manage_memory, actions: [wiki_write, adr_write, node_add, node_link, eisenhower_add] }
+  - { tool: manage_memory, actions: [wiki_write, adr_write, node_add, node_link, node_review, eisenhower_add] }
 
 contentDepth:
   order: [abstract, html, pdf]

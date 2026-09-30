@@ -224,13 +224,122 @@ function extractFirstUrl(handoff: Handoff): string | null {
   return match ? match[0] : null;
 }
 
-/** First step gets the raw goal; a later step gets a synthesis prompt built from the prior step's real (validated) handoff — never the raw prior goal again. */
-function stepInputText(index: number, originalGoal: string, priorHandoff: Handoff | undefined): string {
-  if (index === 0 || !priorHandoff) return originalGoal;
+/** First step gets the raw goal (plus recalled memory context, if any); a later step gets a synthesis prompt built from the prior step's real (validated) handoff — never the raw prior goal again. */
+function stepInputText(index: number, originalGoal: string, priorHandoff: Handoff | undefined, memoryContext?: string): string {
+  if (index === 0 || !priorHandoff) return memoryContext ? `${memoryContext}\n\n${originalGoal}` : originalGoal;
   const findingsText = priorHandoff.findings.length > 0
     ? priorHandoff.findings.map(f => `- ${f.claim} (source: ${f.source})`).join('\n')
     : '(no findings from the prior step)';
   return `Synthesize and critique the following research findings for the goal "${originalGoal}". Note limitations, open questions, and give a concise, grounded conclusion.\n\nFindings:\n${findingsText}`;
+}
+
+/**
+ * P4c recall ("step 0" in the plan's table): best-effort graph_query against
+ * decayed memory, scored by recency-adjusted retention x simple keyword
+ * relevance, injected as a memory context block ahead of the goal. Never
+ * blocks or pauses the run for it — pre-checks policy.evaluate() directly
+ * (not gatedCall) so an ungranted allowlist just means "no memory context"
+ * rather than parking the whole run on an approval for an optional
+ * enrichment step. Only ever called when starting from step 0 (a genuinely
+ * fresh run, not a resume from a later step).
+ */
+async function recallMemoryContext(
+  store: HarnessStore,
+  run: HarnessRun,
+  decl: HarnessDeclaration,
+  goal: string,
+  workspaceRoot: string | undefined,
+  registryKey: string
+): Promise<{ context: string; recalledNodes: { id: string; content: string }[] } | undefined> {
+  const payload = { action: 'graph_query', workspace_root: workspaceRoot };
+  if (evaluate(decl, 'top_level', 'manage_memory', 'graph_query', payload).kind !== 'allow') return undefined;
+
+  try {
+    const result = await gatedCall(
+      store, run, decl, 'top_level', 'manage_memory', 'graph_query', payload, 300, 's-1:recall',
+      async () => (await import('../tools/manage-memory.js')).manageMemory(payload as any)
+    );
+    if (!result.ok) return undefined;
+    const nodes: any[] = result.result?.nodes ?? [];
+    if (nodes.length === 0) return undefined;
+
+    const { retentionOf } = await import('../memory/retention.js');
+    const goalTerms = goal.toLowerCase().split(/\s+/).filter(t => t.length > 3);
+
+    const scored = nodes
+      .map(n => {
+        const content = String(n.content ?? '');
+        const relevance = goalTerms.filter(t => content.toLowerCase().includes(t)).length;
+        const retention = retentionOf({
+          confidence: n.confidence ?? 0.5,
+          lastReviewedAt: n.lastReviewedAt ?? Date.now(),
+          halfLifeDays: n.halfLifeDays ?? 30,
+        });
+        return { node: n, score: relevance * (0.5 + retention) };
+      })
+      .filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+    if (scored.length === 0) return undefined;
+
+    return {
+      context: `## Known context from memory\n${scored.map(s => `- ${String(s.node.content).slice(0, 300)}`).join('\n')}`,
+      recalledNodes: scored.filter(s => s.node.id).map(s => ({ id: s.node.id, content: String(s.node.content ?? '') })),
+    };
+  } catch {
+    return undefined; // best-effort — a memory-layer error must never fail the run
+  }
+}
+
+/**
+ * P4c write-back ("step 6"): persists the run's final content to the DAG
+ * and wiki, and reinforces (node_review) any recalled node whose content
+ * substring shows up verbatim in the final result — a crude but real
+ * "was this actually used" signal, not a blanket review of everything
+ * recalled. Same best-effort posture as recall: each call is pre-checked
+ * against policy.evaluate() and skipped (not failed) if not allowed; the
+ * run's own result/handoffs are already correct without this, so a memory
+ * write failing must never flip a 'complete' run to 'failed'.
+ */
+async function writeBackToMemory(
+  store: HarnessStore,
+  run: HarnessRun,
+  decl: HarnessDeclaration,
+  goal: string,
+  content: string,
+  recalledNodes: { id: string; content: string }[],
+  workspaceRoot: string | undefined
+): Promise<void> {
+  const goalSlug = goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60).replace(/^-+|-+$/g, '') || 'run';
+
+  const nodePayload = { action: 'node_add', workspace_root: workspaceRoot, node: { type: 'text' as const, content: content.slice(0, 2000), tags: [goalSlug] } };
+  if (evaluate(decl, 'top_level', 'manage_memory', 'node_add', nodePayload).kind === 'allow') {
+    await gatedCall(store, run, decl, 'top_level', 'manage_memory', 'node_add', nodePayload, 300, 's-2:writeback:node', async () =>
+      (await import('../tools/manage-memory.js')).manageMemory(nodePayload as any)
+    ).catch(() => {});
+  }
+
+  const wikiPayload = { action: 'wiki_write', workspace_root: workspaceRoot, title: `Harness run: ${goalSlug}`, content, tags: [goalSlug] };
+  if (evaluate(decl, 'top_level', 'manage_memory', 'wiki_write', wikiPayload).kind === 'allow') {
+    await gatedCall(store, run, decl, 'top_level', 'manage_memory', 'wiki_write', wikiPayload, 300, 's-2:writeback:wiki', async () =>
+      (await import('../tools/manage-memory.js')).manageMemory(wikiPayload as any)
+    ).catch(() => {});
+  }
+
+  // Reinforce only nodes actually reflected in the final result (a real,
+  // if crude, "was this cited" check — a snippet of the recalled content
+  // showing up verbatim in the synthesis) — not a blanket review of
+  // everything recall happened to surface.
+  for (const node of recalledNodes) {
+    const snippet = node.content.slice(0, 60).trim();
+    if (!snippet || !content.includes(snippet)) continue;
+    const reviewPayload = { action: 'node_review', workspace_root: workspaceRoot, nodeId: node.id };
+    if (evaluate(decl, 'top_level', 'manage_memory', 'node_review', reviewPayload).kind === 'allow') {
+      await gatedCall(store, run, decl, 'top_level', 'manage_memory', 'node_review', reviewPayload, 100, `s-2:writeback:review:${node.id}`, async () =>
+        (await import('../tools/manage-memory.js')).manageMemory(reviewPayload as any)
+      ).catch(() => {});
+    }
+  }
 }
 
 /**
@@ -390,7 +499,8 @@ async function runSteps(
   workspaceRoot: string | undefined,
   registryKey: string,
   aborted: boolean,
-  priorHandoff: Handoff | undefined
+  priorHandoff: Handoff | undefined,
+  memoryContext?: string
 ): Promise<StepEngineResult> {
   let handoff = priorHandoff;
   let lastContent: string | undefined;
@@ -427,7 +537,7 @@ async function runSteps(
       await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via browser_tool (navigate+extract) on ${url}`);
       callResult = await runScraperStep(store, run, decl, role, callId, url, registryKey);
     } else {
-      const stepGoal = stepInputText(i, originalGoal, handoff);
+      const stepGoal = stepInputText(i, originalGoal, handoff, i === startIndex ? memoryContext : undefined);
       const dispatch = resolveStepDispatch(decl, role, stepGoal, workspaceRoot, registryKey);
       const argsHash = hashArgs(dispatch.payload);
 
@@ -591,9 +701,12 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
 
   (async () => {
     try {
-      const { content } = await runSteps(store, run, decl, roles, 0, input.goal, input.workspaceRoot, registryKey, runInfo.controller.signal.aborted, undefined);
+      const recall = await recallMemoryContext(store, run, decl, input.goal, input.workspaceRoot, registryKey);
+      const { content } = await runSteps(store, run, decl, roles, 0, input.goal, input.workspaceRoot, registryKey, runInfo.controller.signal.aborted, undefined, recall?.context);
+      if (run.status === 'complete' && content) {
+        await writeBackToMemory(store, run, decl, input.goal, content, recall?.recalledNodes ?? [], input.workspaceRoot);
+      }
       await finalizeRun(store, run, registryKey);
-      void content; // final content already persisted onto run.result inside runSteps/applyResearchResult
     } catch (err: any) {
       run.status = 'failed';
       run.error = err?.message || String(err);
@@ -651,9 +764,15 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
 
   (async () => {
     try {
-      const { content } = await runSteps(store, run, decl, roles, startIndex, run.goal, run.workspaceRoot, registryKey, runInfo.controller.signal.aborted, priorHandoff);
+      // Recall only applies to a genuinely fresh first step — a resume
+      // continuing from a later step already had its chance at step 0's
+      // memory context on the original deploy.
+      const recall = startIndex === 0 ? await recallMemoryContext(store, run, decl, run.goal, run.workspaceRoot, registryKey) : undefined;
+      const { content } = await runSteps(store, run, decl, roles, startIndex, run.goal, run.workspaceRoot, registryKey, runInfo.controller.signal.aborted, priorHandoff, recall?.context);
+      if (run.status === 'complete' && content) {
+        await writeBackToMemory(store, run, decl, run.goal, content, recall?.recalledNodes ?? [], run.workspaceRoot);
+      }
       await finalizeRun(store, run, registryKey);
-      void content;
     } catch (err: any) {
       run.status = 'failed';
       run.error = err?.message || String(err);
