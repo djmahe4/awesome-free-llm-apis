@@ -22,9 +22,11 @@
     "dashboard": "tsx --env-file=.env src/server.ts --sse",
     "report": "tsx --env-file=.env scripts/evaluation/model-report.ts",
     "fetch-hermes": "tsx scripts/fetch-hermes-skills.ts",
-    "fetch-cyber-tools": "node scripts/fetch-cyber-tools.js"
+    "fetch-cyber-tools": "node scripts/fetch-cyber-tools.js",
+    "smoke:media": "tsx --env-file=.env scripts/smoke/test_media_modalities_smoke.ts"
   },
   "dependencies": {
+    "@gradio/client": "^2.7.0",
     "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.24.3",
     "@types/multer": "^2.2.0",

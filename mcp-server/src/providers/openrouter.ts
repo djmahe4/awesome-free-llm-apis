@@ -26,5 +26,7 @@ export class OpenRouterProvider extends BaseProvider {
     { id: 'meta-llama/llama-4-scout:free', name: 'Llama 4 Scout (Vision)' },
     { id: 'poolside/laguna-s-2.1:free', name: 'Laguna S 2.1' },
     { id: 'nvidia/nemotron-mini-4b-instruct:free', name: 'Nemotron Mini 4B Instruct' },
+    { id: 'inclusionai/ling-3.0-flash-fin:free', name: 'InclusionAI Ling 3.0 Flash Fin' },
+    { id: 'qwen/qwen3.8-27b:free', name: 'Qwen 3.8 27B' },
   ];
 }

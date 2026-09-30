@@ -1,7 +1,38 @@
 import { pipeline } from '@huggingface/transformers';
+import fs from 'node:fs/promises';
+import { existsSync, createWriteStream } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import https from 'node:https';
+import os from 'node:os';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(__dirname, '../..');
+
+function downloadFile(url, destPath) {
+    return new Promise((resolve, reject) => {
+        https.get(url, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                return downloadFile(res.headers.location, destPath).then(resolve).catch(reject);
+            }
+            if (res.statusCode !== 200) {
+                return reject(new Error(`HTTP ${res.statusCode} downloading ${url}`));
+            }
+            const fileStream = createWriteStream(destPath);
+            res.pipe(fileStream);
+            fileStream.on('finish', () => {
+                fileStream.close();
+                resolve();
+            });
+            fileStream.on('error', (err) => {
+                reject(err);
+            });
+        }).on('error', reject);
+    });
+}
 
 /**
- * Pre-downloads the embedding model used by the memory system.
+ * Pre-downloads the embedding model and kokoro-onnx weights.
  * This prevents timeouts during tests and ensures production readiness.
  */
 async function download() {
@@ -9,13 +40,56 @@ async function download() {
     console.log(`[Build] Pre-downloading embedding model: ${modelName}...`);
     
     try {
-        // Initializing the pipeline will trigger the download if not present
         await pipeline('feature-extraction', modelName);
         console.log('[Build] Model downloaded and cached successfully.');
     } catch (err) {
         console.error('[Build] Failed to download model:', err.message);
-        // We don't exit with error here to avoid blocking builds if HF is down,
-        // but it will likely fail later during tests if not resolved.
+    }
+
+    // Pre-download Kokoro-ONNX weights for instant local TTS
+    // Stored in user dir ~/.free-llm-mcp/models/kokoro (consistent with vector/embedding cache) and server root
+    try {
+        const userKokoroDir = path.join(os.homedir(), '.free-llm-mcp', 'models', 'kokoro');
+        const serverKokoroDir = path.resolve(root, 'models', 'kokoro');
+
+        await fs.mkdir(userKokoroDir, { recursive: true });
+        await fs.mkdir(serverKokoroDir, { recursive: true });
+
+        const files = [
+            {
+                name: 'voices-v1.0.bin',
+                url: 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin'
+            },
+            {
+                name: 'kokoro-v1.0.onnx',
+                url: 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx'
+            }
+        ];
+
+        for (const file of files) {
+            const userTarget = path.join(userKokoroDir, file.name);
+            const serverTarget = path.join(serverKokoroDir, file.name);
+
+            const hasUser = existsSync(userTarget);
+            const hasServer = existsSync(serverTarget);
+
+            if (hasUser && !hasServer) {
+                console.log(`[Build] Syncing ${file.name} to server root...`);
+                await fs.copyFile(userTarget, serverTarget);
+            } else if (!hasUser && hasServer) {
+                console.log(`[Build] Syncing ${file.name} to user dir ~/.free-llm-mcp/models/kokoro...`);
+                await fs.copyFile(serverTarget, userTarget);
+            } else if (!hasUser && !hasServer) {
+                console.log(`[Build] Downloading Kokoro asset ${file.name}...`);
+                await downloadFile(file.url, userTarget);
+                await fs.copyFile(userTarget, serverTarget);
+                console.log(`[Build] ${file.name} downloaded successfully.`);
+            } else {
+                console.log(`[Build] Kokoro asset ${file.name} already present in user dir and server root.`);
+            }
+        }
+    } catch (err) {
+        console.warn('[Build] Warning: Kokoro weights download skipped/failed:', err.message);
     }
 }
 
