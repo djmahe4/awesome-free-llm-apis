@@ -927,6 +927,7 @@ async function runSteps(
 
 /** P4f per-role tracking for top_level's own enrichment calls (recall/write-back) — the same bucket applyResearchResult writes to for research-lane steps, so supervisorShareMax reflects top_level's REAL total cost, not just its research-step share. */
 function trackTopLevelTokens(run: HarnessRun, tokens: number): void {
+  run.budget.used += tokens;
   run.budget.perRole = run.budget.perRole ?? {};
   run.budget.perRole.top_level = (run.budget.perRole.top_level ?? 0) + tokens;
 }

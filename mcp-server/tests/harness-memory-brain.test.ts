@@ -96,6 +96,16 @@ describe('harness brain — recall + write-back + reinforcement (integration)', 
     const reviewCalls = manageMemoryMock.mock.calls.filter(c => c[0].action === 'node_review');
     expect(reviewCalls).toHaveLength(1);
     expect(reviewCalls[0][0].nodeId).toBe('node-1');
+
+    // Regression: trackTopLevelTokens previously updated budget.perRole.
+    // top_level but never budget.used itself, so top_level's own recall/
+    // write-back cost was invisible to the maxTokens ceiling AND made
+    // checkSupervisorShare's share = topLevel/used ratio wrong (top_level's
+    // own tokens excluded from its own denominator).
+    expect(run?.budget.used).toBeGreaterThan(0);
+    const topLevelTokens = run?.budget.perRole?.top_level ?? 0;
+    expect(topLevelTokens).toBeGreaterThan(0);
+    expect(run!.budget.used).toBeGreaterThanOrEqual(topLevelTokens);
   });
 
   it('skips recall and write-back entirely (no manageMemory calls) when top_level has no manage_memory rule — pre-existing declarations unaffected', async () => {
