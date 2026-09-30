@@ -1139,6 +1139,10 @@ async function resumeMonitoredRun(store: HarnessStore, run: HarnessRun): Promise
     throw new Error(`Run '${run.runId}' has status 'monitoring' but no pendingMonitor recorded — this should not happen.`);
   }
 
+  const registryKey = `harness:${run.runId}`;
+  const decl = await loadHarnessDeclaration(run.declarationName, run.workspaceRoot);
+  assertWorkspaceRootAllowed(decl, run.workspaceRoot);
+
   const entry = MonitorRegistry.get(pending.monitorId);
   if (!entry) {
     run.status = 'failed';
@@ -1147,18 +1151,32 @@ async function resumeMonitoredRun(store: HarnessStore, run: HarnessRun): Promise
     await store.saveRun(run);
     await store.appendTrace({ runId: run.runId, role: pending.role, type: 'error', data: { message: run.error } }).catch(() => {});
     await endTaskAttempt(store, run.goal, pending.role, 'failed', run.error);
-    const registryKey = `harness:${run.runId}`;
     await finalizeRun(store, run, registryKey);
     return run;
   }
   if (entry.status === 'running') {
-    return run; // still in flight — no-op, poll monitor_tool or resume again later
+    // P5c: still in flight — mid-flight WALL-CLOCK budget is checked here
+    // (the one budget dimension that applies uniformly to any detached
+    // process regardless of what it does). Token budget is deliberately
+    // NOT checked mid-flight for this concrete detached user (cyber_tool's
+    // osint scan): a web search call has no natural per-progress-event
+    // token cost to settle against — D3's "if the event reports token/
+    // resource usage" is conditional, and this one doesn't report any.
+    // Pausing here is NOT resumable today — no code anywhere transitions a
+    // run OUT of 'paused_budget' (a pre-existing gap, not new); pendingMonitor
+    // is deliberately kept (not cleared) so a future resume-from-budget-pause
+    // capability could still find its way back to this same monitor.
+    if (wallBudgetExceeded(run, decl)) {
+      run.status = 'paused_budget';
+      run.error = `Wall-clock budget exceeded (maxWallMinutes: ${decl.harness.budget.maxWallMinutes}) while monitoring '${pending.monitorId}'`;
+      await store.saveRun(run);
+      await store.appendTrace({ runId: run.runId, role: pending.role, type: 'budget', data: { reason: 'maxWallMinutes exceeded', monitorId: pending.monitorId } }).catch(() => {});
+      return run;
+    }
+    return run; // still in flight, within budget — no-op, poll monitor_tool or resume again later
   }
 
-  const decl = await loadHarnessDeclaration(run.declarationName, run.workspaceRoot);
-  assertWorkspaceRootAllowed(decl, run.workspaceRoot);
   const roles = await loadStepRoles(store, decl, run.goal);
-  const registryKey = `harness:${run.runId}`;
 
   if (entry.status === 'failed') {
     run.status = 'failed';
