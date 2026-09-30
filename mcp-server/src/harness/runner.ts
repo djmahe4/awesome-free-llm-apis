@@ -343,6 +343,49 @@ async function writeBackToMemory(
 }
 
 /**
+ * P4d Eisenhower review — SUBMIT half only (D4 in the P4 plan). Every real
+ * open question the final step actually phrased (handoff.openQuestions,
+ * extracted in handoff.ts) becomes an eisenhower_add task with deterministic
+ * flags, never an LLM guess (autoClassify stays off, per standing
+ * instruction):
+ *   - urgent: this run's own final step didn't cleanly finish (status
+ *     'blocked'/'needs_user', or it explicitly needs approval) — the
+ *     question is blocking something concrete in THIS run.
+ *   - important: the question shares a real keyword with an actual finding
+ *     (a core claim), not a tangent.
+ * NOT implemented here — deferred, same disclosed-partial-scope pattern as
+ * P4b's pdf branch: reading the backlog back (`eisenhower_list`) and acting
+ * per quadrant (do/schedule/delegate/delete), especially `delegate` →
+ * spawning a scoped sub-run. That's a real recursive-deploy capability, the
+ * same size class as the fan-out/park-revive gaps docs/harness-cyber.md
+ * already flagged as separate P5+ work — not something to bolt on here.
+ */
+async function submitOpenQuestions(
+  store: HarnessStore,
+  run: HarnessRun,
+  decl: HarnessDeclaration,
+  goal: string,
+  handoff: Handoff,
+  workspaceRoot: string | undefined
+): Promise<void> {
+  if (handoff.openQuestions.length === 0) return;
+  const goalSlug = goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60).replace(/^-+|-+$/g, '') || 'run';
+  const urgent = handoff.status === 'blocked' || handoff.status === 'needs_user' || handoff.requiresApproval.needed;
+  const findingsText = handoff.findings.map(f => f.claim).join(' ').toLowerCase();
+
+  for (const question of handoff.openQuestions) {
+    const questionTerms = question.toLowerCase().split(/\s+/).filter(t => t.length > 4);
+    const important = questionTerms.some(t => findingsText.includes(t));
+    const payload = { action: 'eisenhower_add', workspace_root: workspaceRoot, task: question, urgent, important, tags: [goalSlug] };
+    if (evaluate(decl, 'top_level', 'manage_memory', 'eisenhower_add', payload).kind === 'allow') {
+      await gatedCall(store, run, decl, 'top_level', 'manage_memory', 'eisenhower_add', payload, 100, `s-3:eisenhower:${goalSlug}:${handoff.openQuestions.indexOf(question)}`, async () =>
+        (await import('../tools/manage-memory.js')).manageMemory(payload as any)
+      ).catch(() => {});
+    }
+  }
+}
+
+/**
  * Resolves a step's tool + payload WITHOUT executing or gating it — split
  * out from the old runRoleStep so the step engine can hash the payload
  * (repeat detection, D7 in the P4 plan) before deciding whether to call
@@ -478,7 +521,7 @@ async function lastHandoff(store: HarnessStore): Promise<Handoff | undefined> {
   return undefined;
 }
 
-interface StepEngineResult { content: string | undefined; lastRole: string }
+interface StepEngineResult { content: string | undefined; lastRole: string; finalHandoff: Handoff | undefined }
 
 /**
  * Runs steps[startIndex..] in order, stopping immediately (without
@@ -524,7 +567,7 @@ async function runSteps(
         run.error = `Scraper step '${callId}' has no URL to fetch (escalation inserted without one — should not happen)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
         await endTaskAttempt(store, originalGoal, role, 'failed', run.error);
-        return { content: lastContent, lastRole };
+        return { content: lastContent, lastRole, finalHandoff: handoff };
       }
       const scraperArgsHash = hashArgs({ url });
       if (await hasRepeatedSuccess(store, callId, scraperArgsHash)) {
@@ -532,7 +575,7 @@ async function runSteps(
         run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
         await endTaskAttempt(store, originalGoal, role, 'failed', `repeat detected: ${run.error}`);
-        return { content: lastContent, lastRole };
+        return { content: lastContent, lastRole, finalHandoff: handoff };
       }
       await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via browser_tool (navigate+extract) on ${url}`);
       callResult = await runScraperStep(store, run, decl, role, callId, url, registryKey);
@@ -546,7 +589,7 @@ async function runSteps(
         run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
         await endTaskAttempt(store, originalGoal, role, 'failed', `repeat detected: ${run.error}`);
-        return { content: lastContent, lastRole };
+        return { content: lastContent, lastRole, finalHandoff: handoff };
       }
 
       await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via ${dispatch.toolName}`);
@@ -561,7 +604,7 @@ async function runSteps(
     if (run.status !== 'complete') {
       // paused_approval / paused_budget / failed / aborted — later steps stay
       // untouched (still 'pending' in tasks.md) so resume picks up here.
-      return { content: lastContent ?? content, lastRole };
+      return { content: lastContent ?? content, lastRole, finalHandoff: handoff };
     }
 
     lastContent = content;
@@ -574,7 +617,7 @@ async function runSteps(
       run.error = `Malformed handoff from step '${callId}': ${validated.error}`;
       await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
       await endTaskAttempt(store, originalGoal, role, 'failed', run.error);
-      return { content: lastContent, lastRole };
+      return { content: lastContent, lastRole, finalHandoff: handoff };
     }
 
     // P4b escalation: insert an 'html'-level scraper step right after this
@@ -595,7 +638,7 @@ async function runSteps(
     if (!isLastStep) run.status = 'running'; // more steps to go — applyResearchResult marked this one 'complete', but the RUN isn't done yet
   }
 
-  return { content: lastContent, lastRole };
+  return { content: lastContent, lastRole, finalHandoff: handoff };
 }
 
 function applyResearchResult(run: HarnessRun, role: string, callResult: GatedResult, goalTokens: number, aborted: boolean): { content?: string } {
@@ -702,9 +745,10 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
   (async () => {
     try {
       const recall = await recallMemoryContext(store, run, decl, input.goal, input.workspaceRoot, registryKey);
-      const { content } = await runSteps(store, run, decl, roles, 0, input.goal, input.workspaceRoot, registryKey, runInfo.controller.signal.aborted, undefined, recall?.context);
+      const { content, finalHandoff } = await runSteps(store, run, decl, roles, 0, input.goal, input.workspaceRoot, registryKey, runInfo.controller.signal.aborted, undefined, recall?.context);
       if (run.status === 'complete' && content) {
         await writeBackToMemory(store, run, decl, input.goal, content, recall?.recalledNodes ?? [], input.workspaceRoot);
+        if (finalHandoff) await submitOpenQuestions(store, run, decl, input.goal, finalHandoff, input.workspaceRoot);
       }
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
@@ -768,9 +812,10 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
       // continuing from a later step already had its chance at step 0's
       // memory context on the original deploy.
       const recall = startIndex === 0 ? await recallMemoryContext(store, run, decl, run.goal, run.workspaceRoot, registryKey) : undefined;
-      const { content } = await runSteps(store, run, decl, roles, startIndex, run.goal, run.workspaceRoot, registryKey, runInfo.controller.signal.aborted, priorHandoff, recall?.context);
+      const { content, finalHandoff } = await runSteps(store, run, decl, roles, startIndex, run.goal, run.workspaceRoot, registryKey, runInfo.controller.signal.aborted, priorHandoff, recall?.context);
       if (run.status === 'complete' && content) {
         await writeBackToMemory(store, run, decl, run.goal, content, recall?.recalledNodes ?? [], run.workspaceRoot);
+        if (finalHandoff) await submitOpenQuestions(store, run, decl, run.goal, finalHandoff, run.workspaceRoot);
       }
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {

@@ -29,6 +29,21 @@ export const HandoffSchema = z.object({
 export type Handoff = z.infer<typeof HandoffSchema>;
 
 /**
+ * Lines the model itself phrased as a question (ending in '?') are the
+ * closest thing to real open questions available without a second LLM call
+ * to extract them — same "derive from the step's own content, never
+ * fabricate" posture as confidence. Capped at 5 so one rambly reply can't
+ * flood the Eisenhower backlog (P4d).
+ */
+function extractOpenQuestions(content: string): string[] {
+  return content
+    .split(/\n+/)
+    .map(l => l.trim())
+    .filter(l => l.length > 0 && l.endsWith('?'))
+    .slice(0, 5);
+}
+
+/**
  * Confidence is computed from the step's own output, never a literal —
  * capped contribution from length (a longer grounded answer isn't
  * automatically more confident past a point) plus a floor for any non-empty
@@ -46,7 +61,7 @@ export function buildHandoff(from: string, to: string, content: string): Handoff
     status: trimmed ? 'complete' : 'blocked',
     confidence,
     findings,
-    openQuestions: [],
+    openQuestions: trimmed ? extractOpenQuestions(trimmed) : [],
     artifacts: [],
     nextAction: trimmed ? 'none' : 'retry',
     requiresApproval: { needed: false },
