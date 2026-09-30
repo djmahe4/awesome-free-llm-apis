@@ -181,6 +181,49 @@ function planSteps(decl: HarnessDeclaration, goal: string): string[] {
   return roles;
 }
 
+/**
+ * On resume, the step list must come from tasks.md (the persisted record of
+ * what this run actually planned, including any dynamically-inserted 'html'
+ * escalation step below — see decideEscalation) rather than recomputing
+ * planSteps() fresh, which only knows the STATIC base plan and would drop a
+ * step that got spliced in live during the original run.
+ */
+async function loadStepRoles(store: HarnessStore, decl: HarnessDeclaration, goal: string): Promise<string[]> {
+  const raw = await store.loadTasksMarkdown();
+  if (raw) {
+    const tasks = parseTasksMarkdown(raw);
+    if (tasks.length > 0) return tasks.map(t => t.id);
+  }
+  return planSteps(decl, goal);
+}
+
+/**
+ * P4b research depth ladder (deterministic, never an LLM choice, per D6 in
+ * the P4 plan) — abstract → html only in this slice. Escalates past a
+ * researcher step's abstract-level answer to a real page fetch when
+ * confidence is low AND the declaration defines a 'scraper' role AND a
+ * fetchable URL is actually present in the findings — otherwise there's
+ * nothing to escalate TO, so it's skipped rather than failing the run.
+ * pdf escalation (contentDepth 'pdf', resolvePdfRef) is explicitly NOT part
+ * of this slice — deferred, same as this session's other disclosed partial-
+ * scope commits, rather than rushing a third branch untested.
+ */
+function decideEscalation(decl: HarnessDeclaration, role: string, handoff: Handoff): string | null {
+  if (role !== 'researcher') return null; // only escalate off the abstract-level pass, not off analyst/scraper output
+  if (!decl.roles.scraper) return null;
+  if (handoff.status !== 'complete') return null;
+  const threshold = decl.handoff?.lowConfidenceThreshold ?? 0.7;
+  if (handoff.confidence >= threshold) return null;
+  if (!extractFirstUrl(handoff)) return null;
+  return 'scraper';
+}
+
+function extractFirstUrl(handoff: Handoff): string | null {
+  const text = handoff.findings.map(f => f.claim).join(' ');
+  const match = text.match(/https?:\/\/[^\s)\]"'>]+/);
+  return match ? match[0] : null;
+}
+
 /** First step gets the raw goal; a later step gets a synthesis prompt built from the prior step's real (validated) handoff — never the raw prior goal again. */
 function stepInputText(index: number, originalGoal: string, priorHandoff: Handoff | undefined): string {
   if (index === 0 || !priorHandoff) return originalGoal;
@@ -259,6 +302,40 @@ function resolveStepDispatch(
 }
 
 /**
+ * Scraper (html-level) step for the research depth ladder: navigate then
+ * extract, each its own separately policy-gated/traced/approvable call
+ * (matching the bundled declaration's `actions: [navigate, extract, ...]`
+ * per-action allowlist), not one opaque composite call. Returns the
+ * extract call's GatedResult (navigate is plumbing — its content doesn't
+ * feed the handoff); a navigate failure/pause short-circuits before ever
+ * attempting extract.
+ */
+async function runScraperStep(
+  store: HarnessStore,
+  run: HarnessRun,
+  decl: HarnessDeclaration,
+  role: string,
+  callId: string,
+  url: string,
+  registryKey: string
+): Promise<GatedResult> {
+  const { dispatchBrowserAction } = await import('../browser/dispatch.js');
+
+  const navigatePayload = { action: 'navigate', url, sessionId: registryKey };
+  const navigateResult = await gatedCall(
+    store, run, decl, role, 'browser_tool', 'navigate', navigatePayload, 500, `${callId}:navigate`,
+    async () => dispatchBrowserAction(navigatePayload)
+  );
+  if (!navigateResult.ok) return navigateResult;
+
+  const extractPayload = { action: 'extract', sessionId: registryKey, params: { strategy: 'auto' } };
+  return gatedCall(
+    store, run, decl, role, 'browser_tool', 'extract', extractPayload, 1500, `${callId}:extract`,
+    async () => dispatchBrowserAction(extractPayload)
+  );
+}
+
+/**
  * Repeat/loop guard (D7 in the P4 plan): true if this exact (callId,
  * argsHash) already reached a successful tool_result in this run's trace.
  * Only fires on a genuine re-attempt of an already-COMPLETED call, not on an
@@ -323,22 +400,51 @@ async function runSteps(
     const role = roles[i];
     lastRole = role;
     const callId = `s${i}:${role}`;
-    const stepGoal = stepInputText(i, originalGoal, handoff);
-    const dispatch = resolveStepDispatch(decl, role, stepGoal, workspaceRoot, registryKey);
-    const argsHash = hashArgs(dispatch.payload);
 
-    if (await hasRepeatedSuccess(store, callId, argsHash)) {
-      run.status = 'failed';
-      run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
-      await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
-      await endTaskAttempt(store, originalGoal, role, 'failed', `repeat detected: ${run.error}`);
-      return { content: lastContent, lastRole };
+    let callResult: GatedResult;
+    let goalTokens = 0;
+
+    if (role === 'scraper') {
+      // Escalation step (P4b): its input is a URL extracted from the prior
+      // handoff, not a text prompt — decideEscalation already confirmed one
+      // exists before this step was ever inserted, but re-check defensively.
+      const url = handoff ? extractFirstUrl(handoff) : null;
+      if (!url) {
+        run.status = 'failed';
+        run.error = `Scraper step '${callId}' has no URL to fetch (escalation inserted without one — should not happen)`;
+        await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
+        await endTaskAttempt(store, originalGoal, role, 'failed', run.error);
+        return { content: lastContent, lastRole };
+      }
+      const scraperArgsHash = hashArgs({ url });
+      if (await hasRepeatedSuccess(store, callId, scraperArgsHash)) {
+        run.status = 'failed';
+        run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
+        await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
+        await endTaskAttempt(store, originalGoal, role, 'failed', `repeat detected: ${run.error}`);
+        return { content: lastContent, lastRole };
+      }
+      await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via browser_tool (navigate+extract) on ${url}`);
+      callResult = await runScraperStep(store, run, decl, role, callId, url, registryKey);
+    } else {
+      const stepGoal = stepInputText(i, originalGoal, handoff);
+      const dispatch = resolveStepDispatch(decl, role, stepGoal, workspaceRoot, registryKey);
+      const argsHash = hashArgs(dispatch.payload);
+
+      if (await hasRepeatedSuccess(store, callId, argsHash)) {
+        run.status = 'failed';
+        run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
+        await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
+        await endTaskAttempt(store, originalGoal, role, 'failed', `repeat detected: ${run.error}`);
+        return { content: lastContent, lastRole };
+      }
+
+      await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via ${dispatch.toolName}`);
+      goalTokens = contextManager.countStringTokens(stepGoal);
+      const estimate = goalTokens + 2000;
+      callResult = await gatedCall(store, run, decl, role, dispatch.toolName, undefined, dispatch.payload, estimate, callId, dispatch.execute);
     }
 
-    await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via ${dispatch.toolName}`);
-    const goalTokens = contextManager.countStringTokens(stepGoal);
-    const estimate = goalTokens + 2000;
-    const callResult = await gatedCall(store, run, decl, role, dispatch.toolName, undefined, dispatch.payload, estimate, callId, dispatch.execute);
     const { content } = applyResearchResult(run, role, callResult, goalTokens, aborted);
     await endTaskAttempt(store, originalGoal, role, taskOutcomeFor(run.status), `step ${callId}: ${run.status}${run.error ? ` (${run.error})` : ''}`);
 
@@ -349,9 +455,9 @@ async function runSteps(
     }
 
     lastContent = content;
-    const isLastStep = i === roles.length - 1;
-    const nextTo = isLastStep ? 'top_level' : roles[i + 1];
-    const built = buildHandoff(role, nextTo, content ?? '');
+    const provisionalIsLast = i === roles.length - 1;
+    const provisionalNextTo = provisionalIsLast ? 'top_level' : roles[i + 1];
+    const built = buildHandoff(role, provisionalNextTo, content ?? '');
     const validated = validateHandoff(built);
     if (!validated.ok) {
       run.status = 'failed';
@@ -360,9 +466,22 @@ async function runSteps(
       await endTaskAttempt(store, originalGoal, role, 'failed', run.error);
       return { content: lastContent, lastRole };
     }
+
+    // P4b escalation: insert an 'html'-level scraper step right after this
+    // one if confidence is low and a URL is actually available — mutates
+    // `roles` in place, so tasks.md (seeded per-role via beginTaskAttempt at
+    // the top of the loop) and resume's loadStepRoles both pick it up.
+    const escalateTo = decideEscalation(decl, role, validated.handoff);
+    if (escalateTo && roles[i + 1] !== escalateTo) {
+      roles.splice(i + 1, 0, escalateTo);
+      validated.handoff.to = escalateTo;
+      validated.handoff.nextAction = `escalate to ${escalateTo} (confidence ${validated.handoff.confidence.toFixed(2)} below threshold)`;
+    }
+
     await store.appendTrace({ runId: run.runId, role, type: 'handoff', data: validated.handoff }).catch(() => {});
     handoff = validated.handoff;
 
+    const isLastStep = i === roles.length - 1; // re-check AFTER any splice above
     if (!isLastStep) run.status = 'running'; // more steps to go — applyResearchResult marked this one 'complete', but the RUN isn't done yet
   }
 
@@ -381,12 +500,16 @@ function applyResearchResult(run: HarnessRun, role: string, callResult: GatedRes
   }
   // Different dispatched tools return content under different keys
   // (use_free_llm: choices[0].message.content, execute_skill: response,
-  // load_skill_prompt: prompt) — checking only the use_free_llm shape made
-  // every non-use_free_llm success look like an empty result.
+  // load_skill_prompt: prompt, browser_tool/extract: data — a
+  // BrowserActionResult, string or structured) — checking only the
+  // use_free_llm shape made every non-use_free_llm success look like an
+  // empty result.
+  const browserData = callResult.result?.data;
   const content: string =
     callResult.result?.choices?.[0]?.message?.content ??
     callResult.result?.response ??
     callResult.result?.prompt ??
+    (typeof browserData === 'string' ? browserData : browserData ? JSON.stringify(browserData) : undefined) ??
     '';
   run.budget.used += contextManager.countStringTokens(content) + goalTokens;
   run.result = content;
@@ -503,7 +626,10 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
   // resume (e.g. allowedWorkspaceRoots tightened) must not grandfather in a
   // workspace_root that would no longer be permitted.
   assertWorkspaceRootAllowed(decl, run.workspaceRoot);
-  const roles = planSteps(decl, run.goal);
+  // loadStepRoles (not planSteps) — the persisted tasks.md order, including
+  // any step P4b's escalation dynamically inserted before this run paused,
+  // which a fresh planSteps() call would have no way to know about.
+  const roles = await loadStepRoles(store, decl, run.goal);
   const registryKey = `harness:${runId}`;
 
   // tasks.md IS the cursor: the first task not yet 'completed', in step
