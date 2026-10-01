@@ -329,6 +329,7 @@ tabBtns.forEach(btn => {
     if (target === 'profile')  { fetchUserConfig(); fetchLeaderboard(); }
     if (target === 'wiki')     { initWikiTab(); }
     if (target === 'dagmemory') { initDagMemoryTab(); }
+    if (target === 'harness')   { initHarnessTab(); }
   });
 });
 
@@ -3028,4 +3029,561 @@ function initDagMemoryTab() {
     }
   }
 }
+
+// ─── Harness & Multi-Agent Telemetry Tab ────────────────────────
+let harnessInitialized = false;
+let currentHarnessRunId = null;
+
+const harnessWorkspaceInput   = document.getElementById('harness-workspace-input');
+const harnessRefreshBtn        = document.getElementById('harness-refresh-btn');
+const harnessLeasesContainer   = document.getElementById('harness-leases-container');
+const harnessLeaseCount        = document.getElementById('harness-lease-count');
+const harnessReasoningContainer= document.getElementById('harness-reasoning-container');
+const harnessReasoningCount    = document.getElementById('harness-reasoning-count');
+const harnessRunsTbody         = document.getElementById('harness-runs-tbody');
+const harnessRunsCount         = document.getElementById('harness-runs-count');
+const harnessRunDetailPanel    = document.getElementById('harness-run-detail-panel');
+const harnessDetailTitle       = document.getElementById('harness-detail-title');
+const harnessDetailClose       = document.getElementById('harness-detail-close');
+const harnessRerunRole         = document.getElementById('harness-rerun-role');
+const harnessRerunContext      = document.getElementById('harness-rerun-context');
+const harnessRerunSubmit       = document.getElementById('harness-rerun-submit');
+const harnessRerunMsg          = document.getElementById('harness-rerun-msg');
+const harnessTasksView         = document.getElementById('harness-tasks-view');
+const harnessTraceView         = document.getElementById('harness-trace-view');
+
+function initHarnessTab() {
+  if (!harnessInitialized) {
+    harnessInitialized = true;
+    const savedWs = localStorage.getItem('mcp-workspace') || (document.getElementById('pg-workspace')?.value || '').trim();
+    if (savedWs && harnessWorkspaceInput) {
+      harnessWorkspaceInput.value = savedWs;
+    }
+  }
+  fetchHarnessTelemetry();
+}
+
+async function fetchHarnessTelemetry() {
+  const ws = (harnessWorkspaceInput?.value || '').trim();
+  const url = ws ? `/api/harness/runs?workspace=${encodeURIComponent(ws)}` : '/api/harness/runs';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderHarnessTelemetry(data);
+  } catch (err) {
+    console.warn('[Harness] Failed to fetch runs:', err);
+    if (harnessRunsTbody) {
+      harnessRunsTbody.innerHTML = `<tr><td colspan="6" class="conv-empty" style="color:var(--accent-red);padding:24px;text-align:center;">Failed to load harness data: ${esc(err.message)}</td></tr>`;
+    }
+  }
+}
+
+function renderHarnessTelemetry(data) {
+  const { runs = [], activeScopes = [], reasoningScopes = [] } = data;
+
+  // Render File Leases
+  if (harnessLeaseCount) harnessLeaseCount.textContent = `${activeScopes.length} active`;
+  if (harnessLeasesContainer) {
+    if (activeScopes.length === 0) {
+      harnessLeasesContainer.innerHTML = '<div class="conv-empty" style="padding:16px;">No active file claims in scopes.json</div>';
+    } else {
+      harnessLeasesContainer.innerHTML = activeScopes.map(scope => `
+        <div style="padding:10px 14px;border-bottom:1px solid var(--glass-border);display:flex;flex-direction:column;gap:4px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-weight:600;font-size:.78rem;color:var(--accent-cyan);font-family:'JetBrains Mono',monospace;">Agent: ${esc(scope.agentId)}</span>
+            <span style="font-size:.7rem;color:var(--text-muted);">${new Date(scope.claimedAt).toLocaleTimeString()}</span>
+          </div>
+          <div style="font-size:.73rem;color:var(--text-secondary);word-break:break-all;">
+            <strong>Files:</strong> ${(scope.files || []).map(f => `<code style="background:rgba(255,255,255,0.06);padding:2px 4px;border-radius:3px;margin-right:4px;">${esc(f)}</code>`).join(' ')}
+          </div>
+        </div>
+      `).join('');
+    }
+  }
+
+  // Render Reasoning Scopes
+  if (harnessReasoningCount) harnessReasoningCount.textContent = `${reasoningScopes.length} scopes`;
+  if (harnessReasoningContainer) {
+    if (reasoningScopes.length === 0) {
+      harnessReasoningContainer.innerHTML = '<div class="conv-empty" style="padding:16px;">No reasoning scopes registered</div>';
+    } else {
+      harnessReasoningContainer.innerHTML = reasoningScopes.map(r => `
+        <div style="padding:10px 14px;border-bottom:1px solid var(--glass-border);display:flex;flex-direction:column;gap:4px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-weight:600;font-size:.78rem;color:var(--accent-purple);">Role: ${esc(r.role)} (${esc(r.agentId)})</span>
+            <span style="font-size:.7rem;color:var(--text-muted);">${new Date(r.timestamp).toLocaleTimeString()}</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:2px;">
+            ${(r.keywords || []).map(k => `<span class="badge badge-purple" style="font-size:.62rem;">${esc(k)}</span>`).join('')}
+          </div>
+          ${r.findingsText ? `<div style="font-size:.7rem;color:var(--text-muted);max-height:48px;overflow:hidden;text-overflow:ellipsis;margin-top:4px;">${esc(r.findingsText)}</div>` : ''}
+        </div>
+      `).join('');
+    }
+  }
+
+  // Render Runs Table
+  if (harnessRunsCount) harnessRunsCount.textContent = `${runs.length} runs`;
+  if (harnessRunsTbody) {
+    if (runs.length === 0) {
+      harnessRunsTbody.innerHTML = '<tr><td colspan="6" class="conv-empty" style="padding:24px;text-align:center;">No harness runs found.</td></tr>';
+    } else {
+      harnessRunsTbody.innerHTML = runs.map(run => {
+        let badgeCls = 'badge-gray';
+        if (run.status === 'completed') badgeCls = 'badge-green';
+        else if (run.status === 'running') badgeCls = 'badge-cyan pulse';
+        else if (run.status === 'failed') badgeCls = 'badge-red';
+        else if (run.status === 'paused') badgeCls = 'badge-amber';
+
+        const started = run.startedAt ? new Date(run.startedAt).toLocaleString() : '--';
+        return `
+          <tr style="border-bottom:1px solid var(--glass-border);">
+            <td style="padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:.75rem;color:var(--accent-cyan);">${esc(run.runId.slice(0, 8))}…</td>
+            <td style="padding:10px 14px;font-weight:500;">${esc(run.declarationName || 'unknown')}</td>
+            <td style="padding:10px 14px;"><span class="badge ${badgeCls}">${esc(run.status)}</span></td>
+            <td style="padding:10px 14px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(run.goal)}">${esc(run.goal)}</td>
+            <td style="padding:10px 14px;color:var(--text-muted);font-size:.75rem;">${esc(started)}</td>
+            <td style="padding:10px 14px;text-align:right;">
+              <button class="btn btn-secondary btn-sm" onclick="inspectHarnessRun('${esc(run.runId)}')" style="cursor:pointer;padding:4px 8px;font-size:.75rem;">Inspect</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+  }
+}
+
+async function inspectHarnessRun(runId) {
+  currentHarnessRunId = runId;
+  const ws = (harnessWorkspaceInput?.value || '').trim();
+  const url = `/api/harness/runs/${encodeURIComponent(runId)}${ws ? `?workspace=${encodeURIComponent(ws)}` : ''}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (harnessRunDetailPanel) harnessRunDetailPanel.style.display = 'block';
+    if (harnessDetailTitle) harnessDetailTitle.innerHTML = `Run Inspector — <span style="font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);">${esc(runId)}</span>`;
+    if (harnessTasksView) harnessTasksView.textContent = data.tasks || 'No tasks.md content available.';
+    if (harnessTraceView) {
+      if (!data.trace || data.trace.length === 0) {
+        harnessTraceView.textContent = 'No trace events recorded.';
+      } else {
+        harnessTraceView.textContent = data.trace.map(t => `[${new Date(t.timestamp).toLocaleTimeString()}] [${t.type}] ${JSON.stringify(t.payload)}`).join('\n');
+      }
+    }
+    if (harnessRerunRole && data.run?.roles && data.run.roles.length > 0) {
+      harnessRerunRole.value = data.run.roles[data.run.roles.length - 1];
+    }
+  } catch (err) {
+    console.warn('[Harness] Error inspecting run:', err);
+  }
+}
+
+window.inspectHarnessRun = inspectHarnessRun;
+
+if (harnessRefreshBtn) {
+  harnessRefreshBtn.addEventListener('click', fetchHarnessTelemetry);
+}
+
+if (harnessDetailClose) {
+  harnessDetailClose.addEventListener('click', () => {
+    if (harnessRunDetailPanel) harnessRunDetailPanel.style.display = 'none';
+    currentHarnessRunId = null;
+  });
+}
+
+if (harnessRerunSubmit) {
+  harnessRerunSubmit.addEventListener('click', async () => {
+    if (!currentHarnessRunId) {
+      alert('Please select and inspect a run first.');
+      return;
+    }
+    const role = (harnessRerunRole?.value || '').trim();
+    if (!role) {
+      alert('Please enter a role name to rerun.');
+      return;
+    }
+    const followupContext = (harnessRerunContext?.value || '').trim();
+    const ws = (harnessWorkspaceInput?.value || '').trim();
+
+    harnessRerunSubmit.disabled = true;
+    if (harnessRerunMsg) {
+      harnessRerunMsg.style.display = 'block';
+      harnessRerunMsg.style.color = 'var(--accent-cyan)';
+      harnessRerunMsg.textContent = `Re-orchestrating role '${role}'…`;
+    }
+
+    try {
+      const res = await fetch('/api/tools/call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tool: 'agent_harness',
+          params: {
+            action: 'rerun',
+            runId: currentHarnessRunId,
+            role,
+            followupContext,
+            workspace_root: ws || undefined
+          }
+        })
+      });
+      const result = await res.json();
+      if (!result.ok) throw new Error(result.error || 'Re-run failed');
+      if (harnessRerunMsg) {
+        harnessRerunMsg.style.color = 'var(--accent-green)';
+        harnessRerunMsg.textContent = `Successfully re-orchestrated role '${role}'.`;
+      }
+      await inspectHarnessRun(currentHarnessRunId);
+      await fetchHarnessTelemetry();
+    } catch (err) {
+      if (harnessRerunMsg) {
+        harnessRerunMsg.style.color = 'var(--accent-red)';
+        harnessRerunMsg.textContent = `Error: ${err.message}`;
+      }
+    } finally {
+      harnessRerunSubmit.disabled = false;
+    }
+  });
+}
+
+// ─── Interactive Multi-Agent Relay & Scope Flow Canvas ───────────
+let relayCanvasAnimId = null;
+let relayNodes = [];
+let relayEdges = [];
+let relaySelectedNode = null;
+let relayHoveredNode = null;
+let relayPhysicsEnabled = true;
+
+const relayCanvas = document.getElementById('harness-relay-canvas');
+const relayTooltip = document.getElementById('harness-relay-tooltip');
+const relayStats = document.getElementById('harness-flow-stats');
+const relayDetail = document.getElementById('harness-relay-detail');
+const relayPhysicsToggle = document.getElementById('harness-flow-physics-toggle');
+
+if (relayPhysicsToggle) {
+  relayPhysicsToggle.addEventListener('click', () => {
+    relayPhysicsEnabled = !relayPhysicsEnabled;
+    relayPhysicsToggle.textContent = `Dynamic Orbit: ${relayPhysicsEnabled ? 'ON' : 'OFF'}`;
+  });
+}
+
+function initRelayCanvas(activeScopes = [], reasoningScopes = []) {
+  if (!relayCanvas) return;
+  const ctx = relayCanvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = relayCanvas.parentElement.getBoundingClientRect();
+  const width = rect.width || 700;
+  const height = rect.height || 380;
+  
+  relayCanvas.width = width * dpr;
+  relayCanvas.height = height * dpr;
+  ctx.scale(dpr, dpr);
+
+  const cx = width / 2;
+  const cy = height / 2;
+
+  // Build node set
+  const nodeMap = new Map();
+  const edges = [];
+
+  // Agents & File leases
+  activeScopes.forEach((claim, idx) => {
+    const agentNodeId = `agent:${claim.agentId}`;
+    if (!nodeMap.has(agentNodeId)) {
+      nodeMap.set(agentNodeId, {
+        id: agentNodeId,
+        label: claim.agentId,
+        sub: 'Agent Worker',
+        type: 'agent',
+        color: '#06b6d4',
+        r: 18,
+        x: cx + Math.cos(idx) * 120 + (Math.random() - 0.5) * 40,
+        y: cy + Math.sin(idx) * 100 + (Math.random() - 0.5) * 40,
+        vx: (Math.random() - 0.5) * 0.4,
+        vy: (Math.random() - 0.5) * 0.4,
+        data: claim
+      });
+    }
+
+    (claim.files || []).forEach((file, fIdx) => {
+      const fileNodeId = `file:${file}`;
+      if (!nodeMap.has(fileNodeId)) {
+        nodeMap.set(fileNodeId, {
+          id: fileNodeId,
+          label: file.split(/[\/\\]/).pop(),
+          sub: file,
+          type: 'file',
+          color: '#10b981',
+          r: 13,
+          x: cx + (Math.random() - 0.5) * 260,
+          y: cy + (Math.random() - 0.5) * 180,
+          vx: (Math.random() - 0.5) * 0.3,
+          vy: (Math.random() - 0.5) * 0.3,
+          data: { file, claimedBy: claim.agentId }
+        });
+      }
+      edges.push({
+        from: agentNodeId,
+        to: fileNodeId,
+        type: 'claim',
+        color: 'rgba(16,185,129,0.45)',
+        label: 'claims lease'
+      });
+    });
+  });
+
+  // Reasoning Scopes & Keywords
+  reasoningScopes.forEach((rs, rIdx) => {
+    const roleNodeId = `role:${rs.role}:${rs.agentId}`;
+    if (!nodeMap.has(roleNodeId)) {
+      nodeMap.set(roleNodeId, {
+        id: roleNodeId,
+        label: rs.role,
+        sub: `Agent: ${rs.agentId}`,
+        type: 'agent',
+        color: '#7c3aed',
+        r: 16,
+        x: cx + Math.cos(rIdx + 2) * 140,
+        y: cy + Math.sin(rIdx + 2) * 110,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        data: rs
+      });
+    }
+
+    (rs.keywords || []).forEach(kw => {
+      const kwNodeId = `kw:${kw.toLowerCase()}`;
+      if (!nodeMap.has(kwNodeId)) {
+        nodeMap.set(kwNodeId, {
+          id: kwNodeId,
+          label: `#${kw}`,
+          sub: 'Reasoning Keyword',
+          type: 'keyword',
+          color: '#ec4899',
+          r: 11,
+          x: cx + (Math.random() - 0.5) * 280,
+          y: cy + (Math.random() - 0.5) * 200,
+          vx: (Math.random() - 0.5) * 0.4,
+          vy: (Math.random() - 0.5) * 0.4,
+          data: { keyword: kw, role: rs.role, findings: rs.findingsText }
+        });
+      }
+      edges.push({
+        from: roleNodeId,
+        to: kwNodeId,
+        type: 'relay',
+        color: 'rgba(236,72,153,0.45)',
+        label: 'relays keyword'
+      });
+    });
+  });
+
+  // Demo fallback if no scopes live
+  if (nodeMap.size === 0) {
+    const demo = [
+      { id: 'agent:security-reviewer', label: 'security-reviewer', sub: 'Agent', type: 'agent', color: '#06b6d4', r: 18, x: cx - 140, y: cy - 40 },
+      { id: 'agent:coder-agent', label: 'coder-agent', sub: 'Agent', type: 'agent', color: '#7c3aed', r: 18, x: cx + 140, y: cy - 40 },
+      { id: 'file:src/auth.ts', label: 'auth.ts', sub: 'mcp-server/src/auth.ts', type: 'file', color: '#10b981', r: 14, x: cx, y: cy - 100 },
+      { id: 'file:src/server.ts', label: 'server.ts', sub: 'mcp-server/src/server.ts', type: 'file', color: '#10b981', r: 14, x: cx - 20, y: cy + 110 },
+      { id: 'kw:jwt-tokens', label: '#jwt-tokens', sub: 'Keyword Collision', type: 'keyword', color: '#ec4899', r: 12, x: cx, y: cy - 10 },
+      { id: 'kw:session-lease', label: '#session-lease', sub: 'Relayed Context', type: 'keyword', color: '#ec4899', r: 12, x: cx + 80, y: cy + 50 }
+    ];
+    demo.forEach(d => {
+      nodeMap.set(d.id, { ...d, vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.3, data: { demo: true } });
+    });
+    edges.push(
+      { from: 'agent:security-reviewer', to: 'file:src/auth.ts', type: 'claim', color: 'rgba(16,185,129,0.5)', label: 'file lease lock' },
+      { from: 'agent:security-reviewer', to: 'kw:jwt-tokens', type: 'relay', color: 'rgba(236,72,153,0.5)', label: 'reasoning collision' },
+      { from: 'agent:coder-agent', to: 'kw:jwt-tokens', type: 'relay', color: 'rgba(236,72,153,0.5)', label: 'relayed context pass' },
+      { from: 'agent:coder-agent', to: 'file:src/server.ts', type: 'claim', color: 'rgba(16,185,129,0.5)', label: 'file lease lock' },
+      { from: 'agent:coder-agent', to: 'kw:session-lease', type: 'relay', color: 'rgba(236,72,153,0.5)', label: 'memory decay pass' }
+    );
+  }
+
+  relayNodes = Array.from(nodeMap.values());
+  relayEdges = edges;
+
+  if (relayStats) {
+    relayStats.textContent = `${relayNodes.length} nodes • ${relayEdges.length} relays`;
+  }
+
+  startRelayLoop(ctx, width, height);
+}
+
+function startRelayLoop(ctx, width, height) {
+  if (relayCanvasAnimId) cancelAnimationFrame(relayCanvasAnimId);
+
+  let pulse = 0;
+
+  function render() {
+    pulse += 0.03;
+    ctx.clearRect(0, 0, width, height);
+
+    // Subtle background grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 1;
+    const gridSize = 40;
+    for (let x = 0; x < width; x += gridSize) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
+    }
+    for (let y = 0; y < height; y += gridSize) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+    }
+
+    // Dynamic Physics / Gentle Orbit
+    if (relayPhysicsEnabled) {
+      for (const node of relayNodes) {
+        if (node === relaySelectedNode) continue;
+        node.x += node.vx;
+        node.y += node.vy;
+
+        // Boundaries
+        if (node.x < node.r + 10 || node.x > width - node.r - 10) node.vx *= -1;
+        if (node.y < node.r + 10 || node.y > height - node.r - 10) node.vy *= -1;
+      }
+    }
+
+    // Render Edges
+    for (const edge of relayEdges) {
+      const from = relayNodes.find(n => n.id === edge.from);
+      const to = relayNodes.find(n => n.id === edge.to);
+      if (!from || !to) continue;
+
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.strokeStyle = edge.color;
+      ctx.lineWidth = (relayHoveredNode && (relayHoveredNode.id === from.id || relayHoveredNode.id === to.id)) ? 2.5 : 1.2;
+      ctx.stroke();
+
+      // Flow pulse particle
+      const t = (Math.sin(pulse + from.x * 0.01) + 1) / 2;
+      const px = from.x + (to.x - from.x) * t;
+      const py = from.y + (to.y - from.y) * t;
+      ctx.beginPath();
+      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = edge.type === 'claim' ? '#10b981' : '#ec4899';
+      ctx.shadowColor = edge.type === 'claim' ? '#10b981' : '#ec4899';
+      ctx.shadowBlur = 6;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // Render Nodes
+    for (const node of relayNodes) {
+      const isHovered = relayHoveredNode && relayHoveredNode.id === node.id;
+      const isSelected = relaySelectedNode && relaySelectedNode.id === node.id;
+
+      // Glow halo
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.r + (isHovered || isSelected ? 6 : 2), 0, Math.PI * 2);
+      ctx.fillStyle = isHovered ? 'rgba(6,182,212,0.25)' : 'rgba(255,255,255,0.04)';
+      ctx.fill();
+
+      // Node Body
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+      ctx.fillStyle = node.color;
+      ctx.shadowColor = node.color;
+      ctx.shadowBlur = isHovered || isSelected ? 12 : 5;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Node Border
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255,255,255,0.4)';
+      ctx.stroke();
+
+      // Label text
+      ctx.font = "10px 'JetBrains Mono', monospace";
+      ctx.fillStyle = '#f1f5f9';
+      ctx.textAlign = 'center';
+      ctx.fillText(node.label, node.x, node.y + node.r + 14);
+    }
+
+    relayCanvasAnimId = requestAnimationFrame(render);
+  }
+
+  render();
+}
+
+// Canvas Interaction (Hover / Drag / Inspect)
+if (relayCanvas) {
+  let isDragging = false;
+
+  relayCanvas.addEventListener('mousemove', e => {
+    const rect = relayCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    if (isDragging && relaySelectedNode) {
+      relaySelectedNode.x = mx;
+      relaySelectedNode.y = my;
+      return;
+    }
+
+    let found = null;
+    for (const node of relayNodes) {
+      const dist = Math.hypot(node.x - mx, node.y - my);
+      if (dist <= node.r + 4) {
+        found = node;
+        break;
+      }
+    }
+
+    relayHoveredNode = found;
+    if (found) {
+      relayCanvas.style.cursor = 'pointer';
+      if (relayTooltip) {
+        relayTooltip.style.display = 'block';
+        relayTooltip.style.left = `${Math.min(mx + 12, rect.width - 240)}px`;
+        relayTooltip.style.top = `${Math.min(my + 12, rect.height - 80)}px`;
+        relayTooltip.innerHTML = `
+          <div style="font-weight:700;color:${found.color};">${esc(found.label)}</div>
+          <div style="font-size:.7rem;color:var(--text-secondary);">${esc(found.sub || found.type)}</div>
+          ${found.data?.findings ? `<div style="margin-top:4px;font-size:.68rem;color:var(--text-muted);">${esc(found.data.findings.slice(0, 100))}…</div>` : ''}
+        `;
+      }
+    } else {
+      relayCanvas.style.cursor = 'grab';
+      if (relayTooltip) relayTooltip.style.display = 'none';
+    }
+  });
+
+  relayCanvas.addEventListener('mousedown', e => {
+    if (relayHoveredNode) {
+      relaySelectedNode = relayHoveredNode;
+      isDragging = true;
+      relayCanvas.style.cursor = 'grabbing';
+      if (relayDetail) {
+        relayDetail.innerHTML = `
+          <div style="display:flex;align-items:center;gap:10px;width:100%;">
+            <span style="font-weight:700;color:${relaySelectedNode.color};font-family:'JetBrains Mono',monospace;">Selected: ${esc(relaySelectedNode.label)}</span>
+            <span class="badge badge-purple">${esc(relaySelectedNode.type)}</span>
+            <span style="font-size:.72rem;color:var(--text-muted);">${esc(relaySelectedNode.sub || '')}</span>
+            <button class="btn btn-secondary btn-sm" onclick="this.parentElement.parentElement.innerHTML = 'Inspect metadata and inter-agent relays by clicking any canvas node.'" style="margin-left:auto;padding:2px 8px;font-size:.7rem;">Reset</button>
+          </div>
+          ${relaySelectedNode.data?.findings ? `<div style="width:100%;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:.72rem;background:rgba(0,0,0,0.3);padding:6px;border-radius:4px;">${esc(relaySelectedNode.data.findings)}</div>` : ''}
+        `;
+      }
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDragging = false;
+  });
+}
+
+function updateRelayVisualization(activeScopes = [], reasoningScopes = []) {
+  initRelayCanvas(activeScopes, reasoningScopes);
+}
+
+// Hook into existing renderHarnessTelemetry
+const _prevRenderHarnessTelemetry = renderHarnessTelemetry;
+renderHarnessTelemetry = function(data) {
+  _prevRenderHarnessTelemetry(data);
+  updateRelayVisualization(data.activeScopes || [], data.reasoningScopes || []);
+};
 

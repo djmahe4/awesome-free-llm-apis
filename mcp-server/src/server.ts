@@ -1105,6 +1105,66 @@ export function createExpressApp(): express.Express {
         }
       });
 
+      // ─── Harness & Multi-Agent Telemetry API ─────────────────────────────────
+      app.get('/api/harness/runs', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const workspaceRoot = (req.query.workspace as string) || process.cwd();
+          const harnessDir = path.resolve(workspaceRoot, '.free-llm-mcp', 'harness');
+          if (!fs.existsSync(harnessDir)) {
+            return res.json({ runs: [], activeScopes: [], reasoningScopes: [] });
+          }
+
+          const entries = await fsp.readdir(harnessDir);
+          const runs: any[] = [];
+          for (const runId of entries) {
+            if (!/^[a-zA-Z0-9_\-\.]{1,128}$/.test(runId)) continue;
+            const runJsonPath = path.join(harnessDir, runId, 'run.json');
+            try {
+              if (fs.existsSync(runJsonPath)) {
+                const data = JSON.parse(await fsp.readFile(runJsonPath, 'utf-8'));
+                runs.push(data);
+              }
+            } catch {}
+          }
+
+          // Load active file and reasoning scopes
+          let activeScopes: any[] = [];
+          const scopeFile = path.join(harnessDir, 'scopes.json');
+          if (fs.existsSync(scopeFile)) {
+            try { activeScopes = JSON.parse(await fsp.readFile(scopeFile, 'utf-8')); } catch {}
+          }
+
+          let reasoningScopes: any[] = [];
+          const reasoningFile = path.join(harnessDir, 'reasoning_scopes.json');
+          if (fs.existsSync(reasoningFile)) {
+            try { reasoningScopes = JSON.parse(await fsp.readFile(reasoningFile, 'utf-8')); } catch {}
+          }
+
+          res.json({ runs, activeScopes, reasoningScopes });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      app.get('/api/harness/runs/:runId', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runId } = req.params;
+          const workspaceRoot = (req.query.workspace as string) || process.cwd();
+          const { HarnessStore } = await import('./harness/store.js');
+          const store = new HarnessStore(runId, workspaceRoot);
+          const run = await store.loadRun();
+          if (!run) return res.status(404).json({ error: 'Run not found' });
+          const approvals = await store.listApprovals();
+          const trace = await store.readTrace(100);
+          const rawTasks = await store.loadTasksMarkdown();
+          res.json({ run, approvals, trace, tasks: rawTasks });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
       // POST /api/steering_eval — Live System Prompt Steering & Ingestion Inspection Endpoint
       app.post('/api/steering_eval', express.json({ limit: '1mb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
