@@ -242,6 +242,62 @@ async function main() {
     console.log(`ℹ Schema check completed with ${driftWarnings} parameter variance notices (documented variances).`);
   }
 
+  // 4. Provider Keys & Rate Limit / Health Tracking Sync
+  console.log('\n4. Verifying .env.example provider keys against Quickstart tables and tracking...');
+  const envExamplePath = path.join(mcpDir, '.env.example');
+  const envExampleContent = fs.readFileSync(envExamplePath, 'utf-8');
+
+  // Extract all provider key environment variable names
+  const envKeys = new Set<string>();
+  for (const line of envExampleContent.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const match = trimmed.match(/^([A-Z0-9_]+)=/);
+    if (match) {
+      const varName = match[1];
+      if (
+        varName.endsWith('_KEY') ||
+        varName.endsWith('_TOKEN') ||
+        varName.endsWith('_ID') ||
+        varName.endsWith('_URL')
+      ) {
+        // Exclude server/config keys
+        if (!['FIREBASE_API_KEY', 'FIREBASE_AUTH_DOMAIN', 'FIREBASE_PROJECT_ID', 'FIREBASE_STORAGE_BUCKET', 'FIREBASE_MESSAGING_SENDER_ID', 'FIREBASE_APP_ID', 'FIREBASE_MEASUREMENT_ID', 'MCP_SECRET_KEY'].includes(varName)) {
+          envKeys.add(varName);
+        }
+      }
+    }
+  }
+
+  console.log(`Checking ${envKeys.size} provider environment variables: ${Array.from(envKeys).join(', ')}`);
+
+  // Check coverage in dashboard/index.html quickstart tables
+  const missingInQuickstartKeys: string[] = [];
+  for (const envKey of envKeys) {
+    if (!htmlContent.includes(`<code>${envKey}</code>`)) {
+      missingInQuickstartKeys.push(envKey);
+    }
+  }
+
+  if (missingInQuickstartKeys.length > 0) {
+    console.error(`✗ .env.example keys missing from Quickstart tables in dashboard/index.html: ${missingInQuickstartKeys.join(', ')}`);
+    process.exit(1);
+  }
+  console.log('✓ All .env.example provider keys documented in dashboard Quickstart tables.');
+
+  // Verify rate-limit and circuit breaker error tracking across LLM and Search providers
+  const persistencePath = path.join(mcpDir, 'src', 'utils', 'PersistenceManager.ts');
+  const persistenceContent = fs.readFileSync(persistencePath, 'utf-8');
+  if (!persistenceContent.includes('searchProviders?: Record<string')) {
+    console.error('✗ PersistenceManager missing searchProviders persistent tracking interface.');
+    process.exit(1);
+  }
+  if (!persistenceContent.includes('cooldownUntil?: number')) {
+    console.error('✗ PersistenceManager missing cooldownUntil / rate limit tracking.');
+    process.exit(1);
+  }
+  console.log('✓ PersistenceManager implements durable rate limit & circuit breaker tracking for LLM and Search.');
+
   console.log('\n=== All Pre-Commit Checks Passed Successfully ===');
 }
 

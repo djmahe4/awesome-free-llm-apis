@@ -40,6 +40,11 @@ export interface PersistentUsage {
     cooldownUntil?: number;
     totalErrors?: number;
   }>;
+  searchProviders?: Record<string, {
+    consecutiveFailures?: number;
+    cooldownUntil?: number;
+    lastFailure?: number;
+  }>;
 }
 
 export class PersistenceManager {
@@ -355,6 +360,22 @@ export class PersistenceManager {
         cooldownUntil: mProv.cooldownUntil ?? dProv.cooldownUntil,
         totalErrors: mProv.totalErrors ?? dProv.totalErrors
       };
+    }
+
+    // Merge search providers
+    const baseSearch = base.searchProviders || {};
+    const memSearch = memory.searchProviders || {};
+    if (Object.keys(baseSearch).length > 0 || Object.keys(memSearch).length > 0) {
+      result.searchProviders = { ...baseSearch };
+      for (const [sId, mSProv] of Object.entries(memSearch)) {
+        const dSProv = baseSearch[sId] || {};
+        result.searchProviders[sId] = {
+          ...dSProv,
+          consecutiveFailures: mSProv.consecutiveFailures ?? dSProv.consecutiveFailures,
+          cooldownUntil: mSProv.cooldownUntil ?? dSProv.cooldownUntil,
+          lastFailure: mSProv.lastFailure ?? dSProv.lastFailure
+        };
+      }
     }
 
     return result;

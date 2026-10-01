@@ -150,6 +150,8 @@ export class SearchRouterMiddleware implements Middleware {
             }
           }
 
+          provider.recordSuccess();
+          registry.persistState().catch(() => {});
           context.response = this.formatResponse(query, results, provider.id);
           (context as any).searchTrace = { query, provider: provider.id, results, latencyMs: Date.now() - start };
           this.logSearch(context, query, provider.id, results, Date.now() - start);
@@ -160,6 +162,7 @@ export class SearchRouterMiddleware implements Middleware {
       } catch (err: any) {
         console.error(`[SearchRouter] ${provider.id} failed: ${err.message}`);
         provider.recordFailure(err.status || 500);
+        registry.persistState().catch(() => {});
       }
     }
 

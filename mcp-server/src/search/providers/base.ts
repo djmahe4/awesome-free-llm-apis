@@ -11,7 +11,7 @@ export abstract class BaseSearchProvider implements SearchProvider {
   envVar?: string;
 
   public consecutiveFailures = 0;
-  protected cooldownUntil = 0;
+  public cooldownUntil = 0;
 
   abstract search(query: string, maxResults?: number): Promise<UnifiedSearchResult[]>;
 

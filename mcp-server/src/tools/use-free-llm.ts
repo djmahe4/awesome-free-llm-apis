@@ -984,6 +984,12 @@ export async function flushSystem(): Promise<void> {
   // drops the last batch of request/token counts, which looked like usage
   // "resetting" on every restart.
   await getSharedRouter().persistNow();
+  try {
+    const { SearchProviderRegistry } = await import('../search/registry.js');
+    await SearchProviderRegistry.getInstance().persistState();
+  } catch {
+    // Best-effort search persistence
+  }
 }
 
 interface ParsedToolCall {

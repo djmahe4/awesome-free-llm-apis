@@ -6,6 +6,8 @@ import { DdgsMcpSearchProvider } from './providers/ddgs.js';
 import { JinaSearchProvider } from './providers/jina.js';
 import { SearxngSearchProvider } from './providers/searxng.js';
 
+import { persistence } from '../utils/PersistenceManager.js';
+
 /**
  * Fallback order: Parallel AI -> TinyFish -> Tavily -> DDGS (MCP) -> Jina -> SearXNG.
  * Parallel is keyless/highest-throughput so it goes first; SearXNG is the
@@ -14,6 +16,7 @@ import { SearxngSearchProvider } from './providers/searxng.js';
 export class SearchProviderRegistry {
   private static instance: SearchProviderRegistry;
   private providers: SearchProvider[];
+  private initialized = false;
 
   private constructor() {
     this.providers = [
@@ -29,8 +32,56 @@ export class SearchProviderRegistry {
   static getInstance(): SearchProviderRegistry {
     if (!SearchProviderRegistry.instance) {
       SearchProviderRegistry.instance = new SearchProviderRegistry();
+      SearchProviderRegistry.instance.initFromPersistence().catch(() => {});
     }
     return SearchProviderRegistry.instance;
+  }
+
+  async initFromPersistence(): Promise<void> {
+    if (this.initialized) return;
+    try {
+      const data = await persistence.load();
+      if (data.searchProviders) {
+        for (const p of this.providers) {
+          const spData = data.searchProviders[p.id];
+          if (spData) {
+            if (typeof spData.consecutiveFailures === 'number') {
+              p.consecutiveFailures = spData.consecutiveFailures;
+            }
+            if (typeof spData.cooldownUntil === 'number') {
+              p.cooldownUntil = spData.cooldownUntil;
+            }
+          }
+        }
+      }
+      this.initialized = true;
+    } catch {
+      // Best-effort load
+    }
+  }
+
+  async persistState(): Promise<void> {
+    try {
+      const searchProviders: Record<string, { consecutiveFailures?: number; cooldownUntil?: number; lastFailure?: number }> = {};
+      for (const p of this.providers) {
+        searchProviders[p.id] = {
+          consecutiveFailures: p.consecutiveFailures,
+          cooldownUntil: p.cooldownUntil,
+          lastFailure: p.cooldownUntil ? Date.now() : undefined,
+        };
+      }
+      await persistence.save({
+        lastResetDate: new Date().toISOString().split('T')[0],
+        dailyTotalRequests: 0,
+        dailyTotalTokens: 0,
+        lifetimeTotalRequests: 0,
+        lifetimeTotalTokens: 0,
+        providers: {},
+        searchProviders,
+      });
+    } catch {
+      // Best-effort persist
+    }
   }
 
   static resetInstance(): void {
