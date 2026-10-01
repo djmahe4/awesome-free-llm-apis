@@ -35,21 +35,40 @@ export interface LlmFitRecommendResult {
  * Resolves the path to the Python or llmfit executable inside venv/Scripts.
  */
 export function resolveLlmFitExecutable(startDir?: string): { binaryPath?: string; pythonPath?: string } {
+  const isWin = process.platform === 'win32';
+  const binDirName = isWin ? 'Scripts' : 'bin';
+  const exeName = isWin ? 'llmfit.exe' : 'llmfit';
+  const pyName = isWin ? 'python.exe' : 'python';
+
   const candidates = [
+    startDir ? path.resolve(startDir, 'venv', binDirName) : null,
+    startDir ? path.resolve(startDir, '..', 'venv', binDirName) : null,
+    path.resolve(process.cwd(), 'venv', binDirName),
+    path.resolve(process.cwd(), '..', 'venv', binDirName),
+    // Fallback: check both Scripts and bin regardless of platform
+    startDir ? path.resolve(startDir, 'venv', 'bin') : null,
+    path.resolve(process.cwd(), 'venv', 'bin'),
     startDir ? path.resolve(startDir, 'venv', 'Scripts') : null,
-    startDir ? path.resolve(startDir, '..', 'venv', 'Scripts') : null,
     path.resolve(process.cwd(), 'venv', 'Scripts'),
-    path.resolve(process.cwd(), '..', 'venv', 'Scripts'),
   ].filter(Boolean) as string[];
 
   for (const dir of candidates) {
-    const exe = path.join(dir, 'llmfit.exe');
-    const py = path.join(dir, 'python.exe');
+    const exe = path.join(dir, exeName);
+    const py = path.join(dir, pyName);
+    const exeFallback = path.join(dir, 'llmfit');
+    const pyFallback = path.join(dir, 'python');
+
     if (fs.existsSync(exe)) {
       return { binaryPath: exe, pythonPath: fs.existsSync(py) ? py : undefined };
     }
+    if (fs.existsSync(exeFallback)) {
+      return { binaryPath: exeFallback, pythonPath: fs.existsSync(pyFallback) ? pyFallback : undefined };
+    }
     if (fs.existsSync(py)) {
       return { pythonPath: py };
+    }
+    if (fs.existsSync(pyFallback)) {
+      return { pythonPath: pyFallback };
     }
   }
 
