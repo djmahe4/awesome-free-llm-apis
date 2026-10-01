@@ -1,11 +1,11 @@
 import crypto from 'node:crypto';
-import { deployHarness, resumeHarness, abortHarness } from '../harness/runner.js';
+import { deployHarness, resumeHarness, abortHarness, reorchestrateRole } from '../harness/runner.js';
 import { HarnessStore } from '../harness/store.js';
 import { loadHarnessDeclaration } from '../harness/declaration.js';
 import { parseTasksMarkdown } from './coding-agents.js';
 
 export interface AgentHarnessInput {
-  action: 'deploy' | 'resume' | 'status' | 'approvals' | 'approve' | 'reject' | 'trace' | 'tasks' | 'abort';
+  action: 'deploy' | 'resume' | 'rerun' | 'reorchestrate' | 'status' | 'approvals' | 'approve' | 'reject' | 'trace' | 'tasks' | 'abort';
   runId?: string;              // required for all actions except deploy (which generates one)
   harness?: string;            // declaration name, default 'research-analysis'
   goal?: string;                // required for deploy
@@ -14,6 +14,8 @@ export interface AgentHarnessInput {
   approvalId?: string;         // required for approve/reject
   note?: string;
   limit?: number;              // for trace
+  role?: string;               // for rerun/reorchestrate
+  followupContext?: string;    // for rerun/reorchestrate
 }
 
 export async function agentHarness(input: AgentHarnessInput) {
@@ -33,6 +35,18 @@ export async function agentHarness(input: AgentHarnessInput) {
     case 'resume': {
       if (!input.runId) throw new Error('resume requires `runId`.');
       const run = await resumeHarness(input.runId, input.workspace_root);
+      return { success: true, run };
+    }
+    case 'rerun':
+    case 'reorchestrate': {
+      if (!input.runId) throw new Error(`${input.action} requires \`runId\`.`);
+      if (!input.role) throw new Error(`${input.action} requires \`role\`.`);
+      const run = await reorchestrateRole({
+        runId: input.runId,
+        role: input.role,
+        workspaceRoot: input.workspace_root,
+        followupContext: input.followupContext,
+      });
       return { success: true, run };
     }
     case 'status': {

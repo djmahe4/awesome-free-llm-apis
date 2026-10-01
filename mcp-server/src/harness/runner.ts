@@ -1312,3 +1312,60 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
 export function abortHarness(runId: string): boolean {
   return RunRegistry.abort(`harness:${runId}`);
 }
+
+export interface ReorchestrateRoleInput {
+  runId: string;
+  role: string;
+  workspaceRoot?: string;
+  followupContext?: string;
+}
+
+export async function reorchestrateRole(input: ReorchestrateRoleInput): Promise<HarnessRun> {
+  const store = new HarnessStore(input.runId, input.workspaceRoot);
+  const run = await store.loadRun();
+  if (!run) throw new Error(`No run found for runId '${input.runId}'`);
+
+  const decl = await loadHarnessDeclaration(run.declarationName, input.workspaceRoot);
+  assertWorkspaceRootAllowed(decl, input.workspaceRoot);
+
+  const rawTasks = await store.loadTasksMarkdown();
+  if (!rawTasks) throw new Error(`Tasks file not found for run '${input.runId}'`);
+
+  // Uncheck target role in tasks.md
+  const updatedTasks = rawTasks.replace(new RegExp(`- \\[x\\] ${input.role}\\b`, 'i'), `- [ ] ${input.role}`);
+  await store.saveTasksMarkdown(updatedTasks);
+
+  await store.appendTrace({
+    runId: run.runId,
+    role: input.role,
+    type: 'plan',
+    data: { action: 'reorchestrate_role', followupContext: input.followupContext }
+  });
+
+  run.status = 'running';
+  run.updatedAt = Date.now();
+  run.error = undefined;
+  await store.saveRun(run);
+
+  const roles = await loadStepRoles(store, decl, run.goal);
+  const registryKey = `harness:${run.runId}`;
+  const runInfo = RunRegistry.start(registryKey);
+
+  const roleIndex = roles.indexOf(input.role);
+  const startIndex = roleIndex >= 0 ? roleIndex : 0;
+
+  (async () => {
+    try {
+      const priorHandoff = await lastHandoff(store);
+      const combinedGoal = input.followupContext ? `${run.goal}\n\n[Followup Instructions for ${input.role}]: ${input.followupContext}` : run.goal;
+      await finishStepsAndEnvelope(store, run, decl, roles, startIndex, combinedGoal, input.workspaceRoot, registryKey, runInfo.controller.signal.aborted, priorHandoff, undefined, undefined);
+      await finalizeRun(store, run, registryKey);
+    } catch (err: any) {
+      run.status = 'failed';
+      run.error = err?.message || String(err);
+      await finalizeRun(store, run, registryKey);
+    }
+  })().catch(() => {});
+
+  return run;
+}

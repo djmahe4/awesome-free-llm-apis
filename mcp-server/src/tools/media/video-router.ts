@@ -124,7 +124,7 @@ export async function generateMotionClip(
     return `${baseUrl}/${encodeURIComponent(prompt)}?model=alibaba/wan-2.2-fast&duration=5${keyParam}`;
   }
 
-  const { Client } = await import('@gradio/client');
+  const { Client } = (await (Function('m', 'return import(m)')('@gradio/client'))) as any;
   // Use active official or mirrored spaces
   let spaceId = 'Wan-AI/Wan2.1';
   if (engine === 'ltx' || engine === 'ltx-2') {
