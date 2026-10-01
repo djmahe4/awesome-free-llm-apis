@@ -47,9 +47,11 @@ export abstract class BaseSearchProvider implements SearchProvider {
     }
   }
 
-  recordSuccess(): void {
+  recordSuccess(): boolean {
+    const changed = this.consecutiveFailures > 0 || this.cooldownUntil > 0 || this.lastFailure > 0;
     this.consecutiveFailures = 0;
     this.cooldownUntil = 0;
     this.lastFailure = 0;
+    return changed;
   }
 }

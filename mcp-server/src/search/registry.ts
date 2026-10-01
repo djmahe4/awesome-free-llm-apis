@@ -16,6 +16,7 @@ import { persistence } from '../utils/PersistenceManager.js';
 export class SearchProviderRegistry {
   private static instance: SearchProviderRegistry;
   private providers: SearchProvider[];
+  private initPromise: Promise<void> | null = null;
   private initialized = false;
 
   private constructor() {
@@ -32,7 +33,7 @@ export class SearchProviderRegistry {
   static getInstance(): SearchProviderRegistry {
     if (!SearchProviderRegistry.instance) {
       SearchProviderRegistry.instance = new SearchProviderRegistry();
-      SearchProviderRegistry.instance.initFromPersistence().catch(() => {});
+      SearchProviderRegistry.instance.initPromise = SearchProviderRegistry.instance.initFromPersistence();
     }
     return SearchProviderRegistry.instance;
   }
@@ -65,6 +66,9 @@ export class SearchProviderRegistry {
 
   async persistState(): Promise<void> {
     try {
+      if (this.initPromise) {
+        await this.initPromise;
+      }
       const searchProviders: Record<string, { consecutiveFailures?: number; cooldownUntil?: number; lastFailure?: number }> = {};
       for (const p of this.providers) {
         searchProviders[p.id] = {
@@ -81,6 +85,12 @@ export class SearchProviderRegistry {
 
   static resetInstance(): void {
     (SearchProviderRegistry as any).instance = undefined;
+  }
+
+  async ensureInitialized(): Promise<void> {
+    if (this.initPromise) {
+      await this.initPromise;
+    }
   }
 
   getProviders(): SearchProvider[] {

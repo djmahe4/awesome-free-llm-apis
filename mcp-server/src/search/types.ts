@@ -20,6 +20,6 @@ export interface SearchProvider {
   isAvailable(): boolean;
   search(query: string, maxResults?: number): Promise<UnifiedSearchResult[]>;
   recordFailure(status: number): void;
-  recordSuccess(): void;
+  recordSuccess(): boolean;
   getPenaltyScore(): number;
 }

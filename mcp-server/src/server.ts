@@ -344,7 +344,9 @@ export function createExpressApp(): express.Express {
       // Search-provider health for the dashboard's Providers tab Search section (v1.0.9).
       app.get('/api/search-provider-stats', async (req, res) => {
         try {
-          const providers = SearchProviderRegistry.getInstance().getProviders();
+          const registry = SearchProviderRegistry.getInstance();
+          await registry.ensureInitialized();
+          const providers = registry.getProviders();
           const stats = providers.map(p => ({
             id: p.id,
             name: p.name,
