@@ -145,7 +145,14 @@ export class GeminiProvider extends BaseProvider {
         content: `${systemParts.join('\n\n')}\n\n${filteredMessages[0].content}`,
       };
     }
-    const normalizedMessages = filteredMessages.length > 0 ? filteredMessages : request.messages ?? [];
+    let normalizedMessages: any[];
+    if (filteredMessages.length > 0) {
+      normalizedMessages = filteredMessages;
+    } else if (systemParts.length > 0) {
+      normalizedMessages = [{ role: 'user', content: systemParts.join('\n\n') }];
+    } else {
+      normalizedMessages = [{ role: 'user', content: 'Hello' }];
+    }
 
     let result;
     try {

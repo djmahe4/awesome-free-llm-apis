@@ -451,6 +451,7 @@ export function createExpressApp(): express.Express {
                   skipIndexing: !!params.skipIndexing,
                   action: params.action,
                   resume_input: params.resume_input,
+                  signal: toolAbort.signal,
                 });
                 result = { content: r?.choices?.[0]?.message?.content ?? '', model: r?.model, provider: r?._providerId };
               } finally {
