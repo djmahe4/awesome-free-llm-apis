@@ -83,6 +83,33 @@ async function main() {
     console.log('✓ Dedicated reference markdown files verified.');
   }
 
+  // Verify Architectural and Core Documentation Integrity
+  const requiredDocs = [
+    { file: path.join(mcpDir, 'docs', 'guide.md'), needles: ['SearchRouterMiddleware', 'Phase 3: Routing', 'Quantum Scoring'] },
+    { file: path.join(mcpDir, 'docs', 'setup.md'), needles: ['SearchRouterMiddleware', 'agent_harness', 'coding_agents'] },
+    { file: path.join(mcpDir, 'docs', 'mcp-development.md'), needles: ['skill/references/architecture.md', 'skill/references/memory-usage.md', 'skill/references/agent_harness.md'] },
+    { file: path.join(mcpDir, 'docs', 'skill', 'references', 'architecture.md'), needles: ['SearchRouterMiddleware', 'PersistenceManager', 'Consolidated Pipeline Directory Layout'] },
+    { file: path.join(mcpDir, 'docs', 'skill', 'references', 'memory-usage.md'), needles: ['PersistenceManager', 'searchProviders', 'LOCAL_PERSIST_INTERVAL_MS'] },
+    { file: path.join(mcpDir, 'README.md'), needles: ['15 zero-token-cost tools', 'SearchRouterMiddleware', 'agent_harness'] },
+    { file: path.join(rootDir, 'README.md'), needles: ['15 zero-cost tools', 'SearchRouterMiddleware', 'agent_harness'] }
+  ];
+
+  for (const doc of requiredDocs) {
+    if (!fs.existsSync(doc.file)) {
+      console.error(`✗ Missing required documentation file: ${path.relative(rootDir, doc.file)}`);
+      process.exit(1);
+    }
+    const content = fs.readFileSync(doc.file, 'utf-8');
+    for (const needle of doc.needles) {
+      if (!content.includes(needle)) {
+        console.error(`✗ Documentation drift in ${path.relative(rootDir, doc.file)}: missing required section/token "${needle}"`);
+        process.exit(1);
+      }
+    }
+  }
+  console.log('✓ Core documentation and architectural references verified.');
+
+
   // Check Dashboard Playground and Quickstart tabs
   const dashboardHtmlPath = path.join(mcpDir, 'dashboard', 'index.html');
   const dashboardAppPath = path.join(mcpDir, 'dashboard', 'app.js');

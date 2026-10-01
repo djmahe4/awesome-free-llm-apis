@@ -48,17 +48,21 @@ graph TD
  
 ---
  
-#### Phase 3: Routing & LLM Execution
-Finally, the request is routed depending on whether it contains images, scored using the quantum router, and dispatched to the LLM. If a confused user state is detected, fallback trial ordering is reversed and a guiding system note is appended — this no longer affects indexing (see note below).
+#### Phase 3: Routing, Grounded Search & LLM Execution
+Finally, if search grounding is requested, `SearchRouterMiddleware` executes the query across free search providers. Otherwise, the request is routed depending on whether it contains images, scored using the quantum router, and dispatched to the LLM. If a confused user state is detected, fallback trial ordering is reversed and a guiding system note is appended — this no longer affects indexing (see note below).
  
 ```mermaid
 graph TD
-    A["Phase 3 Entry"] --> B["5. ImageRouterMiddleware<br/>(Checks for images/multimodal)"]
+    A["Phase 3 Entry"] --> S["5. SearchRouterMiddleware<br/>(Checks google_search / SemanticSearch)"]
+    S -->|Search Match| S1["Execute SearchRouter Fallback Cascade<br/>Parallel -> TinyFish -> Tavily -> DDGS -> Jina -> SearXNG"]
+    S1 --> S2["Format Grounded Search Response<br/>CDP Soup Fallback for Full Page Content"]
+    S2 --> M["Return Final Response"]
+    S -->|Standard Request| B["6. ImageRouterMiddleware<br/>(Checks for images/multimodal)"]
     B -->|Contains Images| C["ImageRouter Exec"]
     C --> D{isUserConfused?}
     D -->|Yes| E["Reverse Order: Try Cheapest VLM First<br/>Append Guiding System Note"]
     D -->|No| F["Sort Descending: Try S-Tier VLM First<br/>Pass prompt as-is"]
-    B -->|Text Only| G["6. TextRouterMiddleware<br/>(Classifies TaskType)"]
+    B -->|Text Only| G["7. TextRouterMiddleware<br/>(Classifies TaskType)"]
     G --> H{isUserConfused?}
     H -->|Yes| I["Reverse Order: Try Cheapest LLM First<br/>Append Guiding System Note"]
     H -->|No| J["Quantum Scoring<br/>(Scores models by capability & context)"]
@@ -67,19 +71,20 @@ graph TD
     F --> L
     I --> L
     K --> L
-    L --> M["Return Final Response"]
+    L --> M
 ```
 
-### Pipeline Order (v1.0.7 Update)
+### Pipeline Order (v1.1.0 Update)
 1. **`StructuralMarkdownMiddleware`**: Resolves `file://` and `artifact://` URIs with security boundary checks.
 2. **`ResponseCacheMiddleware`**: Checks if a result exists in the persistent workspace-aware cache.
 3. **`WorkspaceContextMiddleware`**: Injects vector-searched memory and system prompts. Backgrounds (via `setImmediate`, non-blocking) a pre-emptive workspace re-index followed by wiki maintenance, gated on `agentic: true` + a `workspace_root`. **Bypassed only if the caller sets `skipIndexing: true` on the request itself** — see note below.
 4. **`AgenticMiddleware`**: Decomposes tasks into subtasks and manages execution loops.
-5. **`ImageRouterMiddleware`**: Intercepts local/remote image files, checks for confused/empty prompts (image-only), reverses model trial order to save token budget, and appends a guiding system note.
-6. **`TextRouterMiddleware`**: Routes text prompts. Reverses model trial order and appends a guiding system note for file-only/generic confused queries.
+5. **`SearchRouterMiddleware`**: Free-provider fallback search (`Parallel AI` &rarr; `TinyFish` &rarr; `Tavily` &rarr; `DuckDuckGo MCP` &rarr; `Jina AI` &rarr; `SearXNG`). Persists health & rate-limit circuit breakers to disk.
+6. **`ImageRouterMiddleware`**: Intercepts local/remote image files, checks for confused/empty prompts (image-only), reverses model trial order to save token budget, and appends a guiding system note.
+7. **`TextRouterMiddleware`**: Routes text prompts. Reverses model trial order and appends a guiding system note for file-only/generic confused queries. Employs quantum state scoring and collapse.
 
 > [!NOTE]
-> **`skipIndexing` is caller-set only.** `WorkspaceContextMiddleware` runs *before* `AgenticMiddleware`/`ImageRouterMiddleware`/`TextRouterMiddleware` in the pipeline and reads `skipIndexing` before calling `next()`, so none of those downstream middlewares can set it in time to have any effect — it must already be `true` on the incoming request (see `use_free_llm`'s `skipIndexing` parameter in `SKILL.md`). Earlier versions had the confused-user branches in `ImageRouterMiddleware`/`TextRouterMiddleware` also set this flag; that was dead code (set too late to matter) and was removed. PDF/image content reaching the workspace wiki is unaffected either way — see §8, which runs independently of this gate.
+> **`skipIndexing` is caller-set only.** `WorkspaceContextMiddleware` runs *before* downstream middlewares in the pipeline and reads `skipIndexing` before calling `next()`, so none of those downstream middlewares can set it in time to have any effect — it must already be `true` on the incoming request (see `use_free_llm`'s `skipIndexing` parameter in `SKILL.md`). PDF/image content reaching the workspace wiki is unaffected either way — see §8, which runs independently of this gate.
 
 ---
 

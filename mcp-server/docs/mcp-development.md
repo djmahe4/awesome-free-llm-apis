@@ -134,7 +134,9 @@ Register your new middleware by adding it to the `PipelineExecutor` instantiatio
 ## 📖 Architectural References
  
 To avoid documentation drift, refer to the following single sources of truth:
-- For the full request lifecycle and routing design, see the [Workflow & Architecture Guide](guide.md).
+- For the full request lifecycle and routing design, see the [Workflow & Architecture Guide](guide.md) and [Architecture Steering Reference](skill/references/architecture.md).
+- For persistent memory, wiki structures, and state durability, see [Memory Usage Reference](skill/references/memory-usage.md).
+- For agentic harness execution, scope isolation, and handoff protocols, see [Agent Harness Reference](skill/references/agent_harness.md).
 - For autonomous multi-file refactoring, CAS checkpointing, and LSP verification, see the [Coding Agents Reference](skill/references/coding_agents.md).
 - For single-file offline local patching, see the [Local LLM Patch Reference](skill/references/local_llm_patch.md).
 - For browser automation and session scraping, see the [Browser Tool Reference](skill/references/browser_tool.md).

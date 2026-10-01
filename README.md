@@ -47,14 +47,15 @@ This repository is powered by an integrated **MCP (Model Context Protocol)** ser
 
 ### 🚀 Integrated MCP Server
 
-The [`mcp-server`](mcp-server/) directory contains a production-grade MCP server (`@mcp:free-llm-apis`) that provides:
-- **Universal Chat Pipeline**: Deterministic routing across 60+ providers with automatic failover.
-- **Persistent Workspace Memory**: Long-term memory and skill harvesting rooted to your project workspace.
-- **Structural Grounding**: Automatic injection of directory trees and source code snippets via keyword-steered `grep`.
-- **Vision module**: Integrated image understanding tool call.
+The [`mcp-server`](mcp-server/) directory contains an enterprise-grade MCP server (`@mcp:free-llm-apis`) exposing 15 zero-cost tools:
+- **Universal Chat Pipeline (`use_free_llm`)**: Deterministic quantum-inspired model routing across 70+ free models with automatic failover and background DAG subtask execution.
+- **Search Grounding (`SearchRouterMiddleware`)**: Free multi-provider web search fallback (`Parallel AI` &rarr; `TinyFish` &rarr; `Tavily` &rarr; `DuckDuckGo MCP` &rarr; `Jina AI` &rarr; `SearXNG`) with persistent circuit breaker tracking.
+- **Autonomous Multi-Agent Harness (`agent_harness`)**: Declarative agent workflows, file ownership locks, reasoning scope isolation, and human-in-the-loop approvals.
+- **Persistent Workspace Memory & Wiki (`manage_memory`)**: Content-addressed vector storage, automatic ADR harvesting, and persistent health tracking rooted to your project workspace.
+- **Refactoring & Diagnostics**: OMP-style multi-file refactoring (`coding_agents`), offline local model patching (`local_llm_patch`), multi-hypothesis reasoning (`quantum_tool`), real browser automation (`browser_tool`), and visual UI regression testing (`vision_tool`).
 
 > [!TIP]
-> To enable full agentic capabilities in your IDE (Claude Desktop, Cursor, Windsurf), follow the [MCP Setup Guide](mcp-server/README.md#client-configurations).
+> To enable full agentic capabilities in your IDE (Claude Desktop, Cursor, Windsurf), follow the [MCP Setup Guide](mcp-server/docs/setup.md) and [Client Configurations](mcp-server/README.md#client-configurations).
 
 
 ## Provider APIs
