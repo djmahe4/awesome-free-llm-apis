@@ -1,0 +1,26 @@
+# .pre-commit-config.yaml
+# Automates code quality gates: tsc compiler check, tool/docs/skills/dashboard sync,
+# and quickstart/playground schema validation.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.min\.js$|\.map$'
+      - id: end-of-file-fixer
+        exclude: '\.min\.js$|\.map$'
+      - id: check-yaml
+        args: ['--unsafe']
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      - id: verify-precommit-quality-and-tools
+        name: TypeScript Compiler & Tool/Docs/Dashboard Sync
+        entry: npm run verify:precommit --prefix mcp-server
+        language: system
+        files: ^mcp-server/(src|dashboard|docs|scripts)/.*
+        pass_filenames: false

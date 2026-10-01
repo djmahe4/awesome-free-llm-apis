@@ -735,6 +735,31 @@ const TOOLS = [
       { id: 'providerId', label: 'Provider ID', type: 'text', placeholder: 'groq' },
     ]
   },
+  {
+    id: 'agent_harness', label: 'agent_harness', icon: '⚡',
+    tag: 'Multi-Agent Harness',
+    fields: [
+      { id: 'action', label: 'Action', type: 'select', options: ['deploy', 'resume', 'rerun', 'reorchestrate', 'status', 'approvals', 'approve', 'reject', 'trace', 'tasks', 'abort'] },
+      { id: 'goal', label: 'Goal (for deploy)', type: 'textarea', placeholder: 'Audit authentication flow and harden session tokens' },
+      { id: 'runId', label: 'Run ID', type: 'text', placeholder: 'Run UUID (leave blank for new deploy)' },
+      { id: 'harness', label: 'Harness Template', type: 'text', placeholder: 'research-analysis' },
+      { id: 'role', label: 'Role Name (for rerun)', type: 'text', placeholder: 'security-reviewer' },
+      { id: 'followupContext', label: 'Followup Steering Context (for rerun)', type: 'textarea', placeholder: 'Focus strictly on JWT cookie scoping' },
+      { id: 'approvalId', label: 'Approval ID (for approve/reject)', type: 'text', placeholder: 'appr-123' },
+      { id: 'workspace_root', label: 'Workspace Root (optional)', type: 'text', placeholder: 'C:/path/to/project' },
+      { id: 'maxTokens', label: 'Max Tokens (optional)', type: 'number', placeholder: '60000' }
+    ]
+  },
+  {
+    id: 'movie_tool', label: 'movie_tool', icon: '🎬',
+    tag: 'Vibe Movie Engine',
+    fields: [
+      { id: 'action', label: 'Action', type: 'select', options: ['generate_manifest', 'render_timeline', 'transcribe_audio', 'generate_tts', 'generate_music', 'video_generation', 'status'] },
+      { id: 'prompt', label: 'Creative Prompt', type: 'textarea', placeholder: 'Cyberpunk rainy alleyway with neon signs' },
+      { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'movie-session-1' },
+      { id: 'lane', label: 'Media Lane', type: 'select', options: ['all', 'audio', 'video', 'music', 'metadata'] }
+    ]
+  }
 ];
 
 let activeTool = TOOLS[0];

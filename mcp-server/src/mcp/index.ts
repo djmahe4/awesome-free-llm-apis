@@ -834,7 +834,7 @@ export async function createMCPServer(): Promise<Server> {
         inputSchema: {
           type: 'object' as const,
           properties: {
-            action: { type: 'string', enum: ['deploy', 'resume', 'status', 'approvals', 'approve', 'reject', 'trace', 'tasks', 'abort'] },
+            action: { type: 'string', enum: ['deploy', 'resume', 'rerun', 'reorchestrate', 'status', 'approvals', 'approve', 'reject', 'trace', 'tasks', 'abort'] },
             runId: { type: 'string', description: 'Run identifier. Required for every action except deploy (which generates one if omitted).' },
             harness: { type: 'string', description: 'Harness declaration name (default "research-analysis")' },
             goal: { type: 'string', description: 'Research/analysis objective (required for deploy)' },
@@ -843,6 +843,8 @@ export async function createMCPServer(): Promise<Server> {
             approvalId: { type: 'string', description: 'Approval request id (required for approve/reject)' },
             note: { type: 'string', description: 'Optional note attached to an approve/reject decision' },
             limit: { type: 'number', description: 'Max trace events to return (default 200)' },
+            role: { type: 'string', description: 'Target role name to selectively rerun or reorchestrate' },
+            followupContext: { type: 'string', description: 'Optional steering instructions or context injected into rerun role' },
           },
           required: ['action'],
         },

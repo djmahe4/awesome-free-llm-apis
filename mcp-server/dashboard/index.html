@@ -750,6 +750,34 @@
             </tbody>
           </table>
         </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">agent_harness</span><span class="qs-tool-desc">Multi-agent declarative harness runner with file leases, reasoning relay & role rerun</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum: deploy | resume | rerun | reorchestrate | status | approvals | approve | reject | trace | tasks | abort</td><td>✓</td><td>Lifecycle command</td></tr>
+              <tr><td><code>goal</code></td><td>string</td><td>for deploy</td><td>Autonomous multi-agent mission objective</td></tr>
+              <tr><td><code>runId</code></td><td>string</td><td>for resume/rerun/status</td><td>Harness run UUID (generated on deploy)</td></tr>
+              <tr><td><code>role</code></td><td>string</td><td>for rerun/reorchestrate</td><td>Target agent role to rerun without clearing prior steps</td></tr>
+              <tr><td><code>followupContext</code></td><td>string</td><td>for rerun/reorchestrate</td><td>Steering instructions or feedback injected into role prompt</td></tr>
+              <tr><td><code>approvalId</code></td><td>string</td><td>for approve/reject</td><td>Pending approval UUID</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace directory boundary</td></tr>
+              <tr><td><code>maxTokens</code></td><td>number</td><td></td><td>Per-run ceiling budget override</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">movie_tool</span><span class="qs-tool-desc">Multi-lane media generation orchestrator (Audio, Video, Music, Story, Metadata)</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>generate_manifest | render_timeline | transcribe_audio | generate_tts | generate_music | video_generation | status</td></tr>
+              <tr><td><code>prompt</code></td><td>string</td><td>✓</td><td>Creative scene or narrative prompt</td></tr>
+              <tr><td><code>lane</code></td><td>enum</td><td></td><td>all | audio | video | music | metadata</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session identifier for manifest persistence</td></tr>
+            </tbody>
+          </table>
+        </details>
       </div>
 
       <!-- Prompting & Steering Guide -->
