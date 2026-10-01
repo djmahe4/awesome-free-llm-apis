@@ -54,7 +54,7 @@ export class GeminiProvider extends BaseProvider {
     return this.cachedPythonPath;
   }
 
-  private async runPythonClient(request: any, timeoutMs: number = 30000): Promise<any> {
+  private async runPythonClient(request: any, timeoutMs: number = 30000, signal?: AbortSignal): Promise<any> {
     const pythonPath = this.resolvePythonPath();
     const scriptPath = path.join(__dirname, 'gemini_client.py');
     if (process.env.DEBUG) {
@@ -62,9 +62,21 @@ export class GeminiProvider extends BaseProvider {
     }
 
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        return reject(new Error('Operation aborted'));
+      }
+
       const py = spawn(pythonPath, [scriptPath], {
         env: { ...process.env }
       });
+
+      const onAbort = () => {
+        py.kill();
+        reject(new Error('Operation aborted'));
+      };
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
 
       const timer = setTimeout(() => {
         py.kill();
@@ -91,6 +103,9 @@ export class GeminiProvider extends BaseProvider {
 
       py.on('close', (code) => {
         clearTimeout(timer);
+        if (signal) {
+          signal.removeEventListener('abort', onAbort);
+        }
         if (code !== 0) {
           try {
             const err = JSON.parse(stderr);
@@ -163,7 +178,7 @@ export class GeminiProvider extends BaseProvider {
         temperature: request.temperature,
         response_format: request.response_format,
         google_search: request.google_search,
-      }, timeoutMs);
+      }, timeoutMs, request.signal || request.abortSignal);
     } catch (err: any) {
       const error = new Error(`Gemini Error: ${err.message}`);
       const msg = err.message.toLowerCase();
@@ -221,9 +236,21 @@ export class GeminiProvider extends BaseProvider {
       actualModel = 'gemini-3.1-flash-lite';
     }
 
+    const sig = request.signal || request.abortSignal;
+    if (sig?.aborted) {
+      throw new Error('Operation aborted');
+    }
+
     const py = spawn(pythonPath, [scriptPath], {
       env: { ...process.env }
     });
+
+    const onAbort = () => {
+      py.kill();
+    };
+    if (sig) {
+      sig.addEventListener('abort', onAbort, { once: true });
+    }
     const input = JSON.stringify({
       model: actualModel,
       messages: request.messages,
@@ -274,6 +301,9 @@ export class GeminiProvider extends BaseProvider {
       hasError = true;
       throw e;
     } finally {
+      if (sig) {
+        sig.removeEventListener('abort', onAbort);
+      }
       if (!hasError && stderrStr.trim()) {
         const msg = stderrStr.toLowerCase();
         if (msg.includes('error') || msg.includes('traceback') || msg.includes('exception')) {

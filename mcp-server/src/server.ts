@@ -442,6 +442,8 @@ export function createExpressApp(): express.Express {
               const TOOL_TIMEOUT_MS = 120_000;
               const toolAbort = new AbortController();
               const toolTimer = setTimeout(() => toolAbort.abort(), TOOL_TIMEOUT_MS);
+              const onClose = () => toolAbort.abort();
+              req.on('close', onClose);
               try {
                 const r = await useFreeLLM({
                   messages,
@@ -458,6 +460,7 @@ export function createExpressApp(): express.Express {
                 result = { content: r?.choices?.[0]?.message?.content ?? '', model: r?.model, provider: r?._providerId };
               } finally {
                 clearTimeout(toolTimer);
+                req.off('close', onClose);
               }
               break;
             }
