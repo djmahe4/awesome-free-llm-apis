@@ -264,6 +264,70 @@ export class PersistenceManager {
   }
 
   /**
+   * Persists search provider circuit-breaker states without altering LLM usage counters
+   * or corrupting the in-memory delta baseline (lastSavedState).
+   */
+  async saveSearchProviders(searchProviders: Record<string, { consecutiveFailures?: number; cooldownUntil?: number; lastFailure?: number }>): Promise<void> {
+    const releaseLock = await this.acquireLock();
+    try {
+      await this.ensureStorage();
+      const today = new Date().toISOString().split('T')[0];
+
+      let diskState: PersistentUsage;
+      try {
+        if (await fs.pathExists(this.filePath)) {
+          const raw = await fs.readFile(this.filePath, 'utf8');
+          const decrypted = await decrypt(raw);
+          diskState = JSON.parse(decrypted);
+        } else {
+          throw new Error('File does not exist');
+        }
+      } catch (e) {
+        diskState = {
+          lastResetDate: today,
+          dailyTotalRequests: 0,
+          dailyTotalTokens: 0,
+          lifetimeTotalRequests: 0,
+          lifetimeTotalTokens: 0,
+          providers: {}
+        };
+      }
+
+      // Update diskState searchProviders
+      diskState.searchProviders = {
+        ...(diskState.searchProviders || {}),
+        ...searchProviders
+      };
+
+      // Also update searchProviders on lastSavedState if present, keeping baseline counters untouched
+      if (this.lastSavedState) {
+        this.lastSavedState.searchProviders = {
+          ...(this.lastSavedState.searchProviders || {}),
+          ...searchProviders
+        };
+      }
+
+      const tmpPath = `${this.filePath}.tmp`;
+      const serialized = JSON.stringify(diskState);
+      const encrypted = await encrypt(serialized);
+      await fs.writeFile(tmpPath, encrypted, 'utf8');
+      await fs.rename(tmpPath, this.filePath);
+
+      try {
+        const backupTmpPath = `${this.backupPath}.tmp`;
+        await fs.writeFile(backupTmpPath, encrypted, 'utf8');
+        await fs.rename(backupTmpPath, this.backupPath);
+      } catch (backupErr) {
+        console.error('Failed to write usage stats backup:', backupErr);
+      }
+    } catch (e) {
+      console.error('Error saving search providers state:', e);
+    } finally {
+      await releaseLock();
+    }
+  }
+
+  /**
    * Zeroes the counter fields (but not identity/session fields) on the in-memory delta
    * baseline (lastSavedState), so the next save()'s merge() computes deltas relative to
    * zero instead of the pre-reset totals. Must be called immediately after a caller resets

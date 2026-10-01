@@ -12,6 +12,7 @@ export abstract class BaseSearchProvider implements SearchProvider {
 
   public consecutiveFailures = 0;
   public cooldownUntil = 0;
+  public lastFailure = 0;
 
   abstract search(query: string, maxResults?: number): Promise<UnifiedSearchResult[]>;
 
@@ -33,6 +34,7 @@ export abstract class BaseSearchProvider implements SearchProvider {
   }
 
   recordFailure(status: number, retryAfterSeconds?: number): void {
+    this.lastFailure = Date.now();
     if (this.consecutiveFailures < 100) this.consecutiveFailures++;
     if (status === 429) {
       const cooldownMs = retryAfterSeconds ? retryAfterSeconds * 1000 : 60_000;
@@ -48,5 +50,6 @@ export abstract class BaseSearchProvider implements SearchProvider {
   recordSuccess(): void {
     this.consecutiveFailures = 0;
     this.cooldownUntil = 0;
+    this.lastFailure = 0;
   }
 }

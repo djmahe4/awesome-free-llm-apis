@@ -16,6 +16,7 @@ export interface SearchProvider {
   envVar?: string;
   consecutiveFailures: number;
   cooldownUntil?: number;
+  lastFailure?: number;
   isAvailable(): boolean;
   search(query: string, maxResults?: number): Promise<UnifiedSearchResult[]>;
   recordFailure(status: number): void;

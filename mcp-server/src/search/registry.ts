@@ -51,6 +51,9 @@ export class SearchProviderRegistry {
             if (typeof spData.cooldownUntil === 'number') {
               p.cooldownUntil = spData.cooldownUntil;
             }
+            if (typeof spData.lastFailure === 'number') {
+              p.lastFailure = spData.lastFailure;
+            }
           }
         }
       }
@@ -67,18 +70,10 @@ export class SearchProviderRegistry {
         searchProviders[p.id] = {
           consecutiveFailures: p.consecutiveFailures,
           cooldownUntil: p.cooldownUntil,
-          lastFailure: p.cooldownUntil ? Date.now() : undefined,
+          lastFailure: p.lastFailure || undefined,
         };
       }
-      await persistence.save({
-        lastResetDate: new Date().toISOString().split('T')[0],
-        dailyTotalRequests: 0,
-        dailyTotalTokens: 0,
-        lifetimeTotalRequests: 0,
-        lifetimeTotalTokens: 0,
-        providers: {},
-        searchProviders,
-      });
+      await persistence.saveSearchProviders(searchProviders);
     } catch {
       // Best-effort persist
     }
