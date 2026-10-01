@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { getModelInfo } from '../services/llmfit.js';
 
 /**
  * Standalone helper for a genuinely LOCAL Ollama server (http://localhost:11434
@@ -109,11 +110,35 @@ export function rankCandidateModels(availableModels: string[]): string[] {
   return [...preferred, ...rest];
 }
 
-export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number }): Promise<OllamaLocalChatResult> {
+export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number; numCtx?: number }): Promise<OllamaLocalChatResult> {
   const url = `${getBaseUrl()}/api/chat`;
   const timeoutMs = computeChatTimeoutMs(messages);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let numCtx = options?.numCtx;
+  if (!numCtx) {
+    const promptChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+    const estimatedPromptTokens = Math.ceil(promptChars / 3.5);
+    const headroom = options?.maxTokens ?? 4096;
+    const needed = estimatedPromptTokens + headroom;
+
+    if (process.env.OLLAMA_CONTEXT_LENGTH) {
+      const envCtx = parseInt(process.env.OLLAMA_CONTEXT_LENGTH, 10);
+      if (!isNaN(envCtx) && envCtx > 0) numCtx = Math.max(envCtx, needed);
+    }
+
+    if (!numCtx) {
+      try {
+        const fitInfo = await getModelInfo(model);
+        const maxSupported = fitInfo?.contextLength ?? 32768;
+        numCtx = Math.min(Math.max(2048, needed), maxSupported);
+      } catch {
+        numCtx = Math.min(Math.max(2048, needed), 32768);
+      }
+    }
+  }
+
   let response;
   try {
     response = await fetch(url, {
@@ -126,6 +151,7 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
         options: {
           temperature: options?.temperature,
           num_predict: options?.maxTokens,
+          num_ctx: numCtx,
         },
       }),
       signal: controller.signal as any,

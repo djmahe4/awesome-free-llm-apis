@@ -34,8 +34,8 @@ try {
     execSync(`"${sysPython}" -m venv "${venvDir}"`, { stdio: 'inherit' });
   }
 
-  console.log('Installing/upgrading Python dependencies (pymupdf, google-genai, duckduckgo-mcp-server, kokoro-onnx, soundfile)...');
-  execSync(`"${pythonPath}" -m pip install pymupdf google-genai duckduckgo-mcp-server kokoro-onnx soundfile`, { stdio: 'inherit' });
+  console.log('Installing/upgrading Python dependencies (pymupdf, google-genai, duckduckgo-mcp-server, kokoro-onnx, soundfile, llmfit)...');
+  execSync(`"${pythonPath}" -m pip install pymupdf google-genai duckduckgo-mcp-server kokoro-onnx soundfile llmfit`, { stdio: 'inherit' });
   console.log('Python virtual environment setup complete.');
 } catch (err) {
   console.error('Warning: Python virtual environment setup failed. Details:', err.message);

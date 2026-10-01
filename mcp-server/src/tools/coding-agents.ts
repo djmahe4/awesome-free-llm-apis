@@ -1207,13 +1207,54 @@ function windowReplyIsSuspicious(originalWindowLines: string[], replyLines: stri
  */
 interface SearchReplaceBlock { search: string; replace: string }
 
-function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
+export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
   const blocks: SearchReplaceBlock[] = [];
-  const re = /<{5,}\s*SEARCH\r?\n([\s\S]*?)\r?\n={5,}\r?\n([\s\S]*?)\r?\n>{5,}\s*REPLACE/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    blocks.push({ search: m[1], replace: m[2] });
+  const lines = text.split(/\r?\n/);
+  let state: 'OUTSIDE' | 'IN_SEARCH' | 'IN_REPLACE' = 'OUTSIDE';
+  let curSearch: string[] = [];
+  let curReplace: string[] = [];
+
+  const isSearchMarker = (l: string) => /^<{5,}\s*SEARCH\s*$/i.test(l.trim());
+  const isDividerMarker = (l: string) => /^={5,}\s*$/i.test(l.trim());
+  const isReplaceMarker = (l: string) => /^>{5,}\s*REPLACE\s*$/i.test(l.trim());
+
+  for (const line of lines) {
+    if (state === 'OUTSIDE') {
+      if (isSearchMarker(line)) {
+        state = 'IN_SEARCH';
+        curSearch = [];
+        curReplace = [];
+      }
+    } else if (state === 'IN_SEARCH') {
+      if (isDividerMarker(line)) {
+        state = 'IN_REPLACE';
+      } else if (isSearchMarker(line)) {
+        // Reset if another search marker begins without divider
+        curSearch = [];
+        curReplace = [];
+      } else {
+        curSearch.push(line);
+      }
+    } else if (state === 'IN_REPLACE') {
+      if (isReplaceMarker(line)) {
+        blocks.push({
+          search: curSearch.join('\n'),
+          replace: curReplace.join('\n'),
+        });
+        state = 'OUTSIDE';
+        curSearch = [];
+        curReplace = [];
+      } else if (isSearchMarker(line)) {
+        // Premature new block started
+        state = 'IN_SEARCH';
+        curSearch = [];
+        curReplace = [];
+      } else {
+        curReplace.push(line);
+      }
+    }
   }
+
   return blocks;
 }
 
@@ -1441,15 +1482,15 @@ const REFUSAL_PATTERNS = [
  * FULL current content by exact text — there's no line-offset bookkeeping
  * to get wrong, and no requirement that the model reproduce anything.
  */
-async function generateSearchReplacePatch(
+export async function generateSearchReplacePatch(
   currentContent: string,
   instruction: string,
   filename: string,
   tasksContext: string | undefined,
   chat: (prompt: string) => Promise<string>
 ): Promise<{ content: string; appliedCount: number; failures: string[]; hardFailure?: string }> {
-  const hasExports = /^\s*export\s+/m.test(currentContent);
-  const windowInfo = !hasExports ? extractWindowForInstruction(currentContent, instruction) : null;
+  const lineCount = currentContent.split(/\r?\n/).length;
+  const windowInfo = lineCount > 150 ? extractWindowForInstruction(currentContent, instruction, 150) : null;
   const contextText = windowInfo ? windowInfo.window : currentContent;
   const contextLabel = windowInfo
     ? `lines ${windowInfo.startIdx + 1}–${windowInfo.endIdx} of ${filename} (${windowInfo.lineCount} lines total)`
@@ -1468,7 +1509,11 @@ async function generateSearchReplacePatch(
       '=======',
       '(the replacement text)',
       '>>>>>>> REPLACE',
-      'Rules: SEARCH text must match the shown content exactly and must be unique (usually 1–5 lines — include just enough surrounding text to make it unambiguous). Do not paraphrase or reformat SEARCH text. Emit multiple blocks if the instruction requires edits in more than one place.',
+      'Rules:',
+      '1. SEARCH text must match the shown content exactly and must be unique (usually 1–5 lines — include enough surrounding text to make it unambiguous).',
+      '2. Do not paraphrase or reformat SEARCH text.',
+      '3. To ADD lines while retaining existing code: include the anchor line(s) in SEARCH, and in REPLACE include both the anchor line(s) AND the new lines. NEVER leave SEARCH empty.',
+      '4. Emit multiple blocks if the instruction requires edits in more than one place.',
     ].join('\n'),
   ].filter(Boolean).join('\n\n');
 
@@ -1946,8 +1991,30 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       try {
         const { listLocalModels, rankCandidateModels } = await import('../providers/ollama-local.js');
         const models = await listLocalModels();
-        const ranked = rankCandidateModels(models);
-        resolvedModel = ranked[0] ?? null;
+
+        // Check llmfit hardware recommendations to find the optimal coding model
+        try {
+          const { recommendModels } = await import('../services/llmfit.js');
+          const fitResult = await recommendModels({ useCase: 'coding', limit: 5, workspaceRoot });
+          const recommendedOllamaNames = (fitResult.models || [])
+            .map(m => m.ollamaName)
+            .filter(Boolean) as string[];
+
+          for (const rec of recommendedOllamaNames) {
+            const match = models.find(m => m === rec || m.startsWith(`${rec}:`));
+            if (match) {
+              resolvedModel = match;
+              break;
+            }
+          }
+        } catch {
+          // Fall back gracefully to heuristic candidate ranking
+        }
+
+        if (!resolvedModel) {
+          const ranked = rankCandidateModels(models);
+          resolvedModel = ranked[0] ?? null;
+        }
       } catch {
         console.warn('[coding-agents] Ollama unreachable — will route to cloud model fallback');
       }
@@ -2012,8 +2079,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
             // this shares the exact same model-invocation, context-gathering,
             // and refusal-detection code as the full-content path below —
             // including the same test/mock seam.
-            const hasExports = /^\s*export\s+/m.test(patchedContent);
-            const windowInfo = !hasExports ? extractWindowForInstruction(patchedContent, augmentedInstruction) : null;
+            const lineCount = patchedContent.split(/\r?\n/).length;
+            const windowInfo = lineCount > 150 ? extractWindowForInstruction(patchedContent, augmentedInstruction, 150) : null;
             const srLlmResult = await localLlmPatch({
               filePath: fullPath,
               instruction: augmentedInstruction,
