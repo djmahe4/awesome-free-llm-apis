@@ -1183,10 +1183,10 @@ function collectParams(tool) {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
     } else if (f.id === 'files') {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
-    } else if (f.id === 'graphNode' || f.id === 'gates') {
+    } else if (f.id === 'graphNode' || f.id === 'gates' || f.id === 'script_instructions' || f.id === 'metadata') {
       const raw = el.value.trim();
       if (raw) {
-        try { params[f.id] = JSON.parse(raw); } catch { /* leave unset — treat invalid JSON as "no value" */ }
+        try { params[f.id] = JSON.parse(raw); } catch { params[f.id] = raw; }
       }
     } else if (f.id === 'personas') {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
