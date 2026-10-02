@@ -153,6 +153,40 @@ export class TimelineManifestStore {
     await fs.writeJSON(this.manifestPath, manifest, { spaces: 2 });
   }
 
+  public async updateArtifactBounds(
+    artifactId: string,
+    start_ms: number,
+    end_ms: number
+  ): Promise<TimelineArtifact> {
+    const manifest = await this.load();
+    let target: TimelineArtifact | undefined;
+    for (const lane of Object.values(manifest.tracks)) {
+      const a = lane.find((x) => x.artifactId === artifactId);
+      if (a) {
+        a.start_ms = start_ms;
+        a.end_ms = end_ms;
+        target = a;
+        break;
+      }
+    }
+    if (!target) {
+      throw new Error(`Artifact ${artifactId} not found in manifest`);
+    }
+
+    let maxDuration = 0;
+    for (const trackArtifacts of Object.values(manifest.tracks)) {
+      for (const a of trackArtifacts) {
+        if (a.end_ms > maxDuration) {
+          maxDuration = a.end_ms;
+        }
+      }
+    }
+    manifest.totalDuration_ms = maxDuration;
+    manifest.updatedAt = Date.now();
+    await fs.writeJSON(this.manifestPath, manifest, { spaces: 2 });
+    return target;
+  }
+
   public async approveArtifact(artifactId: string): Promise<void> {
     const manifest = await this.load();
     let found = false;

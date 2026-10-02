@@ -591,7 +591,7 @@ export function createExpressApp(): express.Express {
               res.status(400).json({ error: `Unknown tool: ${tool}` });
               return;
           }
-          const selfLoggingTools = new Set(['use_free_llm', 'coding_agents', 'local_llm_patch', 'quantum_tool', 'cyber_tool', 'movie_tool']);
+          const selfLoggingTools = new Set(['use_free_llm', 'coding_agents', 'local_llm_patch', 'quantum_tool', 'cyber_tool', 'movie_tool', 'browser_tool']);
           if (!selfLoggingTools.has(tool)) {
             const sid = params.sessionId || '__no_ws__';
             const { logToolCall } = await import('./utils/ChatLogger.js');
@@ -1226,12 +1226,54 @@ export function createExpressApp(): express.Express {
         }
       });
 
+      // ─── Dedicated Media Preview Endpoint ───────────────────────────────────
+      app.get('/api/media/preview', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const rawFile = (req.query.file as string || '').trim();
+          if (!rawFile || rawFile.includes('\0')) {
+            return res.status(400).json({ error: 'Valid file parameter required' });
+          }
+
+          const resolvedPath = path.isAbsolute(rawFile)
+            ? path.normalize(rawFile)
+            : path.resolve(process.cwd(), rawFile);
+
+          // Disallow traversal outside allowed file extensions or root boundary if relative
+          const allowedExts = new Set(['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.flac', '.png', '.jpg', '.jpeg', '.webp']);
+          const ext = path.extname(resolvedPath).toLowerCase();
+          if (!allowedExts.has(ext)) {
+            return res.status(400).json({ error: `File type ${ext} not permitted for media preview` });
+          }
+
+          if (!fs.existsSync(resolvedPath)) {
+            return res.status(404).json({ error: 'File not found' });
+          }
+
+          return res.sendFile(resolvedPath);
+        } catch (err: any) {
+          res.status(500).json({ error: String(err?.message || err) });
+        }
+      });
+
       // Convenience aliases matching plan specification (/api/movie/*)
       app.get('/api/movie/timeline', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
           const projectId = (req.query.projectId as string) || 'default';
-          const projectDir = req.query.workspace as string;
+          let projectDir: string | undefined = undefined;
+          const rawWorkspace = req.query.workspace as string;
+          if (rawWorkspace && typeof rawWorkspace === 'string') {
+            const trimmed = rawWorkspace.trim();
+            if (trimmed && !trimmed.includes('\0')) {
+              try {
+                const candidate = path.isAbsolute(trimmed) ? path.normalize(trimmed) : path.resolve(process.cwd(), trimmed);
+                if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+                  projectDir = candidate;
+                }
+              } catch {}
+            }
+          }
           const { runMovieTool } = await import('./tools/movie-tool.js');
           const result = await runMovieTool({ action: 'get_timeline', projectId, projectDir });
           res.json(result);

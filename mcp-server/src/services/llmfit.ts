@@ -149,16 +149,20 @@ export async function recommendModels(options?: {
 
   let rawOutput = '';
 
-  if (binaryPath) {
-    const args = ['recommend', '--json', '--use-case', useCase, '--limit', String(limit)];
-    const res = await runCommand(binaryPath, args);
-    rawOutput = res.stdout;
-  } else if (pythonPath) {
-    const code = `import subprocess, sys; res = subprocess.run(['llmfit', 'recommend', '--json', '--use-case', '${useCase}', '--limit', '${limit}'], capture_output=True, text=True); sys.stdout.write(res.stdout)`;
-    const res = await runCommand(pythonPath, ['-c', code]);
-    rawOutput = res.stdout;
-  } else {
-    throw new Error('llmfit is not installed in venv/Scripts');
+  try {
+    if (binaryPath) {
+      const args = ['recommend', '--json', '--use-case', useCase, '--limit', String(limit)];
+      const res = await runCommand(binaryPath, args);
+      rawOutput = res.stdout;
+    } else if (pythonPath) {
+      const code = `import subprocess, sys; res = subprocess.run(['llmfit', 'recommend', '--json', '--use-case', '${useCase}', '--limit', '${limit}'], capture_output=True, text=True); sys.stdout.write(res.stdout)`;
+      const res = await runCommand(pythonPath, ['-c', code]);
+      rawOutput = res.stdout;
+    } else {
+      throw new Error('llmfit is not installed in venv/Scripts');
+    }
+  } catch (err: any) {
+    throw new Error(`llmfit execution failed: ${err.message || err}`);
   }
 
   const data = JSON.parse(rawOutput);

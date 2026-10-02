@@ -154,6 +154,10 @@ export async function applyMediaEffects(
 
   if (!audioFilter && !videoFilter) return inputPath;
 
+  if (!fs.existsSync(inputPath)) {
+    return inputPath;
+  }
+
   await fs.ensureDir(path.dirname(outputPath));
 
   return new Promise((resolve, reject) => {

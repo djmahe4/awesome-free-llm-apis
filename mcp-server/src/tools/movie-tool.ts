@@ -20,6 +20,7 @@ export interface MovieToolInput {
     | 'generate_story'
     | 'compile_timeline'
     | 'get_timeline'
+    | 'update_artifact_bounds'
     | 'apply_effect'
     | 'undo_effect';
   projectId?: string;
@@ -235,6 +236,18 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
           proposed_by: 'user'
         });
         return { success: true, data: toPublicArtifact(artifact) };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'update_artifact_bounds': {
+      if (!input.artifactId || input.start_ms === undefined || input.end_ms === undefined) {
+        return { success: false, error: 'artifactId, start_ms, and end_ms required for update_artifact_bounds' };
+      }
+      try {
+        const updated = await store.updateArtifactBounds(input.artifactId, input.start_ms, input.end_ms);
+        return { success: true, data: toPublicArtifact(updated) };
       } catch (err: any) {
         return { success: false, error: err.message };
       }

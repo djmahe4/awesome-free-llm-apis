@@ -228,7 +228,7 @@
           videoEl.dataset.path = activeVideoArt.artifact_path;
           videoEl.src = activeVideoArt.artifact_path.startsWith('http') 
             ? activeVideoArt.artifact_path 
-            : `/api/tool?action=preview&file=${encodeURIComponent(activeVideoArt.artifact_path)}`;
+            : `/api/media/preview?file=${encodeURIComponent(activeVideoArt.artifact_path)}`;
         }
         const offsetSec = (timeMs - activeVideoArt.start_ms) / 1000;
         if (!isNaN(videoEl.duration) && Math.abs(videoEl.currentTime - offsetSec) > 0.15) {
@@ -493,15 +493,11 @@
       // Persist artifact position change to server
       try {
         await callMovieTool({
-          action: 'add_artifact',
+          action: 'update_artifact_bounds',
           projectId: currentProject,
-          track: activeArtifact.track,
+          artifactId: activeArtifact.artifactId,
           start_ms: finalStart,
-          end_ms: finalEnd,
-          label: activeArtifact.label,
-          name: activeArtifact.name,
-          artifact_path: activeArtifact.artifact_path,
-          metadata: activeArtifact.metadata
+          end_ms: finalEnd
         });
         await loadTimeline();
       } catch (err) {
@@ -651,15 +647,23 @@
     const fxMidSlider = document.getElementById('fx-mid-slider');
     const fxTrebleSlider = document.getElementById('fx-treble-slider');
 
+    const fxTempoSlider = document.getElementById('fx-tempo-slider');
+    const fxContrastSlider = document.getElementById('fx-contrast-slider');
+    const fxSaturationSlider = document.getElementById('fx-saturation-slider');
+
     if (fxTypeSelect) {
       fxTypeSelect.addEventListener('change', () => {
         const val = fxTypeSelect.value;
         const revWrap = document.getElementById('fx-reverb-controls');
         const pitchWrap = document.getElementById('fx-pitch-controls');
         const eqWrap = document.getElementById('fx-eq-controls');
+        const tempoWrap = document.getElementById('fx-tempo-controls');
+        const lutWrap = document.getElementById('fx-lut-controls');
         if (revWrap) revWrap.style.display = val === 'reverb' ? 'block' : 'none';
         if (pitchWrap) pitchWrap.style.display = val === 'pitch' ? 'block' : 'none';
         if (eqWrap) eqWrap.style.display = val === 'eq' ? 'block' : 'none';
+        if (tempoWrap) tempoWrap.style.display = val === 'tempo' ? 'block' : 'none';
+        if (lutWrap) lutWrap.style.display = val === 'lut' ? 'block' : 'none';
       });
     }
 
@@ -669,6 +673,9 @@
     if (fxBassSlider) fxBassSlider.oninput = () => { document.getElementById('fx-bass-val').textContent = `${fxBassSlider.value}dB`; };
     if (fxMidSlider) fxMidSlider.oninput = () => { document.getElementById('fx-mid-val').textContent = `${fxMidSlider.value}dB`; };
     if (fxTrebleSlider) fxTrebleSlider.oninput = () => { document.getElementById('fx-treble-val').textContent = `${fxTrebleSlider.value}dB`; };
+    if (fxTempoSlider) fxTempoSlider.oninput = () => { document.getElementById('fx-tempo-val').textContent = `${(fxTempoSlider.value / 10).toFixed(1)}x`; };
+    if (fxContrastSlider) fxContrastSlider.oninput = () => { document.getElementById('fx-contrast-val').textContent = `${(fxContrastSlider.value / 10).toFixed(2)}`; };
+    if (fxSaturationSlider) fxSaturationSlider.oninput = () => { document.getElementById('fx-saturation-val').textContent = `${(fxSaturationSlider.value / 10).toFixed(2)}`; };
 
     const durationSelect = document.getElementById('movie-max-duration-select');
     if (durationSelect) {
@@ -699,6 +706,9 @@
         } else if (fxType === 'pitch') {
           const st = parseInt(fxSemitoneSlider?.value || '0', 10);
           params = { semitones: st };
+        } else if (fxType === 'tempo') {
+          const factor = (parseInt(fxTempoSlider?.value || '10', 10)) / 10;
+          params = { factor };
         } else if (fxType === 'eq') {
           params = {
             bass: parseInt(fxBassSlider?.value || '0', 10),
@@ -706,7 +716,9 @@
             treble: parseInt(fxTrebleSlider?.value || '0', 10)
           };
         } else if (fxType === 'lut') {
-          params = { contrast: 1.25, saturation: 1.3, brightness: 0.05 };
+          const contrast = (parseInt(fxContrastSlider?.value || '12', 10)) / 10;
+          const saturation = (parseInt(fxSaturationSlider?.value || '13', 10)) / 10;
+          params = { contrast, saturation, brightness: 0.05 };
         }
 
         try {
