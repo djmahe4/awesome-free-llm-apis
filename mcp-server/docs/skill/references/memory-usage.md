@@ -104,6 +104,13 @@ Instead of raw strings, capture the full context of a completed feature or resea
 }
 ```
 
+## 💾 Durable Usage & Health State Persistence (`PersistenceManager`)
+
+In addition to semantic wiki entries and vector memory, the server maintains encrypted state persistence in `usage-stats.json`:
+- **LLM Rate-Limit Tracking**: Durable per-provider request/token counters (`localTotalRequests`, `localTotalTokens`), remaining quota caps, and failure tracking.
+- **Search Provider State**: Preserves `searchProviders` circuit-breaker health (`consecutiveFailures`, `cooldownUntil`, `lastFailure`) across reboots.
+- **Graceful Lifecycle Flush**: Auto-persisted periodically via `LOCAL_PERSIST_INTERVAL_MS` (default 60s) and explicitly drained on server shutdown (`flushSystem()`).
+
 ---
 
 ## ⚠️ Constraints

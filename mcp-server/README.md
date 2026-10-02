@@ -1,6 +1,6 @@
 # free-llm-apis MCP Server (v1.1.0)
 
-An enterprise-grade [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server exposing 14 zero-token-cost tools for interacting with 70+ free LLMs, local offline coding models, real browser sessions, and quantum-inspired multi-hypothesis reasoning engines.
+An enterprise-grade [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server exposing 15 zero-token-cost tools for interacting with 70+ free LLMs, local offline coding models, real browser sessions, multi-agent harness runners, and quantum-inspired multi-hypothesis reasoning engines.
 
 ---
 
@@ -16,15 +16,18 @@ graph TD
         K[CodingAgentsHandler<br/>src/tools/coding-agents.ts]
         Q[QuantumReasoningEngine<br/>src/tools/quantum-tool.ts]
         BR[BrowserAutomation<br/>src/tools/browser-tool.ts]
+        AH[AgentHarnessRunner<br/>src/tools/agent-harness.ts]
     end
 
     C --> D[ResponseCacheMiddleware]
     D -->|Cache Miss| E[WorkspaceContextMiddleware<br/>src/pipeline/middlewares/WorkspaceContextMiddleware.ts]
     E --> F[StructuralMiddleware<br/>src/pipeline/middlewares/StructuralMiddleware.ts]
-    F --> G[ImageRouterMiddleware]
-    G -->|Text Only| H[TextRouterMiddleware]
-    G -->|Images| I[LLMExecutor<br/>VLM]
-    H --> J1[AgenticMiddleware]
+    F --> G[AgenticMiddleware]
+    G --> H[SearchRouterMiddleware<br/>src/pipeline/middlewares/SearchRouterMiddleware.ts]
+    H -->|Search Request| S1[(Free Search Providers<br/>Parallel · TinyFish · Tavily · DDGS · Jina · SearXNG)]
+    H -->|Standard LLM| I[ImageRouterMiddleware]
+    I -->|Images| VLM[LLMExecutor<br/>VLM]
+    I -->|Text Only| J1[TextRouterMiddleware<br/>Quantum Scoring & State Collapse]
     J1 --> K1[TokenManagerMiddleware]
     K1 --> L1[LLMExecutor]
     L1 --> M1[(Free LLM Provider)]
@@ -33,9 +36,11 @@ graph TD
     C --> K
     C --> Q
     C --> BR
+    C --> AH
     
     D -->|Cache Hit| A
-    M1 --> L1 --> K1 --> J1 --> H --> G --> F --> E --> D --> A
+    S1 --> H --> G --> F --> E --> D --> A
+    M1 --> L1 --> K1 --> J1 --> I --> H --> G --> F --> E --> D --> A
 ```
 
 ### Pipeline Order (v1.1.0)
@@ -45,21 +50,23 @@ graph TD
 | 1 | `ResponseCacheMiddleware` | LRU + disk cache; workspace-hash keyed to prevent cross-project context leakage. |
 | 2 | `WorkspaceContextMiddleware` | Resolves `wsHash`, performs **Pre-emptive Indexing**, and injects Grep grounding + vector context. |
 | 3 | `StructuralMiddleware` | Injects full **Session Memory** (queue state + distilled knowledge) and enforces Markdown response formats. |
-| 4 | `ImageRouterMiddleware` | Detects `file:///` URIs, parses image extensions, converts to base64, and routes to VLMs. |
-| 5 | `TextRouterMiddleware` | **Quantum-Inspired Model Routing & State Collapse** using normalized state vector probability matrices. |
-| 6 | `AgenticMiddleware` *(optional)* | DAG subtask decomposition, research validation, and multi-turn state persistence. Time-budgeted (`MCP_SUBTASK_BUDGET_MS`, default 20s) with async background execution. |
-| 7 | `TokenManagerMiddleware` | Enforces rate-limit tracking and quota gates with live disk synchronization. |
-| 8 | `LLMExecutor` | HTTPS requests, telemetry header parsing (`x-ratelimit-*`), circuit-breaking cooldowns, and seamless fallbacks. |
+| 4 | `AgenticMiddleware` *(optional)* | DAG subtask decomposition, research validation, and multi-turn state persistence. Time-budgeted (`MCP_SUBTASK_BUDGET_MS`, default 20s) with async background execution. |
+| 5 | `SearchRouterMiddleware` | Free-provider fallback search (`Parallel AI` &rarr; `TinyFish` &rarr; `Tavily` &rarr; `DuckDuckGo MCP` &rarr; `Jina AI` &rarr; `SearXNG`) with persistent failure tracking and circuit breaking. |
+| 6 | `ImageRouterMiddleware` | Detects `file:///` URIs, parses image extensions, converts to base64, and routes to VLMs. |
+| 7 | `TextRouterMiddleware` | **Quantum-Inspired Model Routing & State Collapse** using normalized state vector probability matrices. |
+| 8 | `TokenManagerMiddleware` | Enforces rate-limit tracking and quota gates with live disk synchronization. |
+| 9 | `LLMExecutor` | HTTPS requests, telemetry header parsing (`x-ratelimit-*`), circuit-breaking cooldowns, and seamless fallbacks. |
 
 ---
 
-## 🛠️ Complete 14-Tool MCP Suite
+## 🛠️ Complete 15-Tool MCP Suite
 
 > **Strict rule for agents:** Use only documented MCP tools. Prefer internal middleware changes to extend capability.
 
 | Tool | Category | Primary Action / Purpose | Key Parameters |
 |---|---|---|---|
 | `use_free_llm` | Chat & Orchestration | Universal chat completion, single-turn Q&A, and multi-step agentic DAG execution | `messages`, `agentic`, `workspace_root`, `action` (`run`\|`continue`\|`status`\|`abort`), `resume_input` |
+| `agent_harness` | Multi-Agent Orchestration | Declarative multi-agent workflows, file ownership locks (`FileScopeRegistry`), reasoning scope isolation, and human approval gates | `action` (`deploy`\|`resume`\|`rerun`\|`reorchestrate`\|`status`\|`approvals`\|`approve`\|`reject`\|`trace`\|`tasks`\|`abort`), `runId`, `goal`, `role` |
 | `coding_agents` | Refactoring & Patching | Multi-file refactoring, VectorStore TF-IDF discovery, Hashline diffs & Polyglot LSP checks | `goal`, `workspaceRoot`, `dryRun`, `topKFiles`, `sessionId`, `astEditOps`, `resolve` (`apply`\|`discard`\|`rollback`) |
 | `local_llm_patch` | Offline Local Coding | 100% offline single-file patching powered by local Ollama coding models with 0 API cost | `action` (`apply_patch`\|`revert_patch`\|`audit_ast`), `target_file`, `instructions`, `model` |
 | `quantum_tool` | Multi-Branch Reasoning | Multi-hypothesis reasoning circuits with gate operators ($H, X, R_Y, CNOT, CZ$) and state collapse | `action` (`setup`\|`step`\|`pause`\|`continue`\|`modify`\|`analyze`), `preset`, `circuit`, `params` |

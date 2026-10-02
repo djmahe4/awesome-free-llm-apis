@@ -344,7 +344,9 @@ export function createExpressApp(): express.Express {
       // Search-provider health for the dashboard's Providers tab Search section (v1.0.9).
       app.get('/api/search-provider-stats', async (req, res) => {
         try {
-          const providers = SearchProviderRegistry.getInstance().getProviders();
+          const registry = SearchProviderRegistry.getInstance();
+          await registry.ensureInitialized();
+          const providers = registry.getProviders();
           const stats = providers.map(p => ({
             id: p.id,
             name: p.name,
@@ -407,10 +409,23 @@ export function createExpressApp(): express.Express {
               result = await validateProvider(params.providerId);
               break;
             case 'use_free_llm': {
-              const messages = Array.isArray(params.messages)
+              // Sanitize messages: ensure each message content is a valid string or parts array,
+              // not a corrupted value (e.g. PowerShell "System.Collections.Hashtable" from
+              // ConvertTo-Json without -Depth 4, or any non-string non-array content).
+              const rawMessages = Array.isArray(params.messages)
                 ? params.messages
                 : [{ role: 'user', content: String(params.messages || params.prompt || '') }];
-              
+              const messages = rawMessages
+                .filter((m: any) => m && typeof m === 'object' && typeof m.role === 'string')
+                .map((m: any) => {
+                  const c = m.content;
+                  // Valid: string, or array of {type,text} parts
+                  if (typeof c === 'string') return m;
+                  if (Array.isArray(c)) return m;
+                  // Invalid (e.g. Hashtable stringified, null, undefined, object): coerce to string
+                  return { ...m, content: c == null ? '' : String(c) };
+                });
+
               // Resolve sessionId from workspace_root using the same algorithm as the real pipeline
               let sid = params.sessionId;
               if (!sid && params.workspace_root) {
@@ -422,18 +437,31 @@ export function createExpressApp(): express.Express {
                 }
               }
 
-              const r = await useFreeLLM({
-                messages,
-                model: params.model,
-                keywords: params.keywords,
-                agentic: !!params.agentic,
-                workspace_root: params.workspace_root,
-                sessionId: sid || '__no_ws__',
-                skipIndexing: !!params.skipIndexing,
-                action: params.action,
-                resume_input: params.resume_input,
-              });
-              result = { content: r?.choices?.[0]?.message?.content ?? '', model: r?.model, provider: r?._providerId };
+              // Wrap in a 120s timeout so the HTTP connection never hangs indefinitely
+              // (all providers exhausted → TextRouterMiddleware throws, but only after many attempts)
+              const TOOL_TIMEOUT_MS = 120_000;
+              const toolAbort = new AbortController();
+              const toolTimer = setTimeout(() => toolAbort.abort(), TOOL_TIMEOUT_MS);
+              const onClose = () => toolAbort.abort();
+              req.on('close', onClose);
+              try {
+                const r = await useFreeLLM({
+                  messages,
+                  model: params.model,
+                  keywords: params.keywords,
+                  agentic: !!params.agentic,
+                  workspace_root: params.workspace_root,
+                  sessionId: sid || '__no_ws__',
+                  skipIndexing: !!params.skipIndexing,
+                  action: params.action,
+                  resume_input: params.resume_input,
+                  signal: toolAbort.signal,
+                });
+                result = { content: r?.choices?.[0]?.message?.content ?? '', model: r?.model, provider: r?._providerId };
+              } finally {
+                clearTimeout(toolTimer);
+                req.off('close', onClose);
+              }
               break;
             }
             case 'vision_tool': {
@@ -538,6 +566,15 @@ export function createExpressApp(): express.Express {
             case 'coding_agents': {
               const { CodingAgentsHandler } = await import('./tools/coding-agents.js');
               result = await CodingAgentsHandler(params);
+              break;
+            }
+            case 'agent_harness': {
+              // Forwarded wholesale (not field-by-field) deliberately — a
+              // per-field whitelist here is exactly what silently dropped new
+              // manage_memory fields twice this session. New agent_harness
+              // params never need a matching edit in this route again.
+              const { agentHarness } = await import('./tools/agent-harness.js');
+              result = await agentHarness(params);
               break;
             }
             default:
@@ -1073,6 +1110,66 @@ export function createExpressApp(): express.Express {
         }
       });
 
+      // ─── Harness & Multi-Agent Telemetry API ─────────────────────────────────
+      app.get('/api/harness/runs', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const workspaceRoot = (req.query.workspace as string) || process.cwd();
+          const harnessDir = path.resolve(workspaceRoot, '.free-llm-mcp', 'harness');
+          if (!fs.existsSync(harnessDir)) {
+            return res.json({ runs: [], activeScopes: [], reasoningScopes: [] });
+          }
+
+          const entries = await fsp.readdir(harnessDir);
+          const runs: any[] = [];
+          for (const runId of entries) {
+            if (!/^[a-zA-Z0-9_\-\.]{1,128}$/.test(runId)) continue;
+            const runJsonPath = path.join(harnessDir, runId, 'run.json');
+            try {
+              if (fs.existsSync(runJsonPath)) {
+                const data = JSON.parse(await fsp.readFile(runJsonPath, 'utf-8'));
+                runs.push(data);
+              }
+            } catch {}
+          }
+
+          // Load active file and reasoning scopes
+          let activeScopes: any[] = [];
+          const scopeFile = path.join(harnessDir, 'scopes.json');
+          if (fs.existsSync(scopeFile)) {
+            try { activeScopes = JSON.parse(await fsp.readFile(scopeFile, 'utf-8')); } catch {}
+          }
+
+          let reasoningScopes: any[] = [];
+          const reasoningFile = path.join(harnessDir, 'reasoning_scopes.json');
+          if (fs.existsSync(reasoningFile)) {
+            try { reasoningScopes = JSON.parse(await fsp.readFile(reasoningFile, 'utf-8')); } catch {}
+          }
+
+          res.json({ runs, activeScopes, reasoningScopes });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      app.get('/api/harness/runs/:runId', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runId } = req.params;
+          const workspaceRoot = (req.query.workspace as string) || process.cwd();
+          const { HarnessStore } = await import('./harness/store.js');
+          const store = new HarnessStore(runId, workspaceRoot);
+          const run = await store.loadRun();
+          if (!run) return res.status(404).json({ error: 'Run not found' });
+          const approvals = await store.listApprovals();
+          const trace = await store.readTrace(100);
+          const rawTasks = await store.loadTasksMarkdown();
+          res.json({ run, approvals, trace, tasks: rawTasks });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
       // POST /api/steering_eval — Live System Prompt Steering & Ingestion Inspection Endpoint
       app.post('/api/steering_eval', express.json({ limit: '1mb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
@@ -1378,6 +1475,26 @@ async function main() {
 
     // Initialize telemetry / session manager
     await initTelemetry(true);
+
+    // Harness boot reconciliation (P4 plan's own self-review point, never
+    // wired until now): a run.json left 'running' by a prior crash/restart
+    // must never look identical to one still legitimately in progress —
+    // run.json persists to disk, so this is real work at boot. Best-effort,
+    // never blocks server startup. MonitorRegistry.markAllOrphaned() is
+    // deliberately NOT called here: its Map is in-memory only and starts
+    // empty every process start, so at true boot there is nothing in it to
+    // reconcile — calling it here would be a no-op dressed up as a fix. It
+    // stays available for callers that actually hold a stale reference
+    // across some other lifecycle event (tests, an admin action).
+    try {
+      const { reconcileRunsOnBoot } = await import('./harness/store.js');
+      const reconciled = await reconcileRunsOnBoot();
+      if (reconciled.length > 0) {
+        console.error(`[harness] Boot reconciliation: ${reconciled.length} orphaned run(s) marked failed.`);
+      }
+    } catch (err: any) {
+      console.error('[harness] Boot reconciliation failed (non-fatal):', err?.message || err);
+    }
 
     // Periodically check/sync telemetry every hour (supports continuous server runs)
     const telemetryInterval = setInterval(async () => {

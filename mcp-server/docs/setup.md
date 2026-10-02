@@ -43,7 +43,7 @@ pip install -U google-genai python-dotenv
 
 ### 3. Docker & SearXNG Setup (Self-Hosted Search Fallback)
 
-The server features `SearchRouterMiddleware` with an automatic fallback cascade (`Parallel AI` → `Tavily` → `Jina` → `Brave` → `SearXNG`). SearXNG serves as the terminal zero-cost self-hosted search fallback.
+The server features `SearchRouterMiddleware` with an automatic fallback cascade (`Parallel AI` &rarr; `TinyFish` &rarr; `Tavily` &rarr; `DuckDuckGo MCP` &rarr; `Jina AI` &rarr; `SearXNG`). SearXNG serves as the terminal zero-cost self-hosted search fallback.
 
 #### Automated Deployment (Postbuild / Script)
 The postbuild lifecycle (`scripts/utils/postbuild.js` & `src/search/searxng-deploy.ts`) checks for Docker and automatically configures a background SearXNG container on `http://localhost:8080` with JSON format enabled. You can run the smoke test directly:
@@ -137,11 +137,14 @@ Then visit `http://localhost:3000` to view the visual dashboard for provider hea
 
 Besides `use_free_llm`, the server exposes specialized tools for autonomous development and diagnostics:
 
+- **`agent_harness`**: Agentic harness management, scope isolation, lifecycle tracking, and handoffs. See [skill/references/agent_harness.md](skill/references/agent_harness.md).
 - **`coding_agents`**: OMP-style multi-file refactoring engine with VectorStore TF-IDF RAG, `[PATH#SHA8]` snapshot anchors, Polyglot LSP diagnostics (TS/Python/Go/Rust), and zero-waste CAS checkpointing. See [skill/references/coding_agents.md](skill/references/coding_agents.md).
 - **`local_llm_patch`**: Fast, single-file offline code patching via local Ollama models (`qwen2.5-coder`, `deepseek-coder`). See [skill/references/local_llm_patch.md](skill/references/local_llm_patch.md).
 - **`browser_tool`**: Real Chrome DevTools session automation for DOM exploration, API capture/replay, and strict scraping. See [skill/references/browser_tool.md](skill/references/browser_tool.md).
 - **`cyber_tool`**: Educational CTF coaching, security tool registry, and persistent decision graphs. See [skill/references/cyber_tool.md](skill/references/cyber_tool.md).
 - **`quantum_tool`**: Multi-branch reasoning framework with parameterized quantum circuit rotations. See [skill/references/quantum_tool.md](skill/references/quantum_tool.md).
+- **`vision_tool`**: Multimodal UI inspection and visual diff regressions. See [skill/references/vision_tool.md](skill/references/vision_tool.md).
+- **`manage_memory`**: Long-term persistent vector memory, ADR management, and wiki access. See [skill/references/manage_memory.md](skill/references/manage_memory.md).
 
 > [!IMPORTANT]
 > **When performing any task scoped to a project or workspace, you MUST pass both `workspace_root` (absolute path) and `agentic: true`.** Omitting either disables memory injection, context enrichment, and session persistence — the response will be blind to prior work. A bare call with only `messages` is for one-off queries that don't need project context.

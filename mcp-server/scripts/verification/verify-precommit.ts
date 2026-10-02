@@ -1,0 +1,334 @@
+import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function run(cmd: string, cwd: string) {
+  console.log(`[Check] Running: ${cmd} (in ${cwd})`);
+  execSync(cmd, { cwd, stdio: 'inherit' });
+}
+
+async function main() {
+  const mcpDir = path.resolve(__dirname, '..', '..');
+  const rootDir = path.resolve(mcpDir, '..');
+
+  console.log('=== Pre-Commit Quality & Tool Integrity Checks ===\n');
+
+  // 1. TypeScript compiler diagnostics check on mcp-server/src
+  console.log('1. Verifying TypeScript compilation (tsc -p tsconfig.build.json --noEmit)...');
+  try {
+    run('npx tsc -p tsconfig.build.json --noEmit', mcpDir);
+    console.log('✓ TypeScript compilation check passed.\n');
+  } catch (err) {
+    console.error('✗ TypeScript compilation failed!');
+    process.exit(1);
+  }
+
+  // 2. Tool Sync Check: Compare MCP tools against Docs, Skills, Playground, and Quickstart
+  console.log('2. Verifying tool sync across docs, skills, playground, and quickstart...');
+
+  const mcpIndexPath = path.join(mcpDir, 'src', 'mcp', 'index.ts');
+  const mcpContent = fs.readFileSync(mcpIndexPath, 'utf-8');
+
+  // Extract tools inside ListToolsRequestSchema handler
+  const listToolsMatch = mcpContent.match(/ListToolsRequestSchema[\s\S]*?tools:\s*\[([\s\S]*?)\]\s*,\s*\}\)\);/);
+  if (!listToolsMatch) {
+    throw new Error('Could not find tools array inside ListToolsRequestSchema in src/mcp/index.ts');
+  }
+  const toolsBlock = listToolsMatch[1];
+
+  const registeredTools = new Set<string>();
+  const lines = toolsBlock.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('//')) continue; // Ignore commented-out/deprecated tools
+    const m = trimmed.match(/^name:\s*'([a-z0-9_]+)'/);
+    if (m) {
+      registeredTools.add(m[1]);
+    }
+  }
+
+  console.log(`Found ${registeredTools.size} registered tools: ${Array.from(registeredTools).join(', ')}`);
+
+  // Check Docs / References
+  const referencesDir = path.join(mcpDir, 'docs', 'skill', 'references');
+  const skillMdPath = path.join(mcpDir, 'docs', 'skill', 'SKILL.md');
+  const skillContent = fs.readFileSync(skillMdPath, 'utf-8');
+
+  const missingSkillDocs: string[] = [];
+  const missingRefFiles: string[] = [];
+
+  for (const tool of registeredTools) {
+    if (!skillContent.includes(`### \`${tool}\``)) {
+      missingSkillDocs.push(tool);
+    }
+    const refFile = path.join(referencesDir, `${tool}.md`);
+    if (!fs.existsSync(refFile)) {
+      missingRefFiles.push(tool);
+    }
+  }
+
+  if (missingSkillDocs.length > 0) {
+    console.warn(`⚠ Warning: Following tools missing in SKILL.md: ${missingSkillDocs.join(', ')}`);
+  } else {
+    console.log('✓ SKILL.md contains all registered tools.');
+  }
+
+  if (missingRefFiles.length > 0) {
+    console.warn(`⚠ Notice: Tools without dedicated reference .md: ${missingRefFiles.join(', ')}`);
+  } else {
+    console.log('✓ Dedicated reference markdown files verified.');
+  }
+
+  // Verify Architectural and Core Documentation Integrity
+  const requiredDocs = [
+    { file: path.join(mcpDir, 'docs', 'guide.md'), needles: ['SearchRouterMiddleware', 'Phase 3: Routing', 'Quantum Scoring'] },
+    { file: path.join(mcpDir, 'docs', 'setup.md'), needles: ['SearchRouterMiddleware', 'agent_harness', 'coding_agents'] },
+    { file: path.join(mcpDir, 'docs', 'mcp-development.md'), needles: ['skill/references/architecture.md', 'skill/references/memory-usage.md', 'skill/references/agent_harness.md'] },
+    { file: path.join(mcpDir, 'docs', 'skill', 'references', 'architecture.md'), needles: ['SearchRouterMiddleware', 'PersistenceManager', 'Consolidated Pipeline Directory Layout'] },
+    { file: path.join(mcpDir, 'docs', 'skill', 'references', 'memory-usage.md'), needles: ['PersistenceManager', 'searchProviders', 'LOCAL_PERSIST_INTERVAL_MS'] },
+    { file: path.join(mcpDir, 'README.md'), needles: ['15 zero-token-cost tools', 'SearchRouterMiddleware', 'agent_harness'] },
+    { file: path.join(rootDir, 'README.md'), needles: ['15 zero-cost tools', 'SearchRouterMiddleware', 'agent_harness'] }
+  ];
+
+  for (const doc of requiredDocs) {
+    if (!fs.existsSync(doc.file)) {
+      console.error(`✗ Missing required documentation file: ${path.relative(rootDir, doc.file)}`);
+      process.exit(1);
+    }
+    const content = fs.readFileSync(doc.file, 'utf-8');
+    for (const needle of doc.needles) {
+      if (!content.includes(needle)) {
+        console.error(`✗ Documentation drift in ${path.relative(rootDir, doc.file)}: missing required section/token "${needle}"`);
+        process.exit(1);
+      }
+    }
+  }
+  console.log('✓ Core documentation and architectural references verified.');
+
+
+  // Check Dashboard Playground and Quickstart tabs
+  const dashboardHtmlPath = path.join(mcpDir, 'dashboard', 'index.html');
+  const dashboardAppPath = path.join(mcpDir, 'dashboard', 'app.js');
+  const htmlContent = fs.readFileSync(dashboardHtmlPath, 'utf-8');
+  const appContent = fs.readFileSync(dashboardAppPath, 'utf-8');
+
+  const missingPlayground: string[] = [];
+  const missingQuickstart: string[] = [];
+
+  for (const tool of registeredTools) {
+    // Check TOOLS array in app.js
+    if (!appContent.includes(`id: '${tool}'`)) {
+      missingPlayground.push(tool);
+    }
+    // Check Quickstart section in index.html
+    if (!htmlContent.includes(`<span class="qs-tool-name">${tool}</span>`)) {
+      missingQuickstart.push(tool);
+    }
+  }
+
+  if (missingPlayground.length > 0) {
+    console.error(`✗ Error: Tool playground is missing definitions for: ${missingPlayground.join(', ')}`);
+    process.exit(1);
+  } else {
+    console.log('✓ Tool Playground (app.js) contains definitions for all tools.');
+  }
+
+  if (missingQuickstart.length > 0) {
+    console.error(`✗ Error: Quickstart documentation tab is missing cards for: ${missingQuickstart.join(', ')}`);
+    process.exit(1);
+  } else {
+    console.log('✓ Quickstart Tab (index.html) contains schemas for all tools.');
+  }
+
+  // 3. Parameter Schema Matching Across MCP Server, Playground, and Quickstart
+  console.log('\n3. Verifying parameter schema matching across files...');
+
+  // Extract properties per tool from src/mcp/index.ts
+  const mcpToolProperties: Record<string, string[]> = {};
+  const toolSplit = toolsBlock.split(/\{\s*name:\s*'/);
+  for (const part of toolSplit) {
+    const trimmed = part.trim();
+    if (!trimmed || trimmed.startsWith('//')) continue;
+    const nameMatch = trimmed.match(/^([a-z0-9_]+)'/);
+    if (!nameMatch) continue;
+    const toolName = nameMatch[1];
+    if (!registeredTools.has(toolName)) continue;
+
+    // Scan properties: { ... } matching balanced braces
+    const pIdx = trimmed.indexOf('properties: {');
+    const props: string[] = [];
+    if (pIdx !== -1) {
+      const openBrace = pIdx + 'properties: {'.length - 1;
+      let depth = 0;
+      let endBrace = -1;
+      for (let i = openBrace; i < trimmed.length; i++) {
+        if (trimmed[i] === '{') depth++;
+        else if (trimmed[i] === '}') {
+          depth--;
+          if (depth === 0) { endBrace = i; break; }
+        }
+      }
+      if (endBrace !== -1) {
+        const propBlock = trimmed.slice(openBrace + 1, endBrace);
+        // Only extract top-level keys
+        let innerDepth = 0;
+        const propLines = propBlock.split('\n');
+        for (const line of propLines) {
+          const tLine = line.trim();
+          if (innerDepth === 0) {
+            const keyMatch = tLine.match(/^([a-zA-Z0-9_]+):/);
+            if (keyMatch && !tLine.startsWith('//')) {
+              props.push(keyMatch[1]);
+            }
+          }
+          for (const ch of line) {
+            if (ch === '{') innerDepth++;
+            else if (ch === '}') innerDepth = Math.max(0, innerDepth - 1);
+          }
+        }
+      }
+    }
+    mcpToolProperties[toolName] = props;
+  }
+
+  // Extract fields per tool in app.js TOOLS
+  const playgroundFields: Record<string, string[]> = {};
+  const toolsStartIdx = appContent.indexOf('const TOOLS = [');
+  const toolsEndIdx = appContent.indexOf('let activeTool = TOOLS[0];');
+  if (toolsStartIdx !== -1 && toolsEndIdx !== -1) {
+    const toolsSlice = appContent.slice(toolsStartIdx, toolsEndIdx);
+    const toolBlocks = toolsSlice.split(/\n\s*\{\s*\n\s*id:\s*'/);
+    for (let i = 1; i < toolBlocks.length; i++) {
+      const b = toolBlocks[i];
+      const toolName = b.slice(0, b.indexOf("'"));
+      const fieldsIdx = b.indexOf('fields: [');
+      if (fieldsIdx !== -1) {
+        // Balanced square bracket search
+        let depth = 0;
+        let endIdx = -1;
+        for (let j = fieldsIdx + 'fields: ['.length - 1; j < b.length; j++) {
+          if (b[j] === '[') depth++;
+          else if (b[j] === ']') {
+            depth--;
+            if (depth === 0) { endIdx = j; break; }
+          }
+        }
+        if (endIdx !== -1) {
+          const fieldsBlock = b.slice(fieldsIdx, endIdx);
+          const fMatches = [...fieldsBlock.matchAll(/id:\s*'([a-zA-Z0-9_]+)'/g)].map(x => x[1]);
+          playgroundFields[toolName] = fMatches;
+        }
+      }
+    }
+  }
+
+  // Extract parameters per tool in Quickstart table
+  const quickstartParams: Record<string, string[]> = {};
+  const qsCards = htmlContent.split('<details class="qs-tool-card"');
+  for (let i = 1; i < qsCards.length; i++) {
+    const card = qsCards[i];
+    const nameMatch = card.match(/<span class="qs-tool-name">([a-z0-9_]+)<\/span>/);
+    if (!nameMatch) continue;
+    const qTool = nameMatch[1];
+    const tableMatch = card.match(/<table class="qs-table">([\s\S]*?)<\/table>/);
+    if (tableMatch) {
+      const pMatches = [...tableMatch[1].matchAll(/<tr><td><code>([a-zA-Z0-9_]+)<\/code><\/td>/g)].map(x => x[1]);
+      quickstartParams[qTool] = pMatches;
+    }
+  }
+
+  let driftWarnings = 0;
+  for (const tool of registeredTools) {
+    const mcpProps = mcpToolProperties[tool] || [];
+    const pgFields = playgroundFields[tool] || [];
+    const qsProps = quickstartParams[tool] || [];
+
+    console.log(`Checking [${tool}] - Schema props (${mcpProps.length}), Playground fields (${pgFields.length}), Quickstart params (${qsProps.length})`);
+
+    // Check for schema properties missing from playground or quickstart
+    const missingInPlayground = mcpProps.filter(p => !pgFields.includes(p));
+    const missingInQuickstart = mcpProps.filter(p => !qsProps.includes(p));
+
+    if (missingInPlayground.length > 0) {
+      console.warn(`  ↳ Playground (app.js) omitted props: ${missingInPlayground.join(', ')}`);
+      driftWarnings++;
+    }
+    if (missingInQuickstart.length > 0) {
+      console.warn(`  ↳ Quickstart (index.html) omitted props: ${missingInQuickstart.join(', ')}`);
+      driftWarnings++;
+    }
+  }
+
+  if (driftWarnings === 0) {
+    console.log('✓ 100% parameter schema alignment across MCP server, playground, and quickstart.');
+  } else {
+    console.log(`ℹ Schema check completed with ${driftWarnings} parameter variance notices (documented variances).`);
+  }
+
+  // 4. Provider Keys & Rate Limit / Health Tracking Sync
+  console.log('\n4. Verifying .env.example provider keys against Quickstart tables and tracking...');
+  const envExamplePath = path.join(mcpDir, '.env.example');
+  const envExampleContent = fs.readFileSync(envExamplePath, 'utf-8');
+
+  // Extract all provider key environment variable names
+  const envKeys = new Set<string>();
+  for (const line of envExampleContent.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const match = trimmed.match(/^([A-Z0-9_]+)=/);
+    if (match) {
+      const varName = match[1];
+      if (
+        varName.endsWith('_KEY') ||
+        varName.endsWith('_TOKEN') ||
+        varName.endsWith('_ID') ||
+        varName.endsWith('_URL')
+      ) {
+        // Exclude server/config keys
+        if (!['FIREBASE_API_KEY', 'FIREBASE_AUTH_DOMAIN', 'FIREBASE_PROJECT_ID', 'FIREBASE_STORAGE_BUCKET', 'FIREBASE_MESSAGING_SENDER_ID', 'FIREBASE_APP_ID', 'FIREBASE_MEASUREMENT_ID', 'MCP_SECRET_KEY'].includes(varName)) {
+          envKeys.add(varName);
+        }
+      }
+    }
+  }
+
+  console.log(`Checking ${envKeys.size} provider environment variables: ${Array.from(envKeys).join(', ')}`);
+
+  // Check coverage in dashboard/index.html quickstart tables
+  const missingInQuickstartKeys: string[] = [];
+  for (const envKey of envKeys) {
+    if (!htmlContent.includes(`<code>${envKey}</code>`)) {
+      missingInQuickstartKeys.push(envKey);
+    }
+  }
+
+  if (missingInQuickstartKeys.length > 0) {
+    console.error(`✗ .env.example keys missing from Quickstart tables in dashboard/index.html: ${missingInQuickstartKeys.join(', ')}`);
+    process.exit(1);
+  }
+  console.log('✓ All .env.example provider keys documented in dashboard Quickstart tables.');
+
+  // Verify rate-limit and circuit breaker error tracking across LLM and Search providers
+  const persistencePath = path.join(mcpDir, 'src', 'utils', 'PersistenceManager.ts');
+  const persistenceContent = fs.readFileSync(persistencePath, 'utf-8');
+  if (!persistenceContent.includes('searchProviders?: Record<string')) {
+    console.error('✗ PersistenceManager missing searchProviders persistent tracking interface.');
+    process.exit(1);
+  }
+  if (!persistenceContent.includes('cooldownUntil?: number')) {
+    console.error('✗ PersistenceManager missing cooldownUntil / rate limit tracking.');
+    process.exit(1);
+  }
+  console.log('✓ PersistenceManager implements durable rate limit & circuit breaker tracking for LLM and Search.');
+
+  console.log('\n=== All Pre-Commit Checks Passed Successfully ===');
+}
+
+main().catch(err => {
+  console.error('Pre-commit verification script error:', err);
+  process.exit(1);
+});

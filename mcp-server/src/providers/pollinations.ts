@@ -40,8 +40,4 @@ export class PollinationsProvider extends BaseProvider {
     { id: 'community/MarcosFRG/flux-1-schnell', name: 'FLUX.1 Schnell (Community Micro-Cost)' }
   ];
 
-  // Optional key - Pollinations allows anonymous requests with basic limits
-  override isAvailable(): boolean {
-    return true;
-  }
 }

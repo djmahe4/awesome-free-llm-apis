@@ -71,6 +71,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="4"/></svg>
         Keyword & Prompt Steering
       </button>
+      <button class="tab-btn" data-tab="harness" role="tab" aria-selected="false" id="tab-harness">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Harness & Multi-Agent
+      </button>
     </nav>
 
     <!-- ══════════════════════════════════════════════════════════
@@ -523,7 +527,6 @@
               <tr><td>Google Gemini</td><td><code>GEMINI_API_KEY</code></td><td><a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/app/apikey</a></td></tr>
               <tr><td>Mistral AI</td><td><code>MISTRAL_API_KEY</code></td><td><a href="https://console.mistral.ai/api-keys" target="_blank" rel="noopener noreferrer">console.mistral.ai/api-keys</a></td></tr>
               <tr><td>Z AI (Zhipu AI)</td><td><code>ZHIPU_API_KEY</code></td><td><a href="https://open.bigmodel.cn/usercenter/apikeys" target="_blank" rel="noopener noreferrer">open.bigmodel.cn/usercenter/apikeys</a></td></tr>
-              <tr><td>Cerebras</td><td><code>CEREBRAS_API_KEY</code></td><td><a href="https://cloud.cerebras.ai/" target="_blank" rel="noopener noreferrer">cloud.cerebras.ai</a></td></tr>
               <tr><td>Cloudflare Workers AI</td><td><code>CLOUDFLARE_API_TOKEN</code> + <code>CLOUDFLARE_ACCOUNT_ID</code></td><td><a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">dash.cloudflare.com/profile/api-tokens</a></td></tr>
               <tr><td>Groq</td><td><code>GROQ_API_KEY</code></td><td><a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">console.groq.com/keys</a></td></tr>
               <tr><td>Hugging Face</td><td><code>HF_TOKEN</code></td><td><a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">huggingface.co/settings/tokens</a></td></tr>
@@ -534,6 +537,10 @@
               <tr><td>Ollama Cloud</td><td><code>OLLAMA_API_KEY</code></td><td><a href="https://ollama.com/settings/keys" target="_blank" rel="noopener noreferrer">ollama.com/settings/keys</a></td></tr>
               <tr><td>OpenRouter</td><td><code>OPENROUTER_API_KEY</code></td><td><a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">openrouter.ai/keys</a></td></tr>
               <tr><td>SiliconFlow</td><td><code>SILICONFLOW_API_KEY</code></td><td><a href="https://cloud.siliconflow.cn/account/ak" target="_blank" rel="noopener noreferrer">cloud.siliconflow.cn/account/ak</a></td></tr>
+              <tr><td>Pollinations AI</td><td><code>POLLINATIONS_API_KEY</code></td><td><a href="https://pollinations.ai" target="_blank" rel="noopener noreferrer">pollinations.ai</a></td></tr>
+              <tr><td>AionLabs</td><td><code>AIONLABS_API_KEY</code></td><td><a href="https://api.aionlabs.ai" target="_blank" rel="noopener noreferrer">api.aionlabs.ai</a></td></tr>
+              <tr><td>GitHub Models (Deprecated)</td><td><code>GITHUB_TOKEN</code></td><td><a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer">github.com/settings/tokens</a></td></tr>
+              <tr><td>Cerebras (Deprecated)</td><td><code>CEREBRAS_API_KEY</code></td><td><a href="https://cloud.cerebras.ai/" target="_blank" rel="noopener noreferrer">cloud.cerebras.ai</a></td></tr>
             </tbody>
           </table>
         </div>
@@ -743,6 +750,34 @@
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
               <tr><td colspan="4">No parameters required. Returns detailed live and persisted metrics across all registered providers.</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">agent_harness</span><span class="qs-tool-desc">Multi-agent declarative harness runner with file leases, reasoning relay & role rerun</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum: deploy | resume | rerun | reorchestrate | status | approvals | approve | reject | trace | tasks | abort</td><td>✓</td><td>Lifecycle command</td></tr>
+              <tr><td><code>goal</code></td><td>string</td><td>for deploy</td><td>Autonomous multi-agent mission objective</td></tr>
+              <tr><td><code>runId</code></td><td>string</td><td>for resume/rerun/status</td><td>Harness run UUID (generated on deploy)</td></tr>
+              <tr><td><code>role</code></td><td>string</td><td>for rerun/reorchestrate</td><td>Target agent role to rerun without clearing prior steps</td></tr>
+              <tr><td><code>followupContext</code></td><td>string</td><td>for rerun/reorchestrate</td><td>Steering instructions or feedback injected into role prompt</td></tr>
+              <tr><td><code>approvalId</code></td><td>string</td><td>for approve/reject</td><td>Pending approval UUID</td></tr>
+              <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace directory boundary</td></tr>
+              <tr><td><code>maxTokens</code></td><td>number</td><td></td><td>Per-run ceiling budget override</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">movie_tool</span><span class="qs-tool-desc">Multi-lane media generation orchestrator (Audio, Video, Music, Story, Metadata)</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>generate_manifest | render_timeline | transcribe_audio | generate_tts | generate_music | video_generation | status</td></tr>
+              <tr><td><code>prompt</code></td><td>string</td><td>✓</td><td>Creative scene or narrative prompt</td></tr>
+              <tr><td><code>lane</code></td><td>enum</td><td></td><td>all | audio | video | music | metadata</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session identifier for manifest persistence</td></tr>
             </tbody>
           </table>
         </details>
@@ -1014,6 +1049,166 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB: HARNESS & MULTI-AGENT TELEMETRY
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-harness" role="tabpanel" aria-labelledby="tab-harness">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h2 style="font-size:1.25rem;font-weight:700;letter-spacing:-.5px;display:flex;align-items:center;gap:8px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-purple"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Multi-Agent Harness &amp; Scopes Telemetry
+          </h2>
+          <p style="font-size:.8rem;color:var(--text-muted);margin-top:2px;">Real-time inspection of multi-agent file locks, reasoning collisions, and step re-orchestration.</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <input type="text" id="harness-workspace-input" placeholder="Workspace root (defaults to cwd)" style="width:260px;font-size:.8rem;padding:6px 12px;">
+          <button id="harness-refresh-btn" class="btn btn-primary btn-sm" style="display:flex;align-items:center;gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Scope Leases & Reasoning Collision Streams -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+        
+        <!-- Active File Leases Card -->
+        <div class="card">
+          <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <span class="card-title" style="display:flex;align-items:center;gap:8px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Active File Scope Leases
+            </span>
+            <span id="harness-lease-count" class="badge badge-cyan">0 active</span>
+          </div>
+          <div class="card-body" id="harness-leases-container" style="max-height:240px;overflow-y:auto;padding:0;">
+            <div class="conv-empty">No active file claims in scopes.json</div>
+          </div>
+        </div>
+
+        <!-- Reasoning Scope & Collision Viewer Card -->
+        <div class="card">
+          <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <span class="card-title" style="display:flex;align-items:center;gap:8px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-purple"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+              Reasoning Scopes &amp; Relay
+            </span>
+            <span id="harness-reasoning-count" class="badge badge-purple">0 scopes</span>
+          </div>
+          <div class="card-body" id="harness-reasoning-container" style="max-height:240px;overflow-y:auto;padding:0;">
+            <div class="conv-empty">No reasoning registrations in reasoning_scopes.json</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Interactive Node-Based Relay Flow Canvas (Multi-Agent Scope & Reasoning Graph) -->
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <div>
+            <span class="card-title" style="display:flex;align-items:center;gap:8px;color:var(--accent-cyan);">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.5 8.5l7 7M6 9v9h9"/></svg>
+              Interactive Relay &amp; Scope Flow Graph
+            </span>
+            <span style="font-size:.73rem;color:var(--text-muted);display:block;margin-top:2px;">Dynamic agent-to-file claims, keyword collisions, and weighted reasoning context passing.</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="harness-flow-physics-toggle" class="btn btn-secondary btn-sm" style="font-size:.73rem;padding:4px 8px;cursor:pointer;">
+              Dynamic Orbit: ON
+            </button>
+            <span id="harness-flow-stats" class="badge badge-purple" style="font-size:.7rem;">0 nodes &bull; 0 relays</span>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0;">
+          <div id="harness-relay-canvas-wrap" style="position:relative;width:100%;height:380px;background:radial-gradient(ellipse at center, rgba(14,14,26,0.9) 0%, rgba(7,7,15,1) 100%);overflow:hidden;border-bottom:1px solid var(--glass-border);">
+            <canvas id="harness-relay-canvas" style="width:100%;height:100%;display:block;cursor:grab;"></canvas>
+            <div id="harness-relay-tooltip" style="position:absolute;display:none;background:rgba(14,14,26,0.95);border:1px solid var(--accent-cyan);padding:8px 12px;border-radius:var(--radius-sm);font-size:.75rem;pointer-events:none;z-index:20;box-shadow:var(--shadow-glow-cyan);max-width:280px;backdrop-filter:blur(8px);"></div>
+          </div>
+          <div id="harness-relay-detail" style="padding:12px 16px;background:rgba(255,255,255,0.02);font-size:.78rem;color:var(--text-secondary);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <div>
+              <span style="color:var(--text-muted);">💡 Click or hover any Agent, File Lease, or Reasoning Keyword node to inspect inter-agent connections and relayed context.</span>
+            </div>
+            <div style="display:flex;gap:12px;font-size:.72rem;">
+              <span style="display:flex;align-items:center;gap:4px;"><span style="width:9px;height:9px;border-radius:50%;background:#06b6d4;display:inline-block;"></span> Agent</span>
+              <span style="display:flex;align-items:center;gap:4px;"><span style="width:9px;height:9px;border-radius:50%;background:#10b981;display:inline-block;"></span> File Lease</span>
+              <span style="display:flex;align-items:center;gap:4px;"><span style="width:9px;height:9px;border-radius:50%;background:#ec4899;display:inline-block;"></span> Keyword / Collision</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Harness Runs Table -->
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="display:flex;align-items:center;gap:8px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-amber"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            Harness Runs History
+          </span>
+          <span id="harness-runs-count" class="badge badge-gray">0 runs</span>
+        </div>
+        <div class="card-body" id="harness-runs-table-wrap" style="padding:0;overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,0.02);color:var(--text-muted);text-align:left;">
+                <th style="padding:10px 14px;">Run ID</th>
+                <th style="padding:10px 14px;">Declaration</th>
+                <th style="padding:10px 14px;">Status</th>
+                <th style="padding:10px 14px;">Goal</th>
+                <th style="padding:10px 14px;">Started</th>
+                <th style="padding:10px 14px;text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="harness-runs-tbody">
+              <tr><td colspan="6" class="conv-empty" style="padding:24px;text-align:center;">No harness runs found.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Run Details & Re-run Role Workspace -->
+      <div id="harness-run-detail-panel" class="card" style="display:none;margin-bottom:20px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" id="harness-detail-title" style="display:flex;align-items:center;gap:8px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-green"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+            Run Inspector
+          </span>
+          <button id="harness-detail-close" class="btn btn-secondary btn-sm">Close Inspector</button>
+        </div>
+        <div class="card-body" style="padding:16px;">
+          <!-- Re-run Role Action Bar -->
+          <div style="background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.25);border-radius:var(--radius-sm);padding:14px;margin-bottom:16px;">
+            <h4 style="font-size:.85rem;font-weight:600;margin-bottom:8px;color:var(--accent-purple);display:flex;align-items:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              Selective Role Re-orchestration
+            </h4>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+              <input type="text" id="harness-rerun-role" placeholder="Role name (e.g. security-reviewer, coder)" style="width:200px;font-size:.8rem;padding:6px 10px;">
+              <input type="text" id="harness-rerun-context" placeholder="Optional followup steering context" style="flex:1;min-width:240px;font-size:.8rem;padding:6px 10px;">
+              <button id="harness-rerun-submit" class="btn btn-primary btn-sm" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Re-run Role
+              </button>
+            </div>
+            <div id="harness-rerun-msg" style="font-size:.75rem;margin-top:6px;display:none;"></div>
+          </div>
+
+          <!-- Tasks & Trace Split View -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div>
+              <h4 style="font-size:.82rem;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">Tasks Progress (tasks.md)</h4>
+              <div id="harness-tasks-view" class="diff-viewer" style="height:260px;overflow-y:auto;white-space:pre-wrap;background:rgba(0,0,0,0.25);">No tasks.md found</div>
+            </div>
+            <div>
+              <h4 style="font-size:.82rem;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">Execution Trace Events</h4>
+              <div id="harness-trace-view" class="diff-viewer" style="height:260px;overflow-y:auto;background:rgba(0,0,0,0.25);">No trace events</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </section>
 
   </main>

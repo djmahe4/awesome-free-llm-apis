@@ -122,6 +122,7 @@ export class SearchRouterMiddleware implements Middleware {
     }
 
     const registry = SearchProviderRegistry.getInstance();
+    await registry.ensureInitialized();
     const candidates = registry.getAvailableProviders()
       .slice()
       .sort((a, b) => a.getPenaltyScore() - b.getPenaltyScore());
@@ -150,6 +151,10 @@ export class SearchRouterMiddleware implements Middleware {
             }
           }
 
+          const stateChanged = provider.recordSuccess();
+          if (stateChanged) {
+            registry.persistState().catch(() => {});
+          }
           context.response = this.formatResponse(query, results, provider.id);
           (context as any).searchTrace = { query, provider: provider.id, results, latencyMs: Date.now() - start };
           this.logSearch(context, query, provider.id, results, Date.now() - start);
@@ -160,6 +165,7 @@ export class SearchRouterMiddleware implements Middleware {
       } catch (err: any) {
         console.error(`[SearchRouter] ${provider.id} failed: ${err.message}`);
         provider.recordFailure(err.status || 500);
+        registry.persistState().catch(() => {});
       }
     }
 

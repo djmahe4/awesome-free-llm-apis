@@ -14,7 +14,7 @@ export async function generateBgm(
   engine: 'musicgen' | 'stable-audio' = 'musicgen',
   hfToken?: string
 ): Promise<string> {
-  const { Client } = await import('@gradio/client');
+  const { Client } = (await (Function('m', 'return import(m)')('@gradio/client'))) as any;
   const spaceId = engine === 'musicgen' ? 'facebook/MusicGen' : 'artificialguybr/Stable-Audio-Open-Zero';
   const token = hfToken || process.env.HF_TOKEN;
   const client = await Client.connect(spaceId, token ? { token } : undefined);

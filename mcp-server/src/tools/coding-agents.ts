@@ -1030,7 +1030,7 @@ async function annotateFixedTaskList(
   }
 }
 
-function serializeTasksMarkdown(goal: string, tasks: TaskItem[]): string {
+export function serializeTasksMarkdown(goal: string, tasks: TaskItem[]): string {
   const firstLine = goal.split('\n')[0].replace(/^#+\s*/, '');
   const lines = [`# Tasks Plan: ${firstLine}\n`];
   for (const t of tasks) {
@@ -1049,7 +1049,7 @@ function serializeTasksMarkdown(goal: string, tasks: TaskItem[]): string {
 /** Parses tasks.md back, including the per-task file/context metadata and the
  * blackboard log — a simple line-state-machine since each task can span
  * several indented lines, not just its own checkbox line. */
-function parseTasksMarkdown(content: string): TaskItem[] {
+export function parseTasksMarkdown(content: string): TaskItem[] {
   const lines = content.split(/\r?\n/);
   const tasks: TaskItem[] = [];
   let current: TaskItem | null = null;
@@ -1082,7 +1082,7 @@ function parseTasksMarkdown(content: string): TaskItem[] {
 }
 
 /** Recovers the original plan goal recorded in a tasks.md header, so resume calls don't overwrite it with a per-task or stale `input.goal`. */
-function extractGoalFromTasksMarkdown(content: string): string | undefined {
+export function extractGoalFromTasksMarkdown(content: string): string | undefined {
   const match = content.match(/^#\s*Tasks Plan:\s*(.+)$/m);
   return match ? match[1].trim() : undefined;
 }
@@ -1106,7 +1106,7 @@ function extractCodeBlock(text: string): string {
  * splice the patched window back into the full content.
  * Returns null when the file is small enough to send whole.
  */
-function extractWindowForInstruction(
+export function extractWindowForInstruction(
   content: string,
   instruction: string,
   windowSize = 120
@@ -1118,12 +1118,30 @@ function extractWindowForInstruction(
     .map(t => t.toLowerCase());
   const uniqueTerms = [...new Set(terms)].slice(0, 12);
 
-  let bestScore = 0;
+  const perLineScore = lines.map(line => {
+    const lower = line.toLowerCase();
+    return uniqueTerms.filter(t => lower.includes(t)).length;
+  });
+
+  // A single keyword-dense line (e.g. one ternary chaining status/complete/
+  // failed) can outscore the real target whose matching terms are spread
+  // across several lines of a multi-line block — sum scores over a local
+  // neighborhood instead of picking the single highest-scoring line, so
+  // sustained relevance beats one coincidentally dense outlier line.
+  // Observed live: this picked a 120-line window around an unrelated
+  // one-liner in finalizeRun instead of the real multi-line target in
+  // applyResearchResult, and the model then hallucinated an edit to the only
+  // thing it could see — applied cleanly (real text, no TS regression),
+  // reported success, and silently missed the actual requested change.
+  const neighborhood = 6;
+  let bestScore = -1;
   let bestLine = Math.floor(lines.length / 2);
   for (let i = 0; i < lines.length; i++) {
-    const lower = lines[i].toLowerCase();
-    const score = uniqueTerms.filter(t => lower.includes(t)).length;
-    if (score > bestScore) { bestScore = score; bestLine = i; }
+    let windowScore = 0;
+    for (let j = Math.max(0, i - neighborhood); j <= Math.min(lines.length - 1, i + neighborhood); j++) {
+      windowScore += perLineScore[j];
+    }
+    if (windowScore > bestScore) { bestScore = windowScore; bestLine = i; }
   }
 
   const half = Math.floor(windowSize / 2);
@@ -1189,13 +1207,54 @@ function windowReplyIsSuspicious(originalWindowLines: string[], replyLines: stri
  */
 interface SearchReplaceBlock { search: string; replace: string }
 
-function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
+export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
   const blocks: SearchReplaceBlock[] = [];
-  const re = /<{5,}\s*SEARCH\r?\n([\s\S]*?)\r?\n={5,}\r?\n([\s\S]*?)\r?\n>{5,}\s*REPLACE/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    blocks.push({ search: m[1], replace: m[2] });
+  const lines = text.split(/\r?\n/);
+  let state: 'OUTSIDE' | 'IN_SEARCH' | 'IN_REPLACE' = 'OUTSIDE';
+  let curSearch: string[] = [];
+  let curReplace: string[] = [];
+
+  const isSearchMarker = (l: string) => /^<{5,}\s*SEARCH\s*$/i.test(l.trim());
+  const isDividerMarker = (l: string) => /^={5,}\s*$/i.test(l.trim());
+  const isReplaceMarker = (l: string) => /^>{5,}\s*REPLACE\s*$/i.test(l.trim());
+
+  for (const line of lines) {
+    if (state === 'OUTSIDE') {
+      if (isSearchMarker(line)) {
+        state = 'IN_SEARCH';
+        curSearch = [];
+        curReplace = [];
+      }
+    } else if (state === 'IN_SEARCH') {
+      if (isDividerMarker(line)) {
+        state = 'IN_REPLACE';
+      } else if (isSearchMarker(line)) {
+        // Reset if another search marker begins without divider
+        curSearch = [];
+        curReplace = [];
+      } else {
+        curSearch.push(line);
+      }
+    } else if (state === 'IN_REPLACE') {
+      if (isReplaceMarker(line)) {
+        blocks.push({
+          search: curSearch.join('\n'),
+          replace: curReplace.join('\n'),
+        });
+        state = 'OUTSIDE';
+        curSearch = [];
+        curReplace = [];
+      } else if (isSearchMarker(line)) {
+        // Premature new block started
+        state = 'IN_SEARCH';
+        curSearch = [];
+        curReplace = [];
+      } else {
+        curReplace.push(line);
+      }
+    }
   }
+
   return blocks;
 }
 
@@ -1234,10 +1293,20 @@ const STRAY_MARKER_RE = /^(?:<{5,}|={5,}|>{5,})\s*(?:SEARCH|REPLACE)?\s*$/m;
  * tier already found (even an ambiguous) match, so loosening the match never
  * silently overrides a real exact hit elsewhere in the file.
  */
-function findLineBlockMatch(
+// Matches a leading `L<number>: ` annotation — the format context-gatherer.ts
+// uses to present grep excerpts to the model (`L${line}: ${content}`,
+// context-gatherer.ts's grep-context formatting). Observed live: the model
+// echoed this presentation-only annotation into BOTH the SEARCH and REPLACE
+// text of a block ("L268: const callResult = ..."), so the exact/trimmed
+// tiers correctly found zero matches (the real file has no such literal
+// text) and the whole batch failed safely — but it's a real, generalizable
+// failure mode worth a dedicated tolerant tier rather than just failing.
+const LINE_NUMBER_PREFIX_RE = /^\s*L\d+:\s?/;
+
+export function findLineBlockMatch(
   workingLines: string[],
   searchLines: string[]
-): { index: number; ambiguous: boolean } {
+): { index: number; ambiguous: boolean; usedLineNumberStrip: boolean } {
   const tryTier = (project: (l: string) => string): number[] => {
     const hits: number[] = [];
     const projSearch = searchLines.map(project);
@@ -1252,15 +1321,23 @@ function findLineBlockMatch(
   };
 
   const exact = tryTier(l => l);
-  if (exact.length > 0) return { index: exact[0], ambiguous: exact.length > 1 };
+  if (exact.length > 0) return { index: exact[0], ambiguous: exact.length > 1, usedLineNumberStrip: false };
 
   const trimmed = tryTier(l => l.trim());
-  if (trimmed.length > 0) return { index: trimmed[0], ambiguous: trimmed.length > 1 };
+  if (trimmed.length > 0) return { index: trimmed[0], ambiguous: trimmed.length > 1, usedLineNumberStrip: false };
 
-  return { index: -1, ambiguous: false };
+  // Only worth trying when the SEARCH text itself actually carries the
+  // annotation — otherwise this tier is identical to the trimmed one above
+  // and would just re-do the same scan for nothing.
+  if (searchLines.some(l => LINE_NUMBER_PREFIX_RE.test(l))) {
+    const lineNumberStripped = tryTier(l => l.trim().replace(LINE_NUMBER_PREFIX_RE, ''));
+    if (lineNumberStripped.length > 0) return { index: lineNumberStripped[0], ambiguous: lineNumberStripped.length > 1, usedLineNumberStrip: true };
+  }
+
+  return { index: -1, ambiguous: false, usedLineNumberStrip: false };
 }
 
-function applySearchReplaceBlocks(
+export function applySearchReplaceBlocks(
   content: string,
   blocks: SearchReplaceBlock[]
 ): { content: string; appliedCount: number; failures: string[] } {
@@ -1284,13 +1361,18 @@ function applySearchReplaceBlocks(
       continue;
     }
     const searchLines = search.split(/\r?\n/);
-    const { index, ambiguous } = findLineBlockMatch(workingLines, searchLines);
+    const { index, ambiguous, usedLineNumberStrip } = findLineBlockMatch(workingLines, searchLines);
     if (index === -1) {
       failures.push(`SEARCH text not found (even with whitespace-tolerant matching): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
     } else if (ambiguous) {
       failures.push(`SEARCH text matched multiple times (ambiguous, must be unique): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
     } else {
-      const replaceLines = replace.split(/\r?\n/);
+      // If the match only succeeded after stripping a bogus "L<N>: " prefix
+      // from SEARCH, the model very likely echoed the same annotation into
+      // REPLACE too (observed live, symmetric on both sides of the block) —
+      // strip it there as well, or the "fix" would insert that literal
+      // presentation-only text into the real file.
+      const replaceLines = (usedLineNumberStrip ? replace.replace(new RegExp(LINE_NUMBER_PREFIX_RE.source, 'gm'), '') : replace).split(/\r?\n/);
       workingLines = [
         ...workingLines.slice(0, index),
         ...replaceLines,
@@ -1400,15 +1482,15 @@ const REFUSAL_PATTERNS = [
  * FULL current content by exact text — there's no line-offset bookkeeping
  * to get wrong, and no requirement that the model reproduce anything.
  */
-async function generateSearchReplacePatch(
+export async function generateSearchReplacePatch(
   currentContent: string,
   instruction: string,
   filename: string,
   tasksContext: string | undefined,
   chat: (prompt: string) => Promise<string>
 ): Promise<{ content: string; appliedCount: number; failures: string[]; hardFailure?: string }> {
-  const hasExports = /^\s*export\s+/m.test(currentContent);
-  const windowInfo = !hasExports ? extractWindowForInstruction(currentContent, instruction) : null;
+  const lineCount = currentContent.split(/\r?\n/).length;
+  const windowInfo = lineCount > 150 ? extractWindowForInstruction(currentContent, instruction, 150) : null;
   const contextText = windowInfo ? windowInfo.window : currentContent;
   const contextLabel = windowInfo
     ? `lines ${windowInfo.startIdx + 1}–${windowInfo.endIdx} of ${filename} (${windowInfo.lineCount} lines total)`
@@ -1427,7 +1509,11 @@ async function generateSearchReplacePatch(
       '=======',
       '(the replacement text)',
       '>>>>>>> REPLACE',
-      'Rules: SEARCH text must match the shown content exactly and must be unique (usually 1–5 lines — include just enough surrounding text to make it unambiguous). Do not paraphrase or reformat SEARCH text. Emit multiple blocks if the instruction requires edits in more than one place.',
+      'Rules:',
+      '1. SEARCH text must match the shown content exactly and must be unique (usually 1–5 lines — include enough surrounding text to make it unambiguous).',
+      '2. Do not paraphrase or reformat SEARCH text.',
+      '3. To ADD lines while retaining existing code: include the anchor line(s) in SEARCH, and in REPLACE include both the anchor line(s) AND the new lines. NEVER leave SEARCH empty.',
+      '4. Emit multiple blocks if the instruction requires edits in more than one place.',
     ].join('\n'),
   ].filter(Boolean).join('\n\n');
 
@@ -1905,8 +1991,30 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       try {
         const { listLocalModels, rankCandidateModels } = await import('../providers/ollama-local.js');
         const models = await listLocalModels();
-        const ranked = rankCandidateModels(models);
-        resolvedModel = ranked[0] ?? null;
+
+        // Check llmfit hardware recommendations to find the optimal coding model
+        try {
+          const { recommendModels } = await import('../services/llmfit.js');
+          const fitResult = await recommendModels({ useCase: 'coding', limit: 5, workspaceRoot });
+          const recommendedOllamaNames = (fitResult.models || [])
+            .map(m => m.ollamaName)
+            .filter(Boolean) as string[];
+
+          for (const rec of recommendedOllamaNames) {
+            const match = models.find(m => m === rec || m.startsWith(`${rec}:`));
+            if (match) {
+              resolvedModel = match;
+              break;
+            }
+          }
+        } catch {
+          // Fall back gracefully to heuristic candidate ranking
+        }
+
+        if (!resolvedModel) {
+          const ranked = rankCandidateModels(models);
+          resolvedModel = ranked[0] ?? null;
+        }
       } catch {
         console.warn('[coding-agents] Ollama unreachable — will route to cloud model fallback');
       }
@@ -1971,8 +2079,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
             // this shares the exact same model-invocation, context-gathering,
             // and refusal-detection code as the full-content path below —
             // including the same test/mock seam.
-            const hasExports = /^\s*export\s+/m.test(patchedContent);
-            const windowInfo = !hasExports ? extractWindowForInstruction(patchedContent, augmentedInstruction) : null;
+            const lineCount = patchedContent.split(/\r?\n/).length;
+            const windowInfo = lineCount > 150 ? extractWindowForInstruction(patchedContent, augmentedInstruction, 150) : null;
             const srLlmResult = await localLlmPatch({
               filePath: fullPath,
               instruction: augmentedInstruction,

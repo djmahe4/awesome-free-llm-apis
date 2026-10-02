@@ -197,7 +197,11 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
           '=======',
           '(the replacement text)',
           '>>>>>>> REPLACE',
-          'Rules: SEARCH text must match the shown content exactly and must be unique (usually 1–5 lines — include just enough surrounding text to make it unambiguous). Do not paraphrase or reformat SEARCH text. Emit multiple blocks if the instruction requires edits in more than one place.',
+          'Rules:',
+          '1. SEARCH text must match the shown content exactly and must be unique (usually 1–5 lines — include enough surrounding text to make it unambiguous).',
+          '2. Do not paraphrase or reformat SEARCH text.',
+          '3. To ADD lines while retaining existing code: include the anchor line(s) in SEARCH, and in REPLACE include both the anchor line(s) AND the new lines. NEVER leave SEARCH empty.',
+          '4. Emit multiple blocks if the instruction requires edits in more than one place.',
         ].join('\n')
       : '';
 

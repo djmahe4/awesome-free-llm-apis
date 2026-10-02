@@ -1,0 +1,58 @@
+harness:
+  name: multi-agent-flow-template
+  schemaVersion: 1
+  primaryLane: engineering
+  budget:
+    maxTokens: 80000
+    maxToolCalls: 50
+    maxWallMinutes: 25
+    supervisorShareMax: 0.2
+  allowedWorkspaceRoots: []
+  approval:
+    timeoutMinutes: 60
+    standingRules: []
+
+roles:
+  top_level:
+    tools:
+      - { tool: manage_memory, actions: [search, wiki_search, wiki_read, adr_list, eisenhower_list, node_list, graph_query] }
+      - { tool: use_free_llm, constraints: { agentic: false } }
+
+  architect:
+    triggers: [architecture, design, plan, system, rfc, adr, spec]
+    tools:
+      - { tool: use_free_llm, constraints: { agentic: false } }
+      - { tool: manage_memory, actions: [wiki_write, adr_write, node_add, node_link] }
+
+  researcher:
+    triggers: [research, explore, docs, investigate, survey, compare]
+    tools:
+      - { tool: use_free_llm, constraints: { agentic: false } }
+      - { tool: browser_tool, actions: [navigate, snapshot, extract, deep_scrape, screenshot] }
+      - { tool: vision_tool }
+
+  coder:
+    triggers: [code, implement, refactor, fix, test, build, patch]
+    requiresApproval: true
+    tools:
+      - { tool: coding_agents }
+      - { tool: local_llm_patch }
+
+  reviewer:
+    triggers: [review, audit, verify, security, linter, validation]
+    requiresApproval: true
+    tools:
+      - { tool: use_free_llm, constraints: { agentic: false } }
+      - { tool: manage_memory, actions: [wiki_search, wiki_read] }
+
+writes:
+  - { tool: manage_memory, actions: [wiki_write, adr_write, node_add, node_link, node_review, eisenhower_add] }
+
+contentDepth:
+  order: [abstract, html, pdf]
+  default: abstract
+
+handoff:
+  schemaVersion: 1
+  lowConfidenceThreshold: 0.75
+  maxDepth: 3

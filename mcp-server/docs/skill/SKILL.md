@@ -265,6 +265,16 @@ Vibe Movie Engine and multi-lane media generation orchestrator.
 
 ---
 
+### `agent_harness` [v1.2.0]
+Multi-agent declarative harness execution and coordination engine.
+- **Actions**: `'deploy'` | `'resume'` | `'rerun'` | `'reorchestrate'` | `'status'` | `'approvals'` | `'approve'` | `'reject'` | `'trace'` | `'tasks'` | `'abort'`.
+- **Selective Role Re-orchestration**: Rerun a specific role (`action: 'rerun' | 'reorchestrate'`, `role`, `followupContext`) from a completed or paused run without discarding prior step logs or resetting `tasks.md`.
+- **Multi-Agent File Ownership**: `FileScopeRegistry` tracks file claims in `.free-llm-mcp/harness/scopes.json` to prevent concurrent write collisions across agents.
+- **Reasoning Collision & Context Passing**: `ReasoningScopeRegistry` detects overlapping agent keywords, syncs with `ShortTermMemory` decay, and relays token-weighted findings chunks across roles.
+- Full reference in [agent_harness.md](references/agent_harness.md).
+
+---
+
 ## 🧭 Prompting & Steering Directives
 
 ### 1. The `override` keyword (in-prompt, bypasses `.gitignore`)
@@ -320,6 +330,7 @@ preferred persona: coder
   - [`quantum_tool`](references/quantum_tool.md)
   - [`local_llm_patch`](references/local_llm_patch.md)
   - [`coding_agents`](references/coding_agents.md)
+  - [`agent_harness`](references/agent_harness.md)
   - [`movie_tool`](references/movie_tool.md)
   - [`manage_memory`](references/manage_memory.md)
   - [`store_workspace_skill`](references/store_workspace_skill.md)

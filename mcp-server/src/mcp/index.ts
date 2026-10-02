@@ -767,42 +767,87 @@ export async function createMCPServer(): Promise<Server> {
         }
       },
       {
-        name: 'movie_tool',
-        description: 'Vibe movie media engine: timeline manifest, asset generation (Pollinations FLUX T2I, Kokoro TTS, MusicGen BGM), and approvals.',
+        name: 'agent_harness',
+        description: [
+          'Deploys a background research/analysis agent under a declarative allowlist,',
+          'token budget, and human-in-the-loop approval queue. Research-first: content depth',
+          'is abstract -> html -> pdf, deterministic, never an LLM choice. Coding tools',
+          '(coding_agents, local_llm_patch) are always gated behind explicit approval,',
+          'regardless of the harness declaration.',
+          '',
+          'USER STORY: Kick off unattended research/scraping/analysis work that runs in the',
+          'background under a strict token budget, with every tool call outside the declared',
+          'allowlist parked in an approval queue instead of executing — poll status, review',
+          'and decide pending approvals, then resume.',
+          '',
+          'WHEN TO USE: A research/analysis/scraping task you want running in the background',
+          'with hard limits on cost and blast radius, not a synchronous one-shot call.',
+          '',
+          'INPUTS:',
+          '  action (required)   — "deploy" | "resume" | "status" | "approvals" | "approve" | "reject" | "trace" | "tasks" | "abort".',
+          '  runId (optional for deploy, required otherwise) — Identifies the run; deploy generates one if omitted.',
+          '  harness (optional)  — Declaration name (default "research-analysis").',
+          '  goal (required for deploy) — The research/analysis objective.',
+          '  workspace_root (optional) — Scopes memory writes and the run\'s on-disk state.',
+          '  maxTokens (optional) — Override the declaration\'s default per-run token budget.',
+          '  approvalId (required for approve/reject) — From a prior "approvals" call.',
+          '  note (optional)     — Attached to an approve/reject decision.',
+          '  limit (optional)    — Max trace events to return (default 200).',
+          '',
+          'ACTION DETAILS:',
+          '  deploy    → Starts a background run (single research role in this version), returns',
+          '              immediately with the initial run record. Poll with "status". Refuses a runId',
+          '              that already has a run — use "resume" to continue a paused one instead.',
+          '  resume    → Re-attempts a run parked in "paused_approval" with the identical goal/payload',
+          '              its pending approval was granted for. No-op error if not currently paused.',
+          '  status    → Run state, budget usage, and pending-approval count.',
+          '  approvals → Lists all approval requests for a run (pending/approved/rejected/expired).',
+          '  approve/reject → Decides one pending approval by id. Binds to the EXACT call it was',
+          '              requested for (runId+callId+argsHash) — approving one call never authorizes',
+          '              a different call, even to the same tool.',
+          '  trace     → Tails the run\'s append-only debug/trace log (policy decisions, tool calls,',
+          '              budget events, handoffs, errors).',
+          '  tasks     → Returns the run\'s tasks.md blackboard — the SAME per-task append-only log',
+          '              format coding_agents uses (id/task/status/log[]), one task per role',
+          '              invocation: pending/in_progress/completed/failed, with a timestamped log',
+          '              entry per deploy/resume attempt. A failed or paused attempt leaves its task',
+          '              \'pending\' (not \'completed\') so it\'s visibly retryable, matching coding_agents\'',
+          '              own blackboard semantics exactly.',
+          '  abort     → Cancels a running run.',
+          '',
+          'OUTPUTS:',
+          '  deploy         → { success:true, run }',
+          '  status         → { success:true, run, pendingApprovals }',
+          '  approvals      → { approvals: ApprovalRequest[] }',
+          '  approve/reject → { success:true, approval } (false if the id doesn\'t exist)',
+          '  trace          → { events: TraceEvent[] }',
+          '  tasks          → { tasksFile: string | null, tasks: TaskItem[] }',
+          '  abort          → { success: boolean }',
+          '',
+          'FAILURE STATES:',
+          '  - run.status:"paused_approval" — a call outside the allowlist is waiting in the',
+          '    approval queue; call "approvals" then "approve"/"reject", then "resume" (same runId) to continue.',
+          '  - run.status:"paused_budget" — the token or tool-call budget would be exceeded;',
+          '    increase maxTokens on a fresh deploy or accept the partial result in run.result.',
+          '  - run.status:"failed" — see run.error and the trace\'s last "error" event.',
+        ].join('\n'),
         inputSchema: {
-          type: 'object',
+          type: 'object' as const,
           properties: {
-            action: {
-              type: 'string',
-              enum: ['init_project', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'compile_timeline', 'get_timeline', 'apply_effect', 'undo_effect'],
-              description: 'The movie_tool action to execute'
-            },
-            projectId: { type: 'string', description: 'Project ID' },
-            premise: { type: 'string', description: 'Premise or logline for the project' },
-            sessionId: { type: 'string', description: 'Session identifier' },
-            projectDir: { type: 'string', description: 'Custom project directory path' },
-            track: { type: 'string', enum: ['video', 'vfx', 'bgm', 'bgm_drums', 'bgm_bass', 'bgm_melody', 'vocal', 'song', 'script', 'dialogue'], description: 'Timeline track lane' },
-            start_ms: { type: 'number', description: 'Start timestamp in milliseconds' },
-            end_ms: { type: 'number', description: 'End timestamp in milliseconds' },
-            label: { type: 'string', description: 'Human readable artifact label' },
-            engine: { type: 'string', description: 'Generation engine name' },
-            model: { type: 'string', description: 'Specific model identifier' },
-            artifact_path: { type: 'string', description: 'File path to media artifact' },
-            prompt: { type: 'string', description: 'Prompt for generation' },
-            artifactId: { type: 'string', description: 'Artifact ID for approval, reroll, or effect manipulation' },
-            apiKey: { type: 'string', description: 'Optional API key for Pollinations or external provider' },
-            hfToken: { type: 'string', description: 'Optional Hugging Face access token' },
-            effect: {
-              type: 'object',
-              description: 'DSP remix or video FX effect object. If invalid or omitted during apply_effect, parameters/type are automatically randomized.'
-            },
-            remix: {
-              type: 'boolean',
-              description: 'Whether to render media remix immediately using FFmpeg (defaults to true)'
-            }
+            action: { type: 'string', enum: ['deploy', 'resume', 'rerun', 'reorchestrate', 'status', 'approvals', 'approve', 'reject', 'trace', 'tasks', 'abort'] },
+            runId: { type: 'string', description: 'Run identifier. Required for every action except deploy (which generates one if omitted).' },
+            harness: { type: 'string', description: 'Harness declaration name (default "research-analysis")' },
+            goal: { type: 'string', description: 'Research/analysis objective (required for deploy)' },
+            workspace_root: { type: 'string', description: 'Absolute workspace path — scopes memory writes and on-disk run state' },
+            maxTokens: { type: 'number', description: 'Override the declaration\'s default per-run token budget' },
+            approvalId: { type: 'string', description: 'Approval request id (required for approve/reject)' },
+            note: { type: 'string', description: 'Optional note attached to an approve/reject decision' },
+            limit: { type: 'number', description: 'Max trace events to return (default 200)' },
+            role: { type: 'string', description: 'Target role name to selectively rerun or reorchestrate' },
+            followupContext: { type: 'string', description: 'Optional steering instructions or context injected into rerun role' },
           },
-          required: ['action']
-        }
+          required: ['action'],
+        },
       }
     ],
   }));
@@ -917,12 +962,12 @@ export async function createMCPServer(): Promise<Server> {
           content: [{ type: 'text' as const, text: toMarkdownResponse(result.content || result.markdown || '') }],
           isError: !result.applied && !!result.error,
         };
-      } else if (name === 'movie_tool') {
-        const { runMovieTool } = await import('../tools/movie-tool.js');
-        const result = await runMovieTool(args as any);
+      } else if (name === 'agent_harness') {
+        const { agentHarness } = await import('../tools/agent-harness.js');
+        const result = await agentHarness(args as any);
         response = {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-          isError: !result.success,
+          isError: result?.success === false,
         };
       } else {
         throw new Error(`Unknown tool: ${name}`);

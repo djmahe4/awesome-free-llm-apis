@@ -65,6 +65,8 @@ export interface UseFreeLLMInput {
   // For action:'continue' — appended to the resumed subtask, same as the trailing text in
   // `continue <promptId> <resume_input>`.
   resume_input?: string;
+  // External abort signal to cancel long-running tool execution or HTTP requests
+  signal?: AbortSignal;
 }
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
@@ -627,6 +629,7 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     stream,
     agentic,
     skipIndexing,
+    abortSignal: (input as any).signal,
   };
 
   const pipeline = new PipelineExecutor();
@@ -981,6 +984,12 @@ export async function flushSystem(): Promise<void> {
   // drops the last batch of request/token counts, which looked like usage
   // "resetting" on every restart.
   await getSharedRouter().persistNow();
+  try {
+    const { SearchProviderRegistry } = await import('../search/registry.js');
+    await SearchProviderRegistry.getInstance().persistState();
+  } catch {
+    // Best-effort search persistence
+  }
 }
 
 interface ParsedToolCall {
