@@ -1226,6 +1226,53 @@ export function createExpressApp(): express.Express {
         }
       });
 
+      // Convenience aliases matching plan specification (/api/movie/*)
+      app.get('/api/movie/timeline', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const projectId = (req.query.projectId as string) || 'default';
+          const projectDir = req.query.workspace as string;
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const result = await runMovieTool({ action: 'get_timeline', projectId, projectDir });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      app.post('/api/movie/artifact', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const result = await runMovieTool({ ...req.body, action: 'add_artifact' });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      app.post('/api/movie/effect', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const result = await runMovieTool({ ...req.body, action: 'apply_effect' });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      app.post('/api/movie/approve', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const result = await runMovieTool({ ...req.body, action: 'approve_artifact' });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
       // POST /api/steering_eval — Live System Prompt Steering & Ingestion Inspection Endpoint
       app.post('/api/steering_eval', express.json({ limit: '1mb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;

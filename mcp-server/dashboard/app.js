@@ -3111,7 +3111,26 @@ async function fetchHarnessTelemetry() {
 }
 
 function renderHarnessTelemetry(data) {
-  const { runs = [], activeScopes = [], reasoningScopes = [] } = data;
+  const { runs = [], activeScopes = [], reasoningScopes = [], wikiPages = [] } = data;
+
+  // Render Wiki Nexus Card
+  const wikiCount = document.getElementById('harness-wiki-count');
+  const wikiList = document.getElementById('harness-wiki-list');
+  if (wikiCount) wikiCount.textContent = `${wikiPages.length} pages indexed`;
+  if (wikiList) {
+    if (wikiPages.length === 0) {
+      wikiList.innerHTML = '<span style="font-size:.75rem;color:var(--text-muted);font-style:italic;">No wiki documents linked to current session.</span>';
+    } else {
+      wikiList.innerHTML = wikiPages.map(wp => `
+        <div class="wiki-tag" style="display:inline-flex;align-items:center;gap:6px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);padding:4px 10px;border-radius:20px;font-size:.75rem;cursor:pointer;transition:background .2s;" 
+             onclick="const wb = document.querySelector('[data-tab=\\'wiki\\']'); if (wb) { wb.click(); }">
+          <span style="color:#60a5fa;">📄</span>
+          <span style="font-weight:600;color:var(--text-primary);">${esc(wp.title)}</span>
+          <span style="font-size:.65rem;color:var(--text-muted);">${(wp.size / 1024).toFixed(1)}KB</span>
+        </div>
+      `).join('');
+    }
+  }
 
   // Render File Leases
   if (harnessLeaseCount) harnessLeaseCount.textContent = `${activeScopes.length} active`;
