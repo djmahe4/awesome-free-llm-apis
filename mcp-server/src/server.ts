@@ -577,11 +577,21 @@ export function createExpressApp(): express.Express {
               result = await agentHarness(params);
               break;
             }
+            case 'browser_tool': {
+              const { dispatchBrowserAction } = await import('./browser/dispatch.js');
+              result = await dispatchBrowserAction(params);
+              break;
+            }
+            case 'movie_tool': {
+              const { runMovieTool } = await import('./tools/movie-tool.js');
+              result = await runMovieTool(params);
+              break;
+            }
             default:
               res.status(400).json({ error: `Unknown tool: ${tool}` });
               return;
           }
-          const selfLoggingTools = new Set(['use_free_llm', 'coding_agents', 'local_llm_patch', 'quantum_tool', 'cyber_tool']);
+          const selfLoggingTools = new Set(['use_free_llm', 'coding_agents', 'local_llm_patch', 'quantum_tool', 'cyber_tool', 'movie_tool']);
           if (!selfLoggingTools.has(tool)) {
             const sid = params.sessionId || '__no_ws__';
             const { logToolCall } = await import('./utils/ChatLogger.js');
@@ -1116,8 +1126,29 @@ export function createExpressApp(): express.Express {
         try {
           const workspaceRoot = (req.query.workspace as string) || process.cwd();
           const harnessDir = path.resolve(workspaceRoot, '.free-llm-mcp', 'harness');
+          const wikiDir = path.resolve(workspaceRoot, '.free-llm-mcp', 'wiki');
+
+          // Collect workspace wiki page metadata for knowledge nexus visualization
+          let wikiPages: Array<{ title: string; updatedAt: number; size: number; snippet?: string }> = [];
+          if (fs.existsSync(wikiDir)) {
+            try {
+              const files = await fsp.readdir(wikiDir);
+              wikiPages = await Promise.all(
+                files.filter(f => f.endsWith('.md')).slice(0, 50).map(async f => {
+                  const stat = await fsp.stat(path.join(wikiDir, f));
+                  let snippet = '';
+                  try {
+                    const content = await fsp.readFile(path.join(wikiDir, f), 'utf-8');
+                    snippet = content.replace(/^---[\s\S]*?---\s*/, '').slice(0, 140).trim();
+                  } catch {}
+                  return { title: f.replace(/\.md$/, ''), updatedAt: stat.mtimeMs, size: stat.size, snippet };
+                })
+              );
+            } catch {}
+          }
+
           if (!fs.existsSync(harnessDir)) {
-            return res.json({ runs: [], activeScopes: [], reasoningScopes: [] });
+            return res.json({ runs: [], activeScopes: [], reasoningScopes: [], wikiPages });
           }
 
           const entries = await fsp.readdir(harnessDir);
@@ -1146,7 +1177,7 @@ export function createExpressApp(): express.Express {
             try { reasoningScopes = JSON.parse(await fsp.readFile(reasoningFile, 'utf-8')); } catch {}
           }
 
-          res.json({ runs, activeScopes, reasoningScopes });
+          res.json({ runs, activeScopes, reasoningScopes, wikiPages });
         } catch (err) {
           res.status(500).json({ error: String(err) });
         }
@@ -1156,17 +1187,42 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const { runId } = req.params;
+          const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit as string) || 250));
           const workspaceRoot = (req.query.workspace as string) || process.cwd();
           const { HarnessStore } = await import('./harness/store.js');
           const store = new HarnessStore(runId, workspaceRoot);
           const run = await store.loadRun();
           if (!run) return res.status(404).json({ error: 'Run not found' });
           const approvals = await store.listApprovals();
-          const trace = await store.readTrace(100);
+          const trace = await store.readTrace(limit);
           const rawTasks = await store.loadTasksMarkdown();
           res.json({ run, approvals, trace, tasks: rawTasks });
         } catch (err) {
           res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // ─── Dedicated Movie Tool Endpoints ─────────────────────────────────────
+      app.post('/api/movie_tool', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const result = await runMovieTool(req.body || {});
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      app.get('/api/movie_tool/timeline/:projectId', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { projectId } = req.params;
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const result = await runMovieTool({ action: 'get_timeline', projectId });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
         }
       });
 
@@ -1464,6 +1520,14 @@ export function createExpressApp(): express.Express {
       // Serve dashboard static files
       const dashboardPath = path.join(__dirname, '../dashboard');
       app.use(express.static(dashboardPath));
+
+      // Global Error Handler (Express JSON parse errors and unhandled request exceptions)
+      app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+        const status = err.status || 500;
+        const message = err.message || 'Internal Server Error';
+        console.error(`[Server Error] ${status}: ${message}`);
+        res.status(status).json({ success: false, error: message });
+      });
 
       return app;
 }

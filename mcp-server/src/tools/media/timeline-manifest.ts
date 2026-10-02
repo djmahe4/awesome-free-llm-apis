@@ -28,6 +28,7 @@ export class TimelineManifestStore {
       },
       totalDuration_ms: 0
     };
+    await fs.ensureDir(this.projectDir);
     await fs.writeJSON(this.manifestPath, manifest, { spaces: 2 });
     return manifest;
   }

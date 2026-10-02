@@ -330,6 +330,7 @@ tabBtns.forEach(btn => {
     if (target === 'wiki')     { initWikiTab(); }
     if (target === 'dagmemory') { initDagMemoryTab(); }
     if (target === 'harness')   { initHarnessTab(); }
+    if (target === 'movie')     { window.initMovieTab?.(); }
   });
 });
 
@@ -754,10 +755,15 @@ const TOOLS = [
     id: 'movie_tool', label: 'movie_tool', icon: '🎬',
     tag: 'Vibe Movie Engine',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['generate_manifest', 'render_timeline', 'transcribe_audio', 'generate_tts', 'generate_music', 'video_generation', 'status'] },
-      { id: 'prompt', label: 'Creative Prompt', type: 'textarea', placeholder: 'Cyberpunk rainy alleyway with neon signs' },
-      { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'movie-session-1' },
-      { id: 'lane', label: 'Media Lane', type: 'select', options: ['all', 'audio', 'video', 'music', 'metadata'] }
+      { id: 'action', label: 'Action', type: 'select', options: ['init_project', 'get_timeline', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'apply_effect', 'undo_effect', 'compile_timeline'] },
+      { id: 'projectId', label: 'Project ID', type: 'text', placeholder: 'proj_cyberpunk_01' },
+      { id: 'premise', label: 'Premise / Prompt', type: 'textarea', placeholder: 'Cyberpunk rainy alleyway with neon signs' },
+      { id: 'track', label: 'Track Lane', type: 'select', options: ['video', 'vfx', 'bgm', 'bgm_drums', 'bgm_bass', 'bgm_melody', 'vocal', 'song', 'script', 'dialogue'] },
+      { id: 'start_ms', label: 'Start Time (ms)', type: 'number', placeholder: '0' },
+      { id: 'end_ms', label: 'End Time (ms)', type: 'number', placeholder: '5000' },
+      { id: 'label', label: 'Artifact Label', type: 'text', placeholder: 'Opening Cut' },
+      { id: 'artifact_path', label: 'File Path / URL', type: 'text', placeholder: 'projects/default/video.mp4' },
+      { id: 'artifactId', label: 'Artifact ID (for approve/reroll/effects)', type: 'text', placeholder: 'art_123' }
     ]
   }
 ];
@@ -3194,7 +3200,11 @@ async function inspectHarnessRun(runId) {
       if (!data.trace || data.trace.length === 0) {
         harnessTraceView.textContent = 'No trace events recorded.';
       } else {
-        harnessTraceView.textContent = data.trace.map(t => `[${new Date(t.timestamp).toLocaleTimeString()}] [${t.type}] ${JSON.stringify(t.payload)}`).join('\n');
+        harnessTraceView.textContent = data.trace.map(t => {
+          const time = new Date(t.ts || t.timestamp || Date.now()).toLocaleTimeString();
+          const payload = t.data !== undefined ? t.data : t.payload;
+          return `[${time}] [${t.type}] ${JSON.stringify(payload)}`;
+        }).join('\n');
       }
     }
     if (harnessRerunRole && data.run?.roles && data.run.roles.length > 0) {
@@ -3240,7 +3250,7 @@ if (harnessRerunSubmit) {
     }
 
     try {
-      const res = await fetch('/api/tools/call', {
+      const res = await fetch('/api/tool', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3601,14 +3611,28 @@ if (relayCanvas) {
   });
 }
 
-function updateRelayVisualization(activeScopes = [], reasoningScopes = []) {
-  initRelayCanvas(activeScopes, reasoningScopes);
+let _harnessVizInstance = null;
+
+function updateRelayVisualization(activeScopes = [], reasoningScopes = [], wikiPages = []) {
+  if (window.HarnessVisualizer) {
+    if (!_harnessVizInstance) {
+      _harnessVizInstance = new window.HarnessVisualizer(
+        'harness-relay-canvas',
+        'harness-relay-canvas-wrap',
+        'harness-relay-tooltip',
+        'harness-node-detail'
+      );
+    }
+    _harnessVizInstance.updateData(activeScopes, reasoningScopes, wikiPages);
+  } else {
+    initRelayCanvas(activeScopes, reasoningScopes);
+  }
 }
 
 // Hook into existing renderHarnessTelemetry
 const _prevRenderHarnessTelemetry = renderHarnessTelemetry;
 renderHarnessTelemetry = function(data) {
   _prevRenderHarnessTelemetry(data);
-  updateRelayVisualization(data.activeScopes || [], data.reasoningScopes || []);
+  updateRelayVisualization(data.activeScopes || [], data.reasoningScopes || [], data.wikiPages || []);
 };
 

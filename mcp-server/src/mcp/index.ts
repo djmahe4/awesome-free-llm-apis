@@ -848,6 +848,30 @@ export async function createMCPServer(): Promise<Server> {
           },
           required: ['action'],
         },
+      },
+      {
+        name: 'movie_tool',
+        description: 'Vibe Movie Engine: multi-track media timeline management, asset generation (Pollinations keyframes, Kokoro voice, MusicGen audio), and DSP effects.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['init_project', 'get_timeline', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'apply_effect', 'undo_effect', 'compile_timeline'],
+              description: 'Action to perform on the timeline or media project'
+            },
+            projectId: { type: 'string', description: 'Target project ID' },
+            premise: { type: 'string', description: 'Story premise or scene description' },
+            track: { type: 'string', enum: ['video', 'vfx', 'bgm', 'bgm_drums', 'bgm_bass', 'bgm_melody', 'vocal', 'song', 'script', 'dialogue'] },
+            start_ms: { type: 'number', description: 'Start timestamp in milliseconds' },
+            end_ms: { type: 'number', description: 'End timestamp in milliseconds' },
+            label: { type: 'string', description: 'Artifact label' },
+            prompt: { type: 'string', description: 'Prompt for media generation' },
+            artifact_path: { type: 'string', description: 'Path to audio or video file' },
+            effect: { type: 'object', description: 'DSP effect descriptor (pitch, pan, tempo, reverb, eq, speed_ramp, lut, glitch)' }
+          },
+          required: ['action']
+        }
       }
     ],
   }));
@@ -968,6 +992,13 @@ export async function createMCPServer(): Promise<Server> {
         response = {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
           isError: result?.success === false,
+        };
+      } else if (name === 'movie_tool') {
+        const { runMovieTool } = await import('../tools/movie-tool.js');
+        const result = await runMovieTool(args as any);
+        response = {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          isError: !result?.success,
         };
       } else {
         throw new Error(`Unknown tool: ${name}`);

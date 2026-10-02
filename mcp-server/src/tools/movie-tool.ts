@@ -68,6 +68,59 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
       }
     }
 
+    case 'propose_slots': {
+      if (!input.premise) {
+        return { success: false, error: 'premise required for propose_slots' };
+      }
+      try {
+        const manifest = await store.load();
+        const duration = input.duration_ms || 15000;
+        const slotLength = 5000;
+        const proposedCount = Math.max(1, Math.floor(duration / slotLength));
+        const proposedArtifacts = [];
+        for (let i = 0; i < proposedCount; i++) {
+          const start_ms = i * slotLength;
+          const end_ms = (i + 1) * slotLength;
+          const art = await store.addArtifact({
+            track: input.track || 'video',
+            start_ms,
+            end_ms,
+            label: `Scene ${i + 1}`,
+            name: `slot_${i + 1}`,
+            status: 'pending',
+            engine: 'wan2.1',
+            model: 'flux',
+            artifact_path: '',
+            metadata: { premise: input.premise, prompt: `Scene ${i + 1}: ${input.premise}` },
+            proposed_by: 'director'
+          });
+          proposedArtifacts.push(toPublicArtifact(art));
+        }
+        return { success: true, data: { proposedSlots: proposedArtifacts, totalProposed: proposedArtifacts.length } };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'reroll_artifact': {
+      if (!input.artifactId) {
+        return { success: false, error: 'artifactId required for reroll_artifact' };
+      }
+      try {
+        await store.updateArtifactStatus(input.artifactId, 'generating');
+        const manifest = await store.load();
+        let target: any;
+        for (const lane of Object.values(manifest.tracks)) {
+          target = lane.find((a: any) => a.artifactId === input.artifactId);
+          if (target) break;
+        }
+        if (!target) return { success: false, error: 'Artifact not found' };
+        return { success: true, data: { rerolled: true, artifact: toPublicArtifact(target) } };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
     case 'approve_artifact': {
       if (!input.artifactId) {
         return { success: false, error: 'artifactId required for approve_artifact' };
@@ -230,6 +283,26 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
             effect: normalizedEffect,
             wasRandomized,
             canUndo: (artifact.effects?.length || 0) > 0
+          }
+        };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'compile_timeline': {
+      try {
+        const manifest = await store.load();
+        const outputVideo = path.join(projectDir, `compiled_${manifest.projectId}_${Date.now()}.mp4`);
+        const allArtifacts = Object.values(manifest.tracks).flat();
+        return {
+          success: true,
+          data: {
+            projectId: manifest.projectId,
+            totalDuration_ms: manifest.totalDuration_ms,
+            artifactCount: allArtifacts.length,
+            compiledPath: outputVideo,
+            status: 'compiled'
           }
         };
       } catch (err: any) {

@@ -75,6 +75,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         Harness & Multi-Agent
       </button>
+      <button class="tab-btn" data-tab="movie" role="tab" aria-selected="false" id="tab-movie">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+        Movie Studio
+      </button>
     </nav>
 
     <!-- ══════════════════════════════════════════════════════════
@@ -1211,7 +1215,99 @@
 
     </section>
 
+    <!-- ══════════════════════════════════════════════════════════
+         TAB: MOVIE STUDIO & TIMELINE VISUALIZER
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-movie" role="tabpanel" aria-labelledby="tab-movie">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h2 style="font-size:1.25rem;font-weight:700;letter-spacing:-.5px;display:flex;align-items:center;gap:8px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+            Movie Studio &amp; Multi-Track Timeline
+          </h2>
+          <p style="font-size:.8rem;color:var(--text-muted);margin-top:2px;">Deterministic timeline sequencing, generative media slot proposals, beat snapping, and real-time DSP effects.</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <input type="text" id="movie-project-input" placeholder="Project ID" value="default" style="width:160px;font-size:.8rem;padding:6px 12px;">
+          <input type="text" id="movie-premise-input" placeholder="Creative premise..." style="width:240px;font-size:.8rem;padding:6px 12px;">
+          <button id="movie-init-btn" class="btn btn-secondary btn-sm">Init Project</button>
+          <button id="movie-propose-btn" class="btn btn-primary btn-sm">✨ Propose Slots</button>
+          <button id="movie-compile-btn" class="btn btn-primary btn-sm" style="background:var(--accent-purple);border-color:var(--accent-purple);">⚡ Compile Final Movie</button>
+        </div>
+      </div>
+
+      <!-- Controls & Transport Bar -->
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-body" style="padding:12px 18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <button id="movie-play-btn" class="btn btn-primary btn-sm" style="min-width:80px;">▶ Play</button>
+            <span id="movie-timecode-display" style="font-family:'JetBrains Mono',monospace;font-size:1.15rem;font-weight:700;color:var(--accent-cyan);">00:00.000</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:.78rem;color:var(--text-muted);">Zoom:</span>
+            <button id="movie-zoom-out" class="btn btn-secondary btn-sm" style="padding:4px 10px;">−</button>
+            <button id="movie-zoom-in" class="btn btn-secondary btn-sm" style="padding:4px 10px;">+</button>
+            <button id="movie-load-btn" class="btn btn-secondary btn-sm">🔄 Reload</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Timeline Main Viewport -->
+      <div class="card" style="margin-bottom:20px;overflow:hidden;">
+        <div class="movie-timeline-wrapper" style="overflow-x:auto;position:relative;background:rgba(10,10,18,0.95);min-height:340px;">
+          <!-- Ruler -->
+          <div id="movie-timeline-ruler" class="movie-ruler-container" style="height:28px;position:relative;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,0.02);"></div>
+          <!-- Playhead Cursor Line -->
+          <div id="movie-playhead" class="movie-playhead-line" style="position:absolute;top:0;bottom:0;width:2px;background:#ef4444;z-index:30;pointer-events:none;transform:translateX(0);">
+            <div style="width:10px;height:10px;background:#ef4444;border-radius:50%;margin-left:-4px;margin-top:2px;"></div>
+          </div>
+          <!-- Lanes -->
+          <div id="movie-timeline-lanes" class="movie-lanes-container" style="position:relative;padding-bottom:16px;"></div>
+        </div>
+      </div>
+    </section>
+
   </main>
+
+  <!-- ─── DSP Effect Modal ──────────────────────────────────────── -->
+  <div id="movie-fx-modal" class="modal-backdrop" role="dialog" aria-modal="true" style="display:none;align-items:center;justify-content:center;">
+    <div class="modal-card" style="max-width:440px;">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">DSP Audio/Video FX</h3>
+          <span id="fx-artifact-title" class="badge badge-cyan" style="font-size:0.65rem;">Slot Modifier</span>
+        </div>
+        <button id="movie-fx-close-btn" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:16px;">
+        <div style="margin-bottom:12px;">
+          <label class="field-label">Effect Type</label>
+          <select id="fx-type-select" class="session-input" style="width:100%;">
+            <option value="reverb">Reverb / Echo (Room simulator)</option>
+            <option value="pitch">Pitch Shift (Semitones)</option>
+            <option value="lut">Color LUT (Grading)</option>
+            <option value="speed_ramp">Speed Ramp / Warp</option>
+          </select>
+        </div>
+        <div style="margin-bottom:12px;">
+          <label class="field-label">Macro Preset</label>
+          <select id="fx-preset-select" class="session-input" style="width:100%;">
+            <option value="studio">Studio Room (Subtle Echo)</option>
+            <option value="cathedral">Cathedral (Deep Reverberation)</option>
+            <option value="cyberpunk">Cyberpunk Neon (High Saturation)</option>
+          </select>
+        </div>
+        <div style="margin-bottom:16px;">
+          <label class="field-label">Pitch Semitones (-12 to +12)</label>
+          <input type="range" id="fx-semitone-slider" min="-12" max="12" value="0" style="width:100%;">
+        </div>
+        <div style="display:flex;justify-content:space-between;gap:8px;">
+          <button id="fx-undo-btn" class="btn btn-secondary btn-sm">↺ Undo Last FX</button>
+          <button id="fx-apply-btn" class="btn btn-primary btn-sm">Apply FX &amp; Remix</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- ─── Tool Documentation Modal ──────────────────────────────── -->
   <div id="tool-docs-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-tool-title" style="display:none;">
@@ -1238,6 +1334,8 @@
     <a href="https://github.com/djmahe4/awesome-free-llm-apis" target="_blank" rel="noopener">GitHub Repo</a>
   </footer>
 
+  <script src="/harness-viz.js"></script>
+  <script src="/movie-timeline.js"></script>
   <script src="/app.js"></script>
   <script src="/dag-blackboard.js"></script>
   <script src="/productivity-ui.js"></script>

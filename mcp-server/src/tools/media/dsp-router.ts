@@ -169,18 +169,20 @@ export async function applyMediaEffects(
     args.push(outputPath);
 
     const proc = spawn('ffmpeg', args);
+    let stderr = '';
+    proc.stderr?.on('data', (d) => { stderr += d.toString(); });
     proc.on('close', (code) => {
       if (code === 0 && fs.existsSync(outputPath)) {
         resolve(outputPath);
       } else {
-        // Graceful fallback to original path if ffmpeg missing or fails
-        resolve(inputPath);
+        console.error(`[DSP Error] FFmpeg exited with code ${code}: ${stderr.slice(-300)}`);
+        reject(new Error(`FFmpeg failed with code ${code}: ${stderr.slice(-200) || 'unknown error'}`));
       }
     });
 
-    proc.on('error', () => {
-      // FFmpeg not found in environment — fallback cleanly
-      resolve(inputPath);
+    proc.on('error', (err) => {
+      console.error(`[DSP Error] FFmpeg spawn error: ${err.message}`);
+      reject(new Error(`FFmpeg binary not available in PATH: ${err.message}`));
     });
   });
 }
