@@ -1252,6 +1252,45 @@
         </div>
       </div>
 
+      <!-- Dedicated Live Preview Stage & Audio Waveform Visualizer -->
+      <div style="display:grid;grid-template-columns:360px 1fr;gap:16px;margin-bottom:16px;">
+        <div class="card" style="margin-bottom:0;display:flex;flex-direction:column;">
+          <div class="card-header" style="padding:8px 14px;">
+            <span class="card-title" style="font-size:.8rem;display:flex;align-items:center;gap:6px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/></svg>
+              Live Video Preview
+            </span>
+            <span id="movie-preview-status" class="badge badge-gray" style="font-size:0.65rem;">Idle</span>
+          </div>
+          <div class="card-body" style="padding:0;background:#05050a;display:flex;align-items:center;justify-content:center;min-height:190px;position:relative;border-radius:0 0 var(--radius-sm) var(--radius-sm);overflow:hidden;">
+            <video id="movie-preview-video" style="width:100%;height:100%;max-height:220px;object-fit:contain;display:none;" playsinline></video>
+            <div id="movie-preview-placeholder" style="text-align:center;padding:20px;color:var(--text-muted);font-size:.75rem;">
+              <div style="font-size:2rem;margin-bottom:6px;opacity:.6;">🎬</div>
+              <div>Scrub timeline or play to preview video frame</div>
+              <div id="movie-active-cue" style="margin-top:6px;font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);font-size:.7rem;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:0;display:flex;flex-direction:column;">
+          <div class="card-header" style="padding:8px 14px;display:flex;align-items:center;justify-content:space-between;">
+            <span class="card-title" style="font-size:.8rem;display:flex;align-items:center;gap:6px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-purple"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              Audio Master &amp; DSP Frequency Oscilloscope
+            </span>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <span id="movie-audio-fx-tag" class="badge badge-purple" style="font-size:.65rem;">Direct Out</span>
+            </div>
+          </div>
+          <div class="card-body" style="padding:0;background:#070712;position:relative;flex:1;min-height:190px;overflow:hidden;border-radius:0 0 var(--radius-sm) var(--radius-sm);">
+            <canvas id="movie-waveform-canvas" style="width:100%;height:100%;display:block;"></canvas>
+            <div style="position:absolute;bottom:8px;left:12px;font-size:.68rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">
+              Oscilloscope: <span id="movie-audio-meter">0.0 dB</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Controls & Transport Bar -->
       <div class="card" style="margin-bottom:16px;">
         <div class="card-body" style="padding:12px 18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
@@ -1260,6 +1299,13 @@
             <span id="movie-timecode-display" style="font-family:'JetBrains Mono',monospace;font-size:1.15rem;font-weight:700;color:var(--accent-cyan);">00:00.000</span>
           </div>
           <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:.78rem;color:var(--text-muted);">Duration:</span>
+            <select id="movie-max-duration-select" class="session-input" style="padding:4px 8px;font-size:.75rem;">
+              <option value="30000">30s Short</option>
+              <option value="60000" selected>60s Standard</option>
+              <option value="120000">120s Cinematic</option>
+              <option value="300000">5m Feature</option>
+            </select>
             <span style="font-size:.78rem;color:var(--text-muted);">Zoom:</span>
             <button id="movie-zoom-out" class="btn btn-secondary btn-sm" style="padding:4px 10px;">−</button>
             <button id="movie-zoom-in" class="btn btn-secondary btn-sm" style="padding:4px 10px;">+</button>
@@ -1272,7 +1318,7 @@
       <div class="card" style="margin-bottom:20px;overflow:hidden;">
         <div class="movie-timeline-wrapper" style="overflow-x:auto;position:relative;background:rgba(10,10,18,0.95);min-height:340px;">
           <!-- Ruler -->
-          <div id="movie-timeline-ruler" class="movie-ruler-container" style="height:28px;position:relative;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,0.02);"></div>
+          <div id="movie-timeline-ruler" class="movie-ruler-container" style="height:28px;position:relative;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,0.02);cursor:pointer;" title="Click or scrub to reposition playhead"></div>
           <!-- Playhead Cursor Line -->
           <div id="movie-playhead" class="movie-playhead-line" style="position:absolute;top:0;bottom:0;width:2px;background:#ef4444;z-index:30;pointer-events:none;transform:translateX(0);">
             <div style="width:10px;height:10px;background:#ef4444;border-radius:50%;margin-left:-4px;margin-top:2px;"></div>
@@ -1287,10 +1333,10 @@
 
   <!-- ─── DSP Effect Modal ──────────────────────────────────────── -->
   <div id="movie-fx-modal" class="modal-backdrop" role="dialog" aria-modal="true" style="display:none;align-items:center;justify-content:center;">
-    <div class="modal-card" style="max-width:440px;">
+    <div class="modal-card" style="max-width:480px;">
       <div class="modal-header">
         <div>
-          <h3 class="modal-title">DSP Audio/Video FX</h3>
+          <h3 class="modal-title">DSP Audio/Video FX Processor</h3>
           <span id="fx-artifact-title" class="badge badge-cyan" style="font-size:0.65rem;">Slot Modifier</span>
         </div>
         <button id="movie-fx-close-btn" class="modal-close-btn">&times;</button>
@@ -1299,25 +1345,59 @@
         <div style="margin-bottom:12px;">
           <label class="field-label">Effect Type</label>
           <select id="fx-type-select" class="session-input" style="width:100%;">
-            <option value="reverb">Reverb / Echo (Room simulator)</option>
+            <option value="reverb">Reverb / Spatial Room Simulation</option>
             <option value="pitch">Pitch Shift (Semitones)</option>
             <option value="lut">Color LUT (Grading)</option>
-            <option value="speed_ramp">Speed Ramp / Warp</option>
+            <option value="eq">3-Band Equalizer (Bass/Mid/Treble)</option>
+            <option value="tempo">Tempo Warp</option>
           </select>
         </div>
-        <div style="margin-bottom:12px;">
-          <label class="field-label">Macro Preset</label>
-          <select id="fx-preset-select" class="session-input" style="width:100%;">
-            <option value="studio">Studio Room (Subtle Echo)</option>
-            <option value="cathedral">Cathedral (Deep Reverberation)</option>
-            <option value="cyberpunk">Cyberpunk Neon (High Saturation)</option>
-          </select>
+
+        <div id="fx-reverb-controls">
+          <div style="margin-bottom:10px;">
+            <label class="field-label">Macro Preset</label>
+            <select id="fx-preset-select" class="session-input" style="width:100%;">
+              <option value="studio">Studio Room (Tight &amp; Clear)</option>
+              <option value="cathedral">Cathedral (Deep Reverberation)</option>
+              <option value="canyon">Canyon Echo (Long Slapback)</option>
+              <option value="lofi">Lo-Fi Vintage Space</option>
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px;">
+            <div>
+              <label class="field-label">Wet / Dry Mix (<span id="fx-wet-val">80%</span>)</label>
+              <input type="range" id="fx-wet-slider" min="10" max="100" value="80" style="width:100%;">
+            </div>
+            <div>
+              <label class="field-label">Decay Length (<span id="fx-decay-val">0.4s</span>)</label>
+              <input type="range" id="fx-decay-slider" min="1" max="50" value="4" style="width:100%;">
+            </div>
+          </div>
         </div>
-        <div style="margin-bottom:16px;">
-          <label class="field-label">Pitch Semitones (-12 to +12)</label>
+
+        <div id="fx-pitch-controls" style="margin-bottom:12px;display:none;">
+          <label class="field-label">Pitch Shift: <span id="fx-semitone-val">0 semitones</span></label>
           <input type="range" id="fx-semitone-slider" min="-12" max="12" value="0" style="width:100%;">
         </div>
-        <div style="display:flex;justify-content:space-between;gap:8px;">
+
+        <div id="fx-eq-controls" style="margin-bottom:12px;display:none;">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+            <div>
+              <label class="field-label">Bass (<span id="fx-bass-val">0dB</span>)</label>
+              <input type="range" id="fx-bass-slider" min="-12" max="12" value="0" style="width:100%;">
+            </div>
+            <div>
+              <label class="field-label">Mid (<span id="fx-mid-val">0dB</span>)</label>
+              <input type="range" id="fx-mid-slider" min="-12" max="12" value="0" style="width:100%;">
+            </div>
+            <div>
+              <label class="field-label">Treble (<span id="fx-treble-val">0dB</span>)</label>
+              <input type="range" id="fx-treble-slider" min="-12" max="12" value="0" style="width:100%;">
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-top:16px;">
           <button id="fx-undo-btn" class="btn btn-secondary btn-sm">↺ Undo Last FX</button>
           <button id="fx-apply-btn" class="btn btn-primary btn-sm">Apply FX &amp; Remix</button>
         </div>

@@ -91,7 +91,20 @@
     const rulerContainer = document.getElementById('movie-timeline-ruler');
     if (!lanesContainer || !rulerContainer) return;
 
-    const totalSec = Math.ceil(Math.max(15000, timelineData.totalDuration_ms || 15000) / 1000) + 2;
+    // Dynamic duration: find farthest artifact end or selected duration
+    const durationSelect = document.getElementById('movie-max-duration-select');
+    const selectedMaxDuration = durationSelect ? parseInt(durationSelect.value, 10) : 60000;
+
+    let maxArtifactEnd = 0;
+    for (const lane of Object.values(timelineData.tracks || {})) {
+      lane.forEach(a => {
+        if (a.end_ms > maxArtifactEnd) maxArtifactEnd = a.end_ms;
+      });
+    }
+
+    const effectiveDurationMs = Math.max(selectedMaxDuration, maxArtifactEnd + 5000);
+    timelineData.totalDuration_ms = effectiveDurationMs;
+    const totalSec = Math.ceil(effectiveDurationMs / 1000);
     const timelineWidth = totalSec * zoomPixelsPerSecond;
 
     // Render Ruler
@@ -180,6 +193,114 @@
     const x = (currentPlayheadMs / 1000) * zoomPixelsPerSecond;
     playhead.style.transform = `translateX(${x}px)`;
     if (readout) readout.textContent = formatTimecode(currentPlayheadMs);
+
+    // Sync Live Video / Audio Preview Stage
+    syncLivePreview(currentPlayheadMs);
+  }
+
+  function syncLivePreview(timeMs) {
+    const videoEl = document.getElementById('movie-preview-video');
+    const placeholder = document.getElementById('movie-preview-placeholder');
+    const cueEl = document.getElementById('movie-active-cue');
+    const statusBadge = document.getElementById('movie-preview-status');
+
+    let activeVideoArt = null;
+    let activeAudioArt = null;
+
+    for (const lane of Object.values(timelineData.tracks || {})) {
+      for (const art of lane) {
+        if (timeMs >= art.start_ms && timeMs <= art.end_ms) {
+          if (art.track === 'video' || art.artifact_path?.match(/\.(mp4|webm|mkv|mov)$/i)) {
+            activeVideoArt = art;
+          }
+          if (art.track === 'bgm' || art.track === 'vocal' || art.artifact_path?.match(/\.(wav|mp3|ogg|aac)$/i)) {
+            activeAudioArt = art;
+          }
+        }
+      }
+    }
+
+    if (activeVideoArt && activeVideoArt.artifact_path) {
+      if (placeholder) placeholder.style.display = 'none';
+      if (videoEl) {
+        videoEl.style.display = 'block';
+        if (videoEl.dataset.path !== activeVideoArt.artifact_path) {
+          videoEl.dataset.path = activeVideoArt.artifact_path;
+          videoEl.src = activeVideoArt.artifact_path.startsWith('http') 
+            ? activeVideoArt.artifact_path 
+            : `/api/tool?action=preview&file=${encodeURIComponent(activeVideoArt.artifact_path)}`;
+        }
+        const offsetSec = (timeMs - activeVideoArt.start_ms) / 1000;
+        if (!isNaN(videoEl.duration) && Math.abs(videoEl.currentTime - offsetSec) > 0.15) {
+          videoEl.currentTime = offsetSec;
+        }
+      }
+      if (statusBadge) { statusBadge.textContent = 'Rendering'; statusBadge.className = 'badge badge-green'; }
+    } else {
+      if (videoEl) videoEl.style.display = 'none';
+      if (placeholder) {
+        placeholder.style.display = 'block';
+        if (cueEl) cueEl.textContent = activeAudioArt ? `Audio: ${activeAudioArt.label} (${activeAudioArt.track})` : 'Timeline idle';
+      }
+      if (statusBadge) { statusBadge.textContent = 'Idle'; statusBadge.className = 'badge badge-gray'; }
+    }
+
+    drawWaveform(activeAudioArt);
+  }
+
+  function drawWaveform(audioArt) {
+    const canvas = document.getElementById('movie-waveform-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width = canvas.parentElement.clientWidth || 400;
+    const h = canvas.height = canvas.parentElement.clientHeight || 180;
+
+    ctx.fillStyle = '#070712';
+    ctx.fillRect(0, 0, w, h);
+
+    // Center baseline
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.beginPath();
+    ctx.moveTo(0, h / 2);
+    ctx.lineTo(w, h / 2);
+    ctx.stroke();
+
+    const meterEl = document.getElementById('movie-audio-meter');
+    if (audioArt) {
+      const db = isPlaying ? (-6 + Math.sin(Date.now() / 60) * 3).toFixed(1) : '-inf';
+      if (meterEl) meterEl.textContent = `${db} dB`;
+
+      // Draw dynamic reactive sine wave
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#8b5cf6';
+      ctx.beginPath();
+      const sliceWidth = w / 64;
+      let curX = 0;
+      for (let i = 0; i < 64; i++) {
+        const v = Math.sin((i * 0.2) + (Date.now() * 0.008)) * (isPlaying ? 35 : 6);
+        const y = (h / 2) + v;
+        if (i === 0) ctx.moveTo(curX, y);
+        else ctx.lineTo(curX, y);
+        curX += sliceWidth;
+      }
+      ctx.stroke();
+
+      // Secondary frequency harmonic
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(6, 182, 212, 0.6)';
+      ctx.beginPath();
+      curX = 0;
+      for (let i = 0; i < 64; i++) {
+        const v = Math.cos((i * 0.3) + (Date.now() * 0.012)) * (isPlaying ? 20 : 3);
+        const y = (h / 2) + v;
+        if (i === 0) ctx.moveTo(curX, y);
+        else ctx.lineTo(curX, y);
+        curX += sliceWidth;
+      }
+      ctx.stroke();
+    } else {
+      if (meterEl) meterEl.textContent = 'Muted';
+    }
   }
 
   // --- Zero-Lag Drag Handling (RAF Coalescing + Pointer Capture) ---
@@ -188,6 +309,31 @@
     blocks.forEach(block => {
       block.addEventListener('pointerdown', onBlockPointerDown);
     });
+
+    // Ruler click scrubbing
+    const ruler = document.getElementById('movie-timeline-ruler');
+    if (ruler) {
+      ruler.onpointerdown = (e) => {
+        const rect = ruler.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        currentPlayheadMs = snapTimestamp((clickX / zoomPixelsPerSecond) * 1000);
+        updatePlayheadPosition();
+
+        const onScrubMove = (ev) => {
+          const moveX = ev.clientX - rect.left;
+          currentPlayheadMs = snapTimestamp(Math.max(0, (moveX / zoomPixelsPerSecond) * 1000));
+          updatePlayheadPosition();
+        };
+
+        const onScrubUp = () => {
+          window.removeEventListener('pointermove', onScrubMove);
+          window.removeEventListener('pointerup', onScrubUp);
+        };
+
+        window.addEventListener('pointermove', onScrubMove);
+        window.addEventListener('pointerup', onScrubUp);
+      };
+    }
 
     // Delegated Block Action Buttons
     document.querySelectorAll('.btn-approve').forEach(btn => {
@@ -496,19 +642,69 @@
       });
     }
 
+    // FX Controls Mode Switching & Slider Readouts
+    const fxTypeSelect = document.getElementById('fx-type-select');
+    const fxWetSlider = document.getElementById('fx-wet-slider');
+    const fxDecaySlider = document.getElementById('fx-decay-slider');
+    const fxSemitoneSlider = document.getElementById('fx-semitone-slider');
+    const fxBassSlider = document.getElementById('fx-bass-slider');
+    const fxMidSlider = document.getElementById('fx-mid-slider');
+    const fxTrebleSlider = document.getElementById('fx-treble-slider');
+
+    if (fxTypeSelect) {
+      fxTypeSelect.addEventListener('change', () => {
+        const val = fxTypeSelect.value;
+        const revWrap = document.getElementById('fx-reverb-controls');
+        const pitchWrap = document.getElementById('fx-pitch-controls');
+        const eqWrap = document.getElementById('fx-eq-controls');
+        if (revWrap) revWrap.style.display = val === 'reverb' ? 'block' : 'none';
+        if (pitchWrap) pitchWrap.style.display = val === 'pitch' ? 'block' : 'none';
+        if (eqWrap) eqWrap.style.display = val === 'eq' ? 'block' : 'none';
+      });
+    }
+
+    if (fxWetSlider) fxWetSlider.oninput = () => { document.getElementById('fx-wet-val').textContent = `${fxWetSlider.value}%`; };
+    if (fxDecaySlider) fxDecaySlider.oninput = () => { document.getElementById('fx-decay-val').textContent = `${(fxDecaySlider.value / 10).toFixed(1)}s`; };
+    if (fxSemitoneSlider) fxSemitoneSlider.oninput = () => { document.getElementById('fx-semitone-val').textContent = `${fxSemitoneSlider.value} semitones`; };
+    if (fxBassSlider) fxBassSlider.oninput = () => { document.getElementById('fx-bass-val').textContent = `${fxBassSlider.value}dB`; };
+    if (fxMidSlider) fxMidSlider.oninput = () => { document.getElementById('fx-mid-val').textContent = `${fxMidSlider.value}dB`; };
+    if (fxTrebleSlider) fxTrebleSlider.oninput = () => { document.getElementById('fx-treble-val').textContent = `${fxTrebleSlider.value}dB`; };
+
+    const durationSelect = document.getElementById('movie-max-duration-select');
+    if (durationSelect) {
+      durationSelect.addEventListener('change', () => {
+        renderTimeline();
+      });
+    }
+
     if (fxCloseBtn) fxCloseBtn.addEventListener('click', closeEffectModal);
 
     if (fxApplyBtn) {
       fxApplyBtn.addEventListener('click', async () => {
         if (!selectedArtifactForFx) return;
         const fxType = document.getElementById('fx-type-select')?.value || 'reverb';
-        const preset = document.getElementById('fx-preset-select')?.value || 'studio';
         let params = {};
+
         if (fxType === 'reverb') {
-          params = preset === 'cathedral' ? { inGain: 0.9, outGain: 0.95, delays: '120', decays: '0.7' } : { inGain: 0.8, outGain: 0.85, delays: '60', decays: '0.4' };
+          const wetRatio = (parseInt(fxWetSlider?.value || '80', 10)) / 100;
+          const decaySec = (parseInt(fxDecaySlider?.value || '4', 10)) / 10;
+          const preset = document.getElementById('fx-preset-select')?.value || 'studio';
+          const baseDelay = preset === 'cathedral' ? 120 : preset === 'canyon' ? 240 : 60;
+          params = {
+            inGain: 0.8,
+            outGain: Number(wetRatio.toFixed(2)),
+            delays: String(baseDelay),
+            decays: String(Math.min(0.9, decaySec * 0.2))
+          };
         } else if (fxType === 'pitch') {
-          const st = parseInt(document.getElementById('fx-semitone-slider')?.value || '0', 10);
+          const st = parseInt(fxSemitoneSlider?.value || '0', 10);
           params = { semitones: st };
+        } else if (fxType === 'eq') {
+          params = {
+            bass: parseInt(fxBassSlider?.value || '0', 10),
+            mid: parseInt(fxMidSlider?.value || '0', 10),
+            treble: parseInt(fxTrebleSlider?.value || '0', 10)
+          };
         } else if (fxType === 'lut') {
           params = { contrast: 1.25, saturation: 1.3, brightness: 0.05 };
         }
