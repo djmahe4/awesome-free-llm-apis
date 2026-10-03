@@ -620,17 +620,22 @@ export async function createMCPServer(): Promise<Server> {
       },
       {
         name: 'cyber_tool',
-        description: 'Educational cyber security coach plus registry/wiki manager for security binaries (sqlmap, nmap, ffuf). Never executes commands — it teaches the exact commands, explains why, tracks CTF decision graphs, and remembers per-tool run suggestions across sessions so the learner can resume where they left off. For osint with autoSearch:true, the search-provider dork lookups run in the BACKGROUND — the call returns immediately with searchStatus:"running"; poll with action:"osint_status" (same sessionId + target) until searchStatus:"done".',
+        description: 'Educational cyber security coach plus registry/wiki manager for security binaries (sqlmap, nmap, ffuf). Never executes commands — it teaches the exact commands, explains why, tracks CTF decision graphs, and remembers per-tool run suggestions across sessions so the learner can resume where they left off. The ONE exception is action "run_action": it spawns a PROJECT-DECLARED bridge subprocess from <workspaceRoot>/.free-llm-mcp/bridges.json (argv only, no shell) for an authorized ctf/lab/consent target — the project config decides what may run, and harness deployments additionally gate it behind their cyberTools allowlist. For osint with autoSearch:true, the search-provider dork lookups run in the BACKGROUND — the call returns immediately with searchStatus:"running"; poll with action:"osint_status" (same sessionId + target) until searchStatus:"done".',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            action: { type: 'string', enum: ['list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'osint', 'osint_status'], description: 'Cyber tool action' },
+            action: { type: 'string', enum: ['list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'osint', 'osint_status', 'run_action'], description: 'Cyber tool action' },
             toolName: { type: 'string', description: 'Security tool name (e.g. sqlmap, nmap, ffuf)' },
             githubUrl: { type: 'string', description: 'GitHub repository URL for tool registration' },
             sessionId: { type: 'string', description: 'Session/CTF-challenge id; keys the progress record and decision graph for learn/coach/save_graph/load_graph, and (with target) the background search run for osint/osint_status' },
             goal: { type: 'string', description: 'Natural-language objective for the learn action, e.g. "find SQLi on a lab web app"' },
             level: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Learner skill level; defaults to beginner' },
             observation: { type: 'string', description: 'For coach: what the learner ran and what they observed' },
+            bridge: { type: 'string', description: 'For run_action: name of the bridge in <workspaceRoot>/.free-llm-mcp/bridges.json; optional only when exactly one bridge is declared' },
+            workspaceRoot: { type: 'string', description: 'For run_action: project folder holding .free-llm-mcp/bridges.json (default: process.cwd()) — lets one server serve multiple project roots' },
+            actionName: { type: 'string', description: 'For run_action: the bridge\'s own action name (allowlisted bridge-side), e.g. a katana dispatch action' },
+            authorization: { type: 'string', enum: ['ctf', 'lab', 'consent'], description: 'For run_action (required): authorization framing for the target — only pass targets you are explicitly authorized to test' },
+            args: { type: 'object', description: 'For run_action: action-specific arguments forwarded verbatim to the bridge (validated bridge-side)' },
             graphNode: {
               type: 'object',
               description: 'For save_graph: a decision-graph node to add, optionally linked from a prior node',

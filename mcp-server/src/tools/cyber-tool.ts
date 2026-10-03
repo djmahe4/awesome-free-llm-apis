@@ -7,6 +7,7 @@ import { TaskType } from '../pipeline/middleware.js';
 import path from 'node:path';
 import { promises as fs, existsSync } from 'node:fs';
 import { RunRegistry } from '../pipeline/middlewares/RunRegistry.js';
+import { runProjectBridge } from './project-bridge.js';
 
 // Background osint autoSearch results, keyed the same way as its RunRegistry
 // entry. Search-provider calls are network-bound and can legitimately run long,
@@ -17,7 +18,8 @@ const osintResultsCache = new Map<string, any[]>();
 
 export interface CyberToolInput {
     action: 'list_tools' | 'get_tool' | 'register_tool' | 'wiki_lookup'
-        | 'learn' | 'coach' | 'save_graph' | 'load_graph' | 'tool_memory' | 'osint' | 'osint_status';
+        | 'learn' | 'coach' | 'save_graph' | 'load_graph' | 'tool_memory' | 'osint' | 'osint_status'
+        | 'run_action';
     toolName?: string;
     githubUrl?: string;
     sessionId?: string;
@@ -40,6 +42,18 @@ export interface CyberToolInput {
     // tool_memory
     memoryOp?: 'read' | 'write';
     note?: string;
+
+    // T8 run_action — project bridge dispatch (see project-bridge.ts)
+    /** Bridge name from `<workspaceRoot>/.free-llm-mcp/bridges.json`; optional only when exactly one bridge is declared. */
+    bridge?: string;
+    /** Project folder holding `.free-llm-mcp/bridges.json` (default: process.cwd()) — lets one server serve multiple project roots. */
+    workspaceRoot?: string;
+    /** The bridge's own action name (dispatch vocabulary), e.g. a katana allowlisted action. */
+    actionName?: string;
+    /** Required authorization framing — only pass targets you are explicitly authorized to test. */
+    authorization?: 'ctf' | 'lab' | 'consent';
+    /** Action-specific arguments forwarded verbatim to the bridge (validated bridge-side). */
+    args?: Record<string, unknown>;
 
     // DAG reverse-engineering extensions
     mode?: 'teach' | 'dag_reverse';
@@ -844,6 +858,43 @@ export async function cyberTool(input: CyberToolInput) {
                     error: run.error,
                     searchResults: osintResultsCache.get(osintRunKey) || [],
                 };
+            }
+        } else if (action === 'run_action') {
+            // T8 — dispatch through a project-declared bridge subprocess
+            // (general mechanism: any project's `.free-llm-mcp/bridges.json`,
+            // any server, multiple project roots per MCP server). Every
+            // failure below returns success:false instead of throwing so the
+            // caller always gets a structured result.
+            const framing = ['ctf', 'lab', 'consent'];
+            if (!input.authorization || !framing.includes(input.authorization)) {
+                result = {
+                    success: false,
+                    action,
+                    error: `run_action requires authorization framing (one of: ${framing.join(', ')}) — only pass targets you are explicitly authorized to test`,
+                };
+            } else if (!input.actionName || !input.target) {
+                result = { success: false, action, error: 'run_action requires actionName and target' };
+            } else {
+                try {
+                    const { bridge, finding } = await runProjectBridge({
+                        workspaceRoot: input.workspaceRoot || process.cwd(),
+                        bridge: input.bridge,
+                        actionName: input.actionName,
+                        target: input.target,
+                        args: input.args,
+                        authorization: input.authorization,
+                    });
+                    result = {
+                        success: true,
+                        action,
+                        bridge,
+                        actionName: input.actionName,
+                        target: input.target,
+                        finding,
+                    };
+                } catch (err: any) {
+                    result = { success: false, action, error: String(err?.message || err) };
+                }
             }
         } else {
             throw new Error(`Unsupported cyber_tool action: ${action}`);

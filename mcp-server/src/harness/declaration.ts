@@ -190,6 +190,16 @@ export async function loadHarnessDeclaration(name = 'research-analysis', workspa
   }
 
   validateLane(parsed, name, filePath);
+
+  // T8 — cyberTools, when present, must be a list of non-empty bridge names
+  // (the fail-closed evaluate() hook treats anything else as "no bridges").
+  if (
+    parsed.cyberTools !== undefined &&
+    (!Array.isArray(parsed.cyberTools) || parsed.cyberTools.some(b => typeof b !== 'string' || !b))
+  ) {
+    throw new Error(`Malformed harness declaration '${name}' (${filePath}): cyberTools must be a list of bridge names`);
+  }
+
   const allowedRoots = parsed.harness.allowedWorkspaceRoots;
   if (Array.isArray(allowedRoots)) {
     const declDir = path.dirname(filePath);

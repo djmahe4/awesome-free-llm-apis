@@ -98,6 +98,23 @@ export function evaluate(
     return { kind: 'needs_approval', reason: `Role '${baseRole}' requires approval for every call (gated lane)` };
   }
 
+  // T8 — cyber_tool run_action spawns a project bridge subprocess, so even a
+  // role that allowlists it must ALSO have the bridge named in the
+  // declaration's top-level `cyberTools` (fail closed when the list is
+  // absent). Mirrors runtime auto-select: an unnamed bridge resolves only
+  // when exactly one bridge is listed.
+  if (tool === 'cyber_tool' && action === 'run_action') {
+    const listed = decl.cyberTools ?? [];
+    const requested = typeof args?.bridge === 'string' && args.bridge
+      ? args.bridge
+      : (listed.length === 1 ? listed[0] : undefined);
+    if (!requested || !listed.includes(requested)) {
+      return requested
+        ? { kind: 'needs_approval', reason: `Bridge '${requested}' is not in this declaration's cyberTools allowlist` }
+        : { kind: 'needs_approval', reason: `cyber_tool run_action requires a bridge from this declaration's cyberTools list (fail-closed)` };
+    }
+  }
+
   for (const rule of roleDef.tools ?? []) {
     if (ruleMatches(rule, tool, action, args)) return { kind: 'allow', rule };
   }

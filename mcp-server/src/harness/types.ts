@@ -54,6 +54,15 @@ export interface HarnessDeclaration {
   /** P4e trial-and-error bounds (docs/plans/2026-09-29-harness-p4-subagents-brain.md, D5). Both optional — absent means the pre-P4e default (2 attempts, deterministic heuristic strategy selection). */
   limits?: { maxAttemptsPerStep?: number };
   reasoning?: { strategy?: 'heuristic' | 'quantum' };
+  /**
+   * T8 — names of project bridges `cyber_tool` `run_action` may spawn
+   * (resolved from `<workspaceRoot>/.free-llm-mcp/bridges.json`). Fail-closed
+   * policy hook: evaluate() only allows run_action when the requested bridge
+   * appears here — absent list = no bridge ever dispatches through the
+   * harness. Covers the executing action only; cyber_tool's other
+   * (non-executing) actions are unaffected.
+   */
+  cyberTools?: string[];
 }
 
 export type PolicyDecision =
