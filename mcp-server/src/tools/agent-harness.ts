@@ -7,7 +7,7 @@ import { parseTasksMarkdown } from './coding-agents.js';
 export interface AgentHarnessInput {
   action: 'deploy' | 'resume' | 'rerun' | 'reorchestrate' | 'status' | 'approvals' | 'approve' | 'reject' | 'trace' | 'tasks' | 'abort';
   runId?: string;              // required for all actions except deploy (which generates one)
-  harness?: string;            // declaration name, default 'research-analysis'
+  harness?: string;            // declaration name (resolved from <workspace_root>/.free-llm-mcp/harness/, then legacy <workspace_root>/harness/, then built-in) or a .yaml path; default 'research-analysis'
   goal?: string;                // required for deploy
   workspace_root?: string;
   maxTokens?: number;
@@ -65,7 +65,7 @@ export async function agentHarness(input: AgentHarnessInput) {
       // a declaration with a longer timeout was having its approvals expired
       // early just from listing them.
       const run = await store.loadRun();
-      const timeoutMinutes = run ? (await loadHarnessDeclaration(run.declarationName)).harness.approval.timeoutMinutes : 60;
+      const timeoutMinutes = run ? (await loadHarnessDeclaration(run.declarationName, run.workspaceRoot)).harness.approval.timeoutMinutes : 60;
       await store.expireStale(timeoutMinutes);
       return { approvals: await store.listApprovals() };
     }
