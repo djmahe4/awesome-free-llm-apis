@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest';
 import path from 'path';
 import { existsSync } from 'fs';
 import { loadHarnessDeclaration, resolveDeclarationPath } from '../src/harness/declaration.js';
-import { assertWorkspaceRootAllowed } from '../src/harness/policy.js';
+import { assertWorkspaceRootAllowed, evaluate } from '../src/harness/policy.js';
 
 // Default matches this machine's layout (sibling of the Desktop workspace);
 // CTF_KATANA_ROOT overrides for other checkouts. The ctf-katana checkout is
@@ -65,5 +65,38 @@ describe.skipIf(!existsSync(APPSEC_DECL_PATH))('appsec harness declaration (T3)'
     expect(gatedRoles.length).toBeGreaterThanOrEqual(1);
     const gatedTools = gatedRoles.flatMap(([, def]) => def.tools.map(t => t.tool));
     expect(gatedTools).toContain('coding_agents');
+  });
+
+  it('ships AGENTS.md with a Skill Access block: recon/security_analyst get execute_skill rules and the skillCatalog resolves bug_hunting', async () => {
+    expect(existsSync(path.join(CTF_KATANA_ROOT, 'AGENTS.md'))).toBe(true);
+
+    const decl = await loadHarnessDeclaration('appsec', CTF_KATANA_ROOT);
+
+    for (const roleName of ['recon', 'security_analyst']) {
+      const role = decl.roles[roleName];
+      expect(role, `${roleName} role exists`).toBeDefined();
+      const rule = role!.tools.find(
+        t => t.tool === 'execute_skill' && Array.isArray((t.constraints as any)?.skillTags)
+      );
+      expect(rule, `${roleName} execute_skill rule`).toBeDefined();
+      expect((rule!.constraints as any).skillTags).toContain('bug-hunting');
+    }
+
+    expect((decl as any).skillCatalog?.bug_hunting?.dir).toBe('skills/bug_hunting');
+    expect((decl as any).skillCatalog?.bug_hunting?.tags).toContain('ctf');
+  });
+
+  it('allows cyber_tool/run_action on the katana bridge for recon and security_analyst, fail-closed everywhere else', async () => {
+    const decl = await loadHarnessDeclaration('appsec', CTF_KATANA_ROOT);
+    const katanaArgs = { bridge: 'katana', actionName: 'port_scan', target: 'example.com' };
+
+    expect(evaluate(decl, 'recon', 'cyber_tool', 'run_action', katanaArgs).kind).toBe('allow');
+    expect(evaluate(decl, 'security_analyst', 'cyber_tool', 'run_action', katanaArgs).kind).toBe('allow');
+
+    expect(evaluate(decl, 'top_level', 'cyber_tool', 'run_action', katanaArgs).kind).toBe('needs_approval');
+    expect(evaluate(decl, 'fixer', 'cyber_tool', 'run_action', katanaArgs).kind).toBe('needs_approval');
+    expect(
+      evaluate(decl, 'recon', 'cyber_tool', 'run_action', { ...katanaArgs, bridge: 'evil-bridge' }).kind
+    ).toBe('needs_approval');
   });
 });

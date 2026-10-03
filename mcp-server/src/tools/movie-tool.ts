@@ -8,6 +8,7 @@ import { synthesizeSpeechLocal } from './media/audio-router.js';
 import { generateStoryScript } from './media/story-router.js';
 import { applyMediaEffects, normalizeOrRandomizeEffect } from './media/dsp-router.js';
 import { toPublicArtifact, type TrackLane, type MediaEffect } from './media/types.js';
+import { pathParamWithinRoots } from '../utils/workspace-roots.js';
 
 export interface MovieToolInput {
   action:
@@ -53,6 +54,10 @@ export interface MovieToolOutput {
 }
 
 export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutput> {
+  const artifactPathGuard = pathParamWithinRoots(input.artifact_path, 'artifact_path');
+  if (artifactPathGuard) {
+    return { success: false, error: artifactPathGuard };
+  }
   const projectDir = input.projectDir || path.resolve(process.cwd(), 'projects', input.projectId || 'default');
   const store = new TimelineManifestStore(projectDir);
 

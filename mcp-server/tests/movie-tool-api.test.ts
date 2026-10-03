@@ -38,4 +38,19 @@ describe('movie_tool actions', () => {
     expect(addRes.data.track).toBe('video');
     expect(addRes.data.artifact_path).toBe('https://example.com/opening.mp4');
   });
+
+  it('rejects an artifact_path outside the allowed roots before any write', async () => {
+    const res = await runMovieTool({
+      action: 'add_artifact',
+      projectId: 'test_audit_proj',
+      projectDir: tmpProjectDir,
+      track: 'video',
+      start_ms: 0,
+      end_ms: 1000,
+      label: 'Escape attempt',
+      artifact_path: '/etc/passwd'
+    });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/artifact_path is outside the allowed roots/);
+  });
 });

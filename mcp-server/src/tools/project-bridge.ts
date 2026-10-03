@@ -25,7 +25,7 @@
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { splitRoots, isInsideRoot as insideRoot } from '../utils/workspace-roots.js';
+import { splitRoots, isInsideRoot as insideRoot, real } from '../utils/workspace-roots.js';
 
 export interface BridgeEntry {
   command: string[];
@@ -56,13 +56,13 @@ export function bridgeWorkspaceRoots(): string[] {
 }
 
 export function assertBridgeWorkspaceRootAllowed(workspaceRoot: string): void {
-  const resolved = path.resolve(workspaceRoot);
-  const roots = bridgeWorkspaceRoots();
+  const realResolved = real(path.resolve(workspaceRoot));
+  const roots = bridgeWorkspaceRoots().map(real);
   if (roots.length > 0) {
-    if (roots.some(root => insideRoot(resolved, root))) return;
+    if (roots.some(root => insideRoot(realResolved, root))) return;
     throw new Error(`workspace_root '${workspaceRoot}' is not permitted — BRIDGE_WORKSPACE_ROOTS allows: ${roots.join(', ')}`);
   }
-  if (insideRoot(resolved, process.cwd())) return;
+  if (insideRoot(realResolved, real(path.resolve(process.cwd())))) return;
   throw new Error(`workspace_root '${workspaceRoot}' is outside the server working directory (${path.resolve(process.cwd())}) — set BRIDGE_WORKSPACE_ROOTS to the project folder(s) whose bridges.json may run`);
 }
 

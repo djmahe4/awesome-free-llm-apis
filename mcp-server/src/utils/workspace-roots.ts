@@ -3,11 +3,30 @@ import fs from 'node:fs';
 
 export function splitRoots(raw?: string | null): string[] {
   if (!raw) return [];
-  return raw
-    .split(/[,:]/)
-    .map(s => s.trim())
-    .filter(Boolean)
-    .map(s => path.resolve(s));
+  const entries: string[] = [];
+  let cur = '';
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === ',') {
+      if (cur.trim()) entries.push(cur);
+      cur = '';
+      continue;
+    }
+    if (ch === ':') {
+      const isDrive = cur.length === 1 && /[A-Za-z]/.test(cur)
+        && (i + 1 >= raw.length || raw[i + 1] === '\\' || raw[i + 1] === '/');
+      if (isDrive) {
+        cur += ch;
+        continue;
+      }
+      if (cur.trim()) entries.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) entries.push(cur);
+  return entries.map(s => path.resolve(s.trim()));
 }
 
 export function isInsideRoot(target: string, root: string): boolean {
@@ -28,7 +47,7 @@ export function resolveWithin(root: string, relPath: string): string | null {
   return full;
 }
 
-function real(p: string): string {
+export function real(p: string): string {
   let current = p;
   const tailSegments: string[] = [];
   for (let i = 0; i < 64; i++) {

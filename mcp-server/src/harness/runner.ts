@@ -586,6 +586,28 @@ function resolveStepDispatch(
 ): { toolName: string; payload: any; execute: () => Promise<any> } {
   const toolName = decl.roles[role]?.tools?.[0]?.tool || 'use_free_llm';
 
+  const normalizeTag = (t: string) => t.toLowerCase().replace(/[-_]+/g, ' ').trim();
+  let matchedSkill: { name: string; dir?: string; tags: string[] } | undefined;
+  const catalog = decl.skillCatalog;
+  if (catalog && Object.keys(catalog).length > 0) {
+    const goalNorm = normalizeTag(stepGoal);
+    for (const rule of decl.roles[role]?.tools ?? []) {
+      if (rule.tool !== 'execute_skill') continue;
+      const ruleTags = (rule.constraints as { skillTags?: unknown } | undefined)?.skillTags;
+      if (!Array.isArray(ruleTags)) continue;
+      for (const [name, entry] of Object.entries(catalog)) {
+        const entryTags = (entry.tags ?? []).filter(t => typeof t === 'string');
+        const shared = entryTags.filter(t => ruleTags.some(rt => typeof rt === 'string' && normalizeTag(rt) === normalizeTag(t)));
+        if (shared.length === 0) continue;
+        if (shared.some(t => goalNorm.includes(normalizeTag(t)))) {
+          matchedSkill = { name, dir: entry.dir, tags: entryTags };
+          break;
+        }
+      }
+      if (matchedSkill) break;
+    }
+  }
+
   // This exact object is both hashed for approval-binding and passed to the
   // tool — one source of truth, so what a human approves is what runs.
   const systemPrompt = 'You are a research agent. Answer with grounded findings only; cite sources inline. Do not fabricate citations.';
@@ -610,11 +632,14 @@ function resolveStepDispatch(
   // (policy.ts's array-membership constraintsMatch) can actually gate this
   // call by tag instead of only by tool name.
   const executeSkillPayload = {
-    skill: 'general-purpose',
+    skill: matchedSkill?.name ?? 'general-purpose',
     input: stepGoal,
     workspace_root: workspaceRoot,
     sessionId: registryKey,
-    skillTags: CYBER_TERMS_REGEX.test(stepGoal) ? ['cyber'] : [],
+    skillTags: matchedSkill
+      ? [...new Set([...matchedSkill.tags, ...(CYBER_TERMS_REGEX.test(stepGoal) ? ['cyber'] : [])])]
+      : CYBER_TERMS_REGEX.test(stepGoal) ? ['cyber'] : [],
+    ...(matchedSkill?.dir ? { skillDir: matchedSkill.dir } : {}),
   };
 
   const dispatchMap: Record<string, { payload: any; execute: () => Promise<any> }> = {
@@ -630,10 +655,15 @@ function resolveStepDispatch(
       payload: executeSkillPayload,
       execute: async () => (await import('../tools/execute-skill.js')).executeSkill(executeSkillPayload as any),
     },
+    coding_agents: {
+      payload: useFreeLlmPayload,
+      execute: async () => (await import('../tools/use-free-llm.js')).useFreeLLM(useFreeLlmPayload as any),
+    },
   };
 
-  const resolved = dispatchMap[toolName] || dispatchMap.use_free_llm;
-  const resolvedToolName = dispatchMap[toolName] ? toolName : 'use_free_llm';
+  const effectiveToolName = matchedSkill ? 'execute_skill' : toolName;
+  const resolved = dispatchMap[effectiveToolName] || dispatchMap.use_free_llm;
+  const resolvedToolName = dispatchMap[effectiveToolName] ? effectiveToolName : 'use_free_llm';
   return { toolName: resolvedToolName, payload: resolved.payload, execute: resolved.execute };
 }
 

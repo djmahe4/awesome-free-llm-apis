@@ -36,7 +36,7 @@ function loadRecordKey(filePath: string, workspaceRoot?: string): string {
  * the same `yaml` parser already used for harness declarations — no new
  * parsing dependency introduced for this.
  */
-function loadAgentsSkillAccess(workspaceRoot: string | undefined): Record<string, string[]> | null {
+function loadAgentsSkillAccess(workspaceRoot: string | undefined): { roles: Record<string, string[]>; skills: Record<string, { tags: string[]; dir?: string }> } | null {
   if (!workspaceRoot) return null;
   const candidates = [findAgentsMdPath(workspaceRoot), path.join(workspaceRoot, 'AGENTS.md')]
     .filter((p): p is string => !!p);
@@ -47,14 +47,29 @@ function loadAgentsSkillAccess(workspaceRoot: string | undefined): Record<string
       const content = readFileSync(agentsMdPath, 'utf-8');
       const match = content.match(/##\s*Skill Access\s*\n```ya?ml\n([\s\S]*?)```/i);
       if (!match) continue;
-      const block = parseYaml(match[1]) as { roles?: Record<string, { skillTags?: string[] }> };
-      if (!block?.roles || typeof block.roles !== 'object') continue;
+      const block = parseYaml(match[1]) as {
+        roles?: Record<string, { skillTags?: string[] }>;
+        skills?: Record<string, { tags?: unknown; dir?: unknown }>;
+      };
+      if (!block || typeof block !== 'object') continue;
+      if (!block.roles && !block.skills) continue;
 
-      const result: Record<string, string[]> = {};
-      for (const [role, def] of Object.entries(block.roles)) {
-        if (Array.isArray(def?.skillTags)) result[role] = def.skillTags.filter(t => typeof t === 'string');
+      const roles: Record<string, string[]> = {};
+      if (block.roles && typeof block.roles === 'object') {
+        for (const [role, def] of Object.entries(block.roles)) {
+          if (Array.isArray(def?.skillTags)) roles[role] = def.skillTags.filter(t => typeof t === 'string');
+        }
       }
-      return result;
+      const skills: Record<string, { tags: string[]; dir?: string }> = {};
+      if (block.skills && typeof block.skills === 'object') {
+        for (const [name, def] of Object.entries(block.skills)) {
+          if (!def || typeof def !== 'object' || !Array.isArray(def.tags)) continue;
+          const tags = def.tags.filter((t): t is string => typeof t === 'string');
+          if (tags.length === 0) continue;
+          skills[name] = typeof def.dir === 'string' && def.dir ? { tags, dir: def.dir } : { tags };
+        }
+      }
+      return { roles, skills };
     } catch {
       // Malformed or unreadable AGENTS.md skill-access block — ignored, not
       // fatal: absence of this block means "no extra restriction", same as
@@ -223,7 +238,11 @@ export async function loadHarnessDeclaration(name = 'research-analysis', workspa
     );
   }
 
-  const withSkillAccess = applySkillAccess(parsed, loadAgentsSkillAccess(workspaceRoot));
+  const skillAccess = loadAgentsSkillAccess(workspaceRoot);
+  const withSkillAccess = applySkillAccess(parsed, skillAccess?.roles ?? null);
+  if (skillAccess && Object.keys(skillAccess.skills).length > 0) {
+    withSkillAccess.skillCatalog = skillAccess.skills;
+  }
 
   loadRecords.set(cacheKey, { filePath, sha256: crypto.createHash('sha256').update(raw, 'utf-8').digest('hex') });
   cache.set(cacheKey, withSkillAccess);

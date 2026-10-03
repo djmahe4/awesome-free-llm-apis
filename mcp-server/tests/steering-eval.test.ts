@@ -1,9 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
+import fs from 'node:fs';
+import path from 'node:path';
 import { createExpressApp } from '../src/server.js';
 import { WorkspaceContextMiddleware } from '../src/pipeline/middlewares/WorkspaceContextMiddleware.js';
 import { getIntelligentSystemPrompt, evaluatePromptSections } from '../src/pipeline/middlewares/prompts.js';
+
+const promptJsonPath = process.env.AGENT_PROMPT_PATH
+  ? path.join(process.env.AGENT_PROMPT_PATH, 'prompt.json')
+  : path.resolve(process.cwd(), '..', 'external', 'agent-prompt', 'prompt.json');
+const hasPromptJson = fs.existsSync(promptJsonPath);
 
 async function callSteeringEval(body: unknown): Promise<{ status: number; body: any }> {
     const app = createExpressApp();
@@ -32,11 +39,12 @@ describe('Steering Evaluation & Ingestion Inspector API (/api/steering_eval)', (
         expect(typeof result.prompt).toBe('string');
         expect(result.prompt.length).toBeGreaterThan(50);
         expect(Array.isArray(result.matchedSections)).toBe(true);
-        expect(result.matchedSections.length).toBeGreaterThan(0);
         expect(result.totalPromptTokens).toBeGreaterThan(0);
-        // Expect section content to be populated for full inspection
-        expect(result.matchedSections[0].content).toBeDefined();
-        expect(typeof result.matchedSections[0].content).toBe('string');
+        if (hasPromptJson) {
+            expect(result.matchedSections.length).toBeGreaterThan(0);
+            expect(result.matchedSections[0].content).toBeDefined();
+            expect(typeof result.matchedSections[0].content).toBe('string');
+        }
     });
 
     it('WorkspaceContextMiddleware attaches comprehensive steeringTelemetry to context', async () => {
@@ -236,7 +244,12 @@ describe('/api/steering_eval token accounting (endpoint)', () => {
         expect(agentic.status).toBe(200);
         const acmp = agentic.body.telemetry.comparison;
         expect(acmp.agenticSubtaskCount).toBe(agentic.body.telemetry.planDetails.phases.length);
-        expect(acmp.singlePassPayloadTokens).toBeGreaterThan(acmp.agenticFirstSubtaskTokens);
+        if (hasPromptJson) {
+            expect(acmp.singlePassPayloadTokens).toBeGreaterThan(acmp.agenticFirstSubtaskTokens);
+        } else {
+            expect(acmp.singlePassPayloadTokens).toBeGreaterThan(0);
+            expect(acmp.agenticFirstSubtaskTokens).toBeGreaterThan(0);
+        }
         if (acmp.agenticSubtaskCount === 1) {
             expect(acmp.agenticRunTokens).toBe(acmp.agenticFirstSubtaskTokens);
         } else {

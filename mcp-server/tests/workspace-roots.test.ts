@@ -29,6 +29,17 @@ describe('workspace-roots', () => {
       expect(splitRoots('')).toEqual([]);
       expect(splitRoots('x')).toEqual([path.resolve(process.cwd(), 'x')]);
     });
+
+    it('keeps Windows drive-letter colons intact (C:\\proj\\x stays one root)', () => {
+      const drive = splitRoots('C:\\proj\\x');
+      expect(drive).toHaveLength(1);
+      expect(drive[0]).toContain('C:\\proj\\x');
+      const slashDrive = splitRoots('D:/data');
+      expect(slashDrive).toHaveLength(1);
+      expect(slashDrive[0]).toContain('D:/data');
+      expect(splitRoots('C:\\a,D:/b')).toHaveLength(2);
+      expect(splitRoots('a:b')).toEqual([path.resolve('a'), path.resolve('b')]);
+    });
   });
 
   describe('isInsideRoot / isInsideRoots', () => {

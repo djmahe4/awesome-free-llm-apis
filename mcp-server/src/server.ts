@@ -584,7 +584,9 @@ export function createExpressApp(): express.Express {
               break;
             }
             case 'movie_tool': {
-              const paramGuard = pathParamWithinRoots(params.projectDir, 'projectDir') ?? relativeSegmentError(params.projectId, 'projectId');
+              const paramGuard = pathParamWithinRoots(params.projectDir, 'projectDir')
+                ?? relativeSegmentError(params.projectId, 'projectId')
+                ?? pathParamWithinRoots(params.artifact_path, 'artifact_path');
               if (paramGuard) {
                 res.status(400).json({ error: paramGuard });
                 return;
@@ -1216,7 +1218,9 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const body = req.body || {};
-          const paramGuard = pathParamWithinRoots(body.projectDir, 'projectDir') ?? relativeSegmentError(body.projectId, 'projectId');
+          const paramGuard = pathParamWithinRoots(body.projectDir, 'projectDir')
+            ?? relativeSegmentError(body.projectId, 'projectId')
+            ?? pathParamWithinRoots(body.artifact_path, 'artifact_path');
           if (paramGuard) {
             return res.status(400).json({ success: false, error: paramGuard });
           }

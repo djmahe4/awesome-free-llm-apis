@@ -63,6 +63,15 @@ export interface HarnessDeclaration {
    * (non-executing) actions are unaffected.
    */
   cyberTools?: string[];
+  /**
+   * AGENTS.md `## Skill Access` optional `skills:` catalog — skill name to
+   * its tag list (plus optional repo-relative `skills/<name>/` dir). Used by
+   * resolveStepDispatch to replace the hardcoded 'general-purpose' skill
+   * name with a real repo skill when the step goal matches the catalog
+   * entry's tags AND the role's execute_skill rule skillTags. Absent (or
+   * empty) = no tag-based skill resolution, same behavior as before.
+   */
+  skillCatalog?: Record<string, { tags: string[]; dir?: string }>;
 }
 
 export type PolicyDecision =

@@ -35,6 +35,8 @@ export interface ExecuteSkillInput {
   sessionId?: string;
   /** Force a specific skill source instead of auto-detecting Hermes first. */
   source?: 'agentic-awesome' | 'hermes';
+  /** Repo-relative directory (under workspace_root) holding prompt.md + skill.yaml. */
+  skillDir?: string;
 }
 
 export interface ExecuteSkillResult {
@@ -144,11 +146,42 @@ export async function executeSkill(input: ExecuteSkillInput): Promise<ExecuteSki
  * Execute a prompt using a specific local skill's instructions and reference files.
  */
 async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkillResult> {
-  const { skill, input: userPrompt, model, workspace_root, sessionId, source } = input;
+  const { skill, input: userPrompt, model, workspace_root, sessionId, source, skillDir } = input;
 
   // 1. Path traversal security guard
   if (!skill || !/^[a-zA-Z0-9_\-\.]+$/.test(skill) || skill.includes('..')) {
     return { success: false, error: 'Security Exception: Invalid skill name.' };
+  }
+
+  if (workspace_root && source !== 'hermes') {
+    const wsRoot = path.resolve(workspace_root);
+    let repoDir: string | null = null;
+    if (skillDir) {
+      repoDir = path.resolve(wsRoot, skillDir);
+      if (repoDir !== wsRoot && !repoDir.startsWith(wsRoot + path.sep)) {
+        return { success: false, error: 'Security Exception: skillDir escapes the workspace root.' };
+      }
+    } else if (await fs.pathExists(wsRoot)) {
+      repoDir = path.join(wsRoot, 'skills', skill);
+    }
+    if (repoDir) {
+      const promptPath = path.join(repoDir, 'prompt.md');
+      if (await fs.pathExists(promptPath)) {
+        try {
+          const promptContent = await fs.readFile(promptPath, 'utf-8');
+          let systemMessage = `# Specialized Skill Core Instructions (prompt.md)\n${promptContent}\n`;
+          const yamlPath = path.join(repoDir, 'skill.yaml');
+          if (await fs.pathExists(yamlPath)) {
+            const yamlRaw = await fs.readFile(yamlPath, 'utf-8');
+            const descMatch = yamlRaw.match(/^\s*description:\s*(.+)$/m);
+            if (descMatch) systemMessage += `\n## Skill Description\n${descMatch[1].trim()}\n`;
+          }
+          return await executeWithSystemPrompt(systemMessage, userPrompt, model, workspace_root, sessionId, skill);
+        } catch (error: any) {
+          return { success: false, error: error?.message || 'Unknown error occurred during repo-style skill execution.' };
+        }
+      }
+    }
   }
 
   // 2. Hermes auto-detect: try the bundled Hermes skill set first (unless the

@@ -45,6 +45,38 @@ describe('AGENTS.md skill-access merge into harness declaration', () => {
     expect((rule!.constraints as any).skillTags).toEqual(['research', 'osint']);
   });
 
+  it('parses a skills: catalog from the Skill Access block into decl.skillCatalog with tags and dir', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'AGENTS.md'),
+      [
+        '# Agent Configuration',
+        '',
+        '## Skill Access',
+        '```yaml',
+        'roles:',
+        '  researcher: { skillTags: [research, osint] }',
+        'skills:',
+        '  bug_hunting:',
+        '    tags: [bug-bounty, ctf, recon]',
+        '    dir: skills/bug_hunting',
+        '```',
+      ].join('\n')
+    );
+
+    const { loadHarnessDeclaration } = await import('../src/harness/declaration.js');
+    const decl = await loadHarnessDeclaration('research-analysis', tmpDir);
+
+    expect((decl as any).skillCatalog?.bug_hunting).toEqual({
+      tags: ['bug-bounty', 'ctf', 'recon'],
+      dir: 'skills/bug_hunting',
+    });
+
+    const rule = decl.roles.researcher.tools.find(
+      t => t.tool === 'execute_skill' && Array.isArray((t.constraints as any)?.skillTags)
+    );
+    expect(rule).toBeDefined();
+  });
+
   it('ignores a role AGENTS.md mentions that does not exist in the harness declaration', async () => {
     await fs.writeFile(
       path.join(tmpDir, 'AGENTS.md'),
