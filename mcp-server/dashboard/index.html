@@ -539,6 +539,7 @@
               <tr><td>ModelScope</td><td><code>MODELSCOPE_API_KEY</code></td><td><a href="https://modelscope.cn/my/myaccesstoken" target="_blank" rel="noopener noreferrer">modelscope.cn/my/myaccesstoken</a></td></tr>
               <tr><td>NVIDIA NIM</td><td><code>NVIDIA_API_KEY</code></td><td><a href="https://build.nvidia.com/explore/discover" target="_blank" rel="noopener noreferrer">build.nvidia.com/explore/discover</a></td></tr>
               <tr><td>Ollama Cloud</td><td><code>OLLAMA_API_KEY</code></td><td><a href="https://ollama.com/settings/keys" target="_blank" rel="noopener noreferrer">ollama.com/settings/keys</a></td></tr>
+              <tr><td>Ollama (Local)</td><td><code>OLLAMA_LOCAL_BASE_URL</code></td><td><a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer">ollama.com/download</a> &bull; <code>http://localhost:11434</code></td></tr>
               <tr><td>OpenRouter</td><td><code>OPENROUTER_API_KEY</code></td><td><a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">openrouter.ai/keys</a></td></tr>
               <tr><td>SiliconFlow</td><td><code>SILICONFLOW_API_KEY</code></td><td><a href="https://cloud.siliconflow.cn/account/ak" target="_blank" rel="noopener noreferrer">cloud.siliconflow.cn/account/ak</a></td></tr>
               <tr><td>Pollinations AI</td><td><code>POLLINATIONS_API_KEY</code></td><td><a href="https://pollinations.ai" target="_blank" rel="noopener noreferrer">pollinations.ai</a></td></tr>
@@ -896,10 +897,10 @@
             <div class="stat-card">
               <div class="stat-label c-cyan">Total Injected Context</div>
               <div class="stat-value c-cyan" id="steering-payload-tokens">0 tok</div>
-              <div class="stat-sub">Live 5-layer memory footprint</div>
+              <div class="stat-sub">Measured messages + system prompt</div>
             </div>
             <div class="stat-card">
-              <div class="stat-label c-green">Net Token Savings</div>
+              <div class="stat-label c-green" id="steering-savings-label">Net Token Savings</div>
               <div class="stat-value c-green" id="steering-token-savings">0.0%</div>
               <div class="stat-sub" id="steering-savings-desc">0 tokens saved vs Agentic</div>
             </div>

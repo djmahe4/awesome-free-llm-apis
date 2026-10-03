@@ -1320,7 +1320,7 @@ export function createExpressApp(): express.Express {
       app.post('/api/steering_eval', express.json({ limit: '1mb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
-          const { query = '', keywords = [], agentic = false, workspaceRoot = process.cwd(), sessionId = 'steering-eval-session', subtask } = req.body || {};
+          const { query = '', keywords = [], agentic = false, sessionId = 'steering-eval-session', subtask } = req.body || {};
           let rawKeywordsList: string[] = [];
           if (Array.isArray(keywords)) {
             rawKeywordsList = keywords.map(k => String(k));
@@ -1332,13 +1332,15 @@ export function createExpressApp(): express.Express {
             .map(k => k.replace(/[\[\]"'`]/g, '').trim().toLowerCase())
             .filter(Boolean);
 
-          const effectiveKeywords = userKeywords.length > 0
-            ? userKeywords
-            : (query ? (query.toLowerCase().match(/\b[a-z]{3,}\b/g)?.filter((w: string) => !['the','and','for','with','from','that','this','have','are','was','were','lets','check','please','could','would','should'].includes(w)).slice(0, 8) || []) : []);
+          // An explicit `workspaceRoot` key (even empty/null) = faithful evaluation
+          // with no fallback to the server's own directory. Absent key = demo mode
+          // (default to the server's workspace, as the dashboard expects).
+          const hasWorkspaceRootKey = !!(req.body && Object.prototype.hasOwnProperty.call(req.body, 'workspaceRoot'));
+          const workspaceRootRaw = hasWorkspaceRootKey ? (req.body as any).workspaceRoot : undefined;
 
-          let resolvedWsRoot = process.cwd();
-          if (workspaceRoot && typeof workspaceRoot === 'string') {
-            const trimmed = workspaceRoot.trim();
+          let resolvedWsRoot: string | undefined;
+          if (typeof workspaceRootRaw === 'string') {
+            const trimmed = workspaceRootRaw.trim();
             if (trimmed && !trimmed.includes('\0')) {
               try {
                 const candidate = path.isAbsolute(trimmed) ? path.normalize(trimmed) : path.resolve(process.cwd(), trimmed);
@@ -1347,7 +1349,18 @@ export function createExpressApp(): express.Express {
                 }
               } catch {}
             }
+            // explicit empty/invalid string → stays undefined (true no-workspace eval)
+          } else if (!hasWorkspaceRootKey) {
+            resolvedWsRoot = process.cwd();
           }
+
+          // Auto-derived keywords belong to demo mode: a faithful no-workspace
+          // one-shot must not be steered into groundings the caller never asked for.
+          const effectiveKeywords = userKeywords.length > 0
+            ? userKeywords
+            : (resolvedWsRoot !== undefined && query
+                ? (query.toLowerCase().match(/\b[a-z]{3,}\b/g)?.filter((w: string) => !['the','and','for','with','from','that','this','have','are','was','were','lets','check','please','could','would','should'].includes(w)).slice(0, 8) || [])
+                : []);
 
           const { evaluatePromptSections, getIntelligentSystemPrompt } = await import('./pipeline/middlewares/prompts.js');
           const promptEval = await evaluatePromptSections({
@@ -1363,8 +1376,10 @@ export function createExpressApp(): express.Express {
           let planDetails: any = null;
           let subtaskObj: any = null;
 
-          if (agentic) {
-            const { decomposeGoal } = await import('./pipeline/middlewares/AgenticMiddleware.js');
+          // Local (LLM-free) decomposition — also used below for the savings estimate.
+          const { decomposeGoal } = await import('./pipeline/middlewares/AgenticMiddleware.js');
+
+          if (agentic && resolvedWsRoot !== undefined) {
             const { buildExecutionPlan } = await import('./pipeline/middlewares/task-classifier.js');
             const { tasks: steps } = decomposeGoal(query || 'Execute multi-step task');
             const plan = await buildExecutionPlan(steps, resolvedWsRoot);
@@ -1403,30 +1418,47 @@ export function createExpressApp(): express.Express {
 
           await middleware.execute(context, async () => {});
           const steeringTelemetry = context.telemetry?.steeringTelemetry || {};
-          steeringTelemetry.matchedSections = promptEval.matchedSections;
 
-          // Assemble the complete 5-layer system prompt (including L2 ADR/Memory, L3 Wiki, L4 Grep/Workspace, L5 Prompts)
-          let assembledPrompt = await getIntelligentSystemPrompt({
-            context: agentic ? (subtaskObj?.title || query) : query,
-            keywords: effectiveKeywords,
-            memory: context.telemetry?.memoryContext,
-            workspace: context.telemetry?.grepContext,
-            workspaceRoot: resolvedWsRoot,
-            isSubtask: agentic
-          });
+          // Prefer the prompt the middleware actually injected (markers + L2-L4
+          // layers + grounding gate) over a re-assembly that would miss them.
+          const injectedRaw = String(steeringTelemetry.fullAssembledSystemPrompt || '');
+          const hasRealInjection = !agentic && injectedRaw.includes('<!-- WORKSPACE_CONTEXT_START -->');
 
-          if (agentic && subtaskObj) {
-            const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${subtaskObj.title}\n- **Subtask ID**: ${subtaskObj.id}\n\nStrictly focus on this subtask using the tools provided.`;
-            assembledPrompt = `${assembledPrompt}${taskHeader}`;
+          const buildTaskHeader = (id: string, title: string) =>
+            `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${title}\n- **Subtask ID**: ${id}\n\nStrictly focus on this subtask using the tools provided.`;
+
+          let assembledPrompt = '';
+          if (hasRealInjection) {
+            assembledPrompt = injectedRaw;
+          } else if (agentic) {
+            assembledPrompt = await getIntelligentSystemPrompt({
+              context: subtaskObj?.title || query,
+              keywords: effectiveKeywords,
+              memory: context.telemetry?.memoryContext,
+              workspace: context.telemetry?.grepContext,
+              workspaceRoot: resolvedWsRoot,
+              isSubtask: true
+            });
+            if (subtaskObj) assembledPrompt += buildTaskHeader(subtaskObj.id, subtaskObj.title);
           }
+          // else: non-agentic without a grounding signal — nothing was injected.
+
+          // Only report sections that are actually present in the reported prompt.
+          const matchedSections = assembledPrompt
+            ? promptEval.matchedSections.filter((s: any) => assembledPrompt.includes(s.title))
+            : [];
+          steeringTelemetry.matchedSections = matchedSections;
           steeringTelemetry.fullAssembledSystemPrompt = assembledPrompt;
           steeringTelemetry.planDetails = planDetails;
           steeringTelemetry.subtaskContext = subtaskObj;
 
+          const mem = steeringTelemetry.memoryLayers || (steeringTelemetry.memoryLayers = {});
           const sysTokens = Math.ceil(assembledPrompt.length / 3.8);
-          if (!steeringTelemetry.memoryLayers) steeringTelemetry.memoryLayers = {};
-          steeringTelemetry.memoryLayers.sysPromptTokens = sysTokens;
-          steeringTelemetry.memoryLayers.totalContextTokens = (steeringTelemetry.memoryLayers.shortTermTokens || 0) + (steeringTelemetry.memoryLayers.longTermTokens || 0) + (steeringTelemetry.memoryLayers.wikiTokens || 0) + (steeringTelemetry.memoryLayers.grepTokens || 0) + (steeringTelemetry.memoryLayers.groundingTokens || 0) + sysTokens;
+          mem.sysPromptTokens = sysTokens;
+          // Layers L2-L4 are already embedded in the reported system prompt. The
+          // grounding gate is embedded non-agentic, but AgenticMiddleware appends
+          // it separately to the first prompt (agentic only).
+          mem.totalContextTokens = (mem.shortTermTokens || 0) + sysTokens + (agentic ? (mem.groundingTokens || 0) : 0);
 
           // Structured 5-layer memory hierarchy with explicit priorities and sample extracted text
           const memoryHierarchy = [
@@ -1437,7 +1469,7 @@ export function createExpressApp(): express.Express {
               description: 'Recent conversation turns, immediate user instructions & live subtask execution state',
               tokens: steeringTelemetry.memoryLayers?.shortTermTokens || Math.ceil((query?.length || 10) / 3.8),
               active: true,
-              content: context.telemetry?.memoryContext || `Turn 1: User prompt -> "${query || 'Test query'}"`
+              content: `Turn 1: User prompt -> "${query || 'Test query'}"`
             },
             {
               level: 'L2',
@@ -1473,9 +1505,11 @@ export function createExpressApp(): express.Express {
               description: 'Keyword-targeted prompt.json sections, persona templates & dynamic skills',
               tokens: sysTokens,
               active: sysTokens > 0,
-              content: promptEval.matchedSections.length > 0
-                ? promptEval.matchedSections.map(s => `### ${s.title} (${s.id})\n${s.content || ''}`).join('\n\n')
-                : `### Baseline System Prompt (${sysTokens} tok)\n${assembledPrompt}`
+              content: matchedSections.length > 0
+                ? matchedSections.map(s => `### ${s.title} (${s.id})\n${s.content || ''}`).join('\n\n')
+                : (assembledPrompt
+                    ? `### Baseline System Prompt (${sysTokens} tok)\n${assembledPrompt}`
+                    : '(No system prompt injected — no grounding signal)')
             }
           ];
 
@@ -1484,6 +1518,55 @@ export function createExpressApp(): express.Express {
           steeringTelemetry.dirTree = context.telemetry?.dirTree || '';
           steeringTelemetry.keywords = effectiveKeywords;
           steeringTelemetry.chatHistory = [{ role: 'user', content: query || 'Test query' }];
+
+          // Measured single-pass payload vs estimated agentic run — local
+          // decomposition only (decomposeGoal is LLM-free), no extra model calls.
+          const shortTerm = mem.shortTermTokens || 0;
+          const groundingOnce = mem.groundingTokens || 0;
+          const { tasks: estTasks } = decomposeGoal(query || 'Execute multi-step task');
+          const subtaskCount = agentic
+            ? Math.max(1, planDetails?.phases?.length || estTasks.length)
+            : Math.max(1, estTasks.length);
+
+          const firstSubtaskText = agentic
+            ? assembledPrompt
+            : `${await getIntelligentSystemPrompt({
+                context: estTasks[0]?.task || query,
+                keywords: effectiveKeywords,
+                memory: context.telemetry?.memoryContext,
+                workspace: context.telemetry?.grepContext,
+                workspaceRoot: resolvedWsRoot,
+                isSubtask: true
+              })}${estTasks[0] ? buildTaskHeader(estTasks[0].id, estTasks[0].task) : ''}`;
+          const perSubtaskTokens = Math.ceil(firstSubtaskText.length / 3.8) + shortTerm;
+
+          let singlePassPayloadTokens: number;
+          if (agentic) {
+            const hasSignal = !!(resolvedWsRoot || context.telemetry?.memoryContext || context.telemetry?.grepContext || effectiveKeywords.length);
+            if (hasSignal) {
+              const singlePrompt = await getIntelligentSystemPrompt({
+                context: query,
+                keywords: effectiveKeywords,
+                memory: context.telemetry?.memoryContext,
+                workspace: context.telemetry?.grepContext,
+                workspaceRoot: resolvedWsRoot,
+                isSubtask: false
+              });
+              singlePassPayloadTokens = shortTerm + Math.ceil(singlePrompt.length / 3.8) + groundingOnce;
+            } else {
+              singlePassPayloadTokens = shortTerm;
+            }
+          } else {
+            // Non-agentic: the current payload IS the measured total.
+            singlePassPayloadTokens = mem.totalContextTokens ?? shortTerm;
+          }
+
+          steeringTelemetry.comparison = {
+            singlePassPayloadTokens,
+            agenticFirstSubtaskTokens: perSubtaskTokens + groundingOnce,
+            agenticRunTokens: subtaskCount * perSubtaskTokens + groundingOnce,
+            agenticSubtaskCount: subtaskCount
+          };
 
           res.json({
             success: true,

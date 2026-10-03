@@ -2583,6 +2583,7 @@ const steeringSysTokens = document.getElementById('steering-sys-tokens');
 const steeringSysDesc = document.getElementById('steering-sys-desc');
 const steeringPayloadTokens = document.getElementById('steering-payload-tokens');
 const steeringTokenSavings = document.getElementById('steering-token-savings');
+const steeringSavingsLabel = document.getElementById('steering-savings-label');
 const steeringSavingsDesc = document.getElementById('steering-savings-desc');
 const steeringBloatStatus = document.getElementById('steering-bloat-status');
 
@@ -2694,18 +2695,33 @@ async function runSteeringEvaluation() {
       steeringPersonaBadge.innerHTML = `Persona: <code>${esc(st.persona || 'coder')}</code>${kwPreview}`;
     }
 
-    // Stats
+    // Stats — measured payload vs estimated agentic run (server-side comparison)
     const sysTokens = mem.sysPromptTokens || 0;
     const payloadTokens = mem.totalContextTokens || 0;
-    const agenticBaselinePayload = 3200;
-    const diff = Math.max(0, agenticBaselinePayload - payloadTokens);
-    const savingsPct = isAgentic ? '0.0%' : `${((diff / agenticBaselinePayload) * 100).toFixed(1)}%`;
+    const cmp = st.comparison || {};
+    const singlePass = cmp.singlePassPayloadTokens || payloadTokens;
+    const agenticRun = cmp.agenticRunTokens || 0;
+    const subtaskCount = cmp.agenticSubtaskCount || 1;
 
     if (steeringSysTokens) steeringSysTokens.textContent = `${sysTokens.toLocaleString()} tok`;
     if (steeringSysDesc) steeringSysDesc.textContent = isAgentic ? 'Multi-Pass Agentic Subtask' : 'Single-Pass System Prompt';
     if (steeringPayloadTokens) steeringPayloadTokens.textContent = `${payloadTokens.toLocaleString()} tok`;
-    if (steeringTokenSavings) steeringTokenSavings.textContent = savingsPct;
-    if (steeringSavingsDesc) steeringSavingsDesc.textContent = isAgentic ? 'Full 5-layer memory overhead' : `${diff.toLocaleString()} tokens saved vs max budget`;
+
+    if (isAgentic) {
+      if (steeringSavingsLabel) steeringSavingsLabel.textContent = 'Estimated Agentic Run';
+      if (steeringTokenSavings) steeringTokenSavings.textContent = agenticRun > 0 ? `${agenticRun.toLocaleString()} tok` : '—';
+      if (steeringSavingsDesc) steeringSavingsDesc.textContent = agenticRun > 0
+        ? `${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'} × ~${Math.round(cmp.agenticFirstSubtaskTokens || 0).toLocaleString()} tok`
+        : 'No agentic run estimate available';
+    } else {
+      if (steeringSavingsLabel) steeringSavingsLabel.textContent = 'Net Token Savings';
+      const diff = agenticRun - singlePass; // positive = single-pass cheaper
+      const savingsPct = agenticRun > 0 ? `${diff >= 0 ? '+' : ''}${((diff / agenticRun) * 100).toFixed(1)}%` : '—';
+      if (steeringTokenSavings) steeringTokenSavings.textContent = savingsPct;
+      if (steeringSavingsDesc) steeringSavingsDesc.textContent = agenticRun > 0
+        ? `${diff >= 0 ? diff.toLocaleString() + ' tok cheaper than' : Math.abs(diff).toLocaleString() + ' tok over'} the ${subtaskCount}-subtask run (${agenticRun.toLocaleString()} tok)`
+        : `Measured payload ${singlePass.toLocaleString()} tok (no run estimate)`;
+    }
 
     if (steeringBloatStatus) {
       steeringBloatStatus.textContent = matched.length > 0 ? 'ACTIVE ⚡ (Live Targeted)' : 'CLEAN 🛡️ (0 External Bloat)';

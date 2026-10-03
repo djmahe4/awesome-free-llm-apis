@@ -642,11 +642,16 @@ export class WorkspaceContextMiddleware implements Middleware {
                 grepTokens,
                 groundingTokens,
                 sysPromptTokens,
-                totalContextTokens: shortTermTokens + longTermTokens + wikiTokens + grepTokens + groundingTokens + sysPromptTokens
+                // Non-agentic injection embeds memory + wiki + grep + grounding gate
+                // inside fullSystemPrompt — count those layers once (messages + prompt).
+                // Agentic/no-signal: prompt is not injected here, so layers stay separate.
+                totalContextTokens: sysPromptTokens > 0
+                    ? shortTermTokens + sysPromptTokens
+                    : shortTermTokens + longTermTokens + wikiTokens + grepTokens + groundingTokens
             },
             groundingGate: groundingGate || null,
             dirTree: dirTree || null,
-            fullAssembledSystemPrompt: fullSystemPrompt || '(Delegated to AgenticMiddleware)',
+            fullAssembledSystemPrompt: fullSystemPrompt || (isAgentic ? '(Delegated to AgenticMiddleware)' : '(No system prompt injected — no grounding signal)'),
             subtaskContext: (context as any).subtask || null,
             durationMs: Date.now() - startMs
         };
