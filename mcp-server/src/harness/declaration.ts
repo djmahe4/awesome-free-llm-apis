@@ -1,5 +1,6 @@
 import { promises as fs, existsSync, readFileSync } from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'url';
 import { parse as parseYaml } from 'yaml';
 import { findAgentsMdPath } from '../utils/agents-md-locator.js';
@@ -7,9 +8,21 @@ import type { HarnessDeclaration } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // dist/harness/declaration.js -> dist/../harness/*.yaml (source layout mirrored by postbuild copy)
-const DECLARATIONS_DIR = path.resolve(__dirname, '..', '..', 'harness');
+/** The bundled declarations dir — exported so registry.ts can classify `source: 'builtin'`. */
+export const DECLARATIONS_DIR = path.resolve(__dirname, '..', '..', 'harness');
 
 const cache = new Map<string, HarnessDeclaration>();
+
+export interface DeclarationLoadRecord {
+  filePath: string;
+  sha256: string;
+}
+
+const loadRecords = new Map<string, DeclarationLoadRecord>();
+
+function loadRecordKey(filePath: string, workspaceRoot?: string): string {
+  return `${path.resolve(filePath)}::${workspaceRoot ?? ''}`;
+}
 
 /**
  * Reads an optional `## Skill Access` fenced YAML block from AGENTS.md, e.g.:
@@ -23,7 +36,7 @@ const cache = new Map<string, HarnessDeclaration>();
  * the same `yaml` parser already used for harness declarations — no new
  * parsing dependency introduced for this.
  */
-function loadAgentsSkillAccess(workspaceRoot: string | undefined): Record<string, string[]> | null {
+function loadAgentsSkillAccess(workspaceRoot: string | undefined): { roles: Record<string, string[]>; skills: Record<string, { tags: string[]; dir?: string }> } | null {
   if (!workspaceRoot) return null;
   const candidates = [findAgentsMdPath(workspaceRoot), path.join(workspaceRoot, 'AGENTS.md')]
     .filter((p): p is string => !!p);
@@ -34,14 +47,29 @@ function loadAgentsSkillAccess(workspaceRoot: string | undefined): Record<string
       const content = readFileSync(agentsMdPath, 'utf-8');
       const match = content.match(/##\s*Skill Access\s*\n```ya?ml\n([\s\S]*?)```/i);
       if (!match) continue;
-      const block = parseYaml(match[1]) as { roles?: Record<string, { skillTags?: string[] }> };
-      if (!block?.roles || typeof block.roles !== 'object') continue;
+      const block = parseYaml(match[1]) as {
+        roles?: Record<string, { skillTags?: string[] }>;
+        skills?: Record<string, { tags?: unknown; dir?: unknown }>;
+      };
+      if (!block || typeof block !== 'object') continue;
+      if (!block.roles && !block.skills) continue;
 
-      const result: Record<string, string[]> = {};
-      for (const [role, def] of Object.entries(block.roles)) {
-        if (Array.isArray(def?.skillTags)) result[role] = def.skillTags.filter(t => typeof t === 'string');
+      const roles: Record<string, string[]> = {};
+      if (block.roles && typeof block.roles === 'object') {
+        for (const [role, def] of Object.entries(block.roles)) {
+          if (Array.isArray(def?.skillTags)) roles[role] = def.skillTags.filter(t => typeof t === 'string');
+        }
       }
-      return result;
+      const skills: Record<string, { tags: string[]; dir?: string }> = {};
+      if (block.skills && typeof block.skills === 'object') {
+        for (const [name, def] of Object.entries(block.skills)) {
+          if (!def || typeof def !== 'object' || !Array.isArray(def.tags)) continue;
+          const tags = def.tags.filter((t): t is string => typeof t === 'string');
+          if (tags.length === 0) continue;
+          skills[name] = typeof def.dir === 'string' && def.dir ? { tags, dir: def.dir } : { tags };
+        }
+      }
+      return { roles, skills };
     } catch {
       // Malformed or unreadable AGENTS.md skill-access block — ignored, not
       // fatal: absence of this block means "no extra restriction", same as
@@ -70,31 +98,166 @@ function applySkillAccess(decl: HarnessDeclaration, skillAccess: Record<string, 
   return decl;
 }
 
+/** True when the input should be treated as a file path rather than a bare declaration name. */
+function isPathLike(value: string): boolean {
+  return path.isAbsolute(value) || value.includes('/') || value.includes('\\') || /\.ya?ml$/i.test(value);
+}
+
 /**
- * Loads a named harness declaration (default: the built-in research-analysis
- * harness). Declarations are read-only policy, cached by name+workspaceRoot
- * for the process lifetime — a harness's allowlist/budget shouldn't drift
- * mid-run just because someone edited the YAML (or AGENTS.md) on disk while
- * a run was executing.
+ * T4 — validates the optional `harness.lane`/`harness.maxCycles` pair.
+ * Fail-closed at load: a lane phase must be an executable (non-top_level)
+ * role the step engine can actually run, phases are unique so task-ids stay
+ * unambiguous (T5's `phase`/`phase#cN` scheme breaks on duplicates), and
+ * maxCycles is only meaningful WITH a lane. Absent lane = legacy linear
+ * behavior, never an error.
+ */
+function validateLane(decl: HarnessDeclaration, name: string, filePath: string): void {
+  const lane = decl.harness.lane;
+  const maxCycles = decl.harness.maxCycles;
+  const where = `Harness declaration '${name}' (${filePath})`;
+
+  if (maxCycles !== undefined && lane === undefined) {
+    throw new Error(`${where}: maxCycles declared without lane — cycle caps only apply to a cyclic lane`);
+  }
+  if (lane === undefined) return;
+
+  if (!Array.isArray(lane) || lane.length === 0) {
+    throw new Error(`${where}: lane must be a non-empty array of phase names`);
+  }
+  const seen = new Set<string>();
+  for (const phase of lane) {
+    if (typeof phase !== 'string' || phase.length === 0) {
+      throw new Error(`${where}: lane phase names must be non-empty strings (got: ${JSON.stringify(phase)})`);
+    }
+    if (seen.has(phase)) {
+      throw new Error(`${where}: duplicate lane phase '${phase}' — phases must be unique`);
+    }
+    seen.add(phase);
+    if (phase === 'top_level') {
+      throw new Error(`${where}: lane phase 'top_level' is the supervisor and cannot run as a phase`);
+    }
+    if (!decl.roles[phase]) {
+      throw new Error(`${where}: lane phase '${phase}' is not a role defined under roles:`);
+    }
+  }
+
+  if (maxCycles !== undefined && (!Number.isInteger(maxCycles) || maxCycles < 1 || maxCycles > 1000)) {
+    throw new Error(`${where}: maxCycles must be an integer >= 1 and <= 1000 (got: ${JSON.stringify(maxCycles)})`);
+  }
+}
+
+/**
+ * Resolves the on-disk YAML file for a declaration reference. Two forms:
+ *
+ * 1. Path-like (absolute, contains a separator, or ends .yaml/.yml) — used for
+ *    ad-hoc declarations outside any convention; relative paths resolve against
+ *    workspaceRoot (else cwd). Operator-supplied, so absolute paths are allowed.
+ * 2. Bare name — uniform workspace dir wins: `<workspaceRoot>/.free-llm-mcp/harness/<name>.yaml`
+ *    (the shared artifacts location every harness tool uses), then the legacy
+ *    `<workspaceRoot>/harness/<name>.yaml`, then the built-in mcp-server/harness/ dir.
+ *    `path.basename` still strips separators so a name can't traverse out of any directory.
+ */
+export async function resolveDeclarationPath(nameOrPath: string, workspaceRoot?: string): Promise<string> {
+  if (isPathLike(nameOrPath)) {
+    const filePath = path.isAbsolute(nameOrPath)
+      ? nameOrPath
+      : path.resolve(workspaceRoot ?? process.cwd(), nameOrPath);
+    try {
+      const stat = await fs.stat(filePath);
+      if (!stat.isFile()) throw new Error('not a file');
+    } catch {
+      throw new Error(`Harness declaration file not found: ${filePath}`);
+    }
+    return filePath;
+  }
+
+  const safeName = path.basename(nameOrPath); // no path traversal via harness name
+  const candidates = [
+    workspaceRoot ? path.join(workspaceRoot, '.free-llm-mcp', 'harness', `${safeName}.yaml`) : undefined,
+    workspaceRoot ? path.join(workspaceRoot, 'harness', `${safeName}.yaml`) : undefined,
+    path.join(DECLARATIONS_DIR, `${safeName}.yaml`),
+  ].filter((p): p is string => !!p);
+
+  for (const candidate of candidates) {
+    try {
+      const stat = await fs.stat(candidate);
+      if (stat.isFile()) return candidate;
+    } catch {
+      // keep looking
+    }
+  }
+  throw new Error(
+    `Harness declaration '${nameOrPath}' not found (looked in: ${candidates.join(', ')})`,
+  );
+}
+
+/**
+ * Loads a harness declaration — by bare name (uniform `<root>/.free-llm-mcp/harness/`
+ * first, then legacy `<root>/harness/`, built-in last) or by explicit .yaml path.
+ * Declarations are read-only policy, cached by resolved file path + workspaceRoot
+ * for the process lifetime — a harness's allowlist/budget shouldn't drift mid-run
+ * just because someone edited the YAML (or AGENTS.md) on disk while a run was executing.
+ * The exact bytes parsed are recorded alongside the cache so registry tracking
+ * (`loadedDeclarationRecord`) can pin the hash of the policy actually enforced
+ * instead of re-reading the file later.
+ *
+ * Relative `harness.allowedWorkspaceRoots` entries are resolved against the
+ * declaration file's own directory, so an external declaration (e.g.
+ * ctf-katana/harness/appsec.yaml) can say `allowedWorkspaceRoots: ['.']` and
+ * mean "the folder it lives in" regardless of the server process cwd.
  */
 export async function loadHarnessDeclaration(name = 'research-analysis', workspaceRoot?: string): Promise<HarnessDeclaration> {
-  const cacheKey = `${name}::${workspaceRoot ?? ''}`;
+  const filePath = await resolveDeclarationPath(name, workspaceRoot);
+  const cacheKey = loadRecordKey(filePath, workspaceRoot);
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
-  const safeName = path.basename(name); // no path traversal via harness name
-  const filePath = path.join(DECLARATIONS_DIR, `${safeName}.yaml`);
   const raw = await fs.readFile(filePath, 'utf-8');
   const parsed = parseYaml(raw) as HarnessDeclaration;
 
   if (!parsed?.harness?.name || !parsed?.roles || typeof parsed.roles !== 'object') {
-    throw new Error(`Malformed harness declaration '${name}': missing harness.name or roles`);
+    throw new Error(`Malformed harness declaration '${name}' (${filePath}): missing harness.name or roles`);
   }
 
-  const withSkillAccess = applySkillAccess(parsed, loadAgentsSkillAccess(workspaceRoot));
+  validateLane(parsed, name, filePath);
 
+  // T8 — cyberTools, when present, must be a list of non-empty bridge names
+  // (the fail-closed evaluate() hook treats anything else as "no bridges").
+  if (
+    parsed.cyberTools !== undefined &&
+    (!Array.isArray(parsed.cyberTools) || parsed.cyberTools.some(b => typeof b !== 'string' || !b))
+  ) {
+    throw new Error(`Malformed harness declaration '${name}' (${filePath}): cyberTools must be a list of bridge names`);
+  }
+
+  const allowedRoots = parsed.harness.allowedWorkspaceRoots;
+  if (Array.isArray(allowedRoots)) {
+    const declDir = path.dirname(filePath);
+    parsed.harness.allowedWorkspaceRoots = allowedRoots.map(root =>
+      path.isAbsolute(root) ? root : path.resolve(declDir, root),
+    );
+  }
+
+  const skillAccess = loadAgentsSkillAccess(workspaceRoot);
+  const withSkillAccess = applySkillAccess(parsed, skillAccess?.roles ?? null);
+  if (skillAccess && Object.keys(skillAccess.skills).length > 0) {
+    withSkillAccess.skillCatalog = skillAccess.skills;
+  }
+
+  loadRecords.set(cacheKey, { filePath, sha256: crypto.createHash('sha256').update(raw, 'utf-8').digest('hex') });
   cache.set(cacheKey, withSkillAccess);
   return withSkillAccess;
+}
+
+/**
+ * The `{ filePath, sha256 }` of the declaration bytes `loadHarnessDeclaration`
+ * parsed for this (file, workspaceRoot) pair in this process, or null when the
+ * declaration was never loaded here. Used by registry tracking so a run pins
+ * the hash of the bytes whose policy was actually enforced, closing the
+ * read-then-hash race between load and track.
+ */
+export function loadedDeclarationRecord(filePath: string, workspaceRoot?: string): DeclarationLoadRecord | null {
+  return loadRecords.get(loadRecordKey(filePath, workspaceRoot)) ?? null;
 }
 
 export function listRoleNames(decl: HarnessDeclaration): string[] {

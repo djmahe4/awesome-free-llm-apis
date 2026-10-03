@@ -128,4 +128,52 @@ describe('harness runner — role-declared tool dispatch (integration)', () => {
     expect(run?.status).toBe('paused_approval');
     expect(run?.status).not.toBe('failed'); // never throws
   });
+
+  it('dispatches coding_agents roles through the one-pass use_free_llm executor while gating on the coding_agents tool name (appsec recon completes instead of parking)', async () => {
+    currentDecl = makeDecl('coding_agents');
+    const { deployHarness } = await import('../src/harness/runner.js');
+    const { HarnessStore } = await import('../src/harness/store.js');
+
+    await deployHarness({ runId: 'disp-5', goal: 'recon the target', workspaceRoot: tmpDir });
+    const store = new HarnessStore('disp-5', tmpDir);
+    const run = await waitForSettled(store);
+
+    expect(useFreeLLMMock).toHaveBeenCalledTimes(1);
+    expect(run?.status).toBe('complete');
+
+    const events = await store.readTrace();
+    const toolCallEvent = events.find(e => e.type === 'tool_call');
+    expect((toolCallEvent?.data as any)?.tool).toBe('coding_agents');
+    const policyEvent = events.find(e => e.type === 'policy_decision');
+    expect((policyEvent?.data as any)?.decision).toBe('allow');
+  });
+
+  it('resolves the skill name from the declared skill catalog when the goal matches its tags (not hardcoded general-purpose)', async () => {
+    currentDecl = makeDecl('coding_agents');
+    currentDecl.roles.researcher.tools.push({
+      tool: 'execute_skill',
+      constraints: { skillTags: ['bug-bounty'] },
+    });
+    (currentDecl as any).skillCatalog = {
+      bug_hunting: { tags: ['bug-bounty', 'recon', 'ctf'], dir: 'skills/bug_hunting' },
+    };
+    const { deployHarness } = await import('../src/harness/runner.js');
+    const { HarnessStore } = await import('../src/harness/store.js');
+
+    await deployHarness({ runId: 'disp-6', goal: 'perform bug bounty recon on example.com', workspaceRoot: tmpDir });
+    const store = new HarnessStore('disp-6', tmpDir);
+    const run = await waitForSettled(store);
+
+    expect(executeSkillMock).toHaveBeenCalledTimes(1);
+    expect(executeSkillMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skill: 'bug_hunting',
+        skillDir: 'skills/bug_hunting',
+        skillTags: expect.arrayContaining(['bug-bounty']),
+      }),
+    );
+    expect(useFreeLLMMock).not.toHaveBeenCalled();
+    expect(run?.status).toBe('complete');
+    expect(run?.result).toBe('mock skill executed');
+  });
 });

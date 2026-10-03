@@ -61,6 +61,19 @@ function ruleMatches(rule: AllowRule, tool: string, action: string | undefined, 
 }
 
 /**
+ * T5 — strips a lane cycle suffix: `fixer#c2` → `fixer`. The plan array
+ * (tasks.md cursor) keeps the full id so each cycle is its own task, but
+ * everything keyed by role name — policy lookup, handoff from/to, trace
+ * role, budget.perRole, lessons — must resolve to the BASE role so cycle 2
+ * of a phase runs under the same declaration entry (and the same allowlist)
+ * as cycle 1. Ids without a suffix pass through unchanged, so legacy
+ * declarations are unaffected.
+ */
+export function stripCycleSuffix(id: string): string {
+  return id.replace(/#c\d+$/, '');
+}
+
+/**
  * Default-deny policy evaluation. A call is allowed only if:
  *   - the role is not `requiresApproval` (coder is, always), AND
  *   - some rule for that role (or the shared `writes` list) matches tool+action+constraints.
@@ -74,11 +87,32 @@ export function evaluate(
   action: string | undefined,
   args: any
 ): PolicyDecision {
-  const roleDef = decl.roles[role];
-  if (!roleDef) return { kind: 'deny', reason: `Unknown role '${role}' in harness '${decl.harness.name}'` };
+  // T5 defense-in-depth: a suffixed lane id (`scanner#c2`) is evaluated as
+  // its base role — runSteps already strips, but any future caller passing
+  // a raw plan id must still hit the right rules instead of 'Unknown role'.
+  const baseRole = stripCycleSuffix(role);
+  const roleDef = decl.roles[baseRole];
+  if (!roleDef) return { kind: 'deny', reason: `Unknown role '${baseRole}' in harness '${decl.harness.name}'` };
 
   if (roleDef.requiresApproval) {
-    return { kind: 'needs_approval', reason: `Role '${role}' requires approval for every call (gated lane)` };
+    return { kind: 'needs_approval', reason: `Role '${baseRole}' requires approval for every call (gated lane)` };
+  }
+
+  // T8 — cyber_tool run_action spawns a project bridge subprocess, so even a
+  // role that allowlists it must ALSO have the bridge named in the
+  // declaration's top-level `cyberTools` (fail closed when the list is
+  // absent). Mirrors runtime auto-select: an unnamed bridge resolves only
+  // when exactly one bridge is listed.
+  if (tool === 'cyber_tool' && action === 'run_action') {
+    const listed = decl.cyberTools ?? [];
+    const requested = typeof args?.bridge === 'string' && args.bridge
+      ? args.bridge
+      : (listed.length === 1 ? listed[0] : undefined);
+    if (!requested || !listed.includes(requested)) {
+      return requested
+        ? { kind: 'needs_approval', reason: `Bridge '${requested}' is not in this declaration's cyberTools allowlist` }
+        : { kind: 'needs_approval', reason: `cyber_tool run_action requires a bridge from this declaration's cyberTools list (fail-closed)` };
+    }
   }
 
   for (const rule of roleDef.tools ?? []) {
@@ -88,7 +122,31 @@ export function evaluate(
     if (ruleMatches(rule, tool, action, args)) return { kind: 'allow', rule };
   }
 
-  return { kind: 'needs_approval', reason: `No allowlist rule for tool='${tool}' action='${action ?? ''}' under role '${role}'` };
+  return { kind: 'needs_approval', reason: `No allowlist rule for tool='${tool}' action='${action ?? ''}' under role '${baseRole}'` };
+}
+
+/**
+ * T4 — cycle budget for a declaration's lane.
+ *
+ *   lane + maxCycles: N   — runner may walk the phase list N times
+ *   lane only:             1 — single pass (explicit lane, implicit cap)
+ *   no lane:               null — legacy linear lane, no cycle semantics
+ */
+export function laneCycleMax(decl: HarnessDeclaration): number | null {
+  const lane = decl.harness.lane;
+  if (!lane || lane.length === 0) return null;
+  return decl.harness.maxCycles ?? 1;
+}
+
+/**
+ * T4 — 1-based gate for starting cycle `cycle` of a cyclic lane. Returns
+ * false (never throws) for legacy declarations without a lane, so a caller
+ * that forgot to check `laneCycleMax` first fails closed instead of running
+ * an unbounded loop.
+ */
+export function canStartLaneCycle(decl: HarnessDeclaration, cycle: number): boolean {
+  const max = laneCycleMax(decl);
+  return max !== null && Number.isInteger(cycle) && cycle >= 1 && cycle <= max;
 }
 
 /**

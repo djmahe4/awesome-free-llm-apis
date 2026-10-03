@@ -62,6 +62,7 @@ import { initFirebase, syncStats, getLeaderboard, getUserStats, getRecentSearchL
 import { SearchProviderRegistry } from './search/registry.js';
 import { withFileLock } from './utils/file-lock.js';
 import { writeFileAtomic } from './utils/FileUtils.js';
+import { resolvePathWithinRoots, pathParamWithinRoots, relativeSegmentError } from './utils/workspace-roots.js';
 import { WorkspaceScanner } from './cache/workspace.js';
 import { STATE_FILE } from './pipeline/middlewares/constants.js';
 
@@ -577,11 +578,28 @@ export function createExpressApp(): express.Express {
               result = await agentHarness(params);
               break;
             }
+            case 'browser_tool': {
+              const { dispatchBrowserAction } = await import('./browser/dispatch.js');
+              result = await dispatchBrowserAction(params);
+              break;
+            }
+            case 'movie_tool': {
+              const paramGuard = pathParamWithinRoots(params.projectDir, 'projectDir')
+                ?? relativeSegmentError(params.projectId, 'projectId')
+                ?? pathParamWithinRoots(params.artifact_path, 'artifact_path');
+              if (paramGuard) {
+                res.status(400).json({ error: paramGuard });
+                return;
+              }
+              const { runMovieTool } = await import('./tools/movie-tool.js');
+              result = await runMovieTool(params);
+              break;
+            }
             default:
               res.status(400).json({ error: `Unknown tool: ${tool}` });
               return;
           }
-          const selfLoggingTools = new Set(['use_free_llm', 'coding_agents', 'local_llm_patch', 'quantum_tool', 'cyber_tool']);
+          const selfLoggingTools = new Set(['use_free_llm', 'coding_agents', 'local_llm_patch', 'quantum_tool', 'cyber_tool', 'movie_tool', 'browser_tool']);
           if (!selfLoggingTools.has(tool)) {
             const sid = params.sessionId || '__no_ws__';
             const { logToolCall } = await import('./utils/ChatLogger.js');
@@ -599,7 +617,7 @@ export function createExpressApp(): express.Express {
       app.post('/api/coding_agents', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
-          const { goal, workspaceRoot, dryRun, topKFiles, sessionId, verifyLspDiagnostics } = req.body || {};
+          const { goal, workspaceRoot, dryRun, topKFiles, sessionId, verifyLspDiagnostics, resolve } = req.body || {};
           if (!goal) {
             res.status(400).json({ error: 'goal is required' });
             return;
@@ -611,7 +629,8 @@ export function createExpressApp(): express.Express {
             dryRun: dryRun ?? true,
             topKFiles: topKFiles ?? 5,
             sessionId,
-            verifyLspDiagnostics: verifyLspDiagnostics ?? true
+            verifyLspDiagnostics: verifyLspDiagnostics ?? true,
+            resolve
           });
           res.json(result);
         } catch (err: any) {
@@ -1116,8 +1135,29 @@ export function createExpressApp(): express.Express {
         try {
           const workspaceRoot = (req.query.workspace as string) || process.cwd();
           const harnessDir = path.resolve(workspaceRoot, '.free-llm-mcp', 'harness');
+          const wikiDir = path.resolve(workspaceRoot, '.free-llm-mcp', 'wiki');
+
+          // Collect workspace wiki page metadata for knowledge nexus visualization
+          let wikiPages: Array<{ title: string; updatedAt: number; size: number; snippet?: string }> = [];
+          if (fs.existsSync(wikiDir)) {
+            try {
+              const files = await fsp.readdir(wikiDir);
+              wikiPages = await Promise.all(
+                files.filter(f => f.endsWith('.md')).slice(0, 50).map(async f => {
+                  const stat = await fsp.stat(path.join(wikiDir, f));
+                  let snippet = '';
+                  try {
+                    const content = await fsp.readFile(path.join(wikiDir, f), 'utf-8');
+                    snippet = content.replace(/^---[\s\S]*?---\s*/, '').slice(0, 140).trim();
+                  } catch {}
+                  return { title: f.replace(/\.md$/, ''), updatedAt: stat.mtimeMs, size: stat.size, snippet };
+                })
+              );
+            } catch {}
+          }
+
           if (!fs.existsSync(harnessDir)) {
-            return res.json({ runs: [], activeScopes: [], reasoningScopes: [] });
+            return res.json({ runs: [], activeScopes: [], reasoningScopes: [], wikiPages });
           }
 
           const entries = await fsp.readdir(harnessDir);
@@ -1146,7 +1186,7 @@ export function createExpressApp(): express.Express {
             try { reasoningScopes = JSON.parse(await fsp.readFile(reasoningFile, 'utf-8')); } catch {}
           }
 
-          res.json({ runs, activeScopes, reasoningScopes });
+          res.json({ runs, activeScopes, reasoningScopes, wikiPages });
         } catch (err) {
           res.status(500).json({ error: String(err) });
         }
@@ -1156,17 +1196,164 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const { runId } = req.params;
+          const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit as string) || 250));
           const workspaceRoot = (req.query.workspace as string) || process.cwd();
           const { HarnessStore } = await import('./harness/store.js');
           const store = new HarnessStore(runId, workspaceRoot);
           const run = await store.loadRun();
           if (!run) return res.status(404).json({ error: 'Run not found' });
           const approvals = await store.listApprovals();
-          const trace = await store.readTrace(100);
+          const trace = await store.readTrace(limit);
           const rawTasks = await store.loadTasksMarkdown();
-          res.json({ run, approvals, trace, tasks: rawTasks });
+          const { readSessionMemory } = await import('./harness/session-memory.js');
+          const sessionMemory = await readSessionMemory(store.runDirPath);
+          res.json({ run, approvals, trace, tasks: rawTasks, sessionMemory });
         } catch (err) {
           res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // ─── Dedicated Movie Tool Endpoints ─────────────────────────────────────
+      app.post('/api/movie_tool', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const body = req.body || {};
+          const paramGuard = pathParamWithinRoots(body.projectDir, 'projectDir')
+            ?? relativeSegmentError(body.projectId, 'projectId')
+            ?? pathParamWithinRoots(body.artifact_path, 'artifact_path');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const result = await runMovieTool(body);
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      app.get('/api/movie_tool/timeline/:projectId', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { projectId } = req.params;
+          const paramGuard = relativeSegmentError(projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const result = await runMovieTool({ action: 'get_timeline', projectId });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      // ─── Dedicated Media Preview Endpoint ───────────────────────────────────
+      app.get('/api/media/preview', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const rawFile = (req.query.file as string || '').trim();
+          if (!rawFile || rawFile.includes('\0')) {
+            return res.status(400).json({ error: 'Valid file parameter required' });
+          }
+
+          const resolvedPath = resolvePathWithinRoots(rawFile);
+          if (!resolvedPath) {
+            return res.status(403).json({ error: 'File is outside the allowed roots (WORKSPACE_ROOTS)' });
+          }
+
+          // Disallow traversal outside allowed file extensions or root boundary if relative
+          const allowedExts = new Set(['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.flac', '.png', '.jpg', '.jpeg', '.webp']);
+          const ext = path.extname(resolvedPath).toLowerCase();
+          if (!allowedExts.has(ext)) {
+            return res.status(400).json({ error: `File type ${ext} not permitted for media preview` });
+          }
+
+          if (!fs.existsSync(resolvedPath)) {
+            return res.status(404).json({ error: 'File not found' });
+          }
+
+          return res.sendFile(resolvedPath);
+        } catch (err: any) {
+          res.status(500).json({ error: String(err?.message || err) });
+        }
+      });
+
+      // Convenience aliases matching plan specification (/api/movie/*)
+      app.get('/api/movie/timeline', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const projectId = (req.query.projectId as string) || 'default';
+          const projectIdGuard = relativeSegmentError(projectId, 'projectId');
+          if (projectIdGuard) {
+            return res.status(400).json({ success: false, error: projectIdGuard });
+          }
+          let projectDir: string | undefined = undefined;
+          const rawWorkspace = req.query.workspace as string;
+          if (rawWorkspace && typeof rawWorkspace === 'string') {
+            const trimmed = rawWorkspace.trim();
+            if (trimmed) {
+              const candidate = resolvePathWithinRoots(trimmed);
+              if (!candidate) {
+                return res.status(400).json({ success: false, error: 'workspace is outside the allowed roots (WORKSPACE_ROOTS)' });
+              }
+              try {
+                if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+                  projectDir = candidate;
+                }
+              } catch {}
+            }
+          }
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const result = await runMovieTool({ action: 'get_timeline', projectId, projectDir });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      app.post('/api/movie/artifact', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const paramGuard = pathParamWithinRoots(req.body?.projectDir, 'projectDir') ?? relativeSegmentError(req.body?.projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
+          const result = await runMovieTool({ ...req.body, action: 'add_artifact' });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      app.post('/api/movie/effect', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const paramGuard = pathParamWithinRoots(req.body?.projectDir, 'projectDir') ?? relativeSegmentError(req.body?.projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
+          const result = await runMovieTool({ ...req.body, action: 'apply_effect' });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      app.post('/api/movie/approve', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const paramGuard = pathParamWithinRoots(req.body?.projectDir, 'projectDir') ?? relativeSegmentError(req.body?.projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
+          const result = await runMovieTool({ ...req.body, action: 'approve_artifact' });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
         }
       });
 
@@ -1174,7 +1361,7 @@ export function createExpressApp(): express.Express {
       app.post('/api/steering_eval', express.json({ limit: '1mb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
-          const { query = '', keywords = [], agentic = false, workspaceRoot = process.cwd(), sessionId = 'steering-eval-session', subtask } = req.body || {};
+          const { query = '', keywords = [], agentic = false, sessionId = 'steering-eval-session', subtask } = req.body || {};
           let rawKeywordsList: string[] = [];
           if (Array.isArray(keywords)) {
             rawKeywordsList = keywords.map(k => String(k));
@@ -1186,13 +1373,15 @@ export function createExpressApp(): express.Express {
             .map(k => k.replace(/[\[\]"'`]/g, '').trim().toLowerCase())
             .filter(Boolean);
 
-          const effectiveKeywords = userKeywords.length > 0
-            ? userKeywords
-            : (query ? (query.toLowerCase().match(/\b[a-z]{3,}\b/g)?.filter((w: string) => !['the','and','for','with','from','that','this','have','are','was','were','lets','check','please','could','would','should'].includes(w)).slice(0, 8) || []) : []);
+          // An explicit `workspaceRoot` key (even empty/null) = faithful evaluation
+          // with no fallback to the server's own directory. Absent key = demo mode
+          // (default to the server's workspace, as the dashboard expects).
+          const hasWorkspaceRootKey = !!(req.body && Object.prototype.hasOwnProperty.call(req.body, 'workspaceRoot'));
+          const workspaceRootRaw = hasWorkspaceRootKey ? (req.body as any).workspaceRoot : undefined;
 
-          let resolvedWsRoot = process.cwd();
-          if (workspaceRoot && typeof workspaceRoot === 'string') {
-            const trimmed = workspaceRoot.trim();
+          let resolvedWsRoot: string | undefined;
+          if (typeof workspaceRootRaw === 'string') {
+            const trimmed = workspaceRootRaw.trim();
             if (trimmed && !trimmed.includes('\0')) {
               try {
                 const candidate = path.isAbsolute(trimmed) ? path.normalize(trimmed) : path.resolve(process.cwd(), trimmed);
@@ -1201,7 +1390,18 @@ export function createExpressApp(): express.Express {
                 }
               } catch {}
             }
+            // explicit empty/invalid string → stays undefined (true no-workspace eval)
+          } else if (!hasWorkspaceRootKey) {
+            resolvedWsRoot = process.cwd();
           }
+
+          // Auto-derived keywords belong to demo mode: a faithful no-workspace
+          // one-shot must not be steered into groundings the caller never asked for.
+          const effectiveKeywords = userKeywords.length > 0
+            ? userKeywords
+            : (resolvedWsRoot !== undefined && query
+                ? (query.toLowerCase().match(/\b[a-z]{3,}\b/g)?.filter((w: string) => !['the','and','for','with','from','that','this','have','are','was','were','lets','check','please','could','would','should'].includes(w)).slice(0, 8) || [])
+                : []);
 
           const { evaluatePromptSections, getIntelligentSystemPrompt } = await import('./pipeline/middlewares/prompts.js');
           const promptEval = await evaluatePromptSections({
@@ -1217,8 +1417,10 @@ export function createExpressApp(): express.Express {
           let planDetails: any = null;
           let subtaskObj: any = null;
 
-          if (agentic) {
-            const { decomposeGoal } = await import('./pipeline/middlewares/AgenticMiddleware.js');
+          // Local (LLM-free) decomposition — also used below for the savings estimate.
+          const { decomposeGoal } = await import('./pipeline/middlewares/AgenticMiddleware.js');
+
+          if (agentic && resolvedWsRoot !== undefined) {
             const { buildExecutionPlan } = await import('./pipeline/middlewares/task-classifier.js');
             const { tasks: steps } = decomposeGoal(query || 'Execute multi-step task');
             const plan = await buildExecutionPlan(steps, resolvedWsRoot);
@@ -1257,30 +1459,47 @@ export function createExpressApp(): express.Express {
 
           await middleware.execute(context, async () => {});
           const steeringTelemetry = context.telemetry?.steeringTelemetry || {};
-          steeringTelemetry.matchedSections = promptEval.matchedSections;
 
-          // Assemble the complete 5-layer system prompt (including L2 ADR/Memory, L3 Wiki, L4 Grep/Workspace, L5 Prompts)
-          let assembledPrompt = await getIntelligentSystemPrompt({
-            context: agentic ? (subtaskObj?.title || query) : query,
-            keywords: effectiveKeywords,
-            memory: context.telemetry?.memoryContext,
-            workspace: context.telemetry?.grepContext,
-            workspaceRoot: resolvedWsRoot,
-            isSubtask: agentic
-          });
+          // Prefer the prompt the middleware actually injected (markers + L2-L4
+          // layers + grounding gate) over a re-assembly that would miss them.
+          const injectedRaw = String(steeringTelemetry.fullAssembledSystemPrompt || '');
+          const hasRealInjection = !agentic && injectedRaw.includes('<!-- WORKSPACE_CONTEXT_START -->');
 
-          if (agentic && subtaskObj) {
-            const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${subtaskObj.title}\n- **Subtask ID**: ${subtaskObj.id}\n\nStrictly focus on this subtask using the tools provided.`;
-            assembledPrompt = `${assembledPrompt}${taskHeader}`;
+          const buildTaskHeader = (id: string, title: string) =>
+            `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${title}\n- **Subtask ID**: ${id}\n\nStrictly focus on this subtask using the tools provided.`;
+
+          let assembledPrompt = '';
+          if (hasRealInjection) {
+            assembledPrompt = injectedRaw;
+          } else if (agentic) {
+            assembledPrompt = await getIntelligentSystemPrompt({
+              context: subtaskObj?.title || query,
+              keywords: effectiveKeywords,
+              memory: context.telemetry?.memoryContext,
+              workspace: context.telemetry?.grepContext,
+              workspaceRoot: resolvedWsRoot,
+              isSubtask: true
+            });
+            if (subtaskObj) assembledPrompt += buildTaskHeader(subtaskObj.id, subtaskObj.title);
           }
+          // else: non-agentic without a grounding signal — nothing was injected.
+
+          // Only report sections that are actually present in the reported prompt.
+          const matchedSections = assembledPrompt
+            ? promptEval.matchedSections.filter((s: any) => assembledPrompt.includes(s.title))
+            : [];
+          steeringTelemetry.matchedSections = matchedSections;
           steeringTelemetry.fullAssembledSystemPrompt = assembledPrompt;
           steeringTelemetry.planDetails = planDetails;
           steeringTelemetry.subtaskContext = subtaskObj;
 
+          const mem = steeringTelemetry.memoryLayers || (steeringTelemetry.memoryLayers = {});
           const sysTokens = Math.ceil(assembledPrompt.length / 3.8);
-          if (!steeringTelemetry.memoryLayers) steeringTelemetry.memoryLayers = {};
-          steeringTelemetry.memoryLayers.sysPromptTokens = sysTokens;
-          steeringTelemetry.memoryLayers.totalContextTokens = (steeringTelemetry.memoryLayers.shortTermTokens || 0) + (steeringTelemetry.memoryLayers.longTermTokens || 0) + (steeringTelemetry.memoryLayers.wikiTokens || 0) + (steeringTelemetry.memoryLayers.grepTokens || 0) + (steeringTelemetry.memoryLayers.groundingTokens || 0) + sysTokens;
+          mem.sysPromptTokens = sysTokens;
+          // Layers L2-L4 are already embedded in the reported system prompt. The
+          // grounding gate is embedded non-agentic, but AgenticMiddleware appends
+          // it separately to the first prompt (agentic only).
+          mem.totalContextTokens = (mem.shortTermTokens || 0) + sysTokens + (agentic ? (mem.groundingTokens || 0) : 0);
 
           // Structured 5-layer memory hierarchy with explicit priorities and sample extracted text
           const memoryHierarchy = [
@@ -1291,7 +1510,7 @@ export function createExpressApp(): express.Express {
               description: 'Recent conversation turns, immediate user instructions & live subtask execution state',
               tokens: steeringTelemetry.memoryLayers?.shortTermTokens || Math.ceil((query?.length || 10) / 3.8),
               active: true,
-              content: context.telemetry?.memoryContext || `Turn 1: User prompt -> "${query || 'Test query'}"`
+              content: `Turn 1: User prompt -> "${query || 'Test query'}"`
             },
             {
               level: 'L2',
@@ -1327,9 +1546,11 @@ export function createExpressApp(): express.Express {
               description: 'Keyword-targeted prompt.json sections, persona templates & dynamic skills',
               tokens: sysTokens,
               active: sysTokens > 0,
-              content: promptEval.matchedSections.length > 0
-                ? promptEval.matchedSections.map(s => `### ${s.title} (${s.id})\n${s.content || ''}`).join('\n\n')
-                : `### Baseline System Prompt (${sysTokens} tok)\n${assembledPrompt}`
+              content: matchedSections.length > 0
+                ? matchedSections.map(s => `### ${s.title} (${s.id})\n${s.content || ''}`).join('\n\n')
+                : (assembledPrompt
+                    ? `### Baseline System Prompt (${sysTokens} tok)\n${assembledPrompt}`
+                    : '(No system prompt injected — no grounding signal)')
             }
           ];
 
@@ -1338,6 +1559,55 @@ export function createExpressApp(): express.Express {
           steeringTelemetry.dirTree = context.telemetry?.dirTree || '';
           steeringTelemetry.keywords = effectiveKeywords;
           steeringTelemetry.chatHistory = [{ role: 'user', content: query || 'Test query' }];
+
+          // Measured single-pass payload vs estimated agentic run — local
+          // decomposition only (decomposeGoal is LLM-free), no extra model calls.
+          const shortTerm = mem.shortTermTokens || 0;
+          const groundingOnce = mem.groundingTokens || 0;
+          const { tasks: estTasks } = decomposeGoal(query || 'Execute multi-step task');
+          const subtaskCount = agentic
+            ? Math.max(1, planDetails?.phases?.length || estTasks.length)
+            : Math.max(1, estTasks.length);
+
+          const firstSubtaskText = agentic
+            ? assembledPrompt
+            : `${await getIntelligentSystemPrompt({
+                context: estTasks[0]?.task || query,
+                keywords: effectiveKeywords,
+                memory: context.telemetry?.memoryContext,
+                workspace: context.telemetry?.grepContext,
+                workspaceRoot: resolvedWsRoot,
+                isSubtask: true
+              })}${estTasks[0] ? buildTaskHeader(estTasks[0].id, estTasks[0].task) : ''}`;
+          const perSubtaskTokens = Math.ceil(firstSubtaskText.length / 3.8) + shortTerm;
+
+          let singlePassPayloadTokens: number;
+          if (agentic) {
+            const hasSignal = !!(resolvedWsRoot || context.telemetry?.memoryContext || context.telemetry?.grepContext || effectiveKeywords.length);
+            if (hasSignal) {
+              const singlePrompt = await getIntelligentSystemPrompt({
+                context: query,
+                keywords: effectiveKeywords,
+                memory: context.telemetry?.memoryContext,
+                workspace: context.telemetry?.grepContext,
+                workspaceRoot: resolvedWsRoot,
+                isSubtask: false
+              });
+              singlePassPayloadTokens = shortTerm + Math.ceil(singlePrompt.length / 3.8) + groundingOnce;
+            } else {
+              singlePassPayloadTokens = shortTerm;
+            }
+          } else {
+            // Non-agentic: the current payload IS the measured total.
+            singlePassPayloadTokens = mem.totalContextTokens ?? shortTerm;
+          }
+
+          steeringTelemetry.comparison = {
+            singlePassPayloadTokens,
+            agenticFirstSubtaskTokens: perSubtaskTokens + groundingOnce,
+            agenticRunTokens: subtaskCount * perSubtaskTokens + groundingOnce,
+            agenticSubtaskCount: subtaskCount
+          };
 
           res.json({
             success: true,
@@ -1465,6 +1735,14 @@ export function createExpressApp(): express.Express {
       const dashboardPath = path.join(__dirname, '../dashboard');
       app.use(express.static(dashboardPath));
 
+      // Global Error Handler (Express JSON parse errors and unhandled request exceptions)
+      app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+        const status = err.status || 500;
+        const message = err.message || 'Internal Server Error';
+        console.error(`[Server Error] ${status}: ${message}`);
+        res.status(status).json({ success: false, error: message });
+      });
+
       return app;
 }
 
@@ -1494,6 +1772,33 @@ async function main() {
       }
     } catch (err: any) {
       console.error('[harness] Boot reconciliation failed (non-fatal):', err?.message || err);
+    }
+
+    // R2 — CAS disk persistence boot (same baseDir convention as
+    // reconcileRunsOnBoot above: process.cwd()): prune expired checkpoints
+    // (CAS_TTL_MS, default 24h) + GC orphan blobs, then hydrate the
+    // in-memory store so rollback/undo_file issued after a restart still
+    // resolve against on-disk state. Best-effort, never blocks startup;
+    // without a prior flushCasToDisk there is simply no index.json and
+    // this is a no-op.
+    try {
+      const { globalCasStore } = await import('./memory/ContentAddressableCheckpoint.js');
+      const pruned = await globalCasStore.pruneCasOnBoot();
+      if (pruned.removedManifests > 0 || pruned.removedBlobs > 0) {
+        console.error(
+          `[cas] Boot prune: ${pruned.removedManifests} expired checkpoint(s), ${pruned.removedBlobs} orphan blob(s) removed.`
+        );
+      }
+      globalCasStore.initCasPersistence(process.cwd());
+      const loaded = await globalCasStore.loadCasFromDisk();
+      if (loaded) {
+        const stats = globalCasStore.getStats();
+        console.error(
+          `[cas] Restored checkpoint store from disk (${stats.totalCheckpoints} manifest(s), ${stats.totalBlobs} blob(s)).`
+        );
+      }
+    } catch (err: any) {
+      console.error('[cas] Boot restore failed (non-fatal):', err?.message || err);
     }
 
     // Periodically check/sync telemetry every hour (supports continuous server runs)

@@ -36,6 +36,16 @@ export interface HarnessDeclaration {
       timeoutMinutes: number;
       standingRules: AllowRule[];
     };
+    /**
+     * T4 — ordered phase list for a CYCLIC lane: each entry names an
+     * executable non-top_level role (validated at load). When present, the
+     * runner (T5) walks the phases as one cycle and may repeat the walk up to
+     * `maxCycles` times, tagging later cycles' task-ids `phase#cN`. Absent =
+     * legacy linear lane (planSteps' role order, no cycle semantics at all).
+     */
+    lane?: string[];
+    /** T4 — 1-based cap on full lane cycles. Only valid alongside `lane`; absent = 1 (single pass). */
+    maxCycles?: number;
   };
   roles: Record<string, RoleDeclaration>;
   writes: AllowRule[];
@@ -44,6 +54,24 @@ export interface HarnessDeclaration {
   /** P4e trial-and-error bounds (docs/plans/2026-09-29-harness-p4-subagents-brain.md, D5). Both optional — absent means the pre-P4e default (2 attempts, deterministic heuristic strategy selection). */
   limits?: { maxAttemptsPerStep?: number };
   reasoning?: { strategy?: 'heuristic' | 'quantum' };
+  /**
+   * T8 — names of project bridges `cyber_tool` `run_action` may spawn
+   * (resolved from `<workspaceRoot>/.free-llm-mcp/bridges.json`). Fail-closed
+   * policy hook: evaluate() only allows run_action when the requested bridge
+   * appears here — absent list = no bridge ever dispatches through the
+   * harness. Covers the executing action only; cyber_tool's other
+   * (non-executing) actions are unaffected.
+   */
+  cyberTools?: string[];
+  /**
+   * AGENTS.md `## Skill Access` optional `skills:` catalog — skill name to
+   * its tag list (plus optional repo-relative `skills/<name>/` dir). Used by
+   * resolveStepDispatch to replace the hardcoded 'general-purpose' skill
+   * name with a real repo skill when the step goal matches the catalog
+   * entry's tags AND the role's execute_skill rule skillTags. Absent (or
+   * empty) = no tag-based skill resolution, same behavior as before.
+   */
+  skillCatalog?: Record<string, { tags: string[]; dir?: string }>;
 }
 
 export type PolicyDecision =
@@ -88,7 +116,9 @@ export interface TraceEvent {
     | 'trace_truncated'
     | 'monitor_attached'
     | 'monitor_progress'
-    | 'monitor_done';
+    | 'monitor_done'
+    | 'declaration_tamper'
+    | 'phase';
   data: unknown;
   tokens?: { input: number; output: number; reservedRemaining: number };
 }
@@ -97,6 +127,14 @@ export interface HarnessRun {
   runId: string;
   harness: string;             // decl.harness.name — human-readable display name
   declarationName: string;     // the loadHarnessDeclaration() name (e.g. 'research-analysis') — needed to reload the same declaration on resume
+  /**
+   * T2 — hash provenance: the resolved declaration file and the sha256 of its
+   * content AT deploy time. resume/reorchestrate re-hash the file and emit a
+   * 'declaration_tamper' warn trace on mismatch (never blocks the run — policy
+   * is cached for the process; the trace is the alert). Absent on legacy runs.
+   */
+  declarationPath?: string;
+  declarationSha256?: string;
   goal: string;
   workspaceRoot?: string;
   status: 'running' | 'paused_approval' | 'paused_budget' | 'monitoring' | 'complete' | 'failed' | 'aborted';

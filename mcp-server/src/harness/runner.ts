@@ -2,12 +2,14 @@ import { RunRegistry } from '../pipeline/middlewares/RunRegistry.js';
 import { ContextManager } from '../utils/ContextManager.js';
 import { HarnessStore } from './store.js';
 import { loadHarnessDeclaration, selectRole } from './declaration.js';
-import { evaluate, hashArgs, assertWorkspaceRootAllowed } from './policy.js';
+import { trackDeclaration, verifyDeclarationIntegrity, type RegistryEntry } from './registry.js';
+import { evaluate, hashArgs, assertWorkspaceRootAllowed, laneCycleMax, canStartLaneCycle, stripCycleSuffix } from './policy.js';
 import { serializeTasksMarkdown, parseTasksMarkdown, type TaskItem } from '../tools/coding-agents.js';
 import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
 import { buildHandoff, validateHandoff, type Handoff } from './handoff.js';
 import { createReasoningStrategy, type LessonNode, type StepFailure } from './reasoning.js';
 import { MonitorRegistry } from './monitor.js';
+import { appendSessionMemory, buildSessionMemoryPromptBlock, parseTurnMemory, recentSessionMemory } from './session-memory.js';
 import type { HarnessDeclaration, HarnessRun } from './types.js';
 
 const contextManager = new ContextManager();
@@ -108,10 +110,22 @@ export async function gatedCall(
   args: any,
   estimatedTokens: number,
   callId: string,
-  execute: () => Promise<any>
+  execute: () => Promise<any>,
+  requestedTool?: string
 ): Promise<GatedResult> {
   const argsHashForTrace = hashArgs(args);
-  await store.appendTrace({ runId: run.runId, role, type: 'tool_call', data: { tool, action, callId, argsHash: argsHashForTrace } });
+  await store.appendTrace({
+    runId: run.runId,
+    role,
+    type: 'tool_call',
+    data: {
+      tool,
+      action,
+      callId,
+      argsHash: argsHashForTrace,
+      ...(requestedTool && requestedTool !== tool ? { requestedTool } : {}),
+    },
+  });
 
   if (run.budget.used + run.budget.reserved + estimatedTokens > run.budget.maxTokens) {
     await store.appendTrace({ runId: run.runId, role, type: 'budget', data: { reason: 'would exceed maxTokens', estimatedTokens, remaining: run.budget.maxTokens - run.budget.used - run.budget.reserved } });
@@ -233,17 +247,33 @@ export async function gatedDetach(
 }
 
 /**
- * Which roles run, in order, for this run's lane. P4a's minimal step engine:
- * the goal-selected role always runs first; if the declaration also defines
- * an 'analyst' role (and it isn't already the selected one), it runs second
- * to synthesize the first step's findings — the smallest real multi-step
- * chain, not the full P4b–P4f research-depth ladder (browser/pdf/eisenhower/
- * brain), which stay separate phases. A declaration with only one non-
- * top_level role (every existing test declaration, and any harness that
- * simply doesn't define 'analyst') still runs exactly one step, unchanged
- * from before this change.
+ * Which roles run, in order, for this run's lane.
+ *
+ * T5 — a declaration with an explicit `harness.lane` walks the phase list
+ * for every allowed cycle (cycle 1 = plain phase ids, cycles ≥2 = `phase#cN`),
+ * capped by laneCycleMax: the lane IS the exact plan, so selectRole and the
+ * analyst append below are bypassed entirely (goal-based role selection and
+ * the legacy two-step chain don't apply to an owner-declared lane). Each
+ * `#cN` id makes that cycle a separate tasks.md entry (own attempts, own
+ * resume cursor) while runSteps strips the suffix back to the base role for
+ * policy/handoff/traces.
+ *
+ * Legacy (no lane) path — P4a's minimal step engine, unchanged: the
+ * goal-selected role always runs first; if the declaration also defines an
+ * 'analyst' role (and it isn't already the selected one), it runs second to
+ * synthesize the first step's findings. A declaration with only one non-
+ * top_level role still runs exactly one step.
  */
 function planSteps(decl: HarnessDeclaration, goal: string): string[] {
+  const lane = decl.harness.lane;
+  if (lane && lane.length > 0) {
+    const maxCycles = laneCycleMax(decl) ?? 1;
+    const plan: string[] = [];
+    for (let cycle = 1; cycle <= maxCycles; cycle++) {
+      for (const phase of lane) plan.push(cycle === 1 ? phase : `${phase}#c${cycle}`);
+    }
+    return plan;
+  }
   const primary = selectRole(decl, goal);
   const roles = [primary];
   if (decl.roles.analyst && primary !== 'analyst') roles.push('analyst');
@@ -563,15 +593,39 @@ function resolveStepDispatch(
   role: string,
   stepGoal: string,
   workspaceRoot: string | undefined,
-  registryKey: string
-): { toolName: string; payload: any; execute: () => Promise<any> } {
+  registryKey: string,
+  memoryBlock = ''
+): { toolName: string; requestedTool?: string; payload: any; execute: () => Promise<any> } {
   const toolName = decl.roles[role]?.tools?.[0]?.tool || 'use_free_llm';
+
+  const normalizeTag = (t: string) => t.toLowerCase().replace(/[-_]+/g, ' ').trim();
+  let matchedSkill: { name: string; dir?: string; tags: string[] } | undefined;
+  const catalog = decl.skillCatalog;
+  if (catalog && Object.keys(catalog).length > 0) {
+    const goalNorm = normalizeTag(stepGoal);
+    for (const rule of decl.roles[role]?.tools ?? []) {
+      if (rule.tool !== 'execute_skill') continue;
+      const ruleTags = (rule.constraints as { skillTags?: unknown } | undefined)?.skillTags;
+      if (!Array.isArray(ruleTags)) continue;
+      for (const [name, entry] of Object.entries(catalog)) {
+        const entryTags = (entry.tags ?? []).filter(t => typeof t === 'string');
+        const shared = entryTags.filter(t => ruleTags.some(rt => typeof rt === 'string' && normalizeTag(rt) === normalizeTag(t)));
+        if (shared.length === 0) continue;
+        if (shared.some(t => goalNorm.includes(normalizeTag(t)))) {
+          matchedSkill = { name, dir: entry.dir, tags: entryTags };
+          break;
+        }
+      }
+      if (matchedSkill) break;
+    }
+  }
 
   // This exact object is both hashed for approval-binding and passed to the
   // tool — one source of truth, so what a human approves is what runs.
+  const systemPrompt = 'You are a research agent. Answer with grounded findings only; cite sources inline. Do not fabricate citations.';
   const useFreeLlmPayload = {
     messages: [
-      { role: 'system', content: 'You are a research agent. Answer with grounded findings only; cite sources inline. Do not fabricate citations.' },
+      { role: 'system', content: memoryBlock ? `${systemPrompt}\n\n${memoryBlock}` : systemPrompt },
       { role: 'user', content: stepGoal },
     ],
     agentic: false,
@@ -590,11 +644,14 @@ function resolveStepDispatch(
   // (policy.ts's array-membership constraintsMatch) can actually gate this
   // call by tag instead of only by tool name.
   const executeSkillPayload = {
-    skill: 'general-purpose',
+    skill: matchedSkill?.name ?? 'general-purpose',
     input: stepGoal,
     workspace_root: workspaceRoot,
     sessionId: registryKey,
-    skillTags: CYBER_TERMS_REGEX.test(stepGoal) ? ['cyber'] : [],
+    skillTags: matchedSkill
+      ? [...new Set([...matchedSkill.tags, ...(CYBER_TERMS_REGEX.test(stepGoal) ? ['cyber'] : [])])]
+      : CYBER_TERMS_REGEX.test(stepGoal) ? ['cyber'] : [],
+    ...(matchedSkill?.dir ? { skillDir: matchedSkill.dir } : {}),
   };
 
   const dispatchMap: Record<string, { payload: any; execute: () => Promise<any> }> = {
@@ -610,11 +667,21 @@ function resolveStepDispatch(
       payload: executeSkillPayload,
       execute: async () => (await import('../tools/execute-skill.js')).executeSkill(executeSkillPayload as any),
     },
+    coding_agents: {
+      payload: useFreeLlmPayload,
+      execute: async () => (await import('../tools/use-free-llm.js')).useFreeLLM(useFreeLlmPayload as any),
+    },
   };
 
-  const resolved = dispatchMap[toolName] || dispatchMap.use_free_llm;
-  const resolvedToolName = dispatchMap[toolName] ? toolName : 'use_free_llm';
-  return { toolName: resolvedToolName, payload: resolved.payload, execute: resolved.execute };
+  const effectiveToolName = matchedSkill ? 'execute_skill' : toolName;
+  const resolved = dispatchMap[effectiveToolName] || dispatchMap.use_free_llm;
+  const resolvedToolName = dispatchMap[effectiveToolName] ? effectiveToolName : 'use_free_llm';
+  return {
+    toolName: resolvedToolName,
+    requestedTool: toolName,
+    payload: resolved.payload,
+    execute: resolved.execute,
+  };
 }
 
 /**
@@ -711,7 +778,7 @@ async function runSteps(
 ): Promise<StepEngineResult> {
   let handoff = priorHandoff;
   let lastContent: string | undefined;
-  let lastRole = roles[Math.min(startIndex, roles.length - 1)] ?? roles[0];
+  let lastRole = stripCycleSuffix(roles[Math.min(startIndex, roles.length - 1)] ?? roles[0]);
 
   // startIndex can equal roles.length when the caller (resumeMonitoredRun,
   // P5) just finished the LAST step in the lane out-of-band (a monitored
@@ -726,15 +793,50 @@ async function runSteps(
   }
 
   for (let i = startIndex; i < roles.length; i++) {
-    const role = roles[i];
+    // T5 — two views of the plan entry: stepId is the FULL plan id (what
+    // tasks.md holds, so each lane cycle is its own task/cursor position),
+    // role is the BASE name (what policy, handoffs, traces, budget.perRole
+    // and lessons are keyed by — cycle 2 of 'fixer' runs under the same
+    // declaration entry as cycle 1). callId keeps the full id so the
+    // repeat detector can't mistake a repeated cycle for a loop.
+    const stepId = roles[i];
+    const role = stripCycleSuffix(stepId);
     lastRole = role;
-    const callId = `s${i}:${role}`;
+    const callId = `s${i}:${stepId}`;
 
     if (wallBudgetExceeded(run, decl)) {
       run.status = 'paused_budget';
       run.error = `Wall-clock budget exceeded (maxWallMinutes: ${decl.harness.budget.maxWallMinutes})`;
       await store.appendTrace({ runId: run.runId, role, type: 'budget', data: { reason: 'maxWallMinutes exceeded' } }).catch(() => {});
       return { content: lastContent, lastRole, finalHandoff: handoff };
+    }
+
+    // T5 — fail-closed cycle guard: a `#cN` step may only run while the
+    // declaration's lane policy still allows cycle N (hand-edited tasks.md,
+    // or a declaration whose maxCycles shrank between deploy and resume,
+    // must not run an extra cycle). A legacy (no-lane) plan can never
+    // legitimately contain a suffix, so canStartLaneCycle's null → false
+    // makes any stray `#cN` on a legacy run fail closed too.
+    const cycleMatch = stepId.match(/#c(\d+)$/);
+    if (cycleMatch && !canStartLaneCycle(decl, Number(cycleMatch[1]))) {
+      run.status = 'failed';
+      run.error = `Lane cycle ${cycleMatch[1]} is not allowed (step '${stepId}')`;
+      await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
+      await endTaskAttempt(store, originalGoal, stepId, 'failed', run.error);
+      return { content: lastContent, lastRole, finalHandoff: handoff };
+    }
+
+    // T5 — one `phase` trace per executed lane step, emitted BEFORE the step
+    // runs (including a cyber_tool attach, so the monitored step's phase is
+    // on record at attach time, not only at monitor resolution). Lane
+    // declarations only: legacy runs keep their old trace stream unchanged.
+    // `role`/`phase` stay the base name; `taskId` is the full plan id the
+    // tasks cursor uses; `total` is the plan length at emission time.
+    if (decl.harness.lane && decl.harness.lane.length > 0) {
+      await store.appendTrace({
+        runId: run.runId, role, type: 'phase',
+        data: { phase: role, cycle: cycleMatch ? Number(cycleMatch[1]) : 1, taskId: stepId, index: i, total: roles.length },
+      }).catch(() => {});
     }
 
     // P5b — a role whose declared tool is 'cyber_tool' attaches to a
@@ -751,10 +853,10 @@ async function runSteps(
         run.status = 'failed';
         run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
-        await endTaskAttempt(store, originalGoal, role, 'failed', `repeat detected: ${run.error}`);
+        await endTaskAttempt(store, originalGoal, stepId, 'failed', `repeat detected: ${run.error}`);
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
-      await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attaching cyber_tool osint scan on '${target}'`);
+      await beginTaskAttempt(store, originalGoal, stepId, `step ${callId}: attaching cyber_tool osint scan on '${target}'`);
       const attach = await gatedDetach(store, run, decl, role, 'cyber_tool', 'osint', detachPayload, 500, callId, async () => {
         const { cyberTool } = await import('../tools/cyber-tool.js');
         await cyberTool(detachPayload as any); // returns almost immediately — the actual search runs detached inside cyber-tool.ts's own IIFE
@@ -763,12 +865,14 @@ async function runSteps(
       if (!attach.ok) {
         run.status = attach.reason === 'needs_approval' ? 'paused_approval' : 'paused_budget';
         run.error = attach.detail;
-        await endTaskAttempt(store, originalGoal, role, 'pending', `step ${callId}: ${run.status}`);
+        await endTaskAttempt(store, originalGoal, stepId, 'pending', `step ${callId}: ${run.status}`);
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
       run.status = 'monitoring';
-      run.pendingMonitor = { monitorId: attach.monitorId, stepIndex: i, role };
-      await endTaskAttempt(store, originalGoal, role, 'pending', `step ${callId}: attached, monitoring (${attach.monitorId})`);
+      // Full plan id — resumeMonitoredRun's endTaskAttempt uses it as the
+      // tasks.md cursor (strips to the base role for its own traces/handoff).
+      run.pendingMonitor = { monitorId: attach.monitorId, stepIndex: i, role: stepId };
+      await endTaskAttempt(store, originalGoal, stepId, 'pending', `step ${callId}: attached, monitoring (${attach.monitorId})`);
       return { content: lastContent, lastRole, finalHandoff: handoff };
     }
 
@@ -785,7 +889,7 @@ async function runSteps(
         run.status = 'failed';
         run.error = `Scraper step '${callId}' has no URL to fetch (escalation inserted without one — should not happen)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
-        await endTaskAttempt(store, originalGoal, role, 'failed', run.error);
+        await endTaskAttempt(store, originalGoal, stepId, 'failed', run.error);
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
       const scraperArgsHash = hashArgs({ url });
@@ -793,10 +897,10 @@ async function runSteps(
         run.status = 'failed';
         run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
-        await endTaskAttempt(store, originalGoal, role, 'failed', `repeat detected: ${run.error}`);
+        await endTaskAttempt(store, originalGoal, stepId, 'failed', `repeat detected: ${run.error}`);
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
-      await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via browser_tool (navigate+extract) on ${url}`);
+      await beginTaskAttempt(store, originalGoal, stepId, `step ${callId}: attempting via browser_tool (navigate+extract) on ${url}`);
       callResult = await runScraperStep(store, run, decl, role, callId, url, registryKey);
       stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
     } else if (role === 'pdf') {
@@ -809,7 +913,7 @@ async function runSteps(
         run.status = 'failed';
         run.error = `pdf step '${callId}' has no pdf ref to resolve (escalation inserted without one — should not happen)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
-        await endTaskAttempt(store, originalGoal, role, 'failed', run.error);
+        await endTaskAttempt(store, originalGoal, stepId, 'failed', run.error);
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
       const pdfPayload = { uriPath: pdfRef, workspaceRoot };
@@ -818,10 +922,10 @@ async function runSteps(
         run.status = 'failed';
         run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
-        await endTaskAttempt(store, originalGoal, role, 'failed', `repeat detected: ${run.error}`);
+        await endTaskAttempt(store, originalGoal, stepId, 'failed', `repeat detected: ${run.error}`);
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
-      await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via resolvePdfRef on ${pdfRef}`);
+      await beginTaskAttempt(store, originalGoal, stepId, `step ${callId}: attempting via resolvePdfRef on ${pdfRef}`);
       callResult = await gatedCall(store, run, decl, role, 'pdf_read', undefined, pdfPayload, 500, callId, async () => {
         const { resolvePdfRef } = await import('../tools/use-free-llm.js');
         const resolved = await resolvePdfRef(pdfRef, workspaceRoot);
@@ -834,21 +938,34 @@ async function runSteps(
       stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
     } else {
       const stepGoal = stepInputText(i, originalGoal, handoff, i === startIndex ? memoryContext : undefined);
-      const dispatch = resolveStepDispatch(decl, role, stepGoal, workspaceRoot, registryKey);
+      const memoryBlock = buildSessionMemoryPromptBlock(await recentSessionMemory(store.runDirPath));
+      const dispatch = resolveStepDispatch(decl, role, stepGoal, workspaceRoot, registryKey, memoryBlock);
       const argsHash = hashArgs(dispatch.payload);
 
       if (await hasRepeatedSuccess(store, callId, argsHash)) {
         run.status = 'failed';
         run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
-        await endTaskAttempt(store, originalGoal, role, 'failed', `repeat detected: ${run.error}`);
+        await endTaskAttempt(store, originalGoal, stepId, 'failed', `repeat detected: ${run.error}`);
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
 
-      await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via ${dispatch.toolName}`);
+      await beginTaskAttempt(store, originalGoal, stepId, `step ${callId}: attempting via ${dispatch.toolName}`);
       goalTokens = contextManager.countStringTokens(stepGoal);
       const estimate = goalTokens + 2000;
-      callResult = await gatedCall(store, run, decl, role, dispatch.toolName, undefined, dispatch.payload, estimate, callId, dispatch.execute);
+      callResult = await gatedCall(
+        store,
+        run,
+        decl,
+        role,
+        dispatch.toolName,
+        undefined,
+        dispatch.payload,
+        estimate,
+        callId,
+        dispatch.execute,
+        dispatch.requestedTool
+      );
 
       // P4e trial-and-error (D5): a genuine failure (not a pause — needs_
       // approval/needs_budget already returned control to the human/budget
@@ -868,11 +985,23 @@ async function runSteps(
         const retryGoal = chosen.strategy === 'stricter-json-instruction'
           ? `${stepGoal}\n\nIMPORTANT: you must respond with substantive, non-empty content.`
           : stepGoal;
-        const retryDispatch = resolveStepDispatch(decl, role, retryGoal, workspaceRoot, registryKey);
+        const retryDispatch = resolveStepDispatch(decl, role, retryGoal, workspaceRoot, registryKey, memoryBlock);
         // No need to reset run.status/error here — the applyResearchResult
         // call right below unconditionally overwrites both from this new
         // attempt's callResult, whatever it turns out to be.
-        callResult = await gatedCall(store, run, decl, role, retryDispatch.toolName, undefined, retryDispatch.payload, estimate, `${callId}:a${attempt}`, retryDispatch.execute);
+        callResult = await gatedCall(
+          store,
+          run,
+          decl,
+          role,
+          retryDispatch.toolName,
+          undefined,
+          retryDispatch.payload,
+          estimate,
+          `${callId}:a${attempt}`,
+          retryDispatch.execute,
+          retryDispatch.requestedTool
+        );
         stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
         statusAfterAttempt = run.status;
 
@@ -881,9 +1010,16 @@ async function runSteps(
           if (reused) await reinforceLesson(store, run, decl, reused.id, workspaceRoot);
         }
       }
+
+      if (run.status === 'complete' && stepContent && dispatch.toolName === 'use_free_llm') {
+        const parsedTurn = parseTurnMemory(stepContent);
+        if (parsedTurn) {
+          await appendSessionMemory(store.runDirPath, { runId: run.runId, role, ...parsedTurn }).catch(() => {});
+        }
+      }
     }
 
-    await endTaskAttempt(store, originalGoal, role, taskOutcomeFor(run.status), `step ${callId}: ${run.status}${run.error ? ` (${run.error})` : ''}`);
+    await endTaskAttempt(store, originalGoal, stepId, taskOutcomeFor(run.status), `step ${callId}: ${run.status}${run.error ? ` (${run.error})` : ''}`);
 
     if (run.status !== 'complete') {
       // paused_approval / paused_budget / failed / aborted — later steps stay
@@ -893,14 +1029,14 @@ async function runSteps(
 
     lastContent = stepContent;
     const provisionalIsLast = i === roles.length - 1;
-    const provisionalNextTo = provisionalIsLast ? 'top_level' : roles[i + 1];
+    const provisionalNextTo = provisionalIsLast ? 'top_level' : stripCycleSuffix(roles[i + 1]);
     const built = buildHandoff(role, provisionalNextTo, stepContent ?? '');
     const validated = validateHandoff(built);
     if (!validated.ok) {
       run.status = 'failed';
       run.error = `Malformed handoff from step '${callId}': ${validated.error}`;
       await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
-      await endTaskAttempt(store, originalGoal, role, 'failed', run.error);
+      await endTaskAttempt(store, originalGoal, stepId, 'failed', run.error);
       return { content: lastContent, lastRole, finalHandoff: handoff };
     }
 
@@ -1081,10 +1217,22 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
   const roles = planSteps(decl, input.goal);
   const registryKey = `harness:${input.runId}`;
 
+  // T2 — hash provenance: track this declaration in the workspace registry.json
+  // and pin its path+sha256 on the run for later tamper checks. Best-effort:
+  // a registry failure (locked dir, declaration module mocked without
+  // resolveDeclarationPath in tests) must never block a deploy — the run
+  // simply carries no provenance.
+  let tracked: RegistryEntry | undefined;
+  try {
+    tracked = await trackDeclaration(input.harness ?? 'research-analysis', input.workspaceRoot);
+  } catch { /* provenance is non-fatal */ }
+
   const run: HarnessRun = {
     runId: input.runId,
     harness: decl.harness.name,
     declarationName: input.harness ?? 'research-analysis',
+    declarationPath: tracked?.path,
+    declarationSha256: tracked?.sha256,
     goal: input.goal,
     workspaceRoot: input.workspaceRoot,
     status: 'running',
@@ -1139,10 +1287,17 @@ async function resumeMonitoredRun(store: HarnessStore, run: HarnessRun): Promise
   if (!pending) {
     throw new Error(`Run '${run.runId}' has status 'monitoring' but no pendingMonitor recorded — this should not happen.`);
   }
+  // T5 — pendingMonitor.role carries the FULL plan id (runSteps stored it
+  // so this resume's endTaskAttempt lines up with that cycle's tasks.md
+  // entry); every role-keyed surface below (traces, budget.perRole, the
+  // handoff's from) speaks the BASE role, same as the loop does live.
+  const pendingTaskId = pending.role;
+  const pendingRole = stripCycleSuffix(pending.role);
 
   const registryKey = `harness:${run.runId}`;
   const decl = await loadHarnessDeclaration(run.declarationName, run.workspaceRoot);
   assertWorkspaceRootAllowed(decl, run.workspaceRoot);
+  await verifyDeclarationIntegrity(run, store);
 
   const entry = MonitorRegistry.get(pending.monitorId);
   if (!entry) {
@@ -1150,8 +1305,8 @@ async function resumeMonitoredRun(store: HarnessStore, run: HarnessRun): Promise
     run.error = `Monitor '${pending.monitorId}' is no longer tracked (registry lost it, e.g. a server restart) — cannot resolve this step.`;
     run.pendingMonitor = undefined;
     await store.saveRun(run);
-    await store.appendTrace({ runId: run.runId, role: pending.role, type: 'error', data: { message: run.error } }).catch(() => {});
-    await endTaskAttempt(store, run.goal, pending.role, 'failed', run.error);
+    await store.appendTrace({ runId: run.runId, role: pendingRole, type: 'error', data: { message: run.error } }).catch(() => {});
+    await endTaskAttempt(store, run.goal, pendingTaskId, 'failed', run.error);
     await finalizeRun(store, run, registryKey);
     return run;
   }
@@ -1171,7 +1326,7 @@ async function resumeMonitoredRun(store: HarnessStore, run: HarnessRun): Promise
       run.status = 'paused_budget';
       run.error = `Wall-clock budget exceeded (maxWallMinutes: ${decl.harness.budget.maxWallMinutes}) while monitoring '${pending.monitorId}'`;
       await store.saveRun(run);
-      await store.appendTrace({ runId: run.runId, role: pending.role, type: 'budget', data: { reason: 'maxWallMinutes exceeded', monitorId: pending.monitorId } }).catch(() => {});
+      await store.appendTrace({ runId: run.runId, role: pendingRole, type: 'budget', data: { reason: 'maxWallMinutes exceeded', monitorId: pending.monitorId } }).catch(() => {});
       return run;
     }
     return run; // still in flight, within budget — no-op, poll monitor_tool or resume again later
@@ -1183,21 +1338,21 @@ async function resumeMonitoredRun(store: HarnessStore, run: HarnessRun): Promise
     run.status = 'failed';
     run.error = entry.error || 'Detached process failed';
     run.pendingMonitor = undefined;
-    await store.appendTrace({ runId: run.runId, role: pending.role, type: 'monitor_done', data: { monitorId: pending.monitorId, status: 'failed', error: run.error } }).catch(() => {});
-    await endTaskAttempt(store, run.goal, pending.role, 'failed', run.error);
+    await store.appendTrace({ runId: run.runId, role: pendingRole, type: 'monitor_done', data: { monitorId: pending.monitorId, status: 'failed', error: run.error } }).catch(() => {});
+    await endTaskAttempt(store, run.goal, pendingTaskId, 'failed', run.error);
     await finalizeRun(store, run, registryKey);
     return run;
   }
 
   // entry.status === 'done'
   const content = typeof entry.result === 'string' ? entry.result : entry.result ? JSON.stringify(entry.result) : '';
-  await store.appendTrace({ runId: run.runId, role: pending.role, type: 'monitor_done', data: { monitorId: pending.monitorId, status: 'done' } }).catch(() => {});
+  await store.appendTrace({ runId: run.runId, role: pendingRole, type: 'monitor_done', data: { monitorId: pending.monitorId, status: 'done' } }).catch(() => {});
 
   if (!content) {
     run.status = 'failed';
     run.error = 'Detached step completed without error but produced no content.';
     run.pendingMonitor = undefined;
-    await endTaskAttempt(store, run.goal, pending.role, 'failed', run.error);
+    await endTaskAttempt(store, run.goal, pendingTaskId, 'failed', run.error);
     await finalizeRun(store, run, registryKey);
     return run;
   }
@@ -1205,23 +1360,23 @@ async function resumeMonitoredRun(store: HarnessStore, run: HarnessRun): Promise
   const stepTokens = contextManager.countStringTokens(content);
   run.budget.used += stepTokens;
   run.budget.perRole = run.budget.perRole ?? {};
-  run.budget.perRole[pending.role] = (run.budget.perRole[pending.role] ?? 0) + stepTokens;
+  run.budget.perRole[pendingRole] = (run.budget.perRole[pendingRole] ?? 0) + stepTokens;
   run.result = content;
 
-  const nextTo = pending.stepIndex === roles.length - 1 ? 'top_level' : roles[pending.stepIndex + 1];
-  const built = buildHandoff(pending.role, nextTo, content);
+  const nextTo = pending.stepIndex === roles.length - 1 ? 'top_level' : stripCycleSuffix(roles[pending.stepIndex + 1]);
+  const built = buildHandoff(pendingRole, nextTo, content);
   const validated = validateHandoff(built);
   if (!validated.ok) {
     run.status = 'failed';
     run.error = `Malformed handoff from monitored step '${pending.monitorId}': ${validated.error}`;
     run.pendingMonitor = undefined;
-    await store.appendTrace({ runId: run.runId, role: pending.role, type: 'error', data: { message: run.error } }).catch(() => {});
-    await endTaskAttempt(store, run.goal, pending.role, 'failed', run.error);
+    await store.appendTrace({ runId: run.runId, role: pendingRole, type: 'error', data: { message: run.error } }).catch(() => {});
+    await endTaskAttempt(store, run.goal, pendingTaskId, 'failed', run.error);
     await finalizeRun(store, run, registryKey);
     return run;
   }
-  await store.appendTrace({ runId: run.runId, role: pending.role, type: 'handoff', data: validated.handoff }).catch(() => {});
-  await endTaskAttempt(store, run.goal, pending.role, 'completed', `monitor ${pending.monitorId} done`);
+  await store.appendTrace({ runId: run.runId, role: pendingRole, type: 'handoff', data: validated.handoff }).catch(() => {});
+  await endTaskAttempt(store, run.goal, pendingTaskId, 'completed', `monitor ${pending.monitorId} done`);
 
   run.status = 'running';
   run.pendingMonitor = undefined;
@@ -1267,6 +1422,9 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
   // resume (e.g. allowedWorkspaceRoots tightened) must not grandfather in a
   // workspace_root that would no longer be permitted.
   assertWorkspaceRootAllowed(decl, run.workspaceRoot);
+  // T2 — warn-trace only (never blocks): the file this run's policy came from
+  // must still hash to what deploy recorded, or someone edited it mid-run.
+  await verifyDeclarationIntegrity(run, store);
   // loadStepRoles (not planSteps) — the persisted tasks.md order, including
   // any step P4b's escalation dynamically inserted before this run paused,
   // which a fresh planSteps() call would have no way to know about.
@@ -1327,6 +1485,7 @@ export async function reorchestrateRole(input: ReorchestrateRoleInput): Promise<
 
   const decl = await loadHarnessDeclaration(run.declarationName, input.workspaceRoot);
   assertWorkspaceRootAllowed(decl, input.workspaceRoot);
+  await verifyDeclarationIntegrity(run, store);
 
   const rawTasks = await store.loadTasksMarkdown();
   if (!rawTasks) throw new Error(`Tasks file not found for run '${input.runId}'`);

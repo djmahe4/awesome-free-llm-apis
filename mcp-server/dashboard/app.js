@@ -330,6 +330,7 @@ tabBtns.forEach(btn => {
     if (target === 'wiki')     { initWikiTab(); }
     if (target === 'dagmemory') { initDagMemoryTab(); }
     if (target === 'harness')   { initHarnessTab(); }
+    if (target === 'movie')     { window.initMovieTab?.(); }
   });
 });
 
@@ -754,10 +755,15 @@ const TOOLS = [
     id: 'movie_tool', label: 'movie_tool', icon: '🎬',
     tag: 'Vibe Movie Engine',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['generate_manifest', 'render_timeline', 'transcribe_audio', 'generate_tts', 'generate_music', 'video_generation', 'status'] },
-      { id: 'prompt', label: 'Creative Prompt', type: 'textarea', placeholder: 'Cyberpunk rainy alleyway with neon signs' },
-      { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'movie-session-1' },
-      { id: 'lane', label: 'Media Lane', type: 'select', options: ['all', 'audio', 'video', 'music', 'metadata'] }
+      { id: 'action', label: 'Action', type: 'select', options: ['init_project', 'get_timeline', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'apply_effect', 'undo_effect', 'compile_timeline'] },
+      { id: 'projectId', label: 'Project ID', type: 'text', placeholder: 'proj_cyberpunk_01' },
+      { id: 'premise', label: 'Premise / Prompt', type: 'textarea', placeholder: 'Cyberpunk rainy alleyway with neon signs' },
+      { id: 'track', label: 'Track Lane', type: 'select', options: ['video', 'vfx', 'bgm', 'bgm_drums', 'bgm_bass', 'bgm_melody', 'vocal', 'song', 'script', 'dialogue'] },
+      { id: 'start_ms', label: 'Start Time (ms)', type: 'number', placeholder: '0' },
+      { id: 'end_ms', label: 'End Time (ms)', type: 'number', placeholder: '5000' },
+      { id: 'label', label: 'Artifact Label', type: 'text', placeholder: 'Opening Cut' },
+      { id: 'artifact_path', label: 'File Path / URL', type: 'text', placeholder: 'projects/default/video.mp4' },
+      { id: 'artifactId', label: 'Artifact ID (for approve/reroll/effects)', type: 'text', placeholder: 'art_123' }
     ]
   }
 ];
@@ -1177,10 +1183,10 @@ function collectParams(tool) {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
     } else if (f.id === 'files') {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
-    } else if (f.id === 'graphNode' || f.id === 'gates') {
+    } else if (f.id === 'graphNode' || f.id === 'gates' || f.id === 'script_instructions' || f.id === 'metadata') {
       const raw = el.value.trim();
       if (raw) {
-        try { params[f.id] = JSON.parse(raw); } catch { /* leave unset — treat invalid JSON as "no value" */ }
+        try { params[f.id] = JSON.parse(raw); } catch { params[f.id] = raw; }
       }
     } else if (f.id === 'personas') {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
@@ -2577,6 +2583,7 @@ const steeringSysTokens = document.getElementById('steering-sys-tokens');
 const steeringSysDesc = document.getElementById('steering-sys-desc');
 const steeringPayloadTokens = document.getElementById('steering-payload-tokens');
 const steeringTokenSavings = document.getElementById('steering-token-savings');
+const steeringSavingsLabel = document.getElementById('steering-savings-label');
 const steeringSavingsDesc = document.getElementById('steering-savings-desc');
 const steeringBloatStatus = document.getElementById('steering-bloat-status');
 
@@ -2688,18 +2695,33 @@ async function runSteeringEvaluation() {
       steeringPersonaBadge.innerHTML = `Persona: <code>${esc(st.persona || 'coder')}</code>${kwPreview}`;
     }
 
-    // Stats
+    // Stats — measured payload vs estimated agentic run (server-side comparison)
     const sysTokens = mem.sysPromptTokens || 0;
     const payloadTokens = mem.totalContextTokens || 0;
-    const agenticBaselinePayload = 3200;
-    const diff = Math.max(0, agenticBaselinePayload - payloadTokens);
-    const savingsPct = isAgentic ? '0.0%' : `${((diff / agenticBaselinePayload) * 100).toFixed(1)}%`;
+    const cmp = st.comparison || {};
+    const singlePass = cmp.singlePassPayloadTokens || payloadTokens;
+    const agenticRun = cmp.agenticRunTokens || 0;
+    const subtaskCount = cmp.agenticSubtaskCount || 1;
 
     if (steeringSysTokens) steeringSysTokens.textContent = `${sysTokens.toLocaleString()} tok`;
     if (steeringSysDesc) steeringSysDesc.textContent = isAgentic ? 'Multi-Pass Agentic Subtask' : 'Single-Pass System Prompt';
     if (steeringPayloadTokens) steeringPayloadTokens.textContent = `${payloadTokens.toLocaleString()} tok`;
-    if (steeringTokenSavings) steeringTokenSavings.textContent = savingsPct;
-    if (steeringSavingsDesc) steeringSavingsDesc.textContent = isAgentic ? 'Full 5-layer memory overhead' : `${diff.toLocaleString()} tokens saved vs max budget`;
+
+    if (isAgentic) {
+      if (steeringSavingsLabel) steeringSavingsLabel.textContent = 'Estimated Agentic Run';
+      if (steeringTokenSavings) steeringTokenSavings.textContent = agenticRun > 0 ? `${agenticRun.toLocaleString()} tok` : '—';
+      if (steeringSavingsDesc) steeringSavingsDesc.textContent = agenticRun > 0
+        ? `${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'} × ~${Math.round(cmp.agenticFirstSubtaskTokens || 0).toLocaleString()} tok`
+        : 'No agentic run estimate available';
+    } else {
+      if (steeringSavingsLabel) steeringSavingsLabel.textContent = 'Net Token Savings';
+      const diff = agenticRun - singlePass; // positive = single-pass cheaper
+      const savingsPct = agenticRun > 0 ? `${diff >= 0 ? '+' : ''}${((diff / agenticRun) * 100).toFixed(1)}%` : '—';
+      if (steeringTokenSavings) steeringTokenSavings.textContent = savingsPct;
+      if (steeringSavingsDesc) steeringSavingsDesc.textContent = agenticRun > 0
+        ? `${diff >= 0 ? diff.toLocaleString() + ' tok cheaper than' : Math.abs(diff).toLocaleString() + ' tok over'} the ${subtaskCount}-subtask run (${agenticRun.toLocaleString()} tok)`
+        : `Measured payload ${singlePass.toLocaleString()} tok (no run estimate)`;
+    }
 
     if (steeringBloatStatus) {
       steeringBloatStatus.textContent = matched.length > 0 ? 'ACTIVE ⚡ (Live Targeted)' : 'CLEAN 🛡️ (0 External Bloat)';
@@ -3076,6 +3098,7 @@ const harnessRerunSubmit       = document.getElementById('harness-rerun-submit')
 const harnessRerunMsg          = document.getElementById('harness-rerun-msg');
 const harnessTasksView         = document.getElementById('harness-tasks-view');
 const harnessTraceView         = document.getElementById('harness-trace-view');
+const harnessSessionMemoryView = document.getElementById('harness-session-memory-view');
 
 function initHarnessTab() {
   if (!harnessInitialized) {
@@ -3105,7 +3128,26 @@ async function fetchHarnessTelemetry() {
 }
 
 function renderHarnessTelemetry(data) {
-  const { runs = [], activeScopes = [], reasoningScopes = [] } = data;
+  const { runs = [], activeScopes = [], reasoningScopes = [], wikiPages = [] } = data;
+
+  // Render Wiki Nexus Card
+  const wikiCount = document.getElementById('harness-wiki-count');
+  const wikiList = document.getElementById('harness-wiki-list');
+  if (wikiCount) wikiCount.textContent = `${wikiPages.length} pages indexed`;
+  if (wikiList) {
+    if (wikiPages.length === 0) {
+      wikiList.innerHTML = '<span style="font-size:.75rem;color:var(--text-muted);font-style:italic;">No wiki documents linked to current session.</span>';
+    } else {
+      wikiList.innerHTML = wikiPages.map(wp => `
+        <div class="wiki-tag" style="display:inline-flex;align-items:center;gap:6px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);padding:4px 10px;border-radius:20px;font-size:.75rem;cursor:pointer;transition:background .2s;" 
+             onclick="const wb = document.querySelector('[data-tab=\\'wiki\\']'); if (wb) { wb.click(); }">
+          <span style="color:#60a5fa;">📄</span>
+          <span style="font-weight:600;color:var(--text-primary);">${esc(wp.title)}</span>
+          <span style="font-size:.65rem;color:var(--text-muted);">${(wp.size / 1024).toFixed(1)}KB</span>
+        </div>
+      `).join('');
+    }
+  }
 
   // Render File Leases
   if (harnessLeaseCount) harnessLeaseCount.textContent = `${activeScopes.length} active`;
@@ -3194,7 +3236,19 @@ async function inspectHarnessRun(runId) {
       if (!data.trace || data.trace.length === 0) {
         harnessTraceView.textContent = 'No trace events recorded.';
       } else {
-        harnessTraceView.textContent = data.trace.map(t => `[${new Date(t.timestamp).toLocaleTimeString()}] [${t.type}] ${JSON.stringify(t.payload)}`).join('\n');
+        harnessTraceView.textContent = data.trace.map(t => {
+          const time = new Date(t.ts || t.timestamp || Date.now()).toLocaleTimeString();
+          const payload = t.data !== undefined ? t.data : t.payload;
+          return `[${time}] [${t.type}] ${JSON.stringify(payload)}`;
+        }).join('\n');
+      }
+    }
+    if (harnessSessionMemoryView) {
+      const mem = data.sessionMemory || [];
+      if (mem.length === 0) {
+        harnessSessionMemoryView.textContent = 'No session memory entries yet';
+      } else {
+        harnessSessionMemoryView.textContent = mem.map(e => `[${e.type}] (${e.role}) ${e.text}`).join('\n');
       }
     }
     if (harnessRerunRole && data.run?.roles && data.run.roles.length > 0) {
@@ -3240,7 +3294,7 @@ if (harnessRerunSubmit) {
     }
 
     try {
-      const res = await fetch('/api/tools/call', {
+      const res = await fetch('/api/tool', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3601,14 +3655,28 @@ if (relayCanvas) {
   });
 }
 
-function updateRelayVisualization(activeScopes = [], reasoningScopes = []) {
-  initRelayCanvas(activeScopes, reasoningScopes);
+let _harnessVizInstance = null;
+
+function updateRelayVisualization(activeScopes = [], reasoningScopes = [], wikiPages = []) {
+  if (window.HarnessVisualizer) {
+    if (!_harnessVizInstance) {
+      _harnessVizInstance = new window.HarnessVisualizer(
+        'harness-relay-canvas',
+        'harness-relay-canvas-wrap',
+        'harness-relay-tooltip',
+        'harness-node-detail'
+      );
+    }
+    _harnessVizInstance.updateData(activeScopes, reasoningScopes, wikiPages);
+  } else {
+    initRelayCanvas(activeScopes, reasoningScopes);
+  }
 }
 
 // Hook into existing renderHarnessTelemetry
 const _prevRenderHarnessTelemetry = renderHarnessTelemetry;
 renderHarnessTelemetry = function(data) {
   _prevRenderHarnessTelemetry(data);
-  updateRelayVisualization(data.activeScopes || [], data.reasoningScopes || []);
+  updateRelayVisualization(data.activeScopes || [], data.reasoningScopes || [], data.wikiPages || []);
 };
 

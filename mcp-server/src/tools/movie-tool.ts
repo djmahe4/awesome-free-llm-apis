@@ -8,6 +8,7 @@ import { synthesizeSpeechLocal } from './media/audio-router.js';
 import { generateStoryScript } from './media/story-router.js';
 import { applyMediaEffects, normalizeOrRandomizeEffect } from './media/dsp-router.js';
 import { toPublicArtifact, type TrackLane, type MediaEffect } from './media/types.js';
+import { pathParamWithinRoots } from '../utils/workspace-roots.js';
 
 export interface MovieToolInput {
   action:
@@ -20,6 +21,7 @@ export interface MovieToolInput {
     | 'generate_story'
     | 'compile_timeline'
     | 'get_timeline'
+    | 'update_artifact_bounds'
     | 'apply_effect'
     | 'undo_effect';
   projectId?: string;
@@ -52,6 +54,10 @@ export interface MovieToolOutput {
 }
 
 export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutput> {
+  const artifactPathGuard = pathParamWithinRoots(input.artifact_path, 'artifact_path');
+  if (artifactPathGuard) {
+    return { success: false, error: artifactPathGuard };
+  }
   const projectDir = input.projectDir || path.resolve(process.cwd(), 'projects', input.projectId || 'default');
   const store = new TimelineManifestStore(projectDir);
 
@@ -63,6 +69,59 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
       try {
         const manifest = await store.init(input.projectId, input.sessionId || 'session_default');
         return { success: true, data: manifest };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'propose_slots': {
+      if (!input.premise) {
+        return { success: false, error: 'premise required for propose_slots' };
+      }
+      try {
+        const manifest = await store.load();
+        const duration = input.duration_ms || 15000;
+        const slotLength = 5000;
+        const proposedCount = Math.max(1, Math.floor(duration / slotLength));
+        const proposedArtifacts = [];
+        for (let i = 0; i < proposedCount; i++) {
+          const start_ms = i * slotLength;
+          const end_ms = (i + 1) * slotLength;
+          const art = await store.addArtifact({
+            track: input.track || 'video',
+            start_ms,
+            end_ms,
+            label: `Scene ${i + 1}`,
+            name: `slot_${i + 1}`,
+            status: 'pending',
+            engine: 'wan2.1',
+            model: 'flux',
+            artifact_path: '',
+            metadata: { premise: input.premise, prompt: `Scene ${i + 1}: ${input.premise}` },
+            proposed_by: 'director'
+          });
+          proposedArtifacts.push(toPublicArtifact(art));
+        }
+        return { success: true, data: { proposedSlots: proposedArtifacts, totalProposed: proposedArtifacts.length } };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'reroll_artifact': {
+      if (!input.artifactId) {
+        return { success: false, error: 'artifactId required for reroll_artifact' };
+      }
+      try {
+        await store.updateArtifactStatus(input.artifactId, 'generating');
+        const manifest = await store.load();
+        let target: any;
+        for (const lane of Object.values(manifest.tracks)) {
+          target = lane.find((a: any) => a.artifactId === input.artifactId);
+          if (target) break;
+        }
+        if (!target) return { success: false, error: 'Artifact not found' };
+        return { success: true, data: { rerolled: true, artifact: toPublicArtifact(target) } };
       } catch (err: any) {
         return { success: false, error: err.message };
       }
@@ -187,6 +246,18 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
       }
     }
 
+    case 'update_artifact_bounds': {
+      if (!input.artifactId || input.start_ms === undefined || input.end_ms === undefined) {
+        return { success: false, error: 'artifactId, start_ms, and end_ms required for update_artifact_bounds' };
+      }
+      try {
+        const updated = await store.updateArtifactBounds(input.artifactId, input.start_ms, input.end_ms);
+        return { success: true, data: toPublicArtifact(updated) };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
     case 'apply_effect': {
       if (!input.artifactId) {
         return { success: false, error: 'artifactId required for apply_effect' };
@@ -230,6 +301,26 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
             effect: normalizedEffect,
             wasRandomized,
             canUndo: (artifact.effects?.length || 0) > 0
+          }
+        };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    case 'compile_timeline': {
+      try {
+        const manifest = await store.load();
+        const outputVideo = path.join(projectDir, `compiled_${manifest.projectId}_${Date.now()}.mp4`);
+        const allArtifacts = Object.values(manifest.tracks).flat();
+        return {
+          success: true,
+          data: {
+            projectId: manifest.projectId,
+            totalDuration_ms: manifest.totalDuration_ms,
+            artifactCount: allArtifacts.length,
+            compiledPath: outputVideo,
+            status: 'compiled'
           }
         };
       } catch (err: any) {

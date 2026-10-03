@@ -27,6 +27,41 @@
 | `tool_memory` | `memoryOp` (`read` \| `write`) | `note`, `toolName` | Reads or appends persistent tactical notes associated with a tool or engagement. |
 | `osint` | `target` | `osintType` (`domain` \| `ip` \| `username` \| `all`), `autoSearch`, `allowPrivateIps`, `sessionId` | Performs passive DNS/infrastructure recon (A, AAAA, MX, TXT, NS), suggests tailored search dorks, optionally kicks off automated multi-step search recon via SearchProvider fallback (see below), and persists reports to the cyber wiki with built-in SSRF guards. |
 | `osint_status` | `target` | `sessionId` | Polls a background `autoSearch` run started by a prior `osint` call — see below. |
+| `run_action` | `actionName`, `target`, `authorization` | `bridge`, `workspaceRoot`, `args` | Dispatches an action through a project-declared bridge subprocess (see below). |
+
+---
+
+## 🌉 Project Bridges (`run_action`)
+
+`run_action` is the general project-bridge mechanism: any project declares named bridges in `<workspaceRoot>/.free-llm-mcp/bridges.json`, and the server spawns the selected one as a subprocess — **argv array only, no shell**, multiple project roots per MCP server.
+
+```jsonc
+// <workspaceRoot>/.free-llm-mcp/bridges.json
+{
+  "bridges": {
+    "katana": { "command": ["python3", "cli/cyber_bridge.py"], "cwd": "." }
+  }
+}
+```
+
+```json
+{
+  "action": "run_action",
+  "bridge": "katana",
+  "actionName": "scan",
+  "target": "10.10.10.10",
+  "args": { "ports": "1-1000" },
+  "authorization": "ctf",
+  "workspaceRoot": "/path/to/project"
+}
+```
+
+- **`authorization` is required** — pass target framing (e.g. `ctf` | `lab` | `consent`). The bridge declaration in `bridges.json` specifies permitted framing via `authorizedFraming` (defaults to `["ctf", "lab", "consent"]` if omitted). If caller authorization framing is missing or not allowed by the bridge definition, `run_action` fails closed.
+- **`bridge` is optional** only when exactly one bridge is declared; multiple bridges require an explicit name.
+- **Trust model**: `bridges.json` is a capability token — whoever can write the project's config decides what may be spawned from that workspace root. `command` must be a non-empty string list; `cwd` must stay inside the workspace root.
+- **Workspace-root gate**: `workspaceRoot` must fall inside `BRIDGE_WORKSPACE_ROOTS` (comma/colon-separated list; unset = disabled / fail-closed), so a client can't point run_action at an arbitrary folder that happens to contain a `bridges.json`. Each bridge may declare an optional `env` string map — the subprocess otherwise gets only a minimal base environment (`PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `NO_COLOR`), never the server's API keys.
+- **Execution**: the payload `{ actionName, target, args, authorization }` is written to stdin as JSON; the bridge must print a single JSON **object** on stdout (that object is returned as `finding`). Limits: **60s timeout** (`BRIDGE_TIMEOUT_MS`, SIGKILL), **1 MB stdout** (excess = kill), **8192-char stderr tail**, non-zero exit or non-object JSON → `success: false` with the error.
+- **Harness fail-closed**: when run under `agent_harness`, the declaration's `cyberTools` allowlist gates which bridges may dispatch (a bridge not listed → `needs_approval`), and the role must also allowlist `cyber_tool`/`run_action` in its `tools`. See `agent_harness.md`.
 
 ---
 

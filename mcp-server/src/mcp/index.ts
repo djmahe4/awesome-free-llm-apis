@@ -620,17 +620,22 @@ export async function createMCPServer(): Promise<Server> {
       },
       {
         name: 'cyber_tool',
-        description: 'Educational cyber security coach plus registry/wiki manager for security binaries (sqlmap, nmap, ffuf). Never executes commands — it teaches the exact commands, explains why, tracks CTF decision graphs, and remembers per-tool run suggestions across sessions so the learner can resume where they left off. For osint with autoSearch:true, the search-provider dork lookups run in the BACKGROUND — the call returns immediately with searchStatus:"running"; poll with action:"osint_status" (same sessionId + target) until searchStatus:"done".',
+        description: 'Educational cyber security coach plus registry/wiki manager for security binaries (sqlmap, nmap, ffuf). Never executes commands — it teaches the exact commands, explains why, tracks CTF decision graphs, and remembers per-tool run suggestions across sessions so the learner can resume where they left off. The ONE exception is action "run_action": it spawns a PROJECT-DECLARED bridge subprocess from <workspaceRoot>/.free-llm-mcp/bridges.json (argv only, no shell) for an authorized ctf/lab/consent target — the project config decides what may run, and harness deployments additionally gate it behind their cyberTools allowlist. For osint with autoSearch:true, the search-provider dork lookups run in the BACKGROUND — the call returns immediately with searchStatus:"running"; poll with action:"osint_status" (same sessionId + target) until searchStatus:"done".',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            action: { type: 'string', enum: ['list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'osint', 'osint_status'], description: 'Cyber tool action' },
+            action: { type: 'string', enum: ['list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'osint', 'osint_status', 'run_action'], description: 'Cyber tool action' },
             toolName: { type: 'string', description: 'Security tool name (e.g. sqlmap, nmap, ffuf)' },
             githubUrl: { type: 'string', description: 'GitHub repository URL for tool registration' },
             sessionId: { type: 'string', description: 'Session/CTF-challenge id; keys the progress record and decision graph for learn/coach/save_graph/load_graph, and (with target) the background search run for osint/osint_status' },
             goal: { type: 'string', description: 'Natural-language objective for the learn action, e.g. "find SQLi on a lab web app"' },
             level: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Learner skill level; defaults to beginner' },
             observation: { type: 'string', description: 'For coach: what the learner ran and what they observed' },
+            bridge: { type: 'string', description: 'For run_action: name of the bridge in <workspaceRoot>/.free-llm-mcp/bridges.json; optional only when exactly one bridge is declared' },
+            workspaceRoot: { type: 'string', description: 'For run_action: project folder holding .free-llm-mcp/bridges.json (default: process.cwd()) — lets one server serve multiple project roots' },
+            actionName: { type: 'string', description: 'For run_action: the bridge\'s own action name (allowlisted bridge-side), e.g. a katana dispatch action' },
+            authorization: { type: 'string', enum: ['ctf', 'lab', 'consent'], description: 'For run_action (required): authorization framing for the target — only pass targets you are explicitly authorized to test' },
+            args: { type: 'object', description: 'For run_action: action-specific arguments forwarded verbatim to the bridge (validated bridge-side)' },
             graphNode: {
               type: 'object',
               description: 'For save_graph: a decision-graph node to add, optionally linked from a prior node',
@@ -708,11 +713,12 @@ export async function createMCPServer(): Promise<Server> {
           'a result immediately. Real execution (dryRun:false, no plan/pauseOnTaskPlan) runs in the',
           'BACKGROUND instead: local/cloud LLM patch generation over several files can legitimately take',
           'a long time for a large goal, so the call returns immediately with status:"running" and the',
-          'sessionId; poll with action:"status" (same sessionId) until it returns the final patch result.',
+          'sessionId; poll with action:"status" with that same sessionId (explicit caller ids are preserved',
+          'as in-memory aliases) or the same workspaceRoot, until it returns the final patch result.',
           'Use action:"abort" to cancel an in-flight background run after its current file.',
           '',
           'MULTI-TASK GOALS: pass pauseOnTaskPlan:true (or action:"plan") to decompose the goal into',
-          'tasks.md and pause; then call action:"resume" (same sessionId) to execute the next pending',
+          'tasks.md and pause; then call action:"resume" (same sessionId or workspaceRoot) to execute the next pending',
           'task — each resume call follows the same dryRun-decides-sync-vs-background rule above.',
           '',
           'PLANNING: decomposition uses a cloud model (via use_free_llm) purely to break the goal into',
@@ -737,7 +743,7 @@ export async function createMCPServer(): Promise<Server> {
             dryRun: { type: 'boolean', description: 'Whether to return the line-anchored patch plan without mutating disk, synchronously (default true). false triggers real background execution — see description.' },
             targetFiles: { type: 'array', items: { type: 'string' }, description: 'Explicit list of target file paths to edit or create (bypasses RAG location)' },
             topKFiles: { type: 'number', description: 'Maximum candidate files to locate with VectorStore RAG (default 5)' },
-            sessionId: { type: 'string', description: 'Session identifier for audit logging, snapshot caching, tasks.md pause/resume, and the background run key for status/abort. Reuse the same value across a plan→resume→status sequence.' },
+            sessionId: { type: 'string', description: 'Optional caller-chosen alias, preserved in memory: recorded on first use and accepted by every later status/abort/resume poll (workspaceRoot not required for polling). The canonical sessionId returned in results is always derived from workspaceRoot — stable per workspace, never rotates — so CAS history, checkpoints, and the run key stay unified even if ad-hoc ids are passed.' },
             verifyLspDiagnostics: { type: 'boolean', description: 'Verify syntactic/AST diagnostics before completing plan (default true)' },
             action: { type: 'string', enum: ['plan', 'execute', 'resume', 'status', 'abort'], description: '"plan" writes tasks.md and pauses; "execute" (default) runs the goal directly; "resume" advances the next pending tasks.md task; "status" polls a background run started by a prior dryRun:false call; "abort" cancels one.' },
             pauseOnTaskPlan: { type: 'boolean', description: 'Same effect as action:"plan" — decompose the goal into tasks.md and pause instead of executing' },
@@ -755,10 +761,11 @@ export async function createMCPServer(): Promise<Server> {
             },
             resolve: {
               type: 'object',
-              description: 'How to finalize a non-dry-run patch, or trigger a rollback',
+              description: 'How to finalize a non-dry-run patch, trigger a rollback, or undo a single file',
               properties: {
-                action: { type: 'string', enum: ['apply', 'rollback'], description: '"apply" writes patches to disk via the CAS-checkpointed atomic writer; "rollback" restores a prior CAS checkpoint (synchronous either way)' },
-                checkpointId: { type: 'string', description: 'For rollback: specific checkpoint to restore; defaults to the most recent one for this sessionId' },
+                action: { type: 'string', enum: ['apply', 'rollback', 'undo_file', 'file_history'], description: '"apply" writes patches to disk via the CAS-checkpointed atomic writer; "rollback" restores a prior CAS checkpoint; "undo_file" pops one per-file undo entry (depth 3) and restores that file; "file_history" read-only lists a file\'s undo versions — all synchronous' },
+                checkpointId: { type: 'string', description: 'For rollback: specific checkpoint to restore; defaults to the most recent one for this workspace session' },
+                filePath: { type: 'string', description: 'For undo_file / file_history: workspace-relative file path, e.g. "src/index.ts" (required for those actions)' },
               },
             },
             lspAction: { type: 'object', description: 'Optional direct LSP dispatch request (diagnostics/symbols/definition/references) instead of the full edit pipeline' },
@@ -786,7 +793,10 @@ export async function createMCPServer(): Promise<Server> {
           'INPUTS:',
           '  action (required)   — "deploy" | "resume" | "status" | "approvals" | "approve" | "reject" | "trace" | "tasks" | "abort".',
           '  runId (optional for deploy, required otherwise) — Identifies the run; deploy generates one if omitted.',
-          '  harness (optional)  — Declaration name (default "research-analysis").',
+          '  harness (optional)  — Declaration name (default "research-analysis") or a .yaml path.',
+          '              Bare names resolve from <workspace_root>/.free-llm-mcp/harness/<name>.yaml first (the shared',
+          '              artifacts dir every harness tool uses), then the legacy <workspace_root>/harness/<name>.yaml, then the built-in dir —',
+          '              external projects like ctf-katana can own custom harnesses in either workspace location.',
           '  goal (required for deploy) — The research/analysis objective.',
           '  workspace_root (optional) — Scopes memory writes and the run\'s on-disk state.',
           '  maxTokens (optional) — Override the declaration\'s default per-run token budget.',
@@ -836,7 +846,7 @@ export async function createMCPServer(): Promise<Server> {
           properties: {
             action: { type: 'string', enum: ['deploy', 'resume', 'rerun', 'reorchestrate', 'status', 'approvals', 'approve', 'reject', 'trace', 'tasks', 'abort'] },
             runId: { type: 'string', description: 'Run identifier. Required for every action except deploy (which generates one if omitted).' },
-            harness: { type: 'string', description: 'Harness declaration name (default "research-analysis")' },
+            harness: { type: 'string', description: 'Declaration name (default "research-analysis"); resolved from <workspace_root>/.free-llm-mcp/harness/<name>.yaml first, then <workspace_root>/harness/<name>.yaml, built-in dir last. A .yaml path is also accepted.' },
             goal: { type: 'string', description: 'Research/analysis objective (required for deploy)' },
             workspace_root: { type: 'string', description: 'Absolute workspace path — scopes memory writes and on-disk run state' },
             maxTokens: { type: 'number', description: 'Override the declaration\'s default per-run token budget' },
@@ -848,6 +858,30 @@ export async function createMCPServer(): Promise<Server> {
           },
           required: ['action'],
         },
+      },
+      {
+        name: 'movie_tool',
+        description: 'Vibe Movie Engine: multi-track media timeline management, asset generation (Pollinations keyframes, Kokoro voice, MusicGen audio), and DSP effects.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['init_project', 'get_timeline', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'apply_effect', 'undo_effect', 'compile_timeline'],
+              description: 'Action to perform on the timeline or media project'
+            },
+            projectId: { type: 'string', description: 'Target project ID' },
+            premise: { type: 'string', description: 'Story premise or scene description' },
+            track: { type: 'string', enum: ['video', 'vfx', 'bgm', 'bgm_drums', 'bgm_bass', 'bgm_melody', 'vocal', 'song', 'script', 'dialogue'] },
+            start_ms: { type: 'number', description: 'Start timestamp in milliseconds' },
+            end_ms: { type: 'number', description: 'End timestamp in milliseconds' },
+            label: { type: 'string', description: 'Artifact label' },
+            prompt: { type: 'string', description: 'Prompt for media generation' },
+            artifact_path: { type: 'string', description: 'Path to audio or video file' },
+            effect: { type: 'object', description: 'DSP effect descriptor (pitch, pan, tempo, reverb, eq, speed_ramp, lut, glitch)' }
+          },
+          required: ['action']
+        }
       }
     ],
   }));
@@ -968,6 +1002,13 @@ export async function createMCPServer(): Promise<Server> {
         response = {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
           isError: result?.success === false,
+        };
+      } else if (name === 'movie_tool') {
+        const { runMovieTool } = await import('../tools/movie-tool.js');
+        const result = await runMovieTool(args as any);
+        response = {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          isError: !result?.success,
         };
       } else {
         throw new Error(`Unknown tool: ${name}`);

@@ -75,6 +75,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         Harness & Multi-Agent
       </button>
+      <button class="tab-btn" data-tab="movie" role="tab" aria-selected="false" id="tab-movie">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+        Movie Studio
+      </button>
     </nav>
 
     <!-- ══════════════════════════════════════════════════════════
@@ -535,6 +539,7 @@
               <tr><td>ModelScope</td><td><code>MODELSCOPE_API_KEY</code></td><td><a href="https://modelscope.cn/my/myaccesstoken" target="_blank" rel="noopener noreferrer">modelscope.cn/my/myaccesstoken</a></td></tr>
               <tr><td>NVIDIA NIM</td><td><code>NVIDIA_API_KEY</code></td><td><a href="https://build.nvidia.com/explore/discover" target="_blank" rel="noopener noreferrer">build.nvidia.com/explore/discover</a></td></tr>
               <tr><td>Ollama Cloud</td><td><code>OLLAMA_API_KEY</code></td><td><a href="https://ollama.com/settings/keys" target="_blank" rel="noopener noreferrer">ollama.com/settings/keys</a></td></tr>
+              <tr><td>Ollama (Local)</td><td><code>OLLAMA_LOCAL_BASE_URL</code></td><td><a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer">ollama.com/download</a> &bull; <code>http://localhost:11434</code></td></tr>
               <tr><td>OpenRouter</td><td><code>OPENROUTER_API_KEY</code></td><td><a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">openrouter.ai/keys</a></td></tr>
               <tr><td>SiliconFlow</td><td><code>SILICONFLOW_API_KEY</code></td><td><a href="https://cloud.siliconflow.cn/account/ak" target="_blank" rel="noopener noreferrer">cloud.siliconflow.cn/account/ak</a></td></tr>
               <tr><td>Pollinations AI</td><td><code>POLLINATIONS_API_KEY</code></td><td><a href="https://pollinations.ai" target="_blank" rel="noopener noreferrer">pollinations.ai</a></td></tr>
@@ -892,10 +897,10 @@
             <div class="stat-card">
               <div class="stat-label c-cyan">Total Injected Context</div>
               <div class="stat-value c-cyan" id="steering-payload-tokens">0 tok</div>
-              <div class="stat-sub">Live 5-layer memory footprint</div>
+              <div class="stat-sub">Measured messages + system prompt</div>
             </div>
             <div class="stat-card">
-              <div class="stat-label c-green">Net Token Savings</div>
+              <div class="stat-label c-green" id="steering-savings-label">Net Token Savings</div>
               <div class="stat-value c-green" id="steering-token-savings">0.0%</div>
               <div class="stat-sub" id="steering-savings-desc">0 tokens saved vs Agentic</div>
             </div>
@@ -1137,6 +1142,22 @@
               <span style="display:flex;align-items:center;gap:4px;"><span style="width:9px;height:9px;border-radius:50%;background:#ec4899;display:inline-block;"></span> Keyword / Collision</span>
             </div>
           </div>
+      </div>
+
+      <!-- Harness-Wiki Nexus Knowledge Base Card -->
+      <div class="card" id="harness-wiki-nexus" style="margin-bottom:20px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="display:flex;align-items:center;gap:8px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-blue"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            Knowledge Base Nexus (.free-llm-mcp/wiki)
+          </span>
+          <span id="harness-wiki-count" class="badge badge-blue">0 pages indexed</span>
+        </div>
+        <div class="card-body" style="padding:14px;">
+          <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:12px;">Active semantic context and ADRs linked to agent scopes. Click any page to open in the Wiki tab.</p>
+          <div id="harness-wiki-list" style="display:flex;flex-wrap:wrap;gap:8px;">
+            <span style="font-size:.75rem;color:var(--text-muted);font-style:italic;">No wiki documents linked to current session.</span>
+          </div>
         </div>
       </div>
 
@@ -1206,12 +1227,208 @@
               <div id="harness-trace-view" class="diff-viewer" style="height:260px;overflow-y:auto;background:rgba(0,0,0,0.25);">No trace events</div>
             </div>
           </div>
+
+          <div style="margin-top:16px;">
+            <h4 style="font-size:.82rem;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">Session Memory (last turns)</h4>
+            <div id="harness-session-memory-view" class="diff-viewer" style="height:180px;overflow-y:auto;white-space:pre-wrap;background:rgba(0,0,0,0.25);">No session memory entries yet</div>
+          </div>
         </div>
       </div>
 
     </section>
 
+    <!-- ══════════════════════════════════════════════════════════
+         TAB: MOVIE STUDIO & TIMELINE VISUALIZER
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-movie" role="tabpanel" aria-labelledby="tab-movie">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h2 style="font-size:1.25rem;font-weight:700;letter-spacing:-.5px;display:flex;align-items:center;gap:8px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+            Movie Studio &amp; Multi-Track Timeline
+          </h2>
+          <p style="font-size:.8rem;color:var(--text-muted);margin-top:2px;">Deterministic timeline sequencing, generative media slot proposals, beat snapping, and real-time DSP effects.</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <input type="text" id="movie-project-input" placeholder="Project ID" value="default" style="width:160px;font-size:.8rem;padding:6px 12px;">
+          <input type="text" id="movie-premise-input" placeholder="Creative premise..." style="width:240px;font-size:.8rem;padding:6px 12px;">
+          <button id="movie-init-btn" class="btn btn-secondary btn-sm">Init Project</button>
+          <button id="movie-propose-btn" class="btn btn-primary btn-sm">✨ Propose Slots</button>
+          <button id="movie-compile-btn" class="btn btn-primary btn-sm" style="background:var(--accent-purple);border-color:var(--accent-purple);">⚡ Compile Final Movie</button>
+        </div>
+      </div>
+
+      <!-- Dedicated Live Preview Stage & Audio Waveform Visualizer -->
+      <div style="display:grid;grid-template-columns:360px 1fr;gap:16px;margin-bottom:16px;">
+        <div class="card" style="margin-bottom:0;display:flex;flex-direction:column;">
+          <div class="card-header" style="padding:8px 14px;">
+            <span class="card-title" style="font-size:.8rem;display:flex;align-items:center;gap:6px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/></svg>
+              Live Video Preview
+            </span>
+            <span id="movie-preview-status" class="badge badge-gray" style="font-size:0.65rem;">Idle</span>
+          </div>
+          <div class="card-body" style="padding:0;background:#05050a;display:flex;align-items:center;justify-content:center;min-height:190px;position:relative;border-radius:0 0 var(--radius-sm) var(--radius-sm);overflow:hidden;">
+            <video id="movie-preview-video" style="width:100%;height:100%;max-height:220px;object-fit:contain;display:none;" playsinline></video>
+            <div id="movie-preview-placeholder" style="text-align:center;padding:20px;color:var(--text-muted);font-size:.75rem;">
+              <div style="font-size:2rem;margin-bottom:6px;opacity:.6;">🎬</div>
+              <div>Scrub timeline or play to preview video frame</div>
+              <div id="movie-active-cue" style="margin-top:6px;font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);font-size:.7rem;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:0;display:flex;flex-direction:column;">
+          <div class="card-header" style="padding:8px 14px;display:flex;align-items:center;justify-content:space-between;">
+            <span class="card-title" style="font-size:.8rem;display:flex;align-items:center;gap:6px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-purple"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              Audio Master &amp; DSP Frequency Oscilloscope
+            </span>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <span id="movie-audio-fx-tag" class="badge badge-purple" style="font-size:.65rem;">Direct Out</span>
+            </div>
+          </div>
+          <div class="card-body" style="padding:0;background:#070712;position:relative;flex:1;min-height:190px;overflow:hidden;border-radius:0 0 var(--radius-sm) var(--radius-sm);">
+            <canvas id="movie-waveform-canvas" style="width:100%;height:100%;display:block;"></canvas>
+            <div style="position:absolute;bottom:8px;left:12px;font-size:.68rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">
+              Oscilloscope: <span id="movie-audio-meter">0.0 dB</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls & Transport Bar -->
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-body" style="padding:12px 18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <button id="movie-play-btn" class="btn btn-primary btn-sm" style="min-width:80px;">▶ Play</button>
+            <span id="movie-timecode-display" style="font-family:'JetBrains Mono',monospace;font-size:1.15rem;font-weight:700;color:var(--accent-cyan);">00:00.000</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:.78rem;color:var(--text-muted);">Duration:</span>
+            <select id="movie-max-duration-select" class="session-input" style="padding:4px 8px;font-size:.75rem;">
+              <option value="30000">30s Short</option>
+              <option value="60000" selected>60s Standard</option>
+              <option value="120000">120s Cinematic</option>
+              <option value="300000">5m Feature</option>
+            </select>
+            <span style="font-size:.78rem;color:var(--text-muted);">Zoom:</span>
+            <button id="movie-zoom-out" class="btn btn-secondary btn-sm" style="padding:4px 10px;">−</button>
+            <button id="movie-zoom-in" class="btn btn-secondary btn-sm" style="padding:4px 10px;">+</button>
+            <button id="movie-load-btn" class="btn btn-secondary btn-sm">🔄 Reload</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Timeline Main Viewport -->
+      <div class="card" style="margin-bottom:20px;overflow:hidden;">
+        <div class="movie-timeline-wrapper" style="overflow-x:auto;position:relative;background:rgba(10,10,18,0.95);min-height:340px;">
+          <!-- Ruler -->
+          <div id="movie-timeline-ruler" class="movie-ruler-container" style="height:28px;position:relative;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,0.02);cursor:pointer;" title="Click or scrub to reposition playhead"></div>
+          <!-- Playhead Cursor Line -->
+          <div id="movie-playhead" class="movie-playhead-line" style="position:absolute;top:0;bottom:0;width:2px;background:#ef4444;z-index:30;pointer-events:none;transform:translateX(0);">
+            <div style="width:10px;height:10px;background:#ef4444;border-radius:50%;margin-left:-4px;margin-top:2px;"></div>
+          </div>
+          <!-- Lanes -->
+          <div id="movie-timeline-lanes" class="movie-lanes-container" style="position:relative;padding-bottom:16px;"></div>
+        </div>
+      </div>
+    </section>
+
   </main>
+
+  <!-- ─── DSP Effect Modal ──────────────────────────────────────── -->
+  <div id="movie-fx-modal" class="modal-backdrop" role="dialog" aria-modal="true" style="display:none;align-items:center;justify-content:center;">
+    <div class="modal-card" style="max-width:480px;">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">DSP Audio/Video FX Processor</h3>
+          <span id="fx-artifact-title" class="badge badge-cyan" style="font-size:0.65rem;">Slot Modifier</span>
+        </div>
+        <button id="movie-fx-close-btn" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:16px;">
+        <div style="margin-bottom:12px;">
+          <label class="field-label">Effect Type</label>
+          <select id="fx-type-select" class="session-input" style="width:100%;">
+            <option value="reverb">Reverb / Spatial Room Simulation</option>
+            <option value="pitch">Pitch Shift (Semitones)</option>
+            <option value="lut">Color LUT (Grading)</option>
+            <option value="eq">3-Band Equalizer (Bass/Mid/Treble)</option>
+            <option value="tempo">Tempo Warp</option>
+          </select>
+        </div>
+
+        <div id="fx-reverb-controls">
+          <div style="margin-bottom:10px;">
+            <label class="field-label">Macro Preset</label>
+            <select id="fx-preset-select" class="session-input" style="width:100%;">
+              <option value="studio">Studio Room (Tight &amp; Clear)</option>
+              <option value="cathedral">Cathedral (Deep Reverberation)</option>
+              <option value="canyon">Canyon Echo (Long Slapback)</option>
+              <option value="lofi">Lo-Fi Vintage Space</option>
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px;">
+            <div>
+              <label class="field-label">Wet / Dry Mix (<span id="fx-wet-val">80%</span>)</label>
+              <input type="range" id="fx-wet-slider" min="10" max="100" value="80" style="width:100%;">
+            </div>
+            <div>
+              <label class="field-label">Decay Length (<span id="fx-decay-val">0.4s</span>)</label>
+              <input type="range" id="fx-decay-slider" min="1" max="50" value="4" style="width:100%;">
+            </div>
+          </div>
+        </div>
+
+        <div id="fx-pitch-controls" style="margin-bottom:12px;display:none;">
+          <label class="field-label">Pitch Shift: <span id="fx-semitone-val">0 semitones</span></label>
+          <input type="range" id="fx-semitone-slider" min="-12" max="12" value="0" style="width:100%;">
+        </div>
+
+        <div id="fx-eq-controls" style="margin-bottom:12px;display:none;">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+            <div>
+              <label class="field-label">Bass (<span id="fx-bass-val">0dB</span>)</label>
+              <input type="range" id="fx-bass-slider" min="-12" max="12" value="0" style="width:100%;">
+            </div>
+            <div>
+              <label class="field-label">Mid (<span id="fx-mid-val">0dB</span>)</label>
+              <input type="range" id="fx-mid-slider" min="-12" max="12" value="0" style="width:100%;">
+            </div>
+            <div>
+              <label class="field-label">Treble (<span id="fx-treble-val">0dB</span>)</label>
+              <input type="range" id="fx-treble-slider" min="-12" max="12" value="0" style="width:100%;">
+            </div>
+          </div>
+        </div>
+
+        <div id="fx-tempo-controls" style="margin-bottom:12px;display:none;">
+          <label class="field-label">Tempo Speed Warp: <span id="fx-tempo-val">1.0x</span></label>
+          <input type="range" id="fx-tempo-slider" min="5" max="20" value="10" step="1" style="width:100%;">
+          <div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;">0.5x (half-speed) to 2.0x (double-speed) with atempo pitch compensation.</div>
+        </div>
+
+        <div id="fx-lut-controls" style="margin-bottom:12px;display:none;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              <label class="field-label">Contrast: <span id="fx-contrast-val">1.25</span></label>
+              <input type="range" id="fx-contrast-slider" min="5" max="25" value="12" style="width:100%;">
+            </div>
+            <div>
+              <label class="field-label">Saturation: <span id="fx-saturation-val">1.3</span></label>
+              <input type="range" id="fx-saturation-slider" min="5" max="25" value="13" style="width:100%;">
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-top:16px;">
+          <button id="fx-undo-btn" class="btn btn-secondary btn-sm">↺ Undo Last FX</button>
+          <button id="fx-apply-btn" class="btn btn-primary btn-sm">Apply FX &amp; Remix</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- ─── Tool Documentation Modal ──────────────────────────────── -->
   <div id="tool-docs-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-tool-title" style="display:none;">
@@ -1238,6 +1455,8 @@
     <a href="https://github.com/djmahe4/awesome-free-llm-apis" target="_blank" rel="noopener">GitHub Repo</a>
   </footer>
 
+  <script src="/harness-viz.js"></script>
+  <script src="/movie-timeline.js"></script>
   <script src="/app.js"></script>
   <script src="/dag-blackboard.js"></script>
   <script src="/productivity-ui.js"></script>
