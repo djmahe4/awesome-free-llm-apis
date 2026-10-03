@@ -331,6 +331,7 @@
             <label class="field-label" style="margin:0;white-space:nowrap;" for="wiki-workspace-input">Workspace</label>
             <input type="text" id="wiki-workspace-input" class="session-input" placeholder="workspace path used to look up its wiki">
             <button class="btn btn-primary btn-sm" id="wiki-load-btn">Load Wiki</button>
+            <button class="btn btn-outline btn-sm" id="wiki-new-page-btn">New Page</button>
           </div>
         </div>
       </div>
@@ -353,6 +354,124 @@
             <div class="conv-empty">Select a page from the list.</div>
           </div>
           <div class="wiki-related" id="wiki-related"></div>
+        </div>
+      </div>
+
+      <div class="wiki-aux-grid">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Workspace Line Search</span>
+          </div>
+          <div class="card-body">
+            <div class="session-controls">
+              <input type="text" id="wiki-search-input" class="session-input" placeholder="Search page lines (local index)">
+              <button class="btn btn-outline btn-sm" id="wiki-search-btn">Search</button>
+            </div>
+            <div id="wiki-search-results" class="wiki-search-results">
+              <div class="conv-empty">No line matches yet.</div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Typed Link Preview</span>
+          </div>
+          <div class="card-body" id="wiki-reference-viewer">
+            <div class="conv-empty">Typed link previews will appear here.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <div class="card-header">
+          <span class="card-title">Wiki Editor</span>
+          <span id="wiki-save-status" style="font-size:.72rem;color:var(--text-muted);margin-left:auto;"></span>
+          <button class="btn btn-primary btn-sm" id="wiki-save-btn">Save</button>
+        </div>
+        <div class="card-body">
+          <textarea id="wiki-editor" class="knowledge-box" placeholder="Select or create a page to edit..." style="min-height:220px;"></textarea>
+          <div class="wiki-editor-actions">
+            <button class="btn btn-outline btn-sm" id="wiki-ask-llm-btn">Ask LLM</button>
+            <button class="btn btn-outline btn-sm" id="wiki-llm-insert-btn" style="display:none;">Insert</button>
+            <button class="btn btn-outline btn-sm" id="wiki-llm-copy-btn" style="display:none;">Copy</button>
+            <button class="btn btn-outline btn-sm" id="wiki-llm-discard-btn" style="display:none;">Discard</button>
+          </div>
+          <pre id="wiki-llm-output" class="code-block" style="margin-top:10px;max-height:180px;overflow:auto;"></pre>
+        </div>
+      </div>
+
+      <div class="wiki-aux-grid" style="margin-top:16px;">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Journal</span>
+          </div>
+          <div class="card-body">
+            <div class="session-controls">
+              <label class="field-label" style="margin:0;white-space:nowrap;" for="journal-daily-date">Date</label>
+              <input type="date" id="journal-daily-date" class="session-input" style="max-width:180px;">
+              <button class="btn btn-outline btn-sm" id="journal-open-daily-btn">Open Daily</button>
+              <button class="btn btn-outline btn-sm" id="journal-open-monthly-btn">Open Monthly</button>
+            </div>
+            <div style="font-size:.74rem;color:var(--text-muted);margin:8px 0 12px;">
+              Carry-forward prompts appear when creating a daily page with incomplete prior checklist items.
+            </div>
+            <div class="section-sub" style="margin-bottom:6px;">Checklist</div>
+            <div class="session-controls" style="margin-bottom:8px;">
+              <input type="text" id="journal-checklist-input" class="session-input" placeholder="Add checklist item">
+              <button class="btn btn-outline btn-sm" id="journal-checklist-add-btn">Add</button>
+            </div>
+            <div id="journal-checklist" class="journal-checklist">
+              <div class="conv-empty">No checklist items on this page.</div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Journal Templates</span>
+          </div>
+          <div class="card-body">
+            <div class="session-controls" style="margin-bottom:10px;">
+              <label class="field-label" style="margin:0;white-space:nowrap;" for="journal-template-period">Period</label>
+              <select id="journal-template-period" class="session-input" style="max-width:160px;">
+                <option value="daily">Daily</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+
+            <div class="wiki-template-block">
+              <div class="section-sub">Sections</div>
+              <select id="journal-template-section-select" class="session-input" size="6" style="width:100%;margin-bottom:8px;"></select>
+              <div class="session-controls" style="margin-bottom:8px;">
+                <input type="text" id="journal-template-section-name" class="session-input" placeholder="Section title">
+              </div>
+              <div class="session-controls">
+                <button class="btn btn-outline btn-xs" id="template-section-add-btn">Add</button>
+                <button class="btn btn-outline btn-xs" id="template-section-remove-btn">Remove</button>
+                <button class="btn btn-outline btn-xs" id="template-section-rename-btn">Rename</button>
+                <button class="btn btn-outline btn-xs" id="template-section-up-btn">↑</button>
+                <button class="btn btn-outline btn-xs" id="template-section-down-btn">↓</button>
+                <button class="btn btn-outline btn-xs" id="template-section-toggle-btn">Enable/Disable</button>
+              </div>
+            </div>
+
+            <div class="wiki-template-block">
+              <div class="section-sub">Template Checklist Items</div>
+              <select id="journal-template-checklist-select" class="session-input" size="4" style="width:100%;margin-bottom:8px;"></select>
+              <div class="session-controls" style="margin-bottom:8px;">
+                <input type="text" id="journal-template-checklist-text" class="session-input" placeholder="Checklist item text">
+              </div>
+              <div class="session-controls">
+                <button class="btn btn-outline btn-xs" id="template-checklist-add-btn">Add</button>
+                <button class="btn btn-outline btn-xs" id="template-checklist-remove-btn">Remove</button>
+                <button class="btn btn-outline btn-xs" id="template-checklist-rename-btn">Rename</button>
+              </div>
+            </div>
+
+            <div class="session-controls" style="margin-top:12px;">
+              <button class="btn btn-primary btn-sm" id="journal-template-save-btn">Save Template</button>
+              <button class="btn btn-outline btn-sm" id="journal-template-reset-btn">Reset Defaults</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1457,6 +1576,8 @@
 
   <script src="/harness-viz.js"></script>
   <script src="/movie-timeline.js"></script>
+  <script src="/wiki-link-parser.js"></script>
+  <script src="/wiki-workspace.js"></script>
   <script src="/app.js"></script>
   <script src="/dag-blackboard.js"></script>
   <script src="/productivity-ui.js"></script>

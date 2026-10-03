@@ -1263,7 +1263,7 @@ export function createExpressApp(): express.Express {
           }
 
           // Disallow traversal outside allowed file extensions or root boundary if relative
-          const allowedExts = new Set(['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.flac', '.png', '.jpg', '.jpeg', '.webp']);
+          const allowedExts = new Set(['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.flac', '.png', '.jpg', '.jpeg', '.webp', '.pdf']);
           const ext = path.extname(resolvedPath).toLowerCase();
           if (!allowedExts.has(ext)) {
             return res.status(400).json({ error: `File type ${ext} not permitted for media preview` });

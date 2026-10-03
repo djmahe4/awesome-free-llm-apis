@@ -735,6 +735,110 @@ select option { background: var(--bg-elevated); }
 }
 .wiki-link-chip:hover { background: rgba(255,255,255,.1); }
 .wiki-link { color: var(--accent-cyan); cursor: pointer; text-decoration: underline; }
+.wiki-typed-link {
+  border-bottom: 1px dotted rgba(34, 211, 238, 0.7);
+  text-decoration: none;
+}
+.wiki-link-image::before { content: '🖼 '; }
+.wiki-link-audio::before { content: '🎧 '; }
+.wiki-link-video::before { content: '🎬 '; }
+.wiki-link-pdf::before { content: '📄 '; }
+.wiki-link-quote::before { content: '❝ '; }
+.wiki-aux-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+.wiki-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.wiki-search-item {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,.03);
+}
+.wiki-search-title {
+  font-size: .78rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.wiki-search-meta {
+  font-size: .7rem;
+  color: var(--text-muted);
+}
+.wiki-search-line {
+  font-size: .74rem;
+  margin: 4px 0 8px;
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+}
+.wiki-ref-image {
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.wiki-ref-media {
+  width: 100%;
+}
+.wiki-ref-pdf-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.wiki-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+mark.wiki-line-hit {
+  background: rgba(250, 204, 21, 0.35);
+  color: inherit;
+  border-radius: 3px;
+}
+.journal-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.journal-check-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto auto auto;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  background: rgba(255,255,255,.02);
+}
+.journal-check-item:focus {
+  outline: 2px solid rgba(56, 189, 248, 0.65);
+}
+.journal-check-text.done {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+.journal-check-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .66rem;
+  color: var(--text-muted);
+}
+.wiki-template-block {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: rgba(255,255,255,.02);
+}
 
 /* ─── Chat Bubbles ─────────────────────────────────────────────── */
 .chat-msg {
@@ -1271,4 +1375,3 @@ select option { background: var(--bg-elevated); }
   background: rgba(255, 255, 255, 0.25);
   color: #fff;
 }
-
