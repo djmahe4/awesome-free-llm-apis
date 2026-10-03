@@ -25,10 +25,12 @@
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { splitRoots, isInsideRoot as insideRoot } from '../utils/workspace-roots.js';
 
 export interface BridgeEntry {
   command: string[];
   cwd?: string;
+  env?: Record<string, string>;
 }
 
 export interface BridgesConfig {
@@ -47,6 +49,21 @@ export function bridgesConfigPath(workspaceRoot: string): string {
 function tail(text: string, max = 500): string {
   const t = (text || '').trim();
   return t.length <= max ? t : `…${t.slice(-max)}`;
+}
+
+export function bridgeWorkspaceRoots(): string[] {
+  return splitRoots(process.env.BRIDGE_WORKSPACE_ROOTS);
+}
+
+export function assertBridgeWorkspaceRootAllowed(workspaceRoot: string): void {
+  const resolved = path.resolve(workspaceRoot);
+  const roots = bridgeWorkspaceRoots();
+  if (roots.length > 0) {
+    if (roots.some(root => insideRoot(resolved, root))) return;
+    throw new Error(`workspace_root '${workspaceRoot}' is not permitted — BRIDGE_WORKSPACE_ROOTS allows: ${roots.join(', ')}`);
+  }
+  if (insideRoot(resolved, process.cwd())) return;
+  throw new Error(`workspace_root '${workspaceRoot}' is outside the server working directory (${path.resolve(process.cwd())}) — set BRIDGE_WORKSPACE_ROOTS to the project folder(s) whose bridges.json may run`);
 }
 
 async function selectBridge(workspaceRoot: string, bridgeName?: string): Promise<{ name: string; entry: BridgeEntry }> {
@@ -98,7 +115,26 @@ async function selectBridge(workspaceRoot: string, bridgeName?: string): Promise
     throw new Error(`Bridge '${name}' cwd '${entry.cwd}' escapes the workspace root — cwd must stay inside ${workspaceRoot} (${configPath})`);
   }
 
+  if (entry.env !== undefined) {
+    if (!entry.env || typeof entry.env !== 'object' || Array.isArray(entry.env)
+      || Object.values(entry.env).some(v => typeof v !== 'string')) {
+      throw new Error(`Bridge '${name}' env must be a mapping of string values in ${configPath}`);
+    }
+  }
+
   return { name, entry: { ...entry, cwd } };
+}
+
+const BASE_ENV_KEYS = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TZ', 'NO_COLOR'];
+
+export function buildBridgeEnv(entry: BridgeEntry): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of BASE_ENV_KEYS) {
+    const value = process.env[key];
+    if (typeof value === 'string') env[key] = value;
+  }
+  if (!env.PATH) env.PATH = '/usr/local/bin:/usr/bin:/bin';
+  return { ...env, ...(entry.env ?? {}) };
 }
 
 function buildArgv(entry: BridgeEntry): { file: string; args: string[] } {
@@ -122,6 +158,7 @@ export async function runProjectBridge(opts: {
   args?: Record<string, unknown>;
   authorization: string;
 }): Promise<{ bridge: string; finding: unknown }> {
+  assertBridgeWorkspaceRootAllowed(opts.workspaceRoot);
   const { name, entry } = await selectBridge(opts.workspaceRoot, opts.bridge);
   const { file, args } = buildArgv(entry);
   const payload = JSON.stringify({
@@ -135,7 +172,7 @@ export async function runProjectBridge(opts: {
     let settled = false;
     const done = (fn: () => void) => { if (!settled) { settled = true; fn(); } };
 
-    const child = spawn(file, args, { cwd: entry.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(file, args, { cwd: entry.cwd, env: buildBridgeEnv(entry), stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stdoutBytes = 0;
     let stderr = '';

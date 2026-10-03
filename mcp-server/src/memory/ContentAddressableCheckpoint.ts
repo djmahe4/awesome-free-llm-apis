@@ -13,6 +13,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'fs-extra';
+import { resolveWithin } from '../utils/workspace-roots.js';
 
 export interface CheckpointManifest {
   checkpointId: string;
@@ -84,13 +85,12 @@ export class ContentAddressableStore {
     }
 
     const resolvedRoot = path.resolve(resolvedWsRoot);
-    const fullPath = path.resolve(resolvedRoot, relPath);
-    if (!fullPath.startsWith(resolvedRoot + path.sep) && fullPath !== resolvedRoot) {
+    const fullPath = resolveWithin(resolvedRoot, relPath);
+    if (!fullPath) {
       throw new Error(`Security error: invalid relative path in file history: ${relPath}`);
     }
 
-    const prior = entry.shift()!;
-    if (entry.length === 0) this.fileHistory.delete(key);
+    const prior = entry[0];
 
     if (prior === null) {
       await fs.remove(fullPath).catch(() => { /* already gone */ });
@@ -100,6 +100,9 @@ export class ContentAddressableStore {
       await fs.writeFile(tmpPath, prior, 'utf-8');
       await fs.rename(tmpPath, fullPath);
     }
+
+    entry.shift();
+    if (entry.length === 0) this.fileHistory.delete(key);
 
     return { restored: true, remainingDepth: entry.length };
   }
@@ -211,9 +214,9 @@ export class ContentAddressableStore {
     const restoredFiles: string[] = [];
     const resolvedRoot = path.resolve(workspaceRoot);
     for (const [relPath, content] of Object.entries(restoredMap)) {
-      const fullPath = path.resolve(resolvedRoot, relPath);
-      // Path traversal guard: must stay within workspaceRoot
-      if (!fullPath.startsWith(resolvedRoot + path.sep) && fullPath !== resolvedRoot) {
+      const fullPath = resolveWithin(resolvedRoot, relPath);
+      // Path traversal guard: must stay within workspaceRoot (symlinks resolved)
+      if (!fullPath) {
         throw new Error(`Security error: invalid relative path in CAS checkpoint: ${relPath}`);
       }
       // Write atomically via temp file
@@ -327,7 +330,9 @@ export class ContentAddressableStore {
       for (const name of blobNames) {
         if (name.endsWith('.tmp')) continue;
         try {
-          this.blobs.set(name, await fs.readFile(path.join(casDir, 'blobs', name), 'utf-8'));
+          const content = await fs.readFile(path.join(casDir, 'blobs', name), 'utf-8');
+          if (this.hashContent(content) !== name) continue; // corrupt/tampered blob
+          this.blobs.set(name, content);
         } catch {
           // a single unreadable blob must not block the rest
         }
@@ -383,11 +388,24 @@ export class ContentAddressableStore {
       fileHistory?: Record<string, Array<string | null>>;
     } = { version: 1, manifests: [], fileHistory: {} };
     let hadIndex = false;
-    try {
-      index = JSON.parse(await fs.readFile(indexPath, 'utf-8'));
-      hadIndex = true;
-    } catch {
-      // no/corrupt index: survivors = ∅, so every blob on disk is an orphan
+    let unreadableIndex = false;
+    const rawIndex = await fs.readFile(indexPath, 'utf-8').catch((err: any) => {
+      if (err?.code === 'ENOENT') return null;
+      unreadableIndex = true;
+      return null;
+    });
+    if (unreadableIndex) return result;
+    if (rawIndex !== null) {
+      try {
+        const parsed = JSON.parse(rawIndex);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('corrupt index');
+        if (parsed.manifests !== undefined && !Array.isArray(parsed.manifests)) throw new Error('corrupt index');
+        if (parsed.fileHistory !== undefined && (typeof parsed.fileHistory !== 'object' || parsed.fileHistory === null)) throw new Error('corrupt index');
+        index = parsed;
+        hadIndex = true;
+      } catch {
+        return result; // corrupt index: abort GC entirely — never treat referenced blobs as orphans
+      }
     }
 
     const ttl = Number(process.env.CAS_TTL_MS) || 86_400_000;

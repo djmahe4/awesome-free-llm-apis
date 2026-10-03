@@ -143,4 +143,58 @@ describe('CodingAgentsHandler — stable workspace sessionId', () => {
     const status2 = await CodingAgentsHandler({ goal: 'poll', sessionId: canonical, action: 'status' });
     expect(status2.sessionId).toBe(canonical);
   });
+
+  it('does not reuse an alias registered under a different workspace', async () => {
+    const a = await CodingAgentsHandler({
+      goal: 'inspect ws1',
+      workspaceRoot: ws1,
+      dryRun: true,
+      topKFiles: 1,
+      verifyLspDiagnostics: false,
+      sessionId: 'shared-id',
+    });
+    const b = await CodingAgentsHandler({
+      goal: 'inspect ws2',
+      workspaceRoot: ws2,
+      dryRun: true,
+      topKFiles: 1,
+      verifyLspDiagnostics: false,
+      sessionId: 'shared-id',
+    });
+
+    expect(a.sessionId).toMatch(/^omp-ws-/);
+    expect(b.sessionId).not.toBe(a.sessionId);
+
+    const statusB = await CodingAgentsHandler({
+      goal: 'poll', workspaceRoot: ws2, sessionId: 'shared-id', action: 'status',
+    });
+    expect(statusB.sessionId).toBe(b.sessionId);
+
+    const statusA = await CodingAgentsHandler({
+      goal: 'poll', workspaceRoot: ws1, sessionId: 'shared-id', action: 'status',
+    });
+    expect(statusA.sessionId).toBe(a.sessionId);
+  });
+
+  it('ignores another workspace\'s canonical sessionId for file I/O actions', async () => {
+    const a = await CodingAgentsHandler({
+      goal: 'inspect ws1',
+      workspaceRoot: ws1,
+      dryRun: true,
+      topKFiles: 1,
+      verifyLspDiagnostics: false,
+    });
+
+    const b = await CodingAgentsHandler({
+      goal: 'inspect ws2 with foreign canonical id',
+      workspaceRoot: ws2,
+      dryRun: true,
+      topKFiles: 1,
+      verifyLspDiagnostics: false,
+      sessionId: a.sessionId,
+    });
+
+    expect(b.sessionId).not.toBe(a.sessionId);
+    expect(b.sessionId).toMatch(/^omp-ws-/);
+  });
 });

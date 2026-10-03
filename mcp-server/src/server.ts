@@ -62,6 +62,7 @@ import { initFirebase, syncStats, getLeaderboard, getUserStats, getRecentSearchL
 import { SearchProviderRegistry } from './search/registry.js';
 import { withFileLock } from './utils/file-lock.js';
 import { writeFileAtomic } from './utils/FileUtils.js';
+import { resolvePathWithinRoots, pathParamWithinRoots, relativeSegmentError } from './utils/workspace-roots.js';
 import { WorkspaceScanner } from './cache/workspace.js';
 import { STATE_FILE } from './pipeline/middlewares/constants.js';
 
@@ -583,6 +584,11 @@ export function createExpressApp(): express.Express {
               break;
             }
             case 'movie_tool': {
+              const paramGuard = pathParamWithinRoots(params.projectDir, 'projectDir') ?? relativeSegmentError(params.projectId, 'projectId');
+              if (paramGuard) {
+                res.status(400).json({ error: paramGuard });
+                return;
+              }
               const { runMovieTool } = await import('./tools/movie-tool.js');
               result = await runMovieTool(params);
               break;
@@ -1209,8 +1215,13 @@ export function createExpressApp(): express.Express {
       app.post('/api/movie_tool', express.json({ limit: '10mb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
+          const body = req.body || {};
+          const paramGuard = pathParamWithinRoots(body.projectDir, 'projectDir') ?? relativeSegmentError(body.projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
           const { runMovieTool } = await import('./tools/movie-tool.js');
-          const result = await runMovieTool(req.body || {});
+          const result = await runMovieTool(body);
           res.json(result);
         } catch (err: any) {
           res.status(500).json({ success: false, error: String(err?.message || err) });
@@ -1221,6 +1232,10 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const { projectId } = req.params;
+          const paramGuard = relativeSegmentError(projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
           const { runMovieTool } = await import('./tools/movie-tool.js');
           const result = await runMovieTool({ action: 'get_timeline', projectId });
           res.json(result);
@@ -1238,9 +1253,10 @@ export function createExpressApp(): express.Express {
             return res.status(400).json({ error: 'Valid file parameter required' });
           }
 
-          const resolvedPath = path.isAbsolute(rawFile)
-            ? path.normalize(rawFile)
-            : path.resolve(process.cwd(), rawFile);
+          const resolvedPath = resolvePathWithinRoots(rawFile);
+          if (!resolvedPath) {
+            return res.status(403).json({ error: 'File is outside the allowed roots (WORKSPACE_ROOTS)' });
+          }
 
           // Disallow traversal outside allowed file extensions or root boundary if relative
           const allowedExts = new Set(['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.flac', '.png', '.jpg', '.jpeg', '.webp']);
@@ -1264,13 +1280,20 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const projectId = (req.query.projectId as string) || 'default';
+          const projectIdGuard = relativeSegmentError(projectId, 'projectId');
+          if (projectIdGuard) {
+            return res.status(400).json({ success: false, error: projectIdGuard });
+          }
           let projectDir: string | undefined = undefined;
           const rawWorkspace = req.query.workspace as string;
           if (rawWorkspace && typeof rawWorkspace === 'string') {
             const trimmed = rawWorkspace.trim();
-            if (trimmed && !trimmed.includes('\0')) {
+            if (trimmed) {
+              const candidate = resolvePathWithinRoots(trimmed);
+              if (!candidate) {
+                return res.status(400).json({ success: false, error: 'workspace is outside the allowed roots (WORKSPACE_ROOTS)' });
+              }
               try {
-                const candidate = path.isAbsolute(trimmed) ? path.normalize(trimmed) : path.resolve(process.cwd(), trimmed);
                 if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
                   projectDir = candidate;
                 }
@@ -1289,6 +1312,10 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const { runMovieTool } = await import('./tools/movie-tool.js');
+          const paramGuard = pathParamWithinRoots(req.body?.projectDir, 'projectDir') ?? relativeSegmentError(req.body?.projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
           const result = await runMovieTool({ ...req.body, action: 'add_artifact' });
           res.json(result);
         } catch (err: any) {
@@ -1300,6 +1327,10 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const { runMovieTool } = await import('./tools/movie-tool.js');
+          const paramGuard = pathParamWithinRoots(req.body?.projectDir, 'projectDir') ?? relativeSegmentError(req.body?.projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
           const result = await runMovieTool({ ...req.body, action: 'apply_effect' });
           res.json(result);
         } catch (err: any) {
@@ -1311,6 +1342,10 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const { runMovieTool } = await import('./tools/movie-tool.js');
+          const paramGuard = pathParamWithinRoots(req.body?.projectDir, 'projectDir') ?? relativeSegmentError(req.body?.projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
           const result = await runMovieTool({ ...req.body, action: 'approve_artifact' });
           res.json(result);
         } catch (err: any) {

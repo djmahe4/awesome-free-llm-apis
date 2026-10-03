@@ -71,8 +71,16 @@ export function parseTurnMemory(output: string): { type: SessionMemoryEntry['typ
   return { type, text };
 }
 
+function sanitizePromptValue(value: string): string {
+  return value
+    .replace(/[<>]/g, ch => (ch === '<' ? '&lt;' : '&gt;'))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function buildSessionMemoryPromptBlock(entries: SessionMemoryEntry[]): string {
   if (entries.length === 0) return '';
-  const lines = entries.map(e => `- [${e.type}] (${e.role}) ${e.text}`);
+  const lines = entries.map(e =>
+    `- [${sanitizePromptValue(e.type)}] (${sanitizePromptValue(e.role)}) ${sanitizePromptValue(e.text)}`);
   return `<session-memory>\n${lines.join('\n')}\n</session-memory>`;
 }

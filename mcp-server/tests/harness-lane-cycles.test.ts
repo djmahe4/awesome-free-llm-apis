@@ -11,12 +11,16 @@
 import { describe, it, expect } from 'vitest';
 import path from 'path';
 import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises';
+import { existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { loadHarnessDeclaration } from '../src/harness/declaration.js';
 import { laneCycleMax, canStartLaneCycle } from '../src/harness/policy.js';
 
+// The ctf-katana checkout is not vendored in this repo — the one test below
+// that reads its shipped appsec.yaml skips (never fails) when it is absent.
 const CTF_KATANA_ROOT = process.env.CTF_KATANA_ROOT
   ?? path.resolve(__dirname, '..', '..', '..', 'AVST', 'ctf-katana');
+const APPSEC_DECL_PATH = path.join(CTF_KATANA_ROOT, '.free-llm-mcp', 'harness', 'appsec.yaml');
 
 const BASE_YAML = `
 harness:
@@ -92,6 +96,19 @@ describe('T4 lane/maxCycles schema', () => {
       await expect(loadHarnessDeclaration('lane-test', bad2.root)).rejects.toThrow(/maxCycles/);
     } finally { await bad2.cleanup(); }
   });
+
+  it('rejects maxCycles above the 1000 upper bound', async () => {
+    const huge = await writeDecl('  lane: [scanner, fixer]\n  maxCycles: 1000000\n');
+    try {
+      await expect(loadHarnessDeclaration('lane-test', huge.root)).rejects.toThrow(/maxCycles must be an integer >= 1 and <= 1000/);
+    } finally { await huge.cleanup(); }
+
+    const atBound = await writeDecl('  lane: [scanner, fixer]\n  maxCycles: 1000\n');
+    try {
+      const decl = await loadHarnessDeclaration('lane-test', atBound.root);
+      expect(decl.harness.maxCycles).toBe(1000);
+    } finally { await atBound.cleanup(); }
+  });
 });
 
 describe('T4 lane cycle policy gates', () => {
@@ -126,7 +143,7 @@ describe('T4 lane cycle policy gates', () => {
     } finally { await cleanup(); }
   });
 
-  it('the shipped appsec.yaml declares a lane of real roles with a cycle cap', async () => {
+  it.skipIf(!existsSync(APPSEC_DECL_PATH))('the shipped appsec.yaml declares a lane of real roles with a cycle cap', async () => {
     const decl = await loadHarnessDeclaration('appsec', CTF_KATANA_ROOT);
     expect(Array.isArray(decl.harness.lane)).toBe(true);
     expect(decl.harness.lane!.length).toBeGreaterThanOrEqual(2);

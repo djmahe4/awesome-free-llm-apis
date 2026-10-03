@@ -26,6 +26,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
+import { existsSync } from 'fs';
 
 import { cyberTool } from '../src/tools/cyber-tool.js';
 import { evaluate } from '../src/harness/policy.js';
@@ -40,7 +41,7 @@ const FAKE_BRIDGE = `#!/usr/bin/env node
 let raw = '';
 for await (const chunk of process.stdin) raw += chunk;
 const req = JSON.parse(raw || '{}');
-process.stdout.write(JSON.stringify({ tool: 'fake', target: req.target, status: 'ok', salient: 'fake bridge ran', received: req }));
+process.stdout.write(JSON.stringify({ tool: 'fake', target: req.target, status: 'ok', salient: 'fake bridge ran', received: req, bridgeEnv: { MARK: process.env.BRIDGE_MARK ?? null, LEAK: process.env.BRIDGE_SECRET_MARKER ?? null } }));
 `;
 
 const BROKEN_BRIDGE = `#!/usr/bin/env node
@@ -72,11 +73,13 @@ function multiConfig() {
 describe('T8 cyber_tool run_action — project bridge dispatch', () => {
   beforeAll(async () => {
     ws = await fs.mkdtemp(path.join(os.tmpdir(), 't8-bridge-'));
+    process.env.BRIDGE_WORKSPACE_ROOTS = ws;
     await fs.writeFile(path.join(ws, 'fake-bridge.mjs'), FAKE_BRIDGE, 'utf-8');
     await fs.writeFile(path.join(ws, 'broken-bridge.mjs'), BROKEN_BRIDGE, 'utf-8');
   });
 
   afterAll(async () => {
+    delete process.env.BRIDGE_WORKSPACE_ROOTS;
     await fs.rm(ws, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -194,6 +197,79 @@ describe('T8 cyber_tool run_action — project bridge dispatch', () => {
     expect(String(result.error)).toMatch(/cwd|escape|outside/i);
   });
 
+  it('does not pass the server environment to the bridge (opt-in env only)', async () => {
+    process.env.BRIDGE_SECRET_MARKER = 'server-secret';
+    await writeConfig({
+      bridges: { fake: { command: ['node', 'fake-bridge.mjs'], cwd: '.', env: { BRIDGE_MARK: 'ok' } } },
+    });
+    try {
+      const result = await cyberTool({
+        action: 'run_action',
+        workspaceRoot: ws,
+        authorization: 'ctf',
+        actionName: 'strings',
+        target: 'x.bin',
+      } as any);
+      expect(result.success).toBe(true);
+      const env = (result.finding as any).bridgeEnv;
+      expect(env.MARK).toBe('ok');
+      expect(env.LEAK).toBeNull();
+    } finally {
+      delete process.env.BRIDGE_SECRET_MARKER;
+    }
+  });
+
+  it('rejects a bridge env declaration that is not a string map', async () => {
+    await writeConfig({ bridges: { fake: { command: ['node', 'fake-bridge.mjs'], cwd: '.', env: 'oops' } } });
+    const result = await cyberTool({
+      action: 'run_action',
+      workspaceRoot: ws,
+      authorization: 'ctf',
+      actionName: 'strings',
+      target: 'x.bin',
+    } as any);
+    expect(result.success).toBe(false);
+    expect(String(result.error)).toMatch(/env/i);
+  });
+
+  it('rejects a workspaceRoot outside BRIDGE_WORKSPACE_ROOTS', async () => {
+    await writeConfig(singleFakeConfig());
+    const prev = process.env.BRIDGE_WORKSPACE_ROOTS;
+    process.env.BRIDGE_WORKSPACE_ROOTS = path.join(ws, 'not-this-one');
+    try {
+      const result = await cyberTool({
+        action: 'run_action',
+        workspaceRoot: ws,
+        authorization: 'ctf',
+        actionName: 'strings',
+        target: 'x.bin',
+      } as any);
+      expect(result.success).toBe(false);
+      expect(String(result.error)).toMatch(/BRIDGE_WORKSPACE_ROOTS|not permitted/i);
+    } finally {
+      process.env.BRIDGE_WORKSPACE_ROOTS = prev;
+    }
+  });
+
+  it('fails closed when no roots are configured and workspaceRoot is outside the server cwd', async () => {
+    await writeConfig(singleFakeConfig());
+    const prev = process.env.BRIDGE_WORKSPACE_ROOTS;
+    delete process.env.BRIDGE_WORKSPACE_ROOTS;
+    try {
+      const result = await cyberTool({
+        action: 'run_action',
+        workspaceRoot: ws,
+        authorization: 'ctf',
+        actionName: 'strings',
+        target: 'x.bin',
+      } as any);
+      expect(result.success).toBe(false);
+      expect(String(result.error)).toMatch(/BRIDGE_WORKSPACE_ROOTS|outside the server working directory/i);
+    } finally {
+      process.env.BRIDGE_WORKSPACE_ROOTS = prev;
+    }
+  });
+
   it('surfaces bridge subprocess failures as success:false (never throws)', async () => {
     await writeConfig(multiConfig());
     const result = await cyberTool({
@@ -255,7 +331,11 @@ describe('T8 harness gating — declaration cyberTools list', () => {
   });
 });
 
-describe('T8 appsec.yaml ships the cyberTools declaration', () => {
+// The ctf-katana checkout is not vendored in this repo — skip (never fail)
+// this single contract test when it is absent.
+const APPSEC_DECL_PATH = path.join(CTF_KATANA_ROOT, '.free-llm-mcp', 'harness', 'appsec.yaml');
+
+describe.skipIf(!existsSync(APPSEC_DECL_PATH))('T8 appsec.yaml ships the cyberTools declaration', () => {
   it('lists the katana bridge for the ctf-katana harness', async () => {
     const decl = await loadHarnessDeclaration('appsec', CTF_KATANA_ROOT);
     expect(decl.cyberTools).toContain('katana');

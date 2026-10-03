@@ -18,7 +18,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'node:crypto';
 import { withFileLock } from '../utils/file-lock.js';
-import { DECLARATIONS_DIR, resolveDeclarationPath } from './declaration.js';
+import { DECLARATIONS_DIR, resolveDeclarationPath, loadedDeclarationRecord } from './declaration.js';
 import type { HarnessRun } from './types.js';
 import type { HarnessStore } from './store.js';
 
@@ -64,13 +64,17 @@ async function readRegistryFile(rp: string): Promise<RegistryFile> {
 
 /**
  * Resolves, hashes and upserts a declaration into the workspace registry.
- * `trackedAt` is first-seen time (kept on re-track); `sha256` always follows
- * the current file content. Write is tmp+rename inside `withFileLock` so a
+ * `trackedAt` is first-seen time (kept on re-track); `sha256` follows the
+ * bytes this process parsed when a load record exists — so a run pins the
+ * hash of the policy actually enforced, not whatever is on disk a moment
+ * later (closes the read-then-hash race between load and track) — else the
+ * current file content. Write is tmp+rename inside `withFileLock` so a
  * crash or concurrent deploy can't leave a torn registry.json.
  */
 export async function trackDeclaration(nameOrPath: string, workspaceRoot?: string): Promise<RegistryEntry> {
   const filePath = path.resolve(await resolveDeclarationPath(nameOrPath, workspaceRoot));
-  const sha256 = sha256Hex(await fs.readFile(filePath, 'utf-8'));
+  const loaded = loadedDeclarationRecord(filePath, workspaceRoot);
+  const sha256 = loaded?.sha256 ?? sha256Hex(await fs.readFile(filePath, 'utf-8'));
   const rp = registryPath(workspaceRoot);
 
   return withFileLock(rp, async () => {

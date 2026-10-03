@@ -16,11 +16,14 @@ import { loadHarnessDeclaration, resolveDeclarationPath } from '../src/harness/d
 import { assertWorkspaceRootAllowed } from '../src/harness/policy.js';
 
 // Default matches this machine's layout (sibling of the Desktop workspace);
-// CTF_KATANA_ROOT overrides for other checkouts/CI.
+// CTF_KATANA_ROOT overrides for other checkouts. The ctf-katana checkout is
+// not vendored in this repo, so the suite skips (never fails) without it.
 const CTF_KATANA_ROOT = process.env.CTF_KATANA_ROOT
   ?? path.resolve(__dirname, '..', '..', '..', 'AVST', 'ctf-katana');
 
-describe('appsec harness declaration (T3)', () => {
+const APPSEC_DECL_PATH = path.join(CTF_KATANA_ROOT, '.free-llm-mcp', 'harness', 'appsec.yaml');
+
+describe.skipIf(!existsSync(APPSEC_DECL_PATH))('appsec harness declaration (T3)', () => {
   it('ships at <ctf-katana>/.free-llm-mcp/harness/appsec.yaml and resolves via the uniform dir', async () => {
     const resolved = await resolveDeclarationPath('appsec', CTF_KATANA_ROOT);
     expect(resolved).toBe(path.join(CTF_KATANA_ROOT, '.free-llm-mcp', 'harness', 'appsec.yaml'));

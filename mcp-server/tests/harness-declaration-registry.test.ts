@@ -108,6 +108,33 @@ describe('harness declaration registry (T2)', () => {
     expect(registry!.declarations[declPath]).toEqual(entry);
   });
 
+  it('trackDeclaration pins the sha256 of the bytes loadHarnessDeclaration parsed (no re-read race)', async () => {
+    const { trackDeclaration } = await import('../src/harness/registry.js');
+    const { loadHarnessDeclaration } = await import('../src/harness/declaration.js');
+    const declPath = await writeWorkspaceDecl(ws, 'toctou-h');
+
+    const decl = await loadHarnessDeclaration('toctou-h', ws);
+    expect(decl.harness.name).toBe('registry-test-h');
+
+    const edited = GATE_DECL_YAML + '# edited between load and track\n';
+    await fs.writeFile(declPath, edited, 'utf-8');
+
+    const entry = await trackDeclaration('toctou-h', ws);
+
+    expect(entry.path).toBe(declPath);
+    expect(entry.sha256).toBe(sha256Hex(GATE_DECL_YAML));
+    expect(entry.sha256).not.toBe(sha256Hex(edited));
+  });
+
+  it('trackDeclaration without a prior load still hashes the current file content', async () => {
+    const { trackDeclaration } = await import('../src/harness/registry.js');
+    const declPath = await writeWorkspaceDecl(ws, 'no-load-h');
+
+    const entry = await trackDeclaration('no-load-h', ws);
+
+    expect(entry.sha256).toBe(sha256Hex(GATE_DECL_YAML));
+  });
+
   it('classifies source: builtin declaration dir -> builtin, outside workspace -> path', async () => {
     const { trackDeclaration } = await import('../src/harness/registry.js');
 

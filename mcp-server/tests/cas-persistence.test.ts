@@ -235,4 +235,57 @@ describe('ContentAddressableStore — disk persistence (R2)', () => {
     expect(result.removedBlobs).toBe(1);
     expect((await fs.readdir(blobsDir)).length).toBe(0);
   });
+
+  it('load skips a blob whose content does not match its filename hash', async () => {
+    const dir = casDirOf(baseDir);
+    const blobsDir = path.join(dir, 'blobs');
+    await fs.ensureDir(blobsDir);
+    const probe = new ContentAddressableStore();
+    const goodContent = 'good content';
+    const goodHash = probe.hashContent(goodContent);
+    const tamperedHash = probe.hashContent('original content');
+    await fs.writeFile(path.join(blobsDir, goodHash), goodContent, 'utf-8');
+    await fs.writeFile(path.join(blobsDir, tamperedHash), 'tampered!!', 'utf-8');
+    await fs.writeFile(path.join(dir, 'index.json'), JSON.stringify({
+      version: 1, manifests: [], fileHistory: {},
+    }), 'utf-8');
+
+    const cas = new ContentAddressableStore();
+    cas.initCasPersistence(baseDir);
+    await expect(cas.loadCasFromDisk()).resolves.toBe(true);
+    expect(cas.getBlob(goodHash)).toBe('good content');
+    expect(cas.getBlob(tamperedHash)).toBeUndefined();
+  });
+
+  it('prune aborts when index.json is corrupt — never treats referenced blobs as orphans', async () => {
+    const dir = casDirOf(baseDir);
+    const blobsDir = path.join(dir, 'blobs');
+    await fs.ensureDir(blobsDir);
+    const probe = new ContentAddressableStore();
+    const liveHash = probe.hashContent('still referenced');
+    await fs.writeFile(path.join(blobsDir, liveHash), 'still referenced', 'utf-8');
+    await fs.writeFile(path.join(dir, 'index.json'), '{"version":1,"manifests":[', 'utf-8');
+
+    const cas = new ContentAddressableStore();
+    const result = await cas.pruneCasOnBoot(baseDir);
+    expect(result).toEqual({ removedManifests: 0, removedBlobs: 0 });
+    expect(await fs.pathExists(path.join(blobsDir, liveHash))).toBe(true);
+  });
+
+  it('prune aborts when index.json parses but is structurally invalid', async () => {
+    const dir = casDirOf(baseDir);
+    const blobsDir = path.join(dir, 'blobs');
+    await fs.ensureDir(blobsDir);
+    const probe = new ContentAddressableStore();
+    const liveHash = probe.hashContent('referenced content');
+    await fs.writeFile(path.join(blobsDir, liveHash), 'referenced content', 'utf-8');
+    await fs.writeFile(path.join(dir, 'index.json'), JSON.stringify({
+      version: 1, manifests: 'not-an-array', fileHistory: {},
+    }), 'utf-8');
+
+    const cas = new ContentAddressableStore();
+    const result = await cas.pruneCasOnBoot(baseDir);
+    expect(result).toEqual({ removedManifests: 0, removedBlobs: 0 });
+    expect(await fs.pathExists(path.join(blobsDir, liveHash))).toBe(true);
+  });
 });

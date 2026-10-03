@@ -1783,20 +1783,38 @@ function stableWorkspaceSessionId(workspaceRoot?: string): string {
  * In-memory alias table: a caller-chosen input.sessionId is preserved and
  * resolves to its canonical workspace session, so polling status/abort/resume
  * with the id the tool was originally called with keeps working even though
- * the fallback to the workspace session happened internally. First
- * registration wins; the canonical id also self-resolves so polling with the
- * returned sessionId needs no workspaceRoot. Not persisted (in-memory only).
+ * the fallback to the workspace session happened internally. Each entry
+ * remembers the workspace it was registered under, and an alias is only reused
+ * when the call supplies that same workspace (a status/abort call without a
+ * workspace may reuse it — those only read the in-process run registry), so a
+ * reused caller id can never bind another workspace's file I/O to this
+ * session. First registration wins; the canonical id also self-resolves so
+ * polling with the returned sessionId needs no workspaceRoot. Not persisted
+ * (in-memory only).
  */
-const sessionAliases = new Map<string, string>();
+type SessionAlias = { root: string; canonical: string };
+
+const sessionAliases = new Map<string, SessionAlias>();
+
+function aliasServesCall(
+  alias: SessionAlias | undefined,
+  input: CodingAgentsInput,
+  resolvedRoot: string,
+): alias is SessionAlias {
+  if (!alias) return false;
+  if (input.workspaceRoot && input.workspaceRoot.trim() !== '') return alias.root === resolvedRoot;
+  return input.action === 'status' || input.action === 'abort';
+}
 
 export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<CodingAgentsResult> {
+  const resolvedRoot = path.resolve(input.workspaceRoot || process.cwd());
   const derived = stableWorkspaceSessionId(input.workspaceRoot);
-  sessionAliases.set(derived, derived);
+  sessionAliases.set(derived, { root: resolvedRoot, canonical: derived });
   let sessionId = derived;
   if (input.sessionId && input.sessionId !== derived) {
-    const existing = sessionAliases.get(input.sessionId);
-    if (existing) sessionId = existing;
-    else sessionAliases.set(input.sessionId, derived);
+    const alias = sessionAliases.get(input.sessionId);
+    if (aliasServesCall(alias, input, resolvedRoot)) sessionId = alias.canonical;
+    else if (!alias) sessionAliases.set(input.sessionId, { root: resolvedRoot, canonical: derived });
   }
   const runKey = `coding_agents:${sessionId}`;
 
@@ -1904,6 +1922,18 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     applied: false,
   };
 
+  const finalizeResult = async (): Promise<CodingAgentsResult> => {
+    if (result.status !== 'paused' && result.status !== 'undo_file' && result.status !== 'file_history') {
+      result.status = (result.restoredFiles && result.restoredFiles.length > 0)
+        ? 'rollback'
+        : (result.applied ? 'applied' : 'dry_run');
+    }
+    result.content = formatCodingAgentsMarkdown(result);
+    result.markdown = result.content;
+    await logToolCall(sessionId, 'coding_agents', input, result, Date.now() - start, !!result.error).catch(() => {});
+    return result;
+  };
+
   try {
     // ── Handle Rollback Action ───────────────────────────────────────────────
     if (input.resolve?.action === 'rollback') {
@@ -1940,7 +1970,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         result.status = 'file_history';
         result.fileHistory = versions;
         result.patchSummary = `File history for ${filePath}: ${versions.length} version(s), newest first (null = file did not exist before that apply)`;
-        return result;
+        return finalizeResult();
       }
 
       const { restored, remainingDepth } = await globalCasStore.undoFileVersionToDisk(workspaceRoot, filePath);
@@ -1953,7 +1983,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       result.restored = restored;
       result.remainingDepth = remainingDepth;
       result.patchSummary = `Restored previous version of ${filePath}; ${remainingDepth} version(s) left in its undo history`;
-      return result;
+      return finalizeResult();
     }
 
     if (!input.goal) throw new Error('Goal is required for coding_agents planning');
@@ -2613,15 +2643,5 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     result.error = err.message || String(err);
   }
 
-  if (result.status !== 'paused' && result.status !== 'undo_file' && result.status !== 'file_history') {
-    result.status = (result.restoredFiles && result.restoredFiles.length > 0)
-      ? 'rollback'
-      : (result.applied ? 'applied' : 'dry_run');
-  }
-
-  result.content = formatCodingAgentsMarkdown(result);
-  result.markdown = result.content;
-
-  await logToolCall(sessionId, 'coding_agents', input, result, Date.now() - start, !!result.error).catch(() => {});
-  return result;
+  return finalizeResult();
 }

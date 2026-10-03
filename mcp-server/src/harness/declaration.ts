@@ -1,5 +1,6 @@
 import { promises as fs, existsSync, readFileSync } from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'url';
 import { parse as parseYaml } from 'yaml';
 import { findAgentsMdPath } from '../utils/agents-md-locator.js';
@@ -11,6 +12,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DECLARATIONS_DIR = path.resolve(__dirname, '..', '..', 'harness');
 
 const cache = new Map<string, HarnessDeclaration>();
+
+export interface DeclarationLoadRecord {
+  filePath: string;
+  sha256: string;
+}
+
+const loadRecords = new Map<string, DeclarationLoadRecord>();
+
+function loadRecordKey(filePath: string, workspaceRoot?: string): string {
+  return `${path.resolve(filePath)}::${workspaceRoot ?? ''}`;
+}
 
 /**
  * Reads an optional `## Skill Access` fenced YAML block from AGENTS.md, e.g.:
@@ -114,8 +126,8 @@ function validateLane(decl: HarnessDeclaration, name: string, filePath: string):
     }
   }
 
-  if (maxCycles !== undefined && (!Number.isInteger(maxCycles) || maxCycles < 1)) {
-    throw new Error(`${where}: maxCycles must be an integer >= 1 (got: ${JSON.stringify(maxCycles)})`);
+  if (maxCycles !== undefined && (!Number.isInteger(maxCycles) || maxCycles < 1 || maxCycles > 1000)) {
+    throw new Error(`${where}: maxCycles must be an integer >= 1 and <= 1000 (got: ${JSON.stringify(maxCycles)})`);
   }
 }
 
@@ -170,6 +182,9 @@ export async function resolveDeclarationPath(nameOrPath: string, workspaceRoot?:
  * Declarations are read-only policy, cached by resolved file path + workspaceRoot
  * for the process lifetime — a harness's allowlist/budget shouldn't drift mid-run
  * just because someone edited the YAML (or AGENTS.md) on disk while a run was executing.
+ * The exact bytes parsed are recorded alongside the cache so registry tracking
+ * (`loadedDeclarationRecord`) can pin the hash of the policy actually enforced
+ * instead of re-reading the file later.
  *
  * Relative `harness.allowedWorkspaceRoots` entries are resolved against the
  * declaration file's own directory, so an external declaration (e.g.
@@ -178,7 +193,7 @@ export async function resolveDeclarationPath(nameOrPath: string, workspaceRoot?:
  */
 export async function loadHarnessDeclaration(name = 'research-analysis', workspaceRoot?: string): Promise<HarnessDeclaration> {
   const filePath = await resolveDeclarationPath(name, workspaceRoot);
-  const cacheKey = `${filePath}::${workspaceRoot ?? ''}`;
+  const cacheKey = loadRecordKey(filePath, workspaceRoot);
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
@@ -210,8 +225,20 @@ export async function loadHarnessDeclaration(name = 'research-analysis', workspa
 
   const withSkillAccess = applySkillAccess(parsed, loadAgentsSkillAccess(workspaceRoot));
 
+  loadRecords.set(cacheKey, { filePath, sha256: crypto.createHash('sha256').update(raw, 'utf-8').digest('hex') });
   cache.set(cacheKey, withSkillAccess);
   return withSkillAccess;
+}
+
+/**
+ * The `{ filePath, sha256 }` of the declaration bytes `loadHarnessDeclaration`
+ * parsed for this (file, workspaceRoot) pair in this process, or null when the
+ * declaration was never loaded here. Used by registry tracking so a run pins
+ * the hash of the bytes whose policy was actually enforced, closing the
+ * read-then-hash race between load and track.
+ */
+export function loadedDeclarationRecord(filePath: string, workspaceRoot?: string): DeclarationLoadRecord | null {
+  return loadRecords.get(loadRecordKey(filePath, workspaceRoot)) ?? null;
 }
 
 export function listRoleNames(decl: HarnessDeclaration): string[] {

@@ -113,6 +113,51 @@ describe('ContentAddressableStore — per-file history ring buffer', () => {
     await expect(cas.undoFileVersionToDisk(ws, '../escape.ts'))
       .rejects.toThrow(/invalid relative path/);
   });
+
+  it('keeps the history entry when the restore write fails (pop only after success)', async () => {
+    const rel = 'src/blocked.ts';
+    const target = path.join(ws, rel);
+    await fs.ensureDir(target); // directory at the target makes the final rename fail
+    cas.recordFileVersions(ws, { [rel]: 'prior content' });
+
+    await expect(cas.undoFileVersionToDisk(ws, rel)).rejects.toThrow();
+    expect(cas.fileHistoryVersions(ws, rel)).toEqual(['prior content']);
+
+    await fs.remove(target);
+    const out = await cas.undoFileVersionToDisk(ws, rel);
+    expect(out).toEqual({ restored: true, remainingDepth: 0 });
+    expect(await fs.readFile(target, 'utf-8')).toBe('prior content');
+  });
+
+  it('rejects a symlinked component that escapes the workspace', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'omp-cas-escape-'));
+    try {
+      await fs.symlink(outside, path.join(ws, 'link'), 'dir');
+      cas.recordFileVersions(ws, { 'link/escape.ts': 'evil' });
+
+      await expect(cas.undoFileVersionToDisk(ws, 'link/escape.ts'))
+        .rejects.toThrow(/invalid relative path/);
+      expect(await fs.pathExists(path.join(outside, 'escape.ts'))).toBe(false);
+    } finally {
+      await fs.remove(outside);
+    }
+  });
+
+  it('restoreCheckpointToDisk blocks symlink escape of manifest paths', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'omp-cas-escape-ckpt-'));
+    try {
+      await fs.symlink(outside, path.join(ws, 'link'), 'dir');
+      const manifest = cas.createCheckpoint('sess-symlink', 'escape attempt', {
+        'link/pwn.txt': 'payload',
+      });
+
+      await expect(cas.restoreCheckpointToDisk(manifest.checkpointId, ws))
+        .rejects.toThrow(/invalid relative path/);
+      expect(await fs.pathExists(path.join(outside, 'pwn.txt'))).toBe(false);
+    } finally {
+      await fs.remove(outside);
+    }
+  });
 });
 
 describe('CodingAgentsHandler — resolve undo_file / file_history', () => {
@@ -155,6 +200,8 @@ describe('CodingAgentsHandler — resolve undo_file / file_history', () => {
       resolve: { action: 'file_history', filePath: 'src/versioned.ts' },
     });
     expect(hist.error).toBeUndefined();
+    expect(hist.content).toBeTruthy();
+    expect(hist.markdown).toBe(hist.content);
     expect(hist.fileHistory).toEqual([
       "export const marker = 'v3';",
       "export const marker = 'v2';",
@@ -170,6 +217,8 @@ describe('CodingAgentsHandler — resolve undo_file / file_history', () => {
     expect(u1.error).toBeUndefined();
     expect(u1.restored).toBe(true);
     expect(u1.remainingDepth).toBe(2);
+    expect(u1.content).toBeTruthy();
+    expect(u1.markdown).toBe(u1.content);
     expect(await readMarker()).toBe('v3');
 
     // undo #2 → v2
