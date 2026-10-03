@@ -371,8 +371,10 @@ export class ContentAddressableStore {
    * Boot-time housekeeping (call next to reconcileRunsOnBoot, before load):
    *   1. TTL — manifests older than CAS_TTL_MS (default 24h) are dropped from
    *      index.json (history itself is depth-capped and tiny, so it keeps no TTL).
-   *   2. Orphan GC — every blob file referenced by neither a surviving manifest
-   *      nor fileHistory is deleted (including stale *.tmp crash leftovers).
+   *   2. Orphan GC — when index.json is present and valid, every blob file
+   *      referenced by neither a surviving manifest nor fileHistory is deleted.
+   *      If index.json is missing or corrupt, permanent blobs are preserved and
+   *      only stale *.tmp crash leftovers are cleaned up.
    * Operates directly on disk; does not require (or mutate) this store's state.
    */
   async pruneCasOnBoot(
@@ -438,8 +440,7 @@ export class ContentAddressableStore {
       const blobNames = await fs.readdir(path.join(casDir, 'blobs'));
       for (const name of blobNames) {
         const isTmp = name.endsWith('.tmp');
-        // When index is missing, only prune uncommitted crash orphans (*.tmp), never permanent content blobs
-        if (isTmp || (hadIndex && !referenced.has(name))) {
+        if (isTmp || !referenced.has(name)) {
           await fs.remove(path.join(casDir, 'blobs', name)).catch(() => {});
           result.removedBlobs++;
         }

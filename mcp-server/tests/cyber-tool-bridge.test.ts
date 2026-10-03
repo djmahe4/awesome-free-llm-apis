@@ -251,6 +251,34 @@ describe('T8 cyber_tool run_action — project bridge dispatch', () => {
     }
   });
 
+  it('allows a nested workspaceRoot inside an allowed root in BRIDGE_WORKSPACE_ROOTS (insideRoot / real() containment)', async () => {
+    const nestedSubdir = path.join(ws, 'nested', 'project');
+    const nestedConfigDir = path.join(nestedSubdir, '.free-llm-mcp');
+    await fs.mkdir(nestedConfigDir, { recursive: true });
+    await fs.writeFile(path.join(nestedSubdir, 'fake-bridge.mjs'), FAKE_BRIDGE, 'utf-8');
+    await fs.writeFile(
+      path.join(nestedConfigDir, 'bridges.json'),
+      JSON.stringify(singleFakeConfig()),
+      'utf-8'
+    );
+
+    const prev = process.env.BRIDGE_WORKSPACE_ROOTS;
+    process.env.BRIDGE_WORKSPACE_ROOTS = ws; // ws is parent root
+    try {
+      const result = await cyberTool({
+        action: 'run_action',
+        workspaceRoot: nestedSubdir,
+        authorization: 'ctf',
+        actionName: 'test',
+        target: 'x.bin',
+      } as any);
+      expect(result.success).toBe(true);
+      expect((result as any).finding).toMatchObject({ tool: 'fake' });
+    } finally {
+      process.env.BRIDGE_WORKSPACE_ROOTS = prev;
+    }
+  });
+
   it('fails closed when BRIDGE_WORKSPACE_ROOTS is unset (bridge execution disabled)', async () => {
     await writeConfig(singleFakeConfig());
     const prev = process.env.BRIDGE_WORKSPACE_ROOTS;

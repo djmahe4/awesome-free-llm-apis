@@ -224,16 +224,19 @@ describe('ContentAddressableStore — disk persistence (R2)', () => {
     expect(cas.fileHistoryVersions(wsRoot, 'src/f.ts')).toEqual(['undo history only']);
   });
 
-  it('prune with no index.json removes leftover blobs (crash orphans)', async () => {
+  it('prune with no index.json removes leftover blobs (crash orphans) while preserving permanent blobs', async () => {
     const dir = casDirOf(baseDir);
     const blobsDir = path.join(dir, 'blobs');
     await fs.ensureDir(blobsDir);
+    const permHash = 'cafebabe'.repeat(8);
     await fs.writeFile(path.join(blobsDir, `${'deadbeef'.repeat(8)}.tmp`), 'orphan', 'utf-8');
+    await fs.writeFile(path.join(blobsDir, permHash), 'permanent content', 'utf-8');
 
     const cas = new ContentAddressableStore();
     const result = await cas.pruneCasOnBoot(baseDir);
     expect(result.removedBlobs).toBe(1);
-    expect((await fs.readdir(blobsDir)).length).toBe(0);
+    expect(await fs.pathExists(path.join(blobsDir, permHash))).toBe(true);
+    expect((await fs.readdir(blobsDir)).length).toBe(1);
   });
 
   it('load skips a blob whose content does not match its filename hash', async () => {
