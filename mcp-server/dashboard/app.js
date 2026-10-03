@@ -111,8 +111,6 @@ async function renderMarkdown(text) {
       .replace(/\*\*([^*]+)\*\*/g, (_, t) => `<strong>${t}</strong>`)
       // Italic
       .replace(/\*([^*]+)\*/g, (_, t) => `<em>${t}</em>`)
-      // Wiki-style internal links: [[Title]] — text here is already HTML-escaped by the esc(part) pass above
-      .replace(/\[\[([^\]]+)\]\]/g, (_, title) => `<a href="#" class="wiki-link" data-title="${title.replace(/"/g, '&quot;')}">${title}</a>`)
       // Markdown links: [text](url) — only http(s) URLs become real links, everything else stays plain text
       .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, text, url) => `<a href="${url.replace(/"/g, '&quot;')}" target="_blank" rel="noopener noreferrer">${text}</a>`)
       // H1-H5 (matched in descending order of hashes)
@@ -131,6 +129,12 @@ async function renderMarkdown(text) {
       .replace(/\n\n+/g, '</p><p style="margin:6px 0;">')
       // Single newlines become <br>
       .replace(/\n/g, '<br>');
+
+    if (window.WikiLinkParser?.replaceInternalLinks) {
+      html = window.WikiLinkParser.replaceInternalLinks(html);
+    } else {
+      html = html.replace(/\[\[([^\]]+)\]\]/g, (_, title) => `<a href="#" class="wiki-link" data-title="${title.replace(/"/g, '&quot;')}">${title}</a>`);
+    }
 
     // Restore code blocks (which are already escaped) after inline markdown
     codeBlocks.forEach((cb, idx) => {
@@ -2389,101 +2393,10 @@ setInterval(() => {
 }, 10000);
 
 // ─── WIKI TAB ───────────────────────────────────────────────────
-const wikiWorkspaceInput = document.getElementById('wiki-workspace-input');
-const wikiLoadBtn        = document.getElementById('wiki-load-btn');
-const wikiPageList       = document.getElementById('wiki-page-list');
-const wikiPageTitle      = document.getElementById('wiki-page-title');
-const wikiPageBody       = document.getElementById('wiki-page-body');
-const wikiRelated        = document.getElementById('wiki-related');
-
-let wikiInitialized = false;
-let wikiActiveTitle = null;
-
+const wikiWorkspaceModule = window.DashboardWiki?.create({ esc, renderMarkdown });
 function initWikiTab() {
-  if (!wikiInitialized) {
-    wikiInitialized = true;
-    const savedWs = localStorage.getItem('mcp-workspace');
-    if (savedWs) {
-      wikiWorkspaceInput.value = savedWs;
-      loadWikiList();
-    }
-  }
+  wikiWorkspaceModule?.initTab?.();
 }
-
-async function callManageMemory(params) {
-  const r = await fetch('/api/tool', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tool: 'manage_memory', params: { ...params, workspace_root: wikiWorkspaceInput.value.trim() } })
-  });
-  const d = await r.json();
-  if (!r.ok || d.ok === false) throw new Error(d.error || 'Request failed');
-  return d.result;
-}
-
-async function loadWikiList() {
-  wikiPageList.innerHTML = '<div class="conv-empty">Loading…</div>';
-  try {
-    const result = await callManageMemory({ action: 'wiki_list' });
-    const pages = result.pages || [];
-    if (!pages.length) {
-      wikiPageList.innerHTML = '<div class="conv-empty">No wiki pages yet for this workspace.</div>';
-      return;
-    }
-    wikiPageList.innerHTML = pages.map(p => `
-      <div class="wiki-page-item${p.title === wikiActiveTitle ? ' active' : ''}" data-title="${esc(p.title)}">
-        <span>${esc(p.title)}</span>
-        <span class="badge ${p.tier === 'semantic' ? 'badge-green' : 'badge-amber'}" style="width:fit-content;font-size:.62rem;">${esc(p.tier)} · ${Math.round((p.confidence||0)*100)}%</span>
-      </div>
-    `).join('');
-    wikiPageList.querySelectorAll('.wiki-page-item').forEach(el => {
-      el.addEventListener('click', () => loadWikiPage(el.dataset.title));
-    });
-  } catch (err) {
-    wikiPageList.innerHTML = `<div class="conv-empty">Failed to load: ${esc(err.message)}</div>`;
-  }
-}
-
-async function loadWikiPage(title) {
-  wikiActiveTitle = title;
-  wikiPageTitle.textContent = title;
-  wikiPageBody.innerHTML = '<div class="conv-empty">Loading…</div>';
-  wikiRelated.innerHTML = '';
-  wikiPageList.querySelectorAll('.wiki-page-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.title === title);
-  });
-  try {
-    const result = await callManageMemory({ action: 'wiki_read', title });
-    const page = result.page;
-    if (!page) {
-      wikiPageBody.innerHTML = '<div class="conv-empty">Page not found.</div>';
-      return;
-    }
-    wikiPageBody.innerHTML = await renderMarkdown(page.content);
-    if (page.links && page.links.length) {
-      wikiRelated.innerHTML = page.links.map(l => `<span class="wiki-link-chip" data-title="${esc(l)}">${esc(l)}</span>`).join('');
-      wikiRelated.querySelectorAll('.wiki-link-chip').forEach(el => {
-        el.addEventListener('click', () => loadWikiPage(el.dataset.title));
-      });
-    }
-  } catch (err) {
-    wikiPageBody.innerHTML = `<div class="conv-empty">Failed to load page: ${esc(err.message)}</div>`;
-  }
-}
-
-// Delegated click handler for [[wiki links]] rendered inline by renderMarkdown()
-wikiPageBody?.addEventListener('click', (e) => {
-  const a = e.target.closest('.wiki-link');
-  if (a) {
-    e.preventDefault();
-    loadWikiPage(a.dataset.title);
-  }
-});
-
-wikiLoadBtn?.addEventListener('click', loadWikiList);
-wikiWorkspaceInput?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') loadWikiList();
-});
 
 // ─── Cyber Tool Decision Graph (v1.0.9) ──────────────────────────
 // Visualizes the node/edge graph cyber_tool's 'save_graph'/'load_graph'
@@ -3679,4 +3592,3 @@ renderHarnessTelemetry = function(data) {
   _prevRenderHarnessTelemetry(data);
   updateRelayVisualization(data.activeScopes || [], data.reasoningScopes || [], data.wikiPages || []);
 };
-
