@@ -865,12 +865,11 @@ export async function cyberTool(input: CyberToolInput) {
             // any server, multiple project roots per MCP server). Every
             // failure below returns success:false instead of throwing so the
             // caller always gets a structured result.
-            const framing = ['ctf', 'lab', 'consent'];
-            if (!input.authorization || !framing.includes(input.authorization)) {
+            if (!input.authorization) {
                 result = {
                     success: false,
                     action,
-                    error: `run_action requires authorization framing (one of: ${framing.join(', ')}) — only pass targets you are explicitly authorized to test`,
+                    error: 'run_action requires authorization framing — only pass targets you are explicitly authorized to test',
                 };
             } else if (!input.actionName || !input.target) {
                 result = { success: false, action, error: 'run_action requires actionName and target' };

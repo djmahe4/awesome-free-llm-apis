@@ -31,6 +31,7 @@ export interface BridgeEntry {
   command: string[];
   cwd?: string;
   env?: Record<string, string>;
+  authorizedFraming?: string[];
 }
 
 export interface BridgesConfig {
@@ -121,6 +122,14 @@ async function selectBridge(workspaceRoot: string, bridgeName?: string): Promise
     }
   }
 
+  if (entry.authorizedFraming !== undefined) {
+    if (!Array.isArray(entry.authorizedFraming)
+      || entry.authorizedFraming.length === 0
+      || entry.authorizedFraming.some(f => typeof f !== 'string' || !f)) {
+      throw new Error(`Bridge '${name}' authorizedFraming must be a non-empty list of strings in ${configPath}`);
+    }
+  }
+
   return { name, entry: { ...entry, cwd } };
 }
 
@@ -159,6 +168,10 @@ export async function runProjectBridge(opts: {
 }): Promise<{ bridge: string; finding: unknown }> {
   assertBridgeWorkspaceRootAllowed(opts.workspaceRoot);
   const { name, entry } = await selectBridge(opts.workspaceRoot, opts.bridge);
+  const allowedFramings = entry.authorizedFraming ?? ['ctf', 'lab', 'consent'];
+  if (!opts.authorization || !allowedFramings.includes(opts.authorization)) {
+    throw new Error(`Bridge '${name}' requires server/project authorized framing (one of: ${allowedFramings.join(', ')}) — target authorization not permitted by bridges.json`);
+  }
   const { file, args } = buildArgv(entry);
   const payload = JSON.stringify({
     actionName: opts.actionName,

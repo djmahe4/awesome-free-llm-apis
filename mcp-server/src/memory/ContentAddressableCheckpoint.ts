@@ -389,7 +389,6 @@ export class ContentAddressableStore {
       manifests?: CheckpointManifest[];
       fileHistory?: Record<string, Array<string | null>>;
     } = { version: 1, manifests: [], fileHistory: {} };
-    let hadIndex = false;
     let indexMissing = false;
     let indexCorrupt = false;
     try {
@@ -399,7 +398,6 @@ export class ContentAddressableStore {
       if (parsed.manifests !== undefined && !Array.isArray(parsed.manifests)) throw new Error('corrupt index');
       if (parsed.fileHistory !== undefined && (typeof parsed.fileHistory !== 'object' || parsed.fileHistory === null)) throw new Error('corrupt index');
       index = parsed;
-      hadIndex = true;
     } catch (err: any) {
       if (err?.code === 'ENOENT') {
         indexMissing = true;
@@ -449,7 +447,7 @@ export class ContentAddressableStore {
       // no blobs dir — nothing to GC
     }
 
-    if (hadIndex && result.removedManifests > 0) {
+    if (result.removedManifests > 0) {
       const tmpIndex = `${indexPath}.tmp`;
       await fs.writeFile(tmpIndex, JSON.stringify({ ...index, manifests: survivors }), 'utf-8');
       await fs.rename(tmpIndex, indexPath);

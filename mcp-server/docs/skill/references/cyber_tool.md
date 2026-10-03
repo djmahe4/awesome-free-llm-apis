@@ -56,7 +56,7 @@
 }
 ```
 
-- **`authorization` is required** — one of `ctf` | `lab` | `consent`; only pass targets you are explicitly authorized to test. Missing/invalid framing returns `success: false`.
+- **`authorization` is required** — pass target framing (e.g. `ctf` | `lab` | `consent`). The bridge declaration in `bridges.json` specifies permitted framing via `authorizedFraming` (defaults to `["ctf", "lab", "consent"]` if omitted). If caller authorization framing is missing or not allowed by the bridge definition, `run_action` fails closed.
 - **`bridge` is optional** only when exactly one bridge is declared; multiple bridges require an explicit name.
 - **Trust model**: `bridges.json` is a capability token — whoever can write the project's config decides what may be spawned from that workspace root. `command` must be a non-empty string list; `cwd` must stay inside the workspace root.
 - **Workspace-root gate**: `workspaceRoot` must fall inside `BRIDGE_WORKSPACE_ROOTS` (comma/colon-separated list; unset = disabled / fail-closed), so a client can't point run_action at an arbitrary folder that happens to contain a `bridges.json`. Each bridge may declare an optional `env` string map — the subprocess otherwise gets only a minimal base environment (`PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `NO_COLOR`), never the server's API keys.

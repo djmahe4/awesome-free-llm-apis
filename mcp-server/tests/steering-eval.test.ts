@@ -187,8 +187,10 @@ describe('/api/steering_eval token accounting (endpoint)', () => {
         expect(res.success).toBe(true);
         const st = res.telemetry;
         const mem = st.memoryLayers;
+        const expectedQueryTokens = Math.ceil('say hello'.length / 3.8);
         expect(mem.sysPromptTokens).toBe(0);
-        expect(mem.totalContextTokens).toBe(mem.shortTermTokens || 0);
+        expect(mem.shortTermTokens).toBe(expectedQueryTokens);
+        expect(mem.totalContextTokens).toBe(expectedQueryTokens);
         expect(st.fullAssembledSystemPrompt).toBe('');
         expect(st.matchedSections).toHaveLength(0);
         expect(st.keywords).toEqual([]);

@@ -182,6 +182,55 @@ describe('T8 cyber_tool run_action — project bridge dispatch', () => {
     } as any);
     expect(invalid.success).toBe(false);
     expect(String(invalid.error)).toMatch(/authorization/i);
+
+    // Custom authorizedFraming configured in bridges.json
+    await writeConfig({
+      bridges: {
+        custom: {
+          command: ['node', 'fake-bridge.mjs'],
+          cwd: '.',
+          authorizedFraming: ['custom-contract', 'pentest-consent'],
+        },
+      },
+    });
+    const rejectedDefault = await cyberTool({
+      action: 'run_action',
+      workspaceRoot: ws,
+      authorization: 'ctf',
+      actionName: 'test',
+      target: 'x.bin',
+    } as any);
+    expect(rejectedDefault.success).toBe(false);
+    expect(String(rejectedDefault.error)).toMatch(/authorized framing/i);
+
+    const allowedCustom = await cyberTool({
+      action: 'run_action',
+      workspaceRoot: ws,
+      authorization: 'pentest-consent',
+      actionName: 'test',
+      target: 'x.bin',
+    } as any);
+    expect(allowedCustom.success).toBe(true);
+
+    // Malformed string authorizedFraming must be rejected, not substring matched
+    await writeConfig({
+      bridges: {
+        stringFraming: {
+          command: ['node', 'fake-bridge.mjs'],
+          cwd: '.',
+          authorizedFraming: 'ctf' as any,
+        },
+      },
+    });
+    const rejectedString = await cyberTool({
+      action: 'run_action',
+      workspaceRoot: ws,
+      authorization: 'c', // would match if 'ctf'.includes('c')
+      actionName: 'test',
+      target: 'x.bin',
+    } as any);
+    expect(rejectedString.success).toBe(false);
+    expect(String(rejectedString.error)).toMatch(/authorizedFraming must be a non-empty list of strings/i);
   });
 
   it('rejects a bridge cwd that escapes the workspace root', async () => {
