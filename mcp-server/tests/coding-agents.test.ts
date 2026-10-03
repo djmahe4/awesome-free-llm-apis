@@ -627,6 +627,9 @@ describe('CodingAgentsHandler — DAG tasks.md, docs filtering & AST validation'
     let result = started;
     for (let i = 0; i < 200 && result.status === 'running'; i++) {
       await new Promise(r => setTimeout(r, 100));
+      // Poll with ONLY the sessionId the run was started with — no
+      // workspaceRoot. The explicit id is preserved as an in-memory alias to
+      // the canonical workspace session, so this must still find the run.
       result = await CodingAgentsHandler({ goal: 'bypass security check', sessionId, action: 'status' });
     }
     expect(result.status).not.toBe('running');

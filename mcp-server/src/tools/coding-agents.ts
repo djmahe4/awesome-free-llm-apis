@@ -90,9 +90,11 @@ export interface AstEditOp {
 }
 
 export interface ResolveAction {
-  action: 'apply' | 'discard' | 'rollback';
+  action: 'apply' | 'discard' | 'rollback' | 'undo_file' | 'file_history';
   checkpointId?: string;
   reason?: string;
+  /** Required for undo_file / file_history: workspace-relative file to operate on. */
+  filePath?: string;
 }
 
 export interface TaskItem {
@@ -115,6 +117,12 @@ export interface CodingAgentsInput {
   targetFiles?: string[];
   dryRun?: boolean;
   topKFiles?: number;
+  /**
+   * Optional caller-chosen alias, preserved in memory: recorded on first use
+   * and accepted by every later status/abort/resume poll, even without
+   * workspaceRoot. The canonical sessionId returned in results stays
+   * workspace-derived (never rotates).
+   */
   sessionId?: string;
   verifyLspDiagnostics?: boolean;
   lspAction?: LspActionRequest;
@@ -134,10 +142,16 @@ export interface CodingAgentsResult {
   patchSummary: string;
   diagnostics: DiagnosticResult[];
   applied: boolean;
-  status?: 'applied' | 'rollback' | 'dry_run' | 'paused' | 'running';
+  status?: 'applied' | 'rollback' | 'dry_run' | 'paused' | 'running' | 'undo_file' | 'file_history';
   message?: string;
   checkpointId?: string;
   restoredFiles?: string[];
+  /** undo_file: whether the previous version was restored to disk. */
+  restored?: boolean;
+  /** undo_file: history entries left after this pop (0 = drained). */
+  remainingDepth?: number;
+  /** file_history: newest-first versions (null = file did not exist before that apply). */
+  fileHistory?: Array<string | null>;
   astRewritesCount?: number;
   markdown?: string;
   content?: string;
@@ -1753,8 +1767,36 @@ function withMarkdown(result: CodingAgentsResult): CodingAgentsResult {
   return result;
 }
 
+/**
+ * Deterministic per-workspace session id (R3): the canonical coding_agents
+ * session is a pure function of workspaceRoot, so CAS file history,
+ * checkpoint rollback, and the background run key never fragment within one
+ * workspace. Other tools (use_free_llm etc.) keep their explicit-override behaviour.
+ */
+function stableWorkspaceSessionId(workspaceRoot?: string): string {
+  const resolved = path.resolve(workspaceRoot || process.cwd());
+  return `omp-ws-${crypto.createHash('sha256').update(resolved).digest('hex').slice(0, 12)}`;
+}
+
+/**
+ * In-memory alias table: a caller-chosen input.sessionId is preserved and
+ * resolves to its canonical workspace session, so polling status/abort/resume
+ * with the id the tool was originally called with keeps working even though
+ * the fallback to the workspace session happened internally. First
+ * registration wins; the canonical id also self-resolves so polling with the
+ * returned sessionId needs no workspaceRoot. Not persisted (in-memory only).
+ */
+const sessionAliases = new Map<string, string>();
+
 export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<CodingAgentsResult> {
-  const sessionId = input.sessionId || `omp-${Date.now()}`;
+  const derived = stableWorkspaceSessionId(input.workspaceRoot);
+  sessionAliases.set(derived, derived);
+  let sessionId = derived;
+  if (input.sessionId && input.sessionId !== derived) {
+    const existing = sessionAliases.get(input.sessionId);
+    if (existing) sessionId = existing;
+    else sessionAliases.set(input.sessionId, derived);
+  }
   const runKey = `coding_agents:${sessionId}`;
 
   if (input.action === 'status') {
@@ -1793,14 +1835,17 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
 
   const dryRun = input.dryRun !== false; // same default as the pipeline itself
   const isRollback = input.resolve?.action === 'rollback';
+  // Per-file undo / history reads are deterministic disk operations — like
+  // rollback they must run synchronously, never be backgrounded behind RunRegistry.
+  const isFileHistoryOp = input.resolve?.action === 'undo_file' || input.resolve?.action === 'file_history';
   const isPlanOnly = input.action === 'plan' || input.pauseOnTaskPlan;
   // astEditOps-only edits are deterministic structural rewrites — the pipeline itself
   // skips LLM generation entirely for them (see the `!input.astEditOps` guard in Step 4),
   // so there's nothing slow here to background.
   const isAstOnly = !!input.astEditOps && input.astEditOps.length > 0;
 
-  // Fast, synchronous paths: preview, plan creation, rollback, deterministic AST edits — unchanged behavior.
-  if (dryRun || isRollback || isPlanOnly || isAstOnly) {
+  // Fast, synchronous paths: preview, plan creation, rollback, per-file undo/history, deterministic AST edits — unchanged behavior.
+  if (dryRun || isRollback || isFileHistoryOp || isPlanOnly || isAstOnly) {
     return runCodingAgentsPipeline(input, sessionId);
   }
 
@@ -1879,6 +1924,34 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       result.checkpointId = targetCheckpoint;
       result.restoredFiles = files;
       result.patchSummary = `Rolled back ${restoredCount} file(s) from CAS checkpoint ${targetCheckpoint}`;
+      return result;
+    }
+
+    // ── Handle Per-File Undo / History Actions (R1) ─────────────────────────
+    if (input.resolve?.action === 'undo_file' || input.resolve?.action === 'file_history') {
+      const filePath = input.resolve.filePath;
+      if (!filePath) throw new Error(`${input.resolve.action} requires resolve.filePath.`);
+
+      if (input.resolve.action === 'file_history') {
+        const versions = globalCasStore.fileHistoryVersions(workspaceRoot, filePath);
+        result.pipelineStage = 'completed';
+        result.applied = false;
+        result.status = 'file_history';
+        result.fileHistory = versions;
+        result.patchSummary = `File history for ${filePath}: ${versions.length} version(s), newest first (null = file did not exist before that apply)`;
+        return result;
+      }
+
+      const { restored, remainingDepth } = await globalCasStore.undoFileVersionToDisk(workspaceRoot, filePath);
+      // R2: the pop changed fileHistory — persist it so the undo doesn't
+      // silently reappear after a restart. Best-effort, same as apply flush.
+      await globalCasStore.flushCasToDisk().catch(() => { /* in-memory still authoritative */ });
+      result.pipelineStage = 'completed';
+      result.applied = true;
+      result.status = 'undo_file';
+      result.restored = restored;
+      result.remainingDepth = remainingDepth;
+      result.patchSummary = `Restored previous version of ${filePath}; ${remainingDepth} version(s) left in its undo history`;
       return result;
     }
 
@@ -2363,12 +2436,23 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     if (!dryRun && input.resolve?.action === 'apply' && patches.length > 0) {
       // Step 1: Snapshot original files into CAS before modifying
       const preApplyMap: Record<string, string> = {};
+      const preHistoryMap: Record<string, string | null> = {};
       for (const patch of patches) {
         const fullPath = path.resolve(workspaceRoot, patch.filePath);
         if (await fs.pathExists(fullPath)) {
-          preApplyMap[patch.filePath] = await fs.readFile(fullPath, 'utf-8');
+          const original = await fs.readFile(fullPath, 'utf-8');
+          preApplyMap[patch.filePath] = original;
+          preHistoryMap[patch.filePath] = original;
+        } else {
+          // Brand-new file: record a null slot so undo_file can delete it (R1).
+          preHistoryMap[patch.filePath] = null;
         }
       }
+
+      // Per-file undo history (depth CAS_FILE_HISTORY_DEPTH, default 3): the
+      // pre-apply versions are recorded BEFORE the transactional write so an
+      // interrupted apply still leaves a consistent newest-first buffer behind.
+      globalCasStore.recordFileVersions(workspaceRoot, preHistoryMap);
 
       const checkpoint = globalCasStore.createCheckpoint(
         sessionId,
@@ -2402,6 +2486,19 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         }
         throw writeErr;
       }
+
+      // R2: persist CAS state (checkpoint manifest + per-file undo history)
+      // right after the writes commit, so a restart can still rollback/undo
+      // this apply. Best-effort: a failed flush must never fail the apply —
+      // in-memory CAS stays authoritative for this session either way.
+      await globalCasStore.flushCasToDisk().catch((flushErr: any) => {
+        result.diagnostics.push({
+          filePath: patches[0]?.filePath || 'unknown',
+          message: `CAS disk persistence flush failed (in-memory checkpoint still valid for this session): ${flushErr?.message || flushErr}`,
+          severity: 'warning',
+          source: 'llm-patch',
+        });
+      });
     }
 
     result.anchors = anchors;
@@ -2512,7 +2609,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     result.error = err.message || String(err);
   }
 
-  if (result.status !== 'paused') {
+  if (result.status !== 'paused' && result.status !== 'undo_file' && result.status !== 'file_history') {
     result.status = (result.restoredFiles && result.restoredFiles.length > 0)
       ? 'rollback'
       : (result.applied ? 'applied' : 'dry_run');

@@ -609,7 +609,7 @@ export function createExpressApp(): express.Express {
       app.post('/api/coding_agents', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
-          const { goal, workspaceRoot, dryRun, topKFiles, sessionId, verifyLspDiagnostics } = req.body || {};
+          const { goal, workspaceRoot, dryRun, topKFiles, sessionId, verifyLspDiagnostics, resolve } = req.body || {};
           if (!goal) {
             res.status(400).json({ error: 'goal is required' });
             return;
@@ -621,7 +621,8 @@ export function createExpressApp(): express.Express {
             dryRun: dryRun ?? true,
             topKFiles: topKFiles ?? 5,
             sessionId,
-            verifyLspDiagnostics: verifyLspDiagnostics ?? true
+            verifyLspDiagnostics: verifyLspDiagnostics ?? true,
+            resolve
           });
           res.json(result);
         } catch (err: any) {
@@ -1647,6 +1648,33 @@ async function main() {
       }
     } catch (err: any) {
       console.error('[harness] Boot reconciliation failed (non-fatal):', err?.message || err);
+    }
+
+    // R2 — CAS disk persistence boot (same baseDir convention as
+    // reconcileRunsOnBoot above: process.cwd()): prune expired checkpoints
+    // (CAS_TTL_MS, default 24h) + GC orphan blobs, then hydrate the
+    // in-memory store so rollback/undo_file issued after a restart still
+    // resolve against on-disk state. Best-effort, never blocks startup;
+    // without a prior flushCasToDisk there is simply no index.json and
+    // this is a no-op.
+    try {
+      const { globalCasStore } = await import('./memory/ContentAddressableCheckpoint.js');
+      const pruned = await globalCasStore.pruneCasOnBoot();
+      if (pruned.removedManifests > 0 || pruned.removedBlobs > 0) {
+        console.error(
+          `[cas] Boot prune: ${pruned.removedManifests} expired checkpoint(s), ${pruned.removedBlobs} orphan blob(s) removed.`
+        );
+      }
+      globalCasStore.initCasPersistence(process.cwd());
+      const loaded = await globalCasStore.loadCasFromDisk();
+      if (loaded) {
+        const stats = globalCasStore.getStats();
+        console.error(
+          `[cas] Restored checkpoint store from disk (${stats.totalCheckpoints} manifest(s), ${stats.totalBlobs} blob(s)).`
+        );
+      }
+    } catch (err: any) {
+      console.error('[cas] Boot restore failed (non-fatal):', err?.message || err);
     }
 
     // Periodically check/sync telemetry every hour (supports continuous server runs)
