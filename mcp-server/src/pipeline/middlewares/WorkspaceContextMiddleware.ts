@@ -498,7 +498,10 @@ export class WorkspaceContextMiddleware implements Middleware {
         // 3b. Wiki Lookup - surface previously-learned, confidence-scored knowledge
         let wikiContext: string | undefined;
         let wikiPagesUsed: string[] = [];
-        if (userContent) {
+        // Wiki knowledge is workspace/session-keyed: workspace-agnostic one-shots
+        // must not be steered into external wiki content (mirrors allowMemory).
+        const allowWiki = context.isOnePass ? !!context.workspaceRoot : true;
+        if (userContent && allowWiki) {
             try {
                 const persona = taskTypeToPersona(context.taskType);
                 const wikiNamespace = context.wsHash || context.sessionId;
