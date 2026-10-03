@@ -31,6 +31,7 @@ import { logToolCall } from '../utils/ChatLogger.js';
 import { localLlmPatch } from './local-llm-patch.js';
 import { RunRegistry, RunInfo } from '../pipeline/middlewares/RunRegistry.js';
 import { globalCasStore, CheckpointManifest } from '../memory/ContentAddressableCheckpoint.js';
+import { assertPatchPathAllowed } from '../harness/write-guard.js';
 
 // `__dirname` isn't a global in ESM (this package is "type": "module") — this
 // file previously used it directly in getAstGrepCmd(), throwing a
@@ -2434,6 +2435,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
 
     // 4c. Atomic Multi-File Single Update with Zero-Waste Pre-Apply CAS Checkpointing
     if (!dryRun && input.resolve?.action === 'apply' && patches.length > 0) {
+      for (const patch of patches) {
+        assertPatchPathAllowed(workspaceRoot, patch.filePath);
+      }
       // Step 1: Snapshot original files into CAS before modifying
       const preApplyMap: Record<string, string> = {};
       const preHistoryMap: Record<string, string | null> = {};
