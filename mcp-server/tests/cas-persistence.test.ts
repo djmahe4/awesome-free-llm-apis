@@ -228,7 +228,7 @@ describe('ContentAddressableStore — disk persistence (R2)', () => {
     const dir = casDirOf(baseDir);
     const blobsDir = path.join(dir, 'blobs');
     await fs.ensureDir(blobsDir);
-    await fs.writeFile(path.join(blobsDir, 'deadbeef'.repeat(8)), 'orphan', 'utf-8');
+    await fs.writeFile(path.join(blobsDir, `${'deadbeef'.repeat(8)}.tmp`), 'orphan', 'utf-8');
 
     const cas = new ContentAddressableStore();
     const result = await cas.pruneCasOnBoot(baseDir);

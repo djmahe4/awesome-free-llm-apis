@@ -989,7 +989,19 @@ async function runSteps(
         // No need to reset run.status/error here — the applyResearchResult
         // call right below unconditionally overwrites both from this new
         // attempt's callResult, whatever it turns out to be.
-        callResult = await gatedCall(store, run, decl, role, retryDispatch.toolName, undefined, retryDispatch.payload, estimate, `${callId}:a${attempt}`, retryDispatch.execute);
+        callResult = await gatedCall(
+          store,
+          run,
+          decl,
+          role,
+          retryDispatch.toolName,
+          undefined,
+          retryDispatch.payload,
+          estimate,
+          `${callId}:a${attempt}`,
+          retryDispatch.execute,
+          retryDispatch.requestedTool
+        );
         stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
         statusAfterAttempt = run.status;
 

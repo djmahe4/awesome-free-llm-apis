@@ -74,6 +74,8 @@ export function parseTurnMemory(output: string): { type: SessionMemoryEntry['typ
 function sanitizePromptValue(value: string): string {
   return value
     .replace(/[<>]/g, ch => (ch === '<' ? '&lt;' : '&gt;'))
+    .replace(/[`[\]]/g, '') // strip delimiters that could escape entry or block formatting
+    .replace(/\b(system|assistant|user):/gi, '$1_') // neutralize simulated role headers
     .replace(/\s+/g, ' ')
     .trim();
 }

@@ -406,6 +406,19 @@ export class ContentAddressableStore {
       }
     }
     if (indexCorrupt) return result; // corrupt or unreadable index: abort GC entirely — never treat referenced blobs as orphans
+    if (indexMissing) {
+      // Missing index: only clean up uncommitted .tmp crash orphans if blobs dir exists, never touch permanent blobs
+      try {
+        const blobNames = await fs.readdir(path.join(casDir, 'blobs'));
+        for (const name of blobNames) {
+          if (name.endsWith('.tmp')) {
+            await fs.remove(path.join(casDir, 'blobs', name)).catch(() => {});
+            result.removedBlobs++;
+          }
+        }
+      } catch {}
+      return result;
+    }
 
     const ttl = Number(process.env.CAS_TTL_MS) || 86_400_000;
     const cutoff = Date.now() - ttl;
@@ -425,7 +438,8 @@ export class ContentAddressableStore {
       const blobNames = await fs.readdir(path.join(casDir, 'blobs'));
       for (const name of blobNames) {
         const isTmp = name.endsWith('.tmp');
-        if (isTmp || !referenced.has(name)) {
+        // When index is missing, only prune uncommitted crash orphans (*.tmp), never permanent content blobs
+        if (isTmp || (hadIndex && !referenced.has(name))) {
           await fs.remove(path.join(casDir, 'blobs', name)).catch(() => {});
           result.removedBlobs++;
         }

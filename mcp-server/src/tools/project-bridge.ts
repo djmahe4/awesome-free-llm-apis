@@ -58,13 +58,11 @@ export function bridgeWorkspaceRoots(): string[] {
 export function assertBridgeWorkspaceRootAllowed(workspaceRoot: string): void {
   const realResolved = real(path.resolve(workspaceRoot));
   const roots = bridgeWorkspaceRoots().map(real);
-  if (roots.length > 0) {
-    if (roots.some(root => realResolved === root || insideRoot(realResolved, root))) return;
-    throw new Error(`workspace_root '${workspaceRoot}' is not permitted — BRIDGE_WORKSPACE_ROOTS allows: ${roots.join(', ')}`);
+  if (roots.length === 0) {
+    throw new Error(`BRIDGE_WORKSPACE_ROOTS is unset — bridge execution is disabled. Set BRIDGE_WORKSPACE_ROOTS explicitly to permitted workspace directory path(s) to enable run_action`);
   }
-  const serverRoot = real(path.resolve(process.cwd()));
-  if (realResolved === serverRoot || insideRoot(realResolved, serverRoot)) return;
-  throw new Error(`workspace_root '${workspaceRoot}' is outside the server working directory (${path.resolve(process.cwd())}) — set BRIDGE_WORKSPACE_ROOTS to the project folder(s) whose bridges.json may run`);
+  if (roots.some(root => realResolved === root || insideRoot(realResolved, root))) return;
+  throw new Error(`workspace_root '${workspaceRoot}' is not permitted — BRIDGE_WORKSPACE_ROOTS allows: ${roots.join(', ')}`);
 }
 
 async function selectBridge(workspaceRoot: string, bridgeName?: string): Promise<{ name: string; entry: BridgeEntry }> {
