@@ -11,6 +11,7 @@ import { toMarkdownResponse } from '../utils/markdown.js';
 import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
 import { TaskType } from '../pipeline/middleware.js';
 import { logToolCall } from '../utils/ChatLogger.js';
+import { isInsideRoot, real } from '../utils/workspace-roots.js';
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
@@ -158,7 +159,7 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
     let repoDir: string | null = null;
     if (skillDir) {
       repoDir = path.resolve(wsRoot, skillDir);
-      if (repoDir !== wsRoot && !repoDir.startsWith(wsRoot + path.sep)) {
+      if (!isInsideRoot(real(repoDir), real(wsRoot))) {
         return { success: false, error: 'Security Exception: skillDir escapes the workspace root.' };
       }
     } else if (await fs.pathExists(wsRoot)) {

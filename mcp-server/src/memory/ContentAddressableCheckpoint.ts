@@ -394,18 +394,16 @@ export class ContentAddressableStore {
       unreadableIndex = true;
       return null;
     });
-    if (unreadableIndex) return result;
-    if (rawIndex !== null) {
-      try {
-        const parsed = JSON.parse(rawIndex);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('corrupt index');
-        if (parsed.manifests !== undefined && !Array.isArray(parsed.manifests)) throw new Error('corrupt index');
-        if (parsed.fileHistory !== undefined && (typeof parsed.fileHistory !== 'object' || parsed.fileHistory === null)) throw new Error('corrupt index');
-        index = parsed;
-        hadIndex = true;
-      } catch {
-        return result; // corrupt index: abort GC entirely — never treat referenced blobs as orphans
-      }
+    if (unreadableIndex || rawIndex === null) return result; // missing or corrupt/unreadable index: abort GC
+    try {
+      const parsed = JSON.parse(rawIndex);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('corrupt index');
+      if (parsed.manifests !== undefined && !Array.isArray(parsed.manifests)) throw new Error('corrupt index');
+      if (parsed.fileHistory !== undefined && (typeof parsed.fileHistory !== 'object' || parsed.fileHistory === null)) throw new Error('corrupt index');
+      index = parsed;
+      hadIndex = true;
+    } catch {
+      return result; // corrupt index: abort GC entirely — never treat referenced blobs as orphans
     }
 
     const ttl = Number(process.env.CAS_TTL_MS) || 86_400_000;

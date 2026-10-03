@@ -36,7 +36,7 @@ describe('workspace-roots', () => {
       expect(drive[0]).toContain('C:\\proj\\x');
       const slashDrive = splitRoots('D:/data');
       expect(slashDrive).toHaveLength(1);
-      expect(slashDrive[0]).toContain('D:/data');
+      expect(slashDrive[0]).toBe(path.resolve('D:/data'));
       expect(splitRoots('C:\\a,D:/b')).toHaveLength(2);
       expect(splitRoots('a:b')).toEqual([path.resolve('a'), path.resolve('b')]);
     });
@@ -87,7 +87,15 @@ describe('workspace-roots', () => {
     it('rejects a symlinked component that escapes the allowed roots', () => {
       process.env.WORKSPACE_ROOTS = root;
       const link = path.join(root, 'escape');
-      fs.symlinkSync(outside, link, 'dir');
+      try {
+        fs.symlinkSync(outside, link, 'dir');
+      } catch (err: any) {
+        if (err?.code === 'EPERM' || err?.code === 'EACCES') {
+          // Windows non-elevated environment without SeCreateSymbolicLinkPrivilege
+          return;
+        }
+        throw err;
+      }
       try {
         expect(resolvePathWithinRoots(path.join(link, 'secret.mp4'))).toBeNull();
       } finally {

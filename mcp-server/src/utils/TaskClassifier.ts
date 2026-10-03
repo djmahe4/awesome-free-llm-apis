@@ -2,7 +2,7 @@ import type { Message } from '../providers/types.js';
 import { TaskType } from '../pipeline/middleware.js';
 import { getMessageContent } from './MessageUtils.js';
 
-export const CYBER_TERMS_REGEX = /\b(ctf|exploit|pentest|pwn|cve|fuzzing|reverse-engineering|buffer-overflow|binary-analysis|wireshark|metasploit|port-scan|nmap|malware|phishing|secure-coding|owasp|sast|dast|bug[-_ ]bount(?:y|ies)|bug[-_ ]hunt(?:ing)?|bug_hunting|hunt|hunting)\b/i;
+export const CYBER_TERMS_REGEX = /\b(ctf|exploit|pentest|pwn|cve|fuzzing|reverse-engineering|buffer-overflow|binary-analysis|wireshark|metasploit|port-scan|nmap|malware|phishing|secure-coding|owasp|sast|dast|bug[-_ ]bount(?:y|ies)|bug[-_ ]hunt(?:ing)?|threat[-_ ]hunt(?:ing)?)\b/i;
 
 export class TaskClassifier {
     private static readonly keywordTaskMap: Record<string, TaskType> = {

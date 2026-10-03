@@ -664,7 +664,12 @@ function resolveStepDispatch(
   const effectiveToolName = matchedSkill ? 'execute_skill' : toolName;
   const resolved = dispatchMap[effectiveToolName] || dispatchMap.use_free_llm;
   const resolvedToolName = dispatchMap[effectiveToolName] ? effectiveToolName : 'use_free_llm';
-  return { toolName: resolvedToolName, payload: resolved.payload, execute: resolved.execute };
+  return {
+    toolName: resolvedToolName,
+    requestedTool: toolName,
+    payload: resolved.payload,
+    execute: resolved.execute,
+  };
 }
 
 /**
