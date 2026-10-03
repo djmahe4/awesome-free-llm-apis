@@ -51,6 +51,10 @@ export class HarnessStore {
     this.tasksPath = path.join(this.dir, 'tasks.md');
   }
 
+  get runDirPath(): string {
+    return this.dir;
+  }
+
   /**
    * Reuses coding_agents' exact tasks.md format/blackboard convention (see
    * src/tools/coding-agents.ts's serializeTasksMarkdown/parseTasksMarkdown,

@@ -1197,7 +1197,9 @@ export function createExpressApp(): express.Express {
           const approvals = await store.listApprovals();
           const trace = await store.readTrace(limit);
           const rawTasks = await store.loadTasksMarkdown();
-          res.json({ run, approvals, trace, tasks: rawTasks });
+          const { readSessionMemory } = await import('./harness/session-memory.js');
+          const sessionMemory = await readSessionMemory(store.runDirPath);
+          res.json({ run, approvals, trace, tasks: rawTasks, sessionMemory });
         } catch (err) {
           res.status(500).json({ error: String(err) });
         }

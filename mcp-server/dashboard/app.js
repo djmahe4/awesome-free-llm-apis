@@ -3098,6 +3098,7 @@ const harnessRerunSubmit       = document.getElementById('harness-rerun-submit')
 const harnessRerunMsg          = document.getElementById('harness-rerun-msg');
 const harnessTasksView         = document.getElementById('harness-tasks-view');
 const harnessTraceView         = document.getElementById('harness-trace-view');
+const harnessSessionMemoryView = document.getElementById('harness-session-memory-view');
 
 function initHarnessTab() {
   if (!harnessInitialized) {
@@ -3240,6 +3241,14 @@ async function inspectHarnessRun(runId) {
           const payload = t.data !== undefined ? t.data : t.payload;
           return `[${time}] [${t.type}] ${JSON.stringify(payload)}`;
         }).join('\n');
+      }
+    }
+    if (harnessSessionMemoryView) {
+      const mem = data.sessionMemory || [];
+      if (mem.length === 0) {
+        harnessSessionMemoryView.textContent = 'No session memory entries yet';
+      } else {
+        harnessSessionMemoryView.textContent = mem.map(e => `[${e.type}] (${e.role}) ${e.text}`).join('\n');
       }
     }
     if (harnessRerunRole && data.run?.roles && data.run.roles.length > 0) {

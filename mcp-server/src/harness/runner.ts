@@ -2,12 +2,14 @@ import { RunRegistry } from '../pipeline/middlewares/RunRegistry.js';
 import { ContextManager } from '../utils/ContextManager.js';
 import { HarnessStore } from './store.js';
 import { loadHarnessDeclaration, selectRole } from './declaration.js';
-import { evaluate, hashArgs, assertWorkspaceRootAllowed } from './policy.js';
+import { trackDeclaration, verifyDeclarationIntegrity, type RegistryEntry } from './registry.js';
+import { evaluate, hashArgs, assertWorkspaceRootAllowed, laneCycleMax, canStartLaneCycle, stripCycleSuffix } from './policy.js';
 import { serializeTasksMarkdown, parseTasksMarkdown, type TaskItem } from '../tools/coding-agents.js';
 import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
 import { buildHandoff, validateHandoff, type Handoff } from './handoff.js';
 import { createReasoningStrategy, type LessonNode, type StepFailure } from './reasoning.js';
 import { MonitorRegistry } from './monitor.js';
+import { appendSessionMemory, buildSessionMemoryPromptBlock, parseTurnMemory, recentSessionMemory } from './session-memory.js';
 import type { HarnessDeclaration, HarnessRun } from './types.js';
 
 const contextManager = new ContextManager();
@@ -579,15 +581,17 @@ function resolveStepDispatch(
   role: string,
   stepGoal: string,
   workspaceRoot: string | undefined,
-  registryKey: string
+  registryKey: string,
+  memoryBlock = ''
 ): { toolName: string; payload: any; execute: () => Promise<any> } {
   const toolName = decl.roles[role]?.tools?.[0]?.tool || 'use_free_llm';
 
   // This exact object is both hashed for approval-binding and passed to the
   // tool — one source of truth, so what a human approves is what runs.
+  const systemPrompt = 'You are a research agent. Answer with grounded findings only; cite sources inline. Do not fabricate citations.';
   const useFreeLlmPayload = {
     messages: [
-      { role: 'system', content: 'You are a research agent. Answer with grounded findings only; cite sources inline. Do not fabricate citations.' },
+      { role: 'system', content: memoryBlock ? `${systemPrompt}\n\n${memoryBlock}` : systemPrompt },
       { role: 'user', content: stepGoal },
     ],
     agentic: false,
@@ -887,18 +891,19 @@ async function runSteps(
       stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
     } else {
       const stepGoal = stepInputText(i, originalGoal, handoff, i === startIndex ? memoryContext : undefined);
-      const dispatch = resolveStepDispatch(decl, role, stepGoal, workspaceRoot, registryKey);
+      const memoryBlock = buildSessionMemoryPromptBlock(await recentSessionMemory(store.runDirPath));
+      const dispatch = resolveStepDispatch(decl, role, stepGoal, workspaceRoot, registryKey, memoryBlock);
       const argsHash = hashArgs(dispatch.payload);
 
       if (await hasRepeatedSuccess(store, callId, argsHash)) {
         run.status = 'failed';
         run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
-        await endTaskAttempt(store, originalGoal, role, 'failed', `repeat detected: ${run.error}`);
+        await endTaskAttempt(store, originalGoal, stepId, 'failed', `repeat detected: ${run.error}`);
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
 
-      await beginTaskAttempt(store, originalGoal, role, `step ${callId}: attempting via ${dispatch.toolName}`);
+      await beginTaskAttempt(store, originalGoal, stepId, `step ${callId}: attempting via ${dispatch.toolName}`);
       goalTokens = contextManager.countStringTokens(stepGoal);
       const estimate = goalTokens + 2000;
       callResult = await gatedCall(store, run, decl, role, dispatch.toolName, undefined, dispatch.payload, estimate, callId, dispatch.execute);
@@ -921,7 +926,7 @@ async function runSteps(
         const retryGoal = chosen.strategy === 'stricter-json-instruction'
           ? `${stepGoal}\n\nIMPORTANT: you must respond with substantive, non-empty content.`
           : stepGoal;
-        const retryDispatch = resolveStepDispatch(decl, role, retryGoal, workspaceRoot, registryKey);
+        const retryDispatch = resolveStepDispatch(decl, role, retryGoal, workspaceRoot, registryKey, memoryBlock);
         // No need to reset run.status/error here — the applyResearchResult
         // call right below unconditionally overwrites both from this new
         // attempt's callResult, whatever it turns out to be.
@@ -934,9 +939,16 @@ async function runSteps(
           if (reused) await reinforceLesson(store, run, decl, reused.id, workspaceRoot);
         }
       }
+
+      if (run.status === 'complete' && stepContent && dispatch.toolName === 'use_free_llm') {
+        const parsedTurn = parseTurnMemory(stepContent);
+        if (parsedTurn) {
+          await appendSessionMemory(store.runDirPath, { runId: run.runId, role, ...parsedTurn }).catch(() => {});
+        }
+      }
     }
 
-    await endTaskAttempt(store, originalGoal, role, taskOutcomeFor(run.status), `step ${callId}: ${run.status}${run.error ? ` (${run.error})` : ''}`);
+    await endTaskAttempt(store, originalGoal, stepId, taskOutcomeFor(run.status), `step ${callId}: ${run.status}${run.error ? ` (${run.error})` : ''}`);
 
     if (run.status !== 'complete') {
       // paused_approval / paused_budget / failed / aborted — later steps stay
