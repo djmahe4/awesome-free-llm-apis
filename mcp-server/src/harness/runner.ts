@@ -110,7 +110,8 @@ export async function gatedCall(
   args: any,
   estimatedTokens: number,
   callId: string,
-  execute: () => Promise<any>
+  execute: () => Promise<any>,
+  requestedTool?: string
 ): Promise<GatedResult> {
   const argsHashForTrace = hashArgs(args);
   await store.appendTrace({
@@ -122,7 +123,7 @@ export async function gatedCall(
       action,
       callId,
       argsHash: argsHashForTrace,
-      ...(args?.__requestedTool ? { requestedTool: args.__requestedTool } : {}),
+      ...(requestedTool && requestedTool !== tool ? { requestedTool } : {}),
     },
   });
 
@@ -952,10 +953,19 @@ async function runSteps(
       await beginTaskAttempt(store, originalGoal, stepId, `step ${callId}: attempting via ${dispatch.toolName}`);
       goalTokens = contextManager.countStringTokens(stepGoal);
       const estimate = goalTokens + 2000;
-      const callPayload = dispatch.requestedTool && dispatch.requestedTool !== dispatch.toolName
-        ? { ...dispatch.payload, __requestedTool: dispatch.requestedTool }
-        : dispatch.payload;
-      callResult = await gatedCall(store, run, decl, role, dispatch.toolName, undefined, callPayload, estimate, callId, dispatch.execute);
+      callResult = await gatedCall(
+        store,
+        run,
+        decl,
+        role,
+        dispatch.toolName,
+        undefined,
+        dispatch.payload,
+        estimate,
+        callId,
+        dispatch.execute,
+        dispatch.requestedTool
+      );
 
       // P4e trial-and-error (D5): a genuine failure (not a pause — needs_
       // approval/needs_budget already returned control to the human/budget
