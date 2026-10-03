@@ -388,23 +388,24 @@ export class ContentAddressableStore {
       fileHistory?: Record<string, Array<string | null>>;
     } = { version: 1, manifests: [], fileHistory: {} };
     let hadIndex = false;
-    let unreadableIndex = false;
-    const rawIndex = await fs.readFile(indexPath, 'utf-8').catch((err: any) => {
-      if (err?.code === 'ENOENT') return null;
-      unreadableIndex = true;
-      return null;
-    });
-    if (unreadableIndex || rawIndex === null) return result; // missing or corrupt/unreadable index: abort GC
+    let indexMissing = false;
+    let indexCorrupt = false;
     try {
+      const rawIndex = await fs.readFile(indexPath, 'utf-8');
       const parsed = JSON.parse(rawIndex);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('corrupt index');
       if (parsed.manifests !== undefined && !Array.isArray(parsed.manifests)) throw new Error('corrupt index');
       if (parsed.fileHistory !== undefined && (typeof parsed.fileHistory !== 'object' || parsed.fileHistory === null)) throw new Error('corrupt index');
       index = parsed;
       hadIndex = true;
-    } catch {
-      return result; // corrupt index: abort GC entirely — never treat referenced blobs as orphans
+    } catch (err: any) {
+      if (err?.code === 'ENOENT') {
+        indexMissing = true;
+      } else {
+        indexCorrupt = true;
+      }
     }
+    if (indexCorrupt) return result; // corrupt or unreadable index: abort GC entirely — never treat referenced blobs as orphans
 
     const ttl = Number(process.env.CAS_TTL_MS) || 86_400_000;
     const cutoff = Date.now() - ttl;

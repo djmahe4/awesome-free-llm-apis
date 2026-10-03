@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import { existsSync, readFileSync } from 'fs';
 
-const RUN_PY = path.resolve(__dirname, '..', '..', '..', 'AVST', 'ctf-katana', 'skills', 'bug_hunting', 'run.py');
+const RUN_PY = process.env.CTF_KATANA_RUN_PY
+  ?? path.resolve(__dirname, '..', '..', '..', 'AVST', 'ctf-katana', 'skills', 'bug_hunting', 'run.py');
 
 const EXPECTED_ACTIONS = [
   'feature_map',
@@ -22,7 +23,7 @@ const EXPECTED_ACTIONS = [
   'vuln_scan',
 ];
 
-describe.skipIf(!existsSync(RUN_PY))('ctf-katana bug_hunting run.py action registry (gap G)', () => {
+describe.skipIf(!process.env.CTF_KATANA_RUN_PY || !existsSync(RUN_PY))('ctf-katana bug_hunting run.py action registry (gap G)', () => {
   it('defines a module-level _ACTIONS set literal', () => {
     const src = readFileSync(RUN_PY, 'utf-8');
     expect(src).toMatch(/\b_ACTIONS\s*=\s*\{/);

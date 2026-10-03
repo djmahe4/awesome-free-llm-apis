@@ -113,7 +113,18 @@ export async function gatedCall(
   execute: () => Promise<any>
 ): Promise<GatedResult> {
   const argsHashForTrace = hashArgs(args);
-  await store.appendTrace({ runId: run.runId, role, type: 'tool_call', data: { tool, action, callId, argsHash: argsHashForTrace } });
+  await store.appendTrace({
+    runId: run.runId,
+    role,
+    type: 'tool_call',
+    data: {
+      tool,
+      action,
+      callId,
+      argsHash: argsHashForTrace,
+      ...(args?.__requestedTool ? { requestedTool: args.__requestedTool } : {}),
+    },
+  });
 
   if (run.budget.used + run.budget.reserved + estimatedTokens > run.budget.maxTokens) {
     await store.appendTrace({ runId: run.runId, role, type: 'budget', data: { reason: 'would exceed maxTokens', estimatedTokens, remaining: run.budget.maxTokens - run.budget.used - run.budget.reserved } });
@@ -583,7 +594,7 @@ function resolveStepDispatch(
   workspaceRoot: string | undefined,
   registryKey: string,
   memoryBlock = ''
-): { toolName: string; payload: any; execute: () => Promise<any> } {
+): { toolName: string; requestedTool?: string; payload: any; execute: () => Promise<any> } {
   const toolName = decl.roles[role]?.tools?.[0]?.tool || 'use_free_llm';
 
   const normalizeTag = (t: string) => t.toLowerCase().replace(/[-_]+/g, ' ').trim();
@@ -941,7 +952,10 @@ async function runSteps(
       await beginTaskAttempt(store, originalGoal, stepId, `step ${callId}: attempting via ${dispatch.toolName}`);
       goalTokens = contextManager.countStringTokens(stepGoal);
       const estimate = goalTokens + 2000;
-      callResult = await gatedCall(store, run, decl, role, dispatch.toolName, undefined, dispatch.payload, estimate, callId, dispatch.execute);
+      const callPayload = dispatch.requestedTool && dispatch.requestedTool !== dispatch.toolName
+        ? { ...dispatch.payload, __requestedTool: dispatch.requestedTool }
+        : dispatch.payload;
+      callResult = await gatedCall(store, run, decl, role, dispatch.toolName, undefined, callPayload, estimate, callId, dispatch.execute);
 
       // P4e trial-and-error (D5): a genuine failure (not a pause — needs_
       // approval/needs_budget already returned control to the human/budget

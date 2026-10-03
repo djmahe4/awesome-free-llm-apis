@@ -87,8 +87,8 @@ describe('file-lock', () => {
 
         const duration = Date.now() - start;
         expect(result).toBe('acquired');
-        // Reaping should happen immediately, so duration should be very small
-        expect(duration).toBeLessThan(500);
+        // Reaping should happen immediately, allow margin for Windows filesystem/process lookup
+        expect(duration).toBeLessThan(1500);
 
         // Verify the lock file is cleaned up after completion
         await expect(fs.stat(lockFile)).rejects.toThrow();

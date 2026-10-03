@@ -2138,6 +2138,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       if (run) RunRegistry.progress(`coding_agents:${sessionId}`, relPath, run.completedCount, run.totalCount);
       const fullPath = path.resolve(workspaceRoot, relPath);
       assertSafe(fullPath, workspaceRoot); // security: block path traversal
+      assertPatchPathAllowed(workspaceRoot, relPath); // security: block protected harness configs and bridges.json
 
       const fileExists = await fs.pathExists(fullPath);
       const originalContent = fileExists ? await fs.readFile(fullPath, 'utf-8') : '';

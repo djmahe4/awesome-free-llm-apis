@@ -132,7 +132,12 @@ describe('ContentAddressableStore — per-file history ring buffer', () => {
   it('rejects a symlinked component that escapes the workspace', async () => {
     const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'omp-cas-escape-'));
     try {
-      await fs.symlink(outside, path.join(ws, 'link'), 'dir');
+      try {
+        await fs.symlink(outside, path.join(ws, 'link'), 'dir');
+      } catch (err: any) {
+        if (err?.code === 'EPERM' && process.platform === 'win32') return; // Windows requires SeCreateSymbolicLinkPrivilege
+        throw err;
+      }
       cas.recordFileVersions(ws, { 'link/escape.ts': 'evil' });
 
       await expect(cas.undoFileVersionToDisk(ws, 'link/escape.ts'))
@@ -146,7 +151,12 @@ describe('ContentAddressableStore — per-file history ring buffer', () => {
   it('restoreCheckpointToDisk blocks symlink escape of manifest paths', async () => {
     const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'omp-cas-escape-ckpt-'));
     try {
-      await fs.symlink(outside, path.join(ws, 'link'), 'dir');
+      try {
+        await fs.symlink(outside, path.join(ws, 'link'), 'dir');
+      } catch (err: any) {
+        if (err?.code === 'EPERM' && process.platform === 'win32') return; // Windows requires SeCreateSymbolicLinkPrivilege
+        throw err;
+      }
       const manifest = cas.createCheckpoint('sess-symlink', 'escape attempt', {
         'link/pwn.txt': 'payload',
       });
