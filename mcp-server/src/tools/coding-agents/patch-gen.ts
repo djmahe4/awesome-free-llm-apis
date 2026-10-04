@@ -1,0 +1,551 @@
+import path from 'node:path';
+import { localLlmPatch } from '../local-llm-patch.js';
+import { type DiagnosticResult } from './types.js';
+import { runTsMorphCheck } from './diagnostics.js';
+import { extractCodeBlock } from './tasks.js';
+
+export function extractWindowForInstruction(
+  content: string,
+  instruction: string,
+  windowSize = 120
+): { window: string; startIdx: number; endIdx: number; lineCount: number } | null {
+  const lines = content.split(/\r?\n/);
+  if (lines.length <= windowSize) return null;
+
+  const terms = (instruction.match(/\b[a-zA-Z][a-zA-Z0-9_-]{4,}\b/g) ?? [])
+    .map(t => t.toLowerCase());
+  const uniqueTerms = [...new Set(terms)].slice(0, 12);
+
+  const perLineScore = lines.map(line => {
+    const lower = line.toLowerCase();
+    return uniqueTerms.filter(t => lower.includes(t)).length;
+  });
+
+  // A single keyword-dense line (e.g. one ternary chaining status/complete/
+  // failed) can outscore the real target whose matching terms are spread
+  // across several lines of a multi-line block — sum scores over a local
+  // neighborhood instead of picking the single highest-scoring line, so
+  // sustained relevance beats one coincidentally dense outlier line.
+  // Observed live: this picked a 120-line window around an unrelated
+  // one-liner in finalizeRun instead of the real multi-line target in
+  // applyResearchResult, and the model then hallucinated an edit to the only
+  // thing it could see — applied cleanly (real text, no TS regression),
+  // reported success, and silently missed the actual requested change.
+  const neighborhood = 6;
+  let bestScore = -1;
+  let bestLine = Math.floor(lines.length / 2);
+  for (let i = 0; i < lines.length; i++) {
+    let windowScore = 0;
+    for (let j = Math.max(0, i - neighborhood); j <= Math.min(lines.length - 1, i + neighborhood); j++) {
+      windowScore += perLineScore[j];
+    }
+    if (windowScore > bestScore) { bestScore = windowScore; bestLine = i; }
+  }
+
+  const half = Math.floor(windowSize / 2);
+  const startIdx = Math.max(0, bestLine - half);
+  const endIdx = Math.min(lines.length, bestLine + half);
+  return { window: lines.slice(startIdx, endIdx).join('\n'), startIdx, endIdx, lineCount: lines.length };
+}
+
+/**
+ * Corruption guard for LLM-generated full-file replacements on EXISTING files.
+ * ContextGatherer.gatherContext (used by localLlmPatch for prompt enrichment)
+ * has a known relevance-ranking gap — "top N files" isn't "N most relevant
+ * files" — so a weak local model can occasionally latch onto irrelevant
+ * injected context and produce a syntactically valid, but completely
+ * unrelated, full-file replacement (observed live: a real 364-line
+ * MemoryManager class replaced wholesale with an unrelated smoke-test
+ * script). LSP/syntax diagnostics don't catch this — the output is valid
+ * code, just the wrong code. This is a content-level backstop: for a
+ * non-trivial existing file, at least one of its own top-level declared
+ * symbols (class/function/interface/const/type) must still appear
+ * *somewhere* in the replacement, or it's treated as a hallucinated
+ * replacement rather than a real edit.
+ */
+/**
+ * Sliding-window fidelity guard: a model can honor "don't touch anything
+ * outside the excerpt" while still mangling the excerpt itself in ways a
+ * mere line-count check misses — observed live, twice, on the same 120-line
+ * window: once collapsed down to ~2 lines, once kept a near-identical total
+ * line count but with rows duplicated near the boundary and the actual
+ * target line silently dropped in the shuffle. Because the loss/shift is
+ * small relative to the WHOLE file, looksLikeHallucinatedReplacement's
+ * overlap check on the spliced full content doesn't catch either case.
+ * This compares the window in isolation via multiset line overlap: a real
+ * targeted edit changes a line or two and reproduces everything else
+ * byte-for-byte, so overlap should be near-total regardless of whether the
+ * counts happen to match.
+ */
+export function windowReplyIsSuspicious(originalWindowLines: string[], replyLines: string[]): boolean {
+  if (originalWindowLines.length < 5) return false;
+  const available = new Map<string, number>();
+  for (const line of originalWindowLines) available.set(line, (available.get(line) || 0) + 1);
+  let kept = 0;
+  for (const line of replyLines) {
+    const remaining = available.get(line) || 0;
+    if (remaining > 0) {
+      available.set(line, remaining - 1);
+      kept++;
+    }
+  }
+  return kept / originalWindowLines.length < 0.85;
+}
+
+/**
+ * SEARCH/REPLACE block patching (Aider-style) — the actual fix for the
+ * class of failure the window-fidelity guard above can only detect, not
+ * prevent: every prior strategy (full-file, sliding window) asks the model
+ * to REPRODUCE unchanged text, and weak local models fail at verbatim copy
+ * even over a 120-line excerpt (observed: collapsed excerpts, duplicated/
+ * dropped rows). This asks for zero reproduction — the model emits only the
+ * exact text to find and its replacement; unchanged content never passes
+ * through the model at all, so collapse/duplication/ellipsis-elision are
+ * structurally impossible, not just caught after the fact.
+ */
+interface SearchReplaceBlock { search: string; replace: string }
+
+export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
+  const blocks: SearchReplaceBlock[] = [];
+  const lines = text.split(/\r?\n/);
+  let state: 'OUTSIDE' | 'IN_SEARCH' | 'IN_REPLACE' = 'OUTSIDE';
+  let curSearch: string[] = [];
+  let curReplace: string[] = [];
+
+  const isSearchMarker = (l: string) => /^<{5,}\s*SEARCH\s*$/i.test(l.trim());
+  const isDividerMarker = (l: string) => /^={5,}\s*$/i.test(l.trim());
+  const isReplaceMarker = (l: string) => /^>{5,}\s*REPLACE\s*$/i.test(l.trim());
+
+  for (const line of lines) {
+    if (state === 'OUTSIDE') {
+      if (isSearchMarker(line)) {
+        state = 'IN_SEARCH';
+        curSearch = [];
+        curReplace = [];
+      }
+    } else if (state === 'IN_SEARCH') {
+      if (isDividerMarker(line)) {
+        state = 'IN_REPLACE';
+      } else if (isSearchMarker(line)) {
+        // Reset if another search marker begins without divider
+        curSearch = [];
+        curReplace = [];
+      } else {
+        curSearch.push(line);
+      }
+    } else if (state === 'IN_REPLACE') {
+      if (isReplaceMarker(line)) {
+        blocks.push({
+          search: curSearch.join('\n'),
+          replace: curReplace.join('\n'),
+        });
+        state = 'OUTSIDE';
+        curSearch = [];
+        curReplace = [];
+      } else if (isSearchMarker(line)) {
+        // Premature new block started
+        state = 'IN_SEARCH';
+        curSearch = [];
+        curReplace = [];
+      } else {
+        curReplace.push(line);
+      }
+    }
+  }
+
+  return blocks;
+}
+
+/**
+ * Applies blocks via exact substring match — each SEARCH text must occur
+ * exactly once in the current content (0 matches = anchor drifted/model
+ * misquoted; >1 matches = ambiguous, could edit the wrong occurrence).
+ * Sequential: each block's replace is applied before the next block's
+ * search runs, so later blocks can target text a prior block just wrote.
+ */
+// Matches a stray protocol marker line (<<<<<<<, =======, >>>>>>>) inside a
+// block's own text — real code should never contain these, so their
+// presence means the model's response got tangled (nested/malformed blocks,
+// or it echoed the format instructions back as content) rather than
+// producing a real edit. Observed live: a REPLACE payload containing a
+// marker line got spliced straight into a .ts file, producing a literal
+// "Merge conflict marker encountered" compiler error — caught by the LSP
+// auto-rollback gate that time, but only because verifyLspDiagnostics
+// happened to be on for that call. This guard makes it fail the same
+// (clean, no-op) way regardless of whether that gate is enabled.
+const STRAY_MARKER_RE = /^(?:<{5,}|={5,}|>{5,})\s*(?:SEARCH|REPLACE)?\s*$/m;
+
+/**
+ * Finds where `searchLines` occurs in `workingLines`, trying progressively
+ * looser matching so verbatim-quoting drift (the single biggest observed
+ * cause of "SEARCH text not found" — a weak model reproducing a block with
+ * different indentation/trailing whitespace but otherwise-correct content)
+ * doesn't fail a block that a human would recognize as an unambiguous match.
+ * Splitting on /\r?\n/ before this is ever called already makes line
+ * boundaries CRLF-agnostic, so the tiers below are about per-line content
+ * drift, not line-ending drift.
+ *   Tier 1: exact line-for-line match.
+ *   Tier 2: match after trimming each line (indentation/trailing-space only).
+ * Each tier independently requires exactly one match — an exact match always
+ * wins over a trimmed one, and a tier is never consulted if the previous
+ * tier already found (even an ambiguous) match, so loosening the match never
+ * silently overrides a real exact hit elsewhere in the file.
+ */
+// Matches a leading `L<number>: ` annotation — the format context-gatherer.ts
+// uses to present grep excerpts to the model (`L${line}: ${content}`,
+// context-gatherer.ts's grep-context formatting). Observed live: the model
+// echoed this presentation-only annotation into BOTH the SEARCH and REPLACE
+// text of a block ("L268: const callResult = ..."), so the exact/trimmed
+// tiers correctly found zero matches (the real file has no such literal
+// text) and the whole batch failed safely — but it's a real, generalizable
+// failure mode worth a dedicated tolerant tier rather than just failing.
+const LINE_NUMBER_PREFIX_RE = /^\s*L\d+:\s?/;
+
+export function findLineBlockMatch(
+  workingLines: string[],
+  searchLines: string[]
+): { index: number; ambiguous: boolean; usedLineNumberStrip: boolean } {
+  const tryTier = (project: (l: string) => string): number[] => {
+    const hits: number[] = [];
+    const projSearch = searchLines.map(project);
+    for (let i = 0; i + searchLines.length <= workingLines.length; i++) {
+      let matches = true;
+      for (let j = 0; j < searchLines.length; j++) {
+        if (project(workingLines[i + j]) !== projSearch[j]) { matches = false; break; }
+      }
+      if (matches) hits.push(i);
+    }
+    return hits;
+  };
+
+  const exact = tryTier(l => l);
+  if (exact.length > 0) return { index: exact[0], ambiguous: exact.length > 1, usedLineNumberStrip: false };
+
+  const trimmed = tryTier(l => l.trim());
+  if (trimmed.length > 0) return { index: trimmed[0], ambiguous: trimmed.length > 1, usedLineNumberStrip: false };
+
+  // Only worth trying when the SEARCH text itself actually carries the
+  // annotation — otherwise this tier is identical to the trimmed one above
+  // and would just re-do the same scan for nothing.
+  if (searchLines.some(l => LINE_NUMBER_PREFIX_RE.test(l))) {
+    const lineNumberStripped = tryTier(l => l.trim().replace(LINE_NUMBER_PREFIX_RE, ''));
+    if (lineNumberStripped.length > 0) return { index: lineNumberStripped[0], ambiguous: lineNumberStripped.length > 1, usedLineNumberStrip: true };
+  }
+
+  return { index: -1, ambiguous: false, usedLineNumberStrip: false };
+}
+
+export function applySearchReplaceBlocks(
+  content: string,
+  blocks: SearchReplaceBlock[]
+): { content: string; appliedCount: number; failures: string[] } {
+  // CRLF-agnostic by construction (each line's own ending is discarded by
+  // the split), and rejoined with whichever ending the original file
+  // predominantly used, so touching a couple of lines doesn't flip the
+  // whole file's line endings (this repo has files with mixed endings).
+  const usesCrlf = /\r\n/.test(content);
+  const eol = usesCrlf ? '\r\n' : '\n';
+  let workingLines = content.split(/\r?\n/);
+  let appliedCount = 0;
+  const failures: string[] = [];
+
+  for (const { search, replace } of blocks) {
+    if (!search) {
+      failures.push('Empty SEARCH block (nothing to match)');
+      continue;
+    }
+    if (STRAY_MARKER_RE.test(search) || STRAY_MARKER_RE.test(replace)) {
+      failures.push('Block contains a stray SEARCH/REPLACE marker line (malformed/nested response) — not applied');
+      continue;
+    }
+    const searchLines = search.split(/\r?\n/);
+    const { index, ambiguous, usedLineNumberStrip } = findLineBlockMatch(workingLines, searchLines);
+    if (index === -1) {
+      failures.push(`SEARCH text not found (even with whitespace-tolerant matching): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
+    } else if (ambiguous) {
+      failures.push(`SEARCH text matched multiple times (ambiguous, must be unique): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
+    } else {
+      // If the match only succeeded after stripping a bogus "L<N>: " prefix
+      // from SEARCH, the model very likely echoed the same annotation into
+      // REPLACE too (observed live, symmetric on both sides of the block) —
+      // strip it there as well, or the "fix" would insert that literal
+      // presentation-only text into the real file.
+      const replaceLines = (usedLineNumberStrip ? replace.replace(new RegExp(LINE_NUMBER_PREFIX_RE.source, 'gm'), '') : replace).split(/\r?\n/);
+      workingLines = [
+        ...workingLines.slice(0, index),
+        ...replaceLines,
+        ...workingLines.slice(index + searchLines.length),
+      ];
+      appliedCount++;
+    }
+  }
+  return { content: workingLines.join(eol), appliedCount, failures };
+}
+
+/**
+ * Error-delta gate for TS/JS SEARCH/REPLACE results: a batch of blocks can
+ * each individually match and apply cleanly while the COMBINATION leaves the
+ * file in a worse state than before — observed live: fixing one method's
+ * signature to async without simultaneously updating its call sites turned
+ * 8 compiler errors into 18. Since ts-morph's in-memory check is cheap and
+ * synchronous-enough to run inline, accept a SEARCH/REPLACE result for TS/JS
+ * only if it doesn't increase the real (syntax + semantic) error count
+ * relative to the pre-patch content — otherwise reject the whole batch
+ * atomically rather than leaving a partially-migrated, worse-than-before file.
+ * Non-TS/JS files skip this (no ts-morph checker available) and rely solely
+ * on the guards above.
+ */
+export async function searchReplaceRegressesTsErrors(
+  filePath: string,
+  beforeContent: string,
+  afterContent: string
+): Promise<boolean> {
+  if (!/\.(ts|tsx|js|jsx|mjs|cjs)$/i.test(filePath)) return false;
+  const countErrors = (diags: DiagnosticResult[]) => diags.filter(d => d.severity === 'error').length;
+  const [before, after] = await Promise.all([
+    runTsMorphCheck(filePath, beforeContent),
+    runTsMorphCheck(filePath, afterContent),
+  ]);
+  return countErrors(after) > countErrors(before);
+}
+
+export function looksLikeHallucinatedReplacement(originalContent: string, patchedContent: string): boolean {
+  // A stray leading markdown fence marker means extractCodeBlock's stripping
+  // didn't fully work (e.g. an unclosed/truncated fence) — the content itself
+  // can be otherwise faithful, so the symbol/overlap checks below wouldn't
+  // catch it, but "```" is never valid as the first line of any real source
+  // file this pipeline targets. Reject outright rather than write it to disk.
+  if (/^```/.test(patchedContent.trimStart())) return true;
+  // Cloud models sometimes "regenerate" a large file but elide unchanged
+  // stretches with a literal three-dot placeholder ("...") instead of
+  // reproducing them — silently deleting real sections (nav tabs, attrs,
+  // whole blocks). Real source/markup in this repo never contains a bare
+  // "..." token (legitimate ellipsis text uses the single Unicode "…" char),
+  // so any INCREASE in literal "..." occurrences vs the original is a
+  // reliable truncation signal — independent of overall line-overlap %,
+  // which this failure mode can otherwise still clear on a large file.
+  const countEllipsis = (s: string) => (s.match(/(?<!\.)\.{3}(?!\.)/g) || []).length;
+  if (countEllipsis(patchedContent) > countEllipsis(originalContent)) return true;
+  // `export` is only legal at module top level in TS/JS — never inside a
+  // function or class method body — so requiring it (rather than making it
+  // optional) restricts anchors to real public symbols and excludes generic
+  // local variable/const names declared inside methods (e.g. `const key = `),
+  // which previously produced false-negative "survived" matches purely by
+  // coincidence (any method's local `key`/`value`/`data` would "anchor").
+  const declPattern = /^\s*export\s+(?:default\s+)?(?:abstract\s+)?(?:class|interface|function|const|type|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm;
+  const anchors = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = declPattern.exec(originalContent)) !== null) {
+    anchors.add(m[1]);
+  }
+  // Also extract top-level function declarations for non-module scripts
+  // (classic browser JS: `function foo(`, `async function bar(`).
+  // These are stable landmarks that survive any real edit.
+  const jsFnPattern = /^(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/gm;
+  while ((m = jsFnPattern.exec(originalContent)) !== null) {
+    anchors.add(m[1]);
+  }
+  // No exported symbols AND no top-level functions (pure HTML/CSS):
+  // fall back to line overlap. An edit/append keeps most original lines;
+  // a hallucinated wholesale replacement keeps almost none.
+  if (anchors.size === 0) {
+    const origLines = originalContent.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 3);
+    if (origLines.length < 10) return false;
+    const patchedSet = new Set(patchedContent.split(/\r?\n/).map(l => l.trim()));
+    const kept = origLines.filter(l => patchedSet.has(l)).length;
+    return kept / origLines.length < 0.5;
+  }
+  for (const name of anchors) {
+    if (patchedContent.includes(name)) return false;
+  }
+  return true;
+}
+
+const REFUSAL_PATTERNS = [
+  /I(?:'m| am)? sorry(?:,| but)? I can(?:'t| not) assist/i,
+  /I cannot fulfill this request/i,
+  /I am unable to assist with/i,
+  /as an ai language model/i,
+];
+
+/**
+ * Generates a patch via SEARCH/REPLACE blocks instead of full-content
+ * reproduction — see parseSearchReplaceBlocks/applySearchReplaceBlocks above
+ * for why. Used for the cloud fallback path in Step 4a — the local-model
+ * attempt goes through localLlmPatch's own outputFormat:'search-replace'
+ * instead, to share its model-invocation/refusal-detection/test-mock seam.
+ * `chat` abstracts over whichever backend calls this. A window is still
+ * used to keep the PROMPT small on large files, but unlike the old
+ * windowed-splice approach, applySearchReplaceBlocks matches against the
+ * FULL current content by exact text — there's no line-offset bookkeeping
+ * to get wrong, and no requirement that the model reproduce anything.
+ */
+export async function generateSearchReplacePatch(
+  currentContent: string,
+  instruction: string,
+  filename: string,
+  tasksContext: string | undefined,
+  chat: (prompt: string) => Promise<string>
+): Promise<{ content: string; appliedCount: number; failures: string[]; hardFailure?: string }> {
+  const lineCount = currentContent.split(/\r?\n/).length;
+  const windowInfo = lineCount > 150 ? extractWindowForInstruction(currentContent, instruction, 150) : null;
+  const contextText = windowInfo ? windowInfo.window : currentContent;
+  const contextLabel = windowInfo
+    ? `lines ${windowInfo.startIdx + 1}–${windowInfo.endIdx} of ${filename} (${windowInfo.lineCount} lines total)`
+    : filename;
+
+  const prompt = [
+    `You are editing ${filename}. Shown below is ${windowInfo ? 'an excerpt of' : 'the content of'} the file — ONLY so you can find exact text to change. You do not need to reproduce it.`,
+    tasksContext ? `## Active Task & DAG Plan\n${tasksContext}` : '',
+    `## Instruction\n${instruction}`,
+    `## ${windowInfo ? 'Excerpt' : 'Content'} (${contextLabel})\n\`\`\`\n${contextText}\n\`\`\``,
+    [
+      '## Output format',
+      'Return one or more blocks in EXACTLY this format and nothing else — no explanations, no code fence around the blocks themselves:',
+      '<<<<<<< SEARCH',
+      '(exact existing text to find, copied verbatim character-for-character from above, including original whitespace/indentation)',
+      '=======',
+      '(the replacement text)',
+      '>>>>>>> REPLACE',
+      'Rules:',
+      '1. SEARCH text must match the shown content exactly and must be unique (usually 1–5 lines — include enough surrounding text to make it unambiguous).',
+      '2. Do not paraphrase or reformat SEARCH text.',
+      '3. To ADD lines while retaining existing code: include the anchor line(s) in SEARCH, and in REPLACE include both the anchor line(s) AND the new lines. NEVER leave SEARCH empty.',
+      '4. Emit multiple blocks if the instruction requires edits in more than one place.',
+    ].join('\n'),
+  ].filter(Boolean).join('\n\n');
+
+  let raw: string;
+  try {
+    raw = await chat(prompt);
+  } catch (err: any) {
+    return { content: currentContent, appliedCount: 0, failures: [], hardFailure: `LLM call failed: ${err.message}` };
+  }
+  if (!raw?.trim()) {
+    return { content: currentContent, appliedCount: 0, failures: [], hardFailure: 'Empty response from LLM' };
+  }
+  if (REFUSAL_PATTERNS.some(p => p.test(raw))) {
+    return { content: currentContent, appliedCount: 0, failures: [], hardFailure: `Model refused request ("${raw.trim().slice(0, 200)}")` };
+  }
+
+  const blocks = parseSearchReplaceBlocks(raw);
+  if (blocks.length === 0) {
+    return { content: currentContent, appliedCount: 0, failures: [], hardFailure: 'No SEARCH/REPLACE blocks found in response' };
+  }
+
+  const { content, appliedCount, failures } = applySearchReplaceBlocks(currentContent, blocks);
+  return { content, appliedCount, failures };
+}
+
+export async function generateCodePatchWithCloudLLM(
+  filePath: string,
+  instruction: string,
+  currentContent: string,
+  workspaceRoot: string,
+  sessionId: string,
+  tasksContext?: string
+): Promise<{ patch: string | null; failureReason?: string }> {
+  try {
+    const { useFreeLLM } = await import('../use-free-llm.js');
+    const filename = path.basename(filePath);
+
+    // For large non-module files (HTML, classic browser JS — no `export` declarations),
+    // asking for COMPLETE file causes LLMs to truncate → hallucination guard fires.
+    // Instead, use a sliding window: extract ~120 lines around the best anchor,
+    // ask LLM to patch ONLY that window, then splice back into the full content.
+    // The spliced result keeps 99%+ original lines → guard passes automatically.
+    const hasExports = /^\s*export\s+/m.test(currentContent);
+    const windowInfo = !hasExports ? extractWindowForInstruction(currentContent, instruction) : null;
+
+    let prompt: string;
+    let systemContent: string;
+
+    if (windowInfo) {
+      const { window, startIdx, endIdx, lineCount } = windowInfo;
+      prompt = [
+        `You are editing a specific section of ${filename} (${lineCount} lines total).`,
+        `Edit ONLY the lines shown below (lines ${startIdx + 1}–${endIdx} of the file).`,
+        `Return ONLY those lines — no omission markers, no extra commentary. Wrap in one code fence.`,
+        `The surrounding file content outside this window is preserved unchanged.`,
+        tasksContext ? `## Active Task & DAG Plan\n${tasksContext}` : '',
+        `## Instruction\n${instruction}`,
+        `## Lines ${startIdx + 1}–${endIdx} of ${filename}\n\`\`\`\n${window}\n\`\`\``,
+      ].filter(Boolean).join('\n\n');
+      systemContent = 'You are an elite coding assistant. Return ONLY the updated window lines inside one code fence. Do NOT return the rest of the file.';
+    } else {
+      prompt = [
+        `You are patching a single file: ${filename}.`,
+        `Apply the instruction and return the COMPLETE updated file content only, inside a single code fence.`,
+        `Do not include conversational text, pleasantries, apologies, or explanations outside the code fence.`,
+        tasksContext ? `## Active Task & DAG Plan\n${tasksContext}` : '',
+        `## Instruction\n${instruction}`,
+        `## Current Content of ${filename}\n\`\`\`\n${currentContent}\n\`\`\``,
+      ].filter(Boolean).join('\n\n');
+      systemContent = 'You are an elite coding assistant. Return only the full updated file in a code block.';
+    }
+
+    const res = await useFreeLLM({
+      messages: [
+        { role: 'system', content: systemContent },
+        { role: 'user', content: prompt }
+      ],
+      keywords: ['coding', 'qwen', 'deepseek', 'codellama', 'coder'],
+      taskType: 'coding',
+      workspace_root: workspaceRoot,
+      sessionId,
+      isOnePass: true,
+      skipIndexing: true,
+    });
+
+    const raw = res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
+    if (raw && typeof raw === 'string') {
+      const refusalPatterns = [
+        /I(?:'m| am)? sorry(?:,| but)? I can(?:'t| not) assist/i,
+        /I cannot fulfill this request/i,
+        /I am unable to assist with/i,
+        /as an ai language model/i,
+      ];
+      if (refusalPatterns.some(p => p.test(raw))) {
+        return {
+          patch: null,
+          failureReason: `Cloud model refused request ("${raw.trim()}"). Refusal detected.`,
+        };
+      }
+
+      const extracted = extractCodeBlock(raw);
+      if (extracted?.trim()) {
+        if (windowInfo) {
+          const patchedWindowLines = extracted.split(/\r?\n/);
+          const origLines = currentContent.split(/\r?\n/);
+          const originalWindowLines = origLines.slice(windowInfo.startIdx, windowInfo.endIdx);
+          // Same window-fidelity check as the local-model path: a reply that
+          // mangles the excerpt (collapses, duplicates, or drops lines) still
+          // clears the whole-file overlap check below (the loss is small
+          // relative to the WHOLE file), so it must be caught here first.
+          if (windowReplyIsSuspicious(originalWindowLines, patchedWindowLines)) {
+            return {
+              patch: null,
+              failureReason: `Cloud model mangled a ${originalWindowLines.length}-line excerpt instead of reproducing it verbatim (duplicated/dropped/reordered lines) — not used.`,
+            };
+          }
+          // Splice the patched window back into the full file content.
+          // Result ≈ original + small edit → looksLikeHallucinatedReplacement passes.
+          const spliced = [
+            ...origLines.slice(0, windowInfo.startIdx),
+            ...patchedWindowLines,
+            ...origLines.slice(windowInfo.endIdx),
+          ].join('\n');
+          return { patch: spliced };
+        }
+        return { patch: extracted };
+      }
+      return { patch: null, failureReason: 'Model response contained no code block' };
+    }
+    return { patch: null, failureReason: 'Empty response received from LLM' };
+  } catch (err: any) {
+    const failureReason = `Cloud LLM generation error: ${err.message || String(err)}`;
+    console.warn(`[coding-agents] ${failureReason}`);
+    return { patch: null, failureReason };
+  }
+}
+

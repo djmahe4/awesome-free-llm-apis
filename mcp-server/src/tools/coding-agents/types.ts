@@ -1,0 +1,202 @@
+// ── Interfaces ────────────────────────────────────────────────────────────────
+
+export interface SnapshotAnchor {
+  filePath: string;
+  hashTag: string; // [PATH#SHA8] e.g. "src/server.ts#a1b2c3d4"
+  lineCount: number;
+  capturedAt: number;
+}
+
+export interface LineAnchoredPatch {
+  filePath: string;
+  anchorTag: string;
+  startLine: number;
+  endLine: number;
+  originalSnippet: string;   // preview (first 10 lines)
+  replacementSnippet: string; // preview (first 10 lines)
+  fullPatchedContent: string; // full content used for diagnostics & writes
+  unifiedDiff: string;
+  symbols?: string[];
+  /** True if this file didn't exist before this run — used by the post-apply
+   * rollback gate, since a CAS checkpoint only captures pre-existing content
+   * and can't "restore" a file that never had a prior version. */
+  isNewFile?: boolean;
+}
+
+export interface DiagnosticResult {
+  filePath: string;
+  line?: number;
+  column?: number;
+  message: string;
+  severity: 'error' | 'warning' | 'info';
+  code?: number;
+  source?: 'omp-lsp' | 'ast-syntactic' | 'semantic' | 'subprocess' | 'json-syntax' | 'llm-patch';
+}
+
+export interface LspActionRequest {
+  action: 'diagnostics' | 'symbols' | 'definition' | 'references';
+  file?: string;
+  symbol?: string;
+  query?: string;
+}
+
+export interface AstEditOp {
+  /** OMP-style pattern, e.g. "console.log($$$MSG)" — single $$$ wildcard recommended */
+  pat: string;
+  /** Replacement, e.g. "logger.info($$$MSG)" */
+  out: string;
+}
+
+export interface ResolveAction {
+  action: 'apply' | 'discard' | 'rollback' | 'undo_file' | 'file_history';
+  checkpointId?: string;
+  reason?: string;
+  /** Required for undo_file / file_history: workspace-relative file to operate on. */
+  filePath?: string;
+}
+
+export interface TaskItem {
+  id: string;
+  task: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  /** File this subtask targets — set by intelligent decomposition; naive fallback leaves it unset. */
+  targetFile?: string;
+  /** Why this file/subtask, constraints, dependencies on other subtasks — from the planner. */
+  context?: string;
+  /** Blackboard: append-only record of what actually happened each time this task was resumed
+   * (files touched, model used, applied outcome, diagnostic count) — the AI-agent <-> local_llm_patch
+   * interaction history, not just a checkbox. */
+  log?: string[];
+}
+
+export interface CodingAgentsInput {
+  goal: string;
+  workspaceRoot?: string;
+  targetFiles?: string[];
+  dryRun?: boolean;
+  topKFiles?: number;
+  /**
+   * Optional caller-chosen alias, preserved in memory: recorded on first use
+   * and accepted by every later status/abort/resume poll, even without
+   * workspaceRoot. The canonical sessionId returned in results stays
+   * workspace-derived (never rotates).
+   */
+  sessionId?: string;
+  verifyLspDiagnostics?: boolean;
+  lspAction?: LspActionRequest;
+  astEditOps?: AstEditOp[];
+  resolve?: ResolveAction;
+  action?: 'plan' | 'execute' | 'resume' | 'status' | 'abort';
+  pauseOnTaskPlan?: boolean;
+}
+
+export interface CodingAgentsResult {
+  sessionId: string;
+  goal: string;
+  pipelineStage: 'enumerate' | 'locate' | 'anchor' | 'edit' | 'verify' | 'completed';
+  relevantFiles: string[];
+  anchors: SnapshotAnchor[];
+  patchPlan: LineAnchoredPatch[];
+  patchSummary: string;
+  diagnostics: DiagnosticResult[];
+  applied: boolean;
+  status?: 'applied' | 'rollback' | 'dry_run' | 'paused' | 'running' | 'undo_file' | 'file_history';
+  message?: string;
+  checkpointId?: string;
+  restoredFiles?: string[];
+  /** undo_file: whether the previous version was restored to disk. */
+  restored?: boolean;
+  /** undo_file: history entries left after this pop (0 = drained). */
+  remainingDepth?: number;
+  /** file_history: newest-first versions (null = file did not exist before that apply). */
+  fileHistory?: Array<string | null>;
+  astRewritesCount?: number;
+  markdown?: string;
+  content?: string;
+  error?: string;
+  tasksPlan?: TaskItem[];
+  tasksFile?: string;
+  isPaused?: boolean;
+  modelUsed?: string;
+  usedFallbackModel?: boolean;
+  wiringFiles?: string[];
+  wiringContext?: string[];
+}
+
+export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
+  if (result.error) {
+    return `### 🤖 Coding Agent Error\n\n**Error:** ${result.error}\n\n${result.pipelineStage ? `_Pipeline Stage: \`${result.pipelineStage}\`_` : ''}`;
+  }
+
+  const lines: string[] = [];
+  const statusLabel = result.status === 'running'
+    ? '⏳ Running in Background'
+    : result.status === 'paused'
+    ? '⏸️ Workflow Paused (tasks.md)'
+    : (result.applied ? '✅ Changes Applied to Disk' : (result.patchPlan?.length ? '🔍 Proposed Plan (Dry Run)' : '⚡ Execution Completed'));
+  lines.push(`### 🤖 Coding Agent: ${statusLabel}\n`);
+  lines.push(`- **Goal:** ${result.goal}`);
+  lines.push(`- **Pipeline Stage:** \`${result.pipelineStage || 'completed'}\``);
+  if (result.checkpointId) {
+    lines.push(`- **CAS Checkpoint:** \`${result.checkpointId}\``);
+  }
+  if (result.modelUsed) {
+    lines.push(`- **Model Used:** \`${result.modelUsed}\`${result.usedFallbackModel ? ' _(cloud fallback)_' : ''}`);
+  }
+  if (result.relevantFiles?.length) {
+    lines.push(`- **Target Files:** ${result.relevantFiles.map(f => `\`${f}\``).join(', ')}`);
+  }
+  if (result.wiringFiles?.length) {
+    lines.push(`- **Discovered Wiring Targets:** ${result.wiringFiles.map(f => `\`${f}\``).join(', ')}`);
+  }
+  if (result.anchors?.length) {
+    lines.push(`- **Anchors:** ${result.anchors.map(a => `\`${a.hashTag}\``).join(', ')}`);
+  }
+  if (result.astRewritesCount) {
+    lines.push(`- **AST Structural Rewrites:** ${result.astRewritesCount}`);
+  }
+  if (result.tasksPlan?.length) {
+    const doneCount = result.tasksPlan.filter(t => t.status === 'completed').length;
+    lines.push(`\n#### 📋 Tasks DAG (${doneCount}/${result.tasksPlan.length} completed)`);
+    for (const t of result.tasksPlan) {
+      const check = t.status === 'completed' ? '[x]' : (t.status === 'in_progress' ? '[~]' : '[ ]');
+      lines.push(`- ${check} \`${t.id}\`: ${t.task}`);
+    }
+  }
+  if (result.isPaused) {
+    lines.push(`\n> ⏸️ **Workflow Paused**: \`${result.tasksFile || 'tasks.md'}\` created. Pass \`action: "resume"\` to execute next pending task.`);
+  }
+
+  const actionableDiagnostics = (result.diagnostics || []).filter(
+    d => d.severity !== 'info' || !d.message.toLowerCase().includes('skipped')
+  );
+  if (actionableDiagnostics.length) {
+    lines.push(`\n#### 🩺 Diagnostics (${actionableDiagnostics.length})`);
+    for (const d of actionableDiagnostics) {
+      const icon = d.severity === 'error' ? '❌' : (d.severity === 'warning' ? '⚠️' : 'ℹ️');
+      const loc = d.filePath ? `\`${d.filePath}${d.line ? `:${d.line}` : ''}\`` : '';
+      lines.push(`- ${icon} **${d.severity.toUpperCase()}** ${loc}: ${d.message}`);
+    }
+  }
+
+  if (result.patchPlan?.length) {
+    lines.push(`\n#### 📝 Patches (${result.patchPlan.length} file${result.patchPlan.length > 1 ? 's' : ''})`);
+    for (const p of result.patchPlan) {
+      lines.push(`\n##### \`${p.filePath}\` (${p.anchorTag || 'diff'})`);
+      const diffContent = p.unifiedDiff || (p.replacementSnippet ? `@@ -${p.startLine} +${p.startLine} @@\n${p.replacementSnippet}` : '');
+      if (diffContent) {
+        lines.push('```diff');
+        lines.push(diffContent.trim());
+        lines.push('```');
+      }
+    }
+  } else if (result.patchSummary) {
+    lines.push('\n#### 📝 Patch Summary');
+    lines.push('```diff');
+    lines.push(result.patchSummary.trim());
+    lines.push('```');
+  }
+
+  return lines.join('\n');
+}
+
