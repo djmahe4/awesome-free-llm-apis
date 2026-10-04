@@ -1,0 +1,48 @@
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 6: PROFILE & LEADERBOARD
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-profile" role="tabpanel" aria-labelledby="tab-profile">
+      <div style="display:grid;grid-template-columns: 1fr 1fr; gap:20px;margin-bottom:28px;" class="profile-grid">
+        
+        <!-- Profile Config -->
+        <div class="card">
+          <div class="card-header"><span class="card-title">👤 Telemetry Profile Settings</span></div>
+          <div class="card-body">
+            <form id="profile-form" class="playground-form" onsubmit="event.preventDefault();">
+              <div>
+                <label class="field-label" for="profile-username">Username</label>
+                <input type="text" id="profile-username" placeholder="e.g. dev-hero">
+                <div class="stat-sub" style="margin-top:4px;">3-20 alphanumeric characters, underscores or hyphens.</div>
+              </div>
+              <div class="toggle-row" style="margin-top:14px;">
+                <label class="toggle">
+                  <input type="checkbox" id="profile-telemetry">
+                  <span class="toggle-slider"></span>
+                </label>
+                <span style="font-size:.8rem;color:var(--text-secondary);">Opt out of anonymous telemetry & Firestore sync</span>
+              </div>
+              <div style="margin-top:18px;">
+                <button class="btn btn-primary btn-sm" id="profile-save-btn">Save Settings</button>
+                <span id="profile-status" style="font-size:.78rem;margin-left:10px;"></span>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Leaderboard -->
+        <div class="card">
+          <div class="card-header"><span class="card-title">🏆 Global Leaderboard (Lifetime Tokens)</span></div>
+          <div class="card-body">
+            <div class="feature-list" id="leaderboard-list">
+              <div style="text-align:center;padding:20px 0;color:var(--text-muted);">Loading leaderboard…</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <style>
+      .profile-grid { @media (max-width:768px) { grid-template-columns: 1fr !important; } }
+    </style>
+

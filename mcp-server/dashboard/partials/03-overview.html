@@ -1,0 +1,78 @@
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 1: OVERVIEW
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel active" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
+
+      <!-- Stat Cards -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label c-purple">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            Active Providers
+          </div>
+          <div class="stat-value c-purple" id="stat-providers">--</div>
+          <div class="stat-sub">Ready for routing</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label c-amber">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+            Today's Requests
+          </div>
+          <div class="stat-value c-amber" id="stat-daily-req">0</div>
+          <div class="stat-sub">System-wide daily total</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label c-cyan">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Today's Tokens
+          </div>
+          <div class="stat-value c-cyan" id="stat-daily-tok">0</div>
+          <div class="stat-sub">Aggregated usage today</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label c-green">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+            Lifetime Requests
+          </div>
+          <div class="stat-value c-green" id="stat-lifetime">0</div>
+          <div class="stat-sub">Total since install</div>
+        </div>
+      </div>
+
+      <!-- System Features -->
+      <div class="card">
+        <div class="card-header">
+          <span class="section-title" style="margin:0;font-size:.9rem;">Intelligent Orchestration — Active Features</span>
+        </div>
+        <div class="card-body">
+          <div class="feature-list">
+            <div class="feature-row">
+              <div><div class="feature-name">Token Estimation</div><div class="feature-sub">Proactive counting via js-tiktoken before each call</div></div>
+              <span class="badge badge-green">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Quantum Scoring</div><div class="feature-sub">Probabilistic model selection with deepseek-r1 baseline (1.0)</div></div>
+              <span class="badge badge-purple">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Circuit Breaker</div><div class="feature-sub">Adaptive cooldown (15s rate-limit · 60s server errors)</div></div>
+              <span class="badge badge-cyan">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Header Sync</div><div class="feature-sub">Real-time quota drift correction from API response headers</div></div>
+              <span class="badge badge-green">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Subtask Visual Grounding</div><div class="feature-sub">file:/// → base64 image conversion for TDD agentic runs</div></div>
+              <span class="badge badge-purple">Active</span>
+            </div>
+            <div class="feature-row">
+              <div><div class="feature-name">Auto-Fallback Cascade</div><div class="feature-sub">2-pass routing across all healthy → cooling providers</div></div>
+              <span class="badge badge-green">Active</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+

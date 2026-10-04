@@ -1,0 +1,86 @@
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 4: MEMORY
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-memory" role="tabpanel" aria-labelledby="tab-memory">
+      <div class="section-title">🧠 Session Memory Buffers</div>
+      <div class="section-sub">Live content of <code>knowledge.md</code> and momentum queues for a selected agentic session.</div>
+
+      <!-- Session selector -->
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-body">
+          <div class="session-controls">
+            <label class="field-label" style="margin:0;white-space:nowrap;" for="mem-session-input">Session ID</label>
+            <input type="text" id="mem-session-input" class="session-input" placeholder="e.g. ws-abc123 or my-project">
+            <button class="btn btn-primary btn-sm" id="mem-load-btn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Load
+            </button>
+            <select id="mem-session-select" class="session-select">
+              <option value="">— pick active session —</option>
+            </select>
+            <span id="mem-updated" style="font-size:.72rem;color:var(--text-muted);margin-left:auto;"></span>
+            <button class="btn btn-outline btn-sm" id="mem-refresh-btn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.43"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Knowledge.md -->
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-header">
+          <span class="card-title">knowledge.md <span id="mem-session-label" style="font-family:'JetBrains Mono',monospace;font-weight:400;color:var(--text-muted);"></span></span>
+        </div>
+        <div class="card-body">
+          <textarea id="mem-knowledge" class="knowledge-box" readonly placeholder="Select a session above to view knowledge.md…"></textarea>
+        </div>
+      </div>
+
+      <!-- HITL pause banner — mirrors the chat-side "⚠️ Pipeline Paused" banner so the
+           dashboard shows the same paused/promptId state, not just the raw chat text. -->
+      <div id="mem-paused-banner" style="display:none;margin-bottom:16px;padding:10px 16px;border-radius:var(--radius-sm);background:rgba(234,179,8,.12);border:1px solid var(--accent-yellow, #eab308);color:var(--text-primary);font-size:.82rem;">
+        ⚠️ <strong>Pipeline Paused</strong> — reply <code id="mem-paused-promptid"></code> to resume.
+      </div>
+
+      <!-- Momentum Queues -->
+      <div class="memory-grid">
+        <div class="card">
+          <div class="card-header"><span class="card-title c-green" style="color:var(--accent-green);">▶ Now Queue</span></div>
+          <div class="card-body"><div class="queue-list" id="queue-now"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title" style="color:var(--accent-cyan);">⏭ Next Queue</span></div>
+          <div class="card-body"><div class="queue-list" id="queue-next"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title" style="color:var(--accent-red);">⛔ Blocked</span></div>
+          <div class="card-body"><div class="queue-list" id="queue-blocked"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title" style="color:var(--accent-purple);">✨ Improve Queue</span></div>
+          <div class="card-body"><div class="queue-list" id="queue-improve"></div></div>
+        </div>
+      </div>
+
+      <!-- Subtask History -->
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header">
+          <span class="card-title" style="color:var(--accent-purple);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:middle;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Subtask Execution History
+          </span>
+        </div>
+        <!-- Filter bar — always visible, full-width -->
+        <div style="display:flex;gap:8px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,.02);">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="history-filter" placeholder="Search subtask history…" style="flex:1;font-size:.8rem;padding:4px 8px;background:transparent;border:none;outline:none;color:var(--text-primary);" autocomplete="off">
+          <button class="btn btn-outline btn-sm" id="history-toggle-all" style="white-space:nowrap;flex-shrink:0;">Expand All</button>
+        </div>
+        <div class="card-body">
+          <div id="queue-history" style="display:flex;flex-direction:column;gap:8px;">
+            <div class="queue-empty">Select a session above to view history…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
