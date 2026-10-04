@@ -112,9 +112,15 @@ async function main() {
 
   // Check Dashboard Playground and Quickstart tabs
   const dashboardHtmlPath = path.join(mcpDir, 'dashboard', 'index.html');
-  const dashboardAppPath = path.join(mcpDir, 'dashboard', 'app.js');
+  const dashboardJsDir = path.join(mcpDir, 'dashboard', 'js');
   const htmlContent = fs.readFileSync(dashboardHtmlPath, 'utf-8');
-  const appContent = fs.readFileSync(dashboardAppPath, 'utf-8');
+  // app.js was split into dashboard/js/NN-*.js; zero-padded names make
+  // lexical sort == script-tag load order (see index.html footer).
+  const appContent = fs.readdirSync(dashboardJsDir)
+    .filter((f) => f.endsWith('.js'))
+    .sort()
+    .map((f) => fs.readFileSync(path.join(dashboardJsDir, f), 'utf-8'))
+    .join('');
 
   const missingPlayground: string[] = [];
   const missingQuickstart: string[] = [];
