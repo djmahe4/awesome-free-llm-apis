@@ -51,7 +51,7 @@ import { validateProvider } from './tools/validate-provider.js';
 import { flushSystem, useFreeLLM } from './tools/use-free-llm.js';
 import { visionTool } from './tools/vision-tool.js';
 import { executeSkill } from './tools/execute-skill.js';
-import { manageMemory } from './tools/manage-memory.js';
+import { manageMemory, type ManageMemoryInput } from './tools/manage-memory.js';
 import { indexWorkspace } from './tools/index-workspace.js';
 import { cyberTool } from './tools/cyber-tool.js';
 import { getSharedRouter } from './pipeline/instances.js';
@@ -65,6 +65,7 @@ import { writeFileAtomic } from './utils/FileUtils.js';
 import { resolvePathWithinRoots, pathParamWithinRoots, relativeSegmentError } from './utils/workspace-roots.js';
 import { WorkspaceScanner } from './cache/workspace.js';
 import { STATE_FILE } from './pipeline/middlewares/constants.js';
+import { createHandshake, renderLeaseModule, requireWikiLease, assertDashboardFetch, LeaseError } from './wiki-lease.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -182,7 +183,36 @@ export function createExpressApp(): express.Express {
     }
   }));
   app.use(cors());
-  app.use(express.json());
+  // Size-aware JSON parsing. The global express.json() default (100kb) runs
+  // before route-level parsers, which makes their `limit` options dead code —
+  // so limits are decided here from method+path instead.
+  const JSON_LIMIT_RULES: Array<{ method?: string; pattern: RegExp | string; limit: string }> = [
+    { method: 'patch', pattern: /^\/api\/sessions\/[^/]+$/, limit: '8kb' },
+    { pattern: '/api/chat-log/resolve', limit: '4kb' },
+    { pattern: /^\/api\/chat-log\/[^/]+$/, limit: '512kb' },
+    { pattern: '/api/sessions', limit: '16kb' },
+    { pattern: '/api/quantum_tool', limit: '2mb' },
+    { pattern: '/api/wiki/page', limit: '2mb' },
+    { pattern: '/api/steering_eval', limit: '1mb' },
+    { pattern: '/api/tool', limit: '10mb' },
+    { pattern: '/api/browser_tool', limit: '10mb' },
+    { pattern: '/api/cyber_tool', limit: '10mb' },
+    { pattern: '/api/movie_tool', limit: '10mb' },
+    { pattern: /^\/api\/movie(\/|$)/, limit: '10mb' },
+  ];
+  const jsonLimitFor = (method: string, url: string): string => {
+    const pathname = url.split('?')[0];
+    for (const rule of JSON_LIMIT_RULES) {
+      if (rule.method && rule.method !== method.toLowerCase()) continue;
+      const hit = typeof rule.pattern === 'string' ? rule.pattern === pathname : rule.pattern.test(pathname);
+      if (hit) return rule.limit;
+    }
+    return '100kb';
+  };
+  app.use((req, res, next) => {
+    if (req.method !== 'POST' && req.method !== 'PUT' && req.method !== 'PATCH') return next();
+    return express.json({ limit: jsonLimitFor(req.method, req.originalUrl) })(req, res, next);
+  });
 
   // API endpoints for dashboard
 
@@ -1040,6 +1070,161 @@ export function createExpressApp(): express.Express {
         }
       });
 
+      // ------------------------------------------------------------------
+      // /api/wiki/* — dedicated wiki endpoints for the dashboard (PR #64).
+      //
+      // Data routes are gated by the hybrid post-quantum lease issued from
+      // GET /api/wiki/lease.mjs (hard 401 {ok:false,error} without one).
+      // Envelope: { ok: true, result } / { ok: false, error }.
+      // ------------------------------------------------------------------
+      const wikiQuery = (value: unknown): string | undefined => {
+        const single = Array.isArray(value) ? value[0] : value;
+        return typeof single === 'string' && single.length ? single : undefined;
+      };
+
+      const wikiWorkspaceRoot = (req: express.Request): string | undefined =>
+        wikiQuery(req.query.workspace_root) ?? wikiQuery((req.body as Record<string, unknown> | undefined)?.workspace_root);
+
+      const wikiRequireString = (value: unknown, field: string): string => {
+        if (typeof value !== 'string' || !value.length) throw new LeaseError(`${field} is required`, 400);
+        return value;
+      };
+
+      const wikiOptionalStringList = (value: unknown, field: string): string[] | undefined => {
+        if (value === undefined || value === null) return undefined;
+        if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+          throw new LeaseError(`${field} must be an array of strings`, 400);
+        }
+        return value as string[];
+      };
+
+      const wikiFail = (res: express.Response, err: unknown): void => {
+        const message = err instanceof Error ? err.message : String(err);
+        const status = err instanceof LeaseError ? err.status
+          : /requires|does not exist|exceeds maximum size/i.test(message) ? 400
+          : 500;
+        res.status(status).json({ ok: false, error: message });
+      };
+
+      /** rate limit -> lease gate -> handler (handlers catch their own errors). */
+      const wikiData = (
+        method: 'get' | 'post',
+        route: string,
+        handler: (req: express.Request, res: express.Response) => Promise<void>
+      ): void => {
+        app[method](route, (req, res) => {
+          if (!checkRateLimit(req, res)) return;
+          requireWikiLease(req, res, () => {
+            handler(req, res).catch((err) => wikiFail(res, err));
+          });
+        });
+      };
+
+      // Lease issuance: dynamically rendered ESM module, dashboard (same-origin
+      // browser fetch) only. Returns `finish(clientSecrets)` for the caller.
+      app.get('/api/wiki/lease.mjs', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        if (!assertDashboardFetch(req, res)) return;
+        try {
+          const params = createHandshake({
+            kemPub: wikiQuery(req.query.kem) ?? '',
+            xPub: wikiQuery(req.query.x) ?? '',
+          });
+          res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          res.send(renderLeaseModule(params));
+        } catch (err) {
+          wikiFail(res, err);
+        }
+      });
+
+      // GET /api/wiki/pages?include=content — metadata list, or list + content
+      // in one round trip (replaces the dashboard's per-title read fan-out).
+      wikiData('get', '/api/wiki/pages', async (req, res) => {
+        const workspace_root = wikiWorkspaceRoot(req);
+        const list = (await manageMemory({ action: 'wiki_list', workspace_root })) as { pages?: any[] };
+        const pages: any[] = Array.isArray(list?.pages) ? list.pages : [];
+        if (wikiQuery(req.query.include) !== 'content') {
+          res.json({ ok: true, result: { pages } });
+          return;
+        }
+        const withContent = await Promise.all(pages.map(async (meta) => {
+          try {
+            const read = (await manageMemory({ action: 'wiki_read', title: meta.title, workspace_root })) as { page?: any };
+            return { ...meta, content: read?.page?.content ?? '' };
+          } catch {
+            return { ...meta, content: '' };
+          }
+        }));
+        res.json({ ok: true, result: { pages: withContent } });
+      });
+
+      // GET /api/wiki/page?title=
+      wikiData('get', '/api/wiki/page', async (req, res) => {
+        const title = wikiRequireString(wikiQuery(req.query.title), 'title');
+        const result = (await manageMemory({ action: 'wiki_read', title, workspace_root: wikiWorkspaceRoot(req) })) as { page?: any };
+        res.json({ ok: true, result: { page: result?.page ?? null } });
+      });
+
+      // POST /api/wiki/page — upsert { title, content, tags?, links? } (2mb limit)
+      wikiData('post', '/api/wiki/page', async (req, res) => {
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const title = wikiRequireString(body.title, 'title');
+        const content = wikiRequireString(body.content, 'content');
+        const tags = wikiOptionalStringList(body.tags, 'tags');
+        const links = wikiOptionalStringList(body.links, 'links');
+        const written = (await manageMemory({
+          action: 'wiki_write', title, content, tags, links,
+          workspace_root: wikiWorkspaceRoot(req),
+        })) as { page?: any };
+        res.json({ ok: true, result: { page: written?.page ?? null } });
+      });
+
+      // GET /api/wiki/search?query=&limit=&persona=
+      wikiData('get', '/api/wiki/search', async (req, res) => {
+        const query = wikiRequireString(wikiQuery(req.query.query) ?? wikiQuery(req.query.q), 'query');
+        const limit = Number(wikiQuery(req.query.limit)) || 10;
+        const searched = (await manageMemory({
+          action: 'wiki_search', query, limit, persona: wikiQuery(req.query.persona),
+          workspace_root: wikiWorkspaceRoot(req),
+        })) as { results?: any[] };
+        res.json({ ok: true, result: { results: searched?.results ?? [] } });
+      });
+
+      // GET /api/wiki/graph — full node/edge graph
+      wikiData('get', '/api/wiki/graph', async (req, res) => {
+        const graph = await manageMemory({ action: 'graph_query', workspace_root: wikiWorkspaceRoot(req) });
+        res.json({ ok: true, result: graph });
+      });
+
+      // POST /api/wiki/graph/node — { node }
+      wikiData('post', '/api/wiki/graph/node', async (req, res) => {
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const node = body.node;
+        if (typeof node !== 'object' || node === null || Array.isArray(node)) {
+          throw new LeaseError('node object is required', 400);
+        }
+        const created = await manageMemory({
+          action: 'node_add',
+          node: node as ManageMemoryInput['node'],
+          workspace_root: wikiWorkspaceRoot(req),
+        });
+        res.json({ ok: true, result: created });
+      });
+
+      // POST /api/wiki/graph/link — { from, to, relation }
+      wikiData('post', '/api/wiki/graph/link', async (req, res) => {
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const from = wikiRequireString(body.from, 'from');
+        const to = wikiRequireString(body.to, 'to');
+        const relation = wikiRequireString(body.relation, 'relation');
+        const linked = await manageMemory({
+          action: 'node_link', from, to, relation,
+          workspace_root: wikiWorkspaceRoot(req),
+        });
+        res.json({ ok: true, result: linked });
+      });
+
       // Helper to read and normalize chat log format (chat-logs.json or chat-log.json)
       async function readNormalizedChatLog(dirPath: string): Promise<any[]> {
         let raw = '';
@@ -1734,6 +1919,9 @@ export function createExpressApp(): express.Express {
       // Serve dashboard static files
       const dashboardPath = path.join(__dirname, '../dashboard');
       app.use(express.static(dashboardPath));
+      // Noble crypto packages for the browser (import-map targets in index.html:
+      // /vendor/noble/post-quantum, /vendor/noble/curves, /vendor/noble/hashes).
+      app.use('/vendor/noble', express.static(path.join(__dirname, '../node_modules/@noble')));
 
       // Global Error Handler (Express JSON parse errors and unhandled request exceptions)
       app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

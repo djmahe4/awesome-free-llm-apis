@@ -283,15 +283,86 @@
       });
     }
 
+    async wikiLeaseClient() {
+      if (!window.__wikiLeaseClient) {
+        window.__wikiLeaseClient = await import('/wiki-lease-client.js');
+      }
+      return window.__wikiLeaseClient;
+    }
+
     async callManageMemory(params) {
+      const client = await this.wikiLeaseClient();
+      const lease = await client.acquireWikiLease();
+      try {
+        return await this.wikiRequest(lease, params || {});
+      } catch (err) {
+        if (err && err.wikiLeaseRetry) {
+          const fresh = await client.acquireWikiLease({ force: true });
+          return this.wikiRequest(fresh, params || {});
+        }
+        throw err;
+      }
+    }
+
+    async wikiRequest(lease, params) {
+      const action = params.action;
       const workspace = this.workspaceValue();
-      const r = await fetch('/api/tool', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tool: 'manage_memory', params: { ...params, workspace_root: workspace } })
-      });
-      const d = await r.json();
-      if (!r.ok || d.ok === false) throw new Error(d.error || 'Request failed');
+      const ws = workspace ? `workspace_root=${encodeURIComponent(workspace)}` : '';
+      const withWs = (q) => (q && ws ? `${q}&${ws}` : q || ws);
+      let method = 'GET';
+      let path;
+      let body;
+      switch (action) {
+        case 'wiki_list':
+          path = withWs(params.include === 'content' ? '/api/wiki/pages?include=content' : '/api/wiki/pages');
+          break;
+        case 'wiki_read':
+          path = withWs(`/api/wiki/page?title=${encodeURIComponent(params.title || '')}`);
+          break;
+        case 'wiki_write':
+          method = 'POST';
+          path = '/api/wiki/page';
+          body = { title: params.title, content: params.content, tags: params.tags, links: params.links };
+          if (workspace) body.workspace_root = workspace;
+          break;
+        case 'graph_query':
+          path = withWs('/api/wiki/graph');
+          break;
+        case 'node_add':
+          method = 'POST';
+          path = '/api/wiki/graph/node';
+          body = { node: params.node };
+          if (workspace) body.workspace_root = workspace;
+          break;
+        case 'node_link':
+          method = 'POST';
+          path = '/api/wiki/graph/link';
+          body = { from: params.from, to: params.to, relation: params.relation };
+          if (workspace) body.workspace_root = workspace;
+          break;
+        case 'wiki_search':
+          path = withWs(
+            `/api/wiki/search?query=${encodeURIComponent(params.query || params.q || '')}` +
+            (params.limit ? `&limit=${encodeURIComponent(params.limit)}` : '')
+          );
+          break;
+        default:
+          throw new Error(`Unsupported /api/wiki action: ${action}`);
+      }
+      const headers = { ...lease.headers(method, path) };
+      const init = { method, headers };
+      if (body) {
+        headers['Content-Type'] = 'application/json';
+        init.body = JSON.stringify(body);
+      }
+      const r = await fetch(path, init);
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 401) {
+        const err = new Error(d.error || 'Wiki lease required');
+        err.wikiLeaseRetry = true;
+        throw err;
+      }
+      if (!r.ok || d.ok === false) throw new Error(d.error || `Request failed (${r.status})`);
       return d.result;
     }
 
@@ -310,7 +381,7 @@
       if (!this.el.wikiPageList) return;
       this.el.wikiPageList.innerHTML = '<div class="conv-empty">Loading…</div>';
       try {
-        const result = await this.callManageMemory({ action: 'wiki_list' });
+        const result = await this.callManageMemory({ action: 'wiki_list', include: 'content' });
         const pages = result.pages || [];
         this.pagesCache = pages;
         if (!pages.length) {
@@ -639,12 +710,13 @@
     async rebuildLineIndex() {
       const pages = this.pagesCache || [];
       const index = [];
-      await Promise.all(pages.map(async (meta) => {
+      // Batch fetch happened in loadWikiList (?include=content) — no per-page
+      // wiki_read fan-out here.
+      pages.forEach((meta) => {
         try {
-          const result = await this.callManageMemory({ action: 'wiki_read', title: meta.title });
-          const page = result.page;
-          if (!page?.content) return;
-          const lines = page.content.split('\n');
+          const content = meta.content;
+          if (!content) return;
+          const lines = content.split('\n');
           let currentHeading = '';
           lines.forEach((line, i) => {
             const heading = line.match(/^#{1,6}\s+(.*)$/);
@@ -664,7 +736,7 @@
             });
           });
         } catch {}
-      }));
+      });
       this.lineIndex = index;
       this.runLineSearch();
     }
