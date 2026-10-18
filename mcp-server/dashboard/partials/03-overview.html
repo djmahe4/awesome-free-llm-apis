@@ -39,11 +39,37 @@
         </div>
       </div>
 
-      <!-- System Features -->
-      <div class="card">
-        <div class="card-header">
-          <span class="section-title" style="margin:0;font-size:.9rem;">Intelligent Orchestration — Active Features</span>
+      <!-- Quick Session Launcher & Jump-Off (Marketing Psychology: Clear CTA) -->
+      <div class="card" style="margin-bottom:20px;border-left:3px solid var(--accent-purple);">
+        <div class="card-body" style="padding:16px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;">
+          <div>
+            <div style="font-weight:700;font-size:.95rem;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+              <span>🚀</span> Ready to execute with free LLMs &amp; agentic memory?
+            </div>
+            <div style="font-size:.78rem;color:var(--text-muted);margin-top:3px;">
+              Launch interactive prompt in Playground, orchestrate multi-agent runs, or generate media in Movie Studio.
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('tab-playground')?.click();" style="display:flex;align-items:center;gap:6px;">
+              <span>🛠</span> Open Playground
+            </button>
+            <button class="btn btn-outline btn-sm" onclick="document.getElementById('tab-harness')?.click();" style="display:flex;align-items:center;gap:6px;">
+              <span>⚡</span> Multi-Agent Harness
+            </button>
+          </div>
         </div>
+      </div>
+
+      <!-- System Features (Progressive Disclosure) -->
+      <details class="card" open style="margin-top:16px;">
+        <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;user-select:none;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:6px;">
+            Intelligent Orchestration — Active Features
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+          <span style="font-size:.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">6 subsystems active</span>
+        </summary>
         <div class="card-body">
           <div class="feature-list">
             <div class="feature-row">
@@ -72,7 +98,6 @@
             </div>
           </div>
         </div>
-      </div>
+      </details>
 
     </section>
-

@@ -20,19 +20,29 @@
       </div>
 
       <!-- Search Providers (v1.0.9 SearchRouterMiddleware) -->
-      <div style="margin-top:32px;">
-        <div class="section-title">Search Providers</div>
-        <div class="section-sub">Fallback chain: Parallel AI → Tavily → Jina → Brave → SearXNG · used by <code>google_search</code>/semantic-search requests</div>
-      </div>
-      <div class="providers-grid" id="search-providers-grid" style="margin-top:12px;">
-        <div style="grid-column:1/-1;text-align:center;padding:24px 0;color:var(--text-muted);">Loading…</div>
-      </div>
+      <details class="card" open style="margin-top:28px;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <span class="card-title" style="display:flex;align-items:center;gap:6px;">
+            Search Providers &amp; Web Grounding
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+          <span class="section-sub" style="margin:0;font-size:.72rem;">Fallback: Parallel AI → Tavily → Jina → Brave → SearXNG</span>
+        </summary>
+        <div class="card-body" style="padding:16px;">
+          <div class="providers-grid" id="search-providers-grid">
+            <div style="grid-column:1/-1;text-align:center;padding:24px 0;color:var(--text-muted);">Loading…</div>
+          </div>
+        </div>
+      </details>
 
-      <div style="margin-top:28px;">
-        <div class="section-title">Recent Search Queries</div>
-        <div class="section-sub">Last 25 searches served through SearchRouterMiddleware, newest first</div>
-      </div>
-      <div class="card" style="margin-top:12px;">
+      <details class="card" style="margin-top:16px;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <span class="card-title" style="display:flex;align-items:center;gap:6px;">
+            Recent Search Queries
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+          <span class="section-sub" style="margin:0;font-size:.72rem;">Last 25 searches via SearchRouterMiddleware</span>
+        </summary>
         <div class="card-body" style="padding:0;">
           <table class="qs-table" id="search-logs-table" style="width:100%;">
             <thead>
@@ -43,6 +53,5 @@
             </tbody>
           </table>
         </div>
-      </div>
+      </details>
     </section>
-

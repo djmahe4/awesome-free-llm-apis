@@ -26,15 +26,18 @@
         </div>
       </div>
 
-      <!-- Knowledge.md -->
-      <div class="card" style="margin-bottom:20px;">
-        <div class="card-header">
-          <span class="card-title">knowledge.md <span id="mem-session-label" style="font-family:'JetBrains Mono',monospace;font-weight:400;color:var(--text-muted);"></span></span>
-        </div>
+      <!-- Knowledge.md (Collapsible) -->
+      <details class="card" open style="margin-bottom:20px;">
+        <summary class="card-header" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="display:flex;align-items:center;gap:6px;">
+            knowledge.md <span id="mem-session-label" style="font-family:'JetBrains Mono',monospace;font-weight:400;color:var(--text-muted);"></span>
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+        </summary>
         <div class="card-body">
           <textarea id="mem-knowledge" class="knowledge-box" readonly placeholder="Select a session above to view knowledge.md…"></textarea>
         </div>
-      </div>
+      </details>
 
       <!-- HITL pause banner — mirrors the chat-side "⚠️ Pipeline Paused" banner so the
            dashboard shows the same paused/promptId state, not just the raw chat text. -->
@@ -62,14 +65,15 @@
         </div>
       </div>
 
-      <!-- Subtask History -->
-      <div class="card" style="margin-top:20px;">
-        <div class="card-header">
-          <span class="card-title" style="color:var(--accent-purple);">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:middle;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <!-- Subtask History (Collapsible) -->
+      <details class="card" open style="margin-top:20px;">
+        <summary class="card-header" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="color:var(--accent-purple);display:flex;align-items:center;gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;vertical-align:middle;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             Subtask Execution History
+            <span class="collapse-toggle-icon">▾</span>
           </span>
-        </div>
+        </summary>
         <!-- Filter bar — always visible, full-width -->
         <div style="display:flex;gap:8px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,.02);">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -81,6 +85,5 @@
             <div class="queue-empty">Select a session above to view history…</div>
           </div>
         </div>
-      </div>
+      </details>
     </section>
-

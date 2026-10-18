@@ -53,25 +53,26 @@
       </div>
 
       <!-- Interactive Node-Based Relay Flow Canvas (Multi-Agent Scope & Reasoning Graph) -->
-      <div class="card" style="margin-bottom:20px;">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+      <details class="card" open style="margin-bottom:20px;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;cursor:pointer;">
           <div>
             <span class="card-title" style="display:flex;align-items:center;gap:8px;color:var(--accent-cyan);">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.5 8.5l7 7M6 9v9h9"/></svg>
               Interactive Relay &amp; Scope Flow Graph
+              <span class="collapse-toggle-icon">▾</span>
             </span>
             <span style="font-size:.73rem;color:var(--text-muted);display:block;margin-top:2px;">Dynamic agent-to-file claims, keyword collisions, and weighted reasoning context passing.</span>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
-            <button id="harness-flow-physics-toggle" class="btn btn-secondary btn-sm" style="font-size:.73rem;padding:4px 8px;cursor:pointer;">
+            <button id="harness-flow-physics-toggle" class="btn btn-secondary btn-sm" style="font-size:.73rem;padding:4px 8px;cursor:pointer;" onclick="event.stopPropagation();">
               Dynamic Orbit: ON
             </button>
-            <button id="harness-flow-lightning-toggle" class="btn btn-secondary btn-sm" style="font-size:.73rem;padding:4px 8px;cursor:pointer;">
+            <button id="harness-flow-lightning-toggle" class="btn btn-secondary btn-sm" style="font-size:.73rem;padding:4px 8px;cursor:pointer;" onclick="event.stopPropagation();">
               Lightning Bridge: ON
             </button>
             <span id="harness-flow-stats" class="badge badge-purple" style="font-size:.7rem;">0 nodes &bull; 0 relays</span>
           </div>
-        </div>
+        </summary>
         <div class="card-body" style="padding:0;">
           <div id="harness-relay-canvas-wrap" style="position:relative;width:100%;height:380px;background:radial-gradient(ellipse at center, rgba(14,14,26,0.9) 0%, rgba(7,7,15,1) 100%);overflow:hidden;border-bottom:1px solid var(--glass-border);">
             <canvas id="harness-relay-canvas" style="width:100%;height:100%;display:block;cursor:grab;"></canvas>
@@ -87,34 +88,37 @@
               <span style="display:flex;align-items:center;gap:4px;"><span style="width:9px;height:9px;border-radius:50%;background:#ec4899;display:inline-block;"></span> Keyword / Collision</span>
             </div>
           </div>
-      </div>
+        </div>
+      </details>
 
       <!-- Harness-Wiki Nexus Knowledge Base Card -->
-      <div class="card" id="harness-wiki-nexus" style="margin-bottom:20px;">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+      <details class="card" id="harness-wiki-nexus" open style="margin-bottom:20px;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
           <span class="card-title" style="display:flex;align-items:center;gap:8px;">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-blue"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
             Knowledge Base Nexus (.free-llm-mcp/wiki)
+            <span class="collapse-toggle-icon">▾</span>
           </span>
           <span id="harness-wiki-count" class="badge badge-blue">0 pages indexed</span>
-        </div>
+        </summary>
         <div class="card-body" style="padding:14px;">
           <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:12px;">Active semantic context and ADRs linked to agent scopes. Click any page to open in the Wiki tab.</p>
           <div id="harness-wiki-list" style="display:flex;flex-wrap:wrap;gap:8px;">
             <span style="font-size:.75rem;color:var(--text-muted);font-style:italic;">No wiki documents linked to current session.</span>
           </div>
         </div>
-      </div>
+      </details>
 
       <!-- Harness Runs Table -->
-      <div class="card" style="margin-bottom:20px;">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+      <details class="card" open style="margin-bottom:20px;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
           <span class="card-title" style="display:flex;align-items:center;gap:8px;">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-amber"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
             Harness Runs History
+            <span class="collapse-toggle-icon">▾</span>
           </span>
           <span id="harness-runs-count" class="badge badge-gray">0 runs</span>
-        </div>
+        </summary>
         <div class="card-body" id="harness-runs-table-wrap" style="padding:0;overflow-x:auto;">
           <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
             <thead>
@@ -132,7 +136,7 @@
             </tbody>
           </table>
         </div>
-      </div>
+      </details>
 
       <!-- Run Details & Re-run Role Workspace -->
       <div id="harness-run-detail-panel" class="card" style="display:none;margin-bottom:20px;">
@@ -189,4 +193,3 @@
       </div>
 
     </section>
-

@@ -21,10 +21,13 @@
         </div>
       </div>
 
-      <div class="card" style="margin-bottom:20px;">
-        <div class="card-header" style="padding:10px 16px;">
-          <span class="card-title" style="font-size:.82rem;">Add Node</span>
-        </div>
+      <details class="card" style="margin-bottom:20px;">
+        <summary class="card-header" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="font-size:.82rem;display:flex;align-items:center;gap:6px;">
+            Add Node &amp; Link
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+        </summary>
         <div class="card-body">
           <div class="session-controls" style="flex-wrap:wrap;">
             <select id="dagmem-node-type" class="session-input" style="max-width:120px;">
@@ -47,7 +50,7 @@
           </div>
           <div id="dagmem-form-status" class="section-sub" style="margin-top:8px;"></div>
         </div>
-      </div>
+      </details>
 
       <div class="card">
         <div class="card-body" id="dagmem-graph-body">
@@ -55,24 +58,30 @@
         </div>
       </div>
 
-      <div class="card" style="margin-top:20px;">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
-          <span class="card-title" style="color:var(--accent-amber);">&#9200; Due-Review Queue (Ebbinghaus)</span>
+      <details class="card" open style="margin-top:20px;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <span class="card-title" style="color:var(--accent-amber);display:flex;align-items:center;gap:6px;">
+            &#9200; Due-Review Queue (Ebbinghaus)
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
           <div style="display:flex;align-items:center;gap:8px;">
             <span id="dagmem-bb-count" style="background:var(--accent-amber);color:#000;border-radius:12px;padding:2px 8px;font-size:12px;font-weight:700;">0</span>
-            <button id="dagmem-bb-refresh" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;">&#x1F504; Refresh Queue</button>
+            <button id="dagmem-bb-refresh" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;" onclick="event.stopPropagation();">&#x1F504; Refresh Queue</button>
           </div>
-        </div>
+        </summary>
         <div class="card-body" id="dagmem-blackboard-container" style="min-height:60px;">
           <div class="conv-empty">Load graph above, then click Refresh Queue to see due-review nodes.</div>
         </div>
-      </div>
+      </details>
 
-      <div class="card" style="margin-top:20px;">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
-          <span class="card-title" style="color:var(--accent-purple);">&#128202; Eisenhower Matrix</span>
-          <button id="eis-refresh" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;">&#x1F504; Refresh</button>
-        </div>
+      <details class="card" open style="margin-top:20px;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <span class="card-title" style="color:var(--accent-purple);display:flex;align-items:center;gap:6px;">
+            &#128202; Eisenhower Matrix
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+          <button id="eis-refresh" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;" onclick="event.stopPropagation();">&#x1F504; Refresh</button>
+        </summary>
         <div class="card-body">
           <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
             <input type="text" id="eis-task-input" placeholder="New task..." style="flex:1;min-width:200px;">
@@ -84,12 +93,15 @@
             <div class="conv-empty">Load a workspace above, then click Refresh.</div>
           </div>
         </div>
-      </div>
+      </details>
 
-      <div class="card" style="margin-top:20px;">
-        <div class="card-header">
-          <span class="card-title" style="color:var(--accent-red);">&#9203; Pomodoro Timer</span>
-        </div>
+      <details class="card" style="margin-top:20px;">
+        <summary class="card-header" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="color:var(--accent-red);display:flex;align-items:center;gap:6px;">
+            &#9203; Pomodoro Timer
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+        </summary>
         <div class="card-body">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <input type="text" id="pomo-label-input" placeholder="What are you working on?" style="flex:1;min-width:180px;">
@@ -104,6 +116,5 @@
             <span id="pomo-display" style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;margin-left:auto;"></span>
           </div>
         </div>
-      </div>
+      </details>
     </section>
-

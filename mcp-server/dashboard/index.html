@@ -150,11 +150,36 @@
         </div>
       </div>
 
+      <!-- Quick Session Launcher & Jump-Off (Marketing Psychology: Clear CTA) -->
+      <div class="card" style="margin-bottom:20px;border-left:3px solid var(--accent-purple);">
+        <div class="card-body" style="padding:16px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;">
+          <div>
+            <div style="font-weight:700;font-size:.95rem;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+              <span>🚀</span> Ready to execute with free LLMs &amp; agentic memory?
+            </div>
+            <div style="font-size:.78rem;color:var(--text-muted);margin-top:3px;">
+              Launch interactive prompt in Playground, orchestrate multi-agent runs, or generate media in Movie Studio.
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('tab-playground')?.click();" style="display:flex;align-items:center;gap:6px;">
+              <span>🛠</span> Open Playground
+            </button>
+            <button class="btn btn-outline btn-sm" onclick="document.getElementById('tab-harness')?.click();" style="display:flex;align-items:center;gap:6px;">
+              <span>⚡</span> Multi-Agent Harness
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- System Features (Progressive Disclosure) -->
       <details class="card" open style="margin-top:16px;">
         <summary class="card-header" style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;user-select:none;">
-          <span class="section-title" style="margin:0;font-size:.9rem;">Intelligent Orchestration — Active Features</span>
-          <span style="font-size:.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">6 subsystems active ▾</span>
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:6px;">
+            Intelligent Orchestration — Active Features
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+          <span style="font-size:.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">6 subsystems active</span>
         </summary>
         <div class="card-body">
           <div class="feature-list">
@@ -187,7 +212,6 @@
       </details>
 
     </section>
-
     <!-- ══════════════════════════════════════════════════════════
          TAB 2: PROVIDERS
     ══════════════════════════════════════════════════════════ -->
@@ -245,7 +269,6 @@
         </div>
       </details>
     </section>
-
     <!-- ══════════════════════════════════════════════════════════
          TAB 3: TOOL PLAYGROUND
     ══════════════════════════════════════════════════════════ -->
@@ -257,25 +280,29 @@
         <div class="pg-sidebar" id="pg-sidebar">
           
           <!-- Conversations Card -->
-          <div class="card" style="margin-bottom:12px; display:flex; flex-direction:column; max-height:280px; min-height:160px;">
-            <div class="card-header" style="padding:10px 16px; flex-shrink:0; display:flex; justify-content:space-between; align-items:center;">
+          <details class="card" open style="margin-bottom:12px; display:flex; flex-direction:column; max-height:280px; min-height:160px;">
+            <summary class="card-header" style="padding:10px 16px; flex-shrink:0; display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
               <span class="card-title" style="font-size:.82rem; display:flex; align-items:center; gap:6px;">
                 <span>🗂</span> Conversations
+                <span class="collapse-toggle-icon">▾</span>
               </span>
-              <button id="pg-new-conv-btn" class="btn btn-primary btn-sm" style="padding:2px 8px; font-size:.7rem; display:flex; align-items:center; gap:3px;" title="Start a new conversation">+ New</button>
-            </div>
+              <button id="pg-new-conv-btn" class="btn btn-primary btn-sm" style="padding:2px 8px; font-size:.7rem; display:flex; align-items:center; gap:3px;" title="Start a new conversation" onclick="event.stopPropagation();">+ New</button>
+            </summary>
             <div class="card-body" style="padding:8px; display:flex; flex-direction:column; overflow:hidden; flex:1; min-height:0;">
               <input type="text" id="pg-conv-search" placeholder="Search sessions..." style="font-size:.75rem; padding:6px 10px; margin-bottom:8px; border-radius:6px; flex-shrink:0; width:100%; border:1px solid var(--glass-border); background:rgba(255,255,255,0.03); color:var(--text-primary);">
               <div id="pg-conv-list" class="conv-list" style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:4px;">
                 <div class="conv-empty">Loading conversations...</div>
               </div>
             </div>
-          </div>
+          </details>
 
+          <!-- Select Tool Card -->
           <details class="card" open style="margin-bottom:12px;">
             <summary class="card-header" style="padding:12px 16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
-              <span class="card-title" style="font-size:.82rem;">Select Tool</span>
-              <span class="collapse-toggle-icon">▾</span>
+              <span class="card-title" style="font-size:.82rem;display:flex;align-items:center;gap:6px;">
+                Select Tool
+                <span class="collapse-toggle-icon">▾</span>
+              </span>
             </summary>
             <div class="card-body" style="padding:8px;">
               <div class="tool-selector-list" id="tool-list"></div>
@@ -312,12 +339,6 @@
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                 </button>
               </div>
-              <!-- Agentic is opt-in, independent of whether a workspace is set — workspace
-                   memory/context grounding and file/pdf reference resolution both already
-                   work without it. Agentic adds subtask decomposition + a pre-emptive
-                   full-workspace re-index, which is unnecessary overhead (and can mangle
-                   simple reference-only requests) unless you actually want multi-step
-                   planning. -->
               <label style="display:flex;gap:5px;align-items:center;font-size:.78rem;color:var(--text-muted);cursor:pointer;" title="Enable subtask decomposition + pre-emptive workspace re-indexing. Leave off for simple grounded Q&A, including PDF/file/image references — those already work via the workspace above.">
                 <input type="checkbox" id="pg-agentic-toggle" style="cursor:pointer;">
                 🧠 Agentic
@@ -357,7 +378,6 @@
 
       </div>
     </section>
-
     <!-- ══════════════════════════════════════════════════════════
          TAB: WIKI
     ══════════════════════════════════════════════════════════ -->
@@ -422,12 +442,18 @@
         </div>
       </div>
 
-      <div class="card" style="margin-top:16px;">
-        <div class="card-header">
-          <span class="card-title">Wiki Editor</span>
-          <span id="wiki-save-status" style="font-size:.72rem;color:var(--text-muted);margin-left:auto;"></span>
-          <button class="btn btn-primary btn-sm" id="wiki-save-btn">Save</button>
-        </div>
+      <!-- Wiki Editor (Progressive Disclosure) -->
+      <details class="card" open style="margin-top:16px;">
+        <summary class="card-header" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="display:flex;align-items:center;gap:6px;">
+            Wiki Editor
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span id="wiki-save-status" style="font-size:.72rem;color:var(--text-muted);"></span>
+            <button class="btn btn-primary btn-sm" id="wiki-save-btn" onclick="event.stopPropagation();">Save</button>
+          </div>
+        </summary>
         <div class="card-body">
           <textarea id="wiki-editor" class="knowledge-box" placeholder="Select or create a page to edit..." style="min-height:220px;"></textarea>
           <div class="wiki-editor-actions">
@@ -438,105 +464,119 @@
           </div>
           <pre id="wiki-llm-output" class="code-block" style="margin-top:10px;max-height:180px;overflow:auto;"></pre>
         </div>
-      </div>
+      </details>
 
-      <div class="wiki-aux-grid" style="margin-top:16px;">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Journal</span>
-          </div>
-          <div class="card-body">
-            <div class="session-controls">
-              <label class="field-label" style="margin:0;white-space:nowrap;" for="journal-daily-date">Date</label>
-              <input type="date" id="journal-daily-date" class="session-input" style="max-width:180px;">
-              <button class="btn btn-outline btn-sm" id="journal-open-daily-btn">Open Daily</button>
-              <button class="btn btn-outline btn-sm" id="journal-open-monthly-btn">Open Monthly</button>
+      <!-- Journal & Templates (Collapsible to reduce choice overload) -->
+      <details class="card" style="margin-top:16px;">
+        <summary class="card-header" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="display:flex;align-items:center;gap:6px;">
+            🗓️ Daily Journal &amp; Templates
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+          <span class="section-sub" style="margin:0;font-size:.72rem;">Checklists, Carry-Forward Prompts &amp; Templates</span>
+        </summary>
+        <div class="card-body" style="padding:16px;">
+          <div class="wiki-aux-grid">
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">Journal</span>
+              </div>
+              <div class="card-body">
+                <div class="session-controls">
+                  <label class="field-label" style="margin:0;white-space:nowrap;" for="journal-daily-date">Date</label>
+                  <input type="date" id="journal-daily-date" class="session-input" style="max-width:180px;">
+                  <button class="btn btn-outline btn-sm" id="journal-open-daily-btn">Open Daily</button>
+                  <button class="btn btn-outline btn-sm" id="journal-open-monthly-btn">Open Monthly</button>
+                </div>
+                <div style="font-size:.74rem;color:var(--text-muted);margin:8px 0 12px;">
+                  Carry-forward prompts appear when creating a daily page with incomplete prior checklist items.
+                </div>
+                <div class="section-sub" style="margin-bottom:6px;">Checklist</div>
+                <div class="session-controls" style="margin-bottom:8px;">
+                  <input type="text" id="journal-checklist-input" class="session-input" placeholder="Add checklist item">
+                  <button class="btn btn-outline btn-sm" id="journal-checklist-add-btn">Add</button>
+                </div>
+                <div id="journal-checklist" class="journal-checklist">
+                  <div class="conv-empty">No checklist items on this page.</div>
+                </div>
+              </div>
             </div>
-            <div style="font-size:.74rem;color:var(--text-muted);margin:8px 0 12px;">
-              Carry-forward prompts appear when creating a daily page with incomplete prior checklist items.
-            </div>
-            <div class="section-sub" style="margin-bottom:6px;">Checklist</div>
-            <div class="session-controls" style="margin-bottom:8px;">
-              <input type="text" id="journal-checklist-input" class="session-input" placeholder="Add checklist item">
-              <button class="btn btn-outline btn-sm" id="journal-checklist-add-btn">Add</button>
-            </div>
-            <div id="journal-checklist" class="journal-checklist">
-              <div class="conv-empty">No checklist items on this page.</div>
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">Journal Templates</span>
+              </div>
+              <div class="card-body">
+                <div class="session-controls" style="margin-bottom:10px;">
+                  <label class="field-label" style="margin:0;white-space:nowrap;" for="journal-template-period">Period</label>
+                  <select id="journal-template-period" class="session-input" style="max-width:160px;">
+                    <option value="daily">Daily</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+
+                <div class="wiki-template-block">
+                  <div class="section-sub">Sections</div>
+                  <select id="journal-template-section-select" class="session-input" size="6" style="width:100%;margin-bottom:8px;"></select>
+                  <div class="session-controls" style="margin-bottom:8px;">
+                    <input type="text" id="journal-template-section-name" class="session-input" placeholder="Section title">
+                  </div>
+                  <div class="session-controls">
+                    <button class="btn btn-outline btn-xs" id="template-section-add-btn">Add</button>
+                    <button class="btn btn-outline btn-xs" id="template-section-remove-btn">Remove</button>
+                    <button class="btn btn-outline btn-xs" id="template-section-rename-btn">Rename</button>
+                    <button class="btn btn-outline btn-xs" id="template-section-up-btn">↑</button>
+                    <button class="btn btn-outline btn-xs" id="template-section-down-btn">↓</button>
+                    <button class="btn btn-outline btn-xs" id="template-section-toggle-btn">Enable/Disable</button>
+                  </div>
+                </div>
+
+                <div class="wiki-template-block">
+                  <div class="section-sub">Template Checklist Items</div>
+                  <select id="journal-template-checklist-select" class="session-input" size="4" style="width:100%;margin-bottom:8px;"></select>
+                  <div class="session-controls" style="margin-bottom:8px;">
+                    <input type="text" id="journal-template-checklist-text" class="session-input" placeholder="Checklist item text">
+                  </div>
+                  <div class="session-controls">
+                    <button class="btn btn-outline btn-xs" id="template-checklist-add-btn">Add</button>
+                    <button class="btn btn-outline btn-xs" id="template-checklist-remove-btn">Remove</button>
+                    <button class="btn btn-outline btn-xs" id="template-checklist-rename-btn">Rename</button>
+                  </div>
+                </div>
+
+                <div class="session-controls" style="margin-top:12px;">
+                  <button class="btn btn-primary btn-sm" id="journal-template-save-btn">Save Template</button>
+                  <button class="btn btn-outline btn-sm" id="journal-template-reset-btn">Reset Defaults</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Journal Templates</span>
+      </details>
+
+      <!-- Cyber Tool Decision Graph (v1.0.9 - Collapsible) -->
+      <details class="card" style="margin-top:16px;">
+        <summary class="card-header" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <span class="card-title" style="display:flex;align-items:center;gap:6px;color:var(--accent-purple);">
+              🕸️ Cyber Tool Decision Graph
+              <span class="collapse-toggle-icon">▾</span>
+            </span>
+            <span class="section-sub" style="display:block;margin-top:2px;font-size:.72rem;">Visualizes goal/hypothesis/action/finding/dead-end graph from <code>cyber_tool</code> coaching sessions.</span>
           </div>
-          <div class="card-body">
-            <div class="session-controls" style="margin-bottom:10px;">
-              <label class="field-label" style="margin:0;white-space:nowrap;" for="journal-template-period">Period</label>
-              <select id="journal-template-period" class="session-input" style="max-width:160px;">
-                <option value="daily">Daily</option>
-                <option value="monthly">Monthly</option>
-              </select>
-            </div>
-
-            <div class="wiki-template-block">
-              <div class="section-sub">Sections</div>
-              <select id="journal-template-section-select" class="session-input" size="6" style="width:100%;margin-bottom:8px;"></select>
-              <div class="session-controls" style="margin-bottom:8px;">
-                <input type="text" id="journal-template-section-name" class="session-input" placeholder="Section title">
-              </div>
-              <div class="session-controls">
-                <button class="btn btn-outline btn-xs" id="template-section-add-btn">Add</button>
-                <button class="btn btn-outline btn-xs" id="template-section-remove-btn">Remove</button>
-                <button class="btn btn-outline btn-xs" id="template-section-rename-btn">Rename</button>
-                <button class="btn btn-outline btn-xs" id="template-section-up-btn">↑</button>
-                <button class="btn btn-outline btn-xs" id="template-section-down-btn">↓</button>
-                <button class="btn btn-outline btn-xs" id="template-section-toggle-btn">Enable/Disable</button>
-              </div>
-            </div>
-
-            <div class="wiki-template-block">
-              <div class="section-sub">Template Checklist Items</div>
-              <select id="journal-template-checklist-select" class="session-input" size="4" style="width:100%;margin-bottom:8px;"></select>
-              <div class="session-controls" style="margin-bottom:8px;">
-                <input type="text" id="journal-template-checklist-text" class="session-input" placeholder="Checklist item text">
-              </div>
-              <div class="session-controls">
-                <button class="btn btn-outline btn-xs" id="template-checklist-add-btn">Add</button>
-                <button class="btn btn-outline btn-xs" id="template-checklist-remove-btn">Remove</button>
-                <button class="btn btn-outline btn-xs" id="template-checklist-rename-btn">Rename</button>
-              </div>
-            </div>
-
-            <div class="session-controls" style="margin-top:12px;">
-              <button class="btn btn-primary btn-sm" id="journal-template-save-btn">Save Template</button>
-              <button class="btn btn-outline btn-sm" id="journal-template-reset-btn">Reset Defaults</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Cyber Tool Decision Graph (v1.0.9) -->
-      <div style="margin-top:28px;">
-        <div class="section-title">🕸 Cyber Tool Decision Graph</div>
-        <div class="section-sub">Visualizes the goal/hypothesis/action/finding/dead-end graph a <code>cyber_tool</code> coaching session built via <code>save_graph</code>/<code>load_graph</code>.</div>
-      </div>
-      <div class="card" style="margin-top:12px;margin-bottom:12px;">
-        <div class="card-body">
-          <div class="session-controls">
+        </summary>
+        <div class="card-body" style="padding:16px;">
+          <div class="session-controls" style="margin-bottom:12px;">
             <label class="field-label" style="margin:0;white-space:nowrap;" for="cyber-graph-session-input">Session ID</label>
             <input type="text" id="cyber-graph-session-input" class="session-input" placeholder="cyber_tool sessionId">
             <button class="btn btn-primary btn-sm" id="cyber-graph-load-btn">Load Graph</button>
             <input type="text" id="cyber-graph-search-input" class="session-input" placeholder="Filter nodes by label/id…" style="max-width:220px;">
           </div>
+          <div id="cyber-graph-body" style="min-height:80px;">
+            <div class="conv-empty">Enter a session ID and click Load Graph.</div>
+          </div>
         </div>
-      </div>
-      <div class="card">
-        <div class="card-body" id="cyber-graph-body">
-          <div class="conv-empty">Enter a session ID and click Load Graph.</div>
-        </div>
-      </div>
+      </details>
     </section>
-
     <!-- ══════════════════════════════════════════════════════════
          TAB 4: MEMORY
     ══════════════════════════════════════════════════════════ -->
@@ -565,15 +605,18 @@
         </div>
       </div>
 
-      <!-- Knowledge.md -->
-      <div class="card" style="margin-bottom:20px;">
-        <div class="card-header">
-          <span class="card-title">knowledge.md <span id="mem-session-label" style="font-family:'JetBrains Mono',monospace;font-weight:400;color:var(--text-muted);"></span></span>
-        </div>
+      <!-- Knowledge.md (Collapsible) -->
+      <details class="card" open style="margin-bottom:20px;">
+        <summary class="card-header" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="display:flex;align-items:center;gap:6px;">
+            knowledge.md <span id="mem-session-label" style="font-family:'JetBrains Mono',monospace;font-weight:400;color:var(--text-muted);"></span>
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+        </summary>
         <div class="card-body">
           <textarea id="mem-knowledge" class="knowledge-box" readonly placeholder="Select a session above to view knowledge.md…"></textarea>
         </div>
-      </div>
+      </details>
 
       <!-- HITL pause banner — mirrors the chat-side "⚠️ Pipeline Paused" banner so the
            dashboard shows the same paused/promptId state, not just the raw chat text. -->
@@ -601,14 +644,15 @@
         </div>
       </div>
 
-      <!-- Subtask History -->
-      <div class="card" style="margin-top:20px;">
-        <div class="card-header">
-          <span class="card-title" style="color:var(--accent-purple);">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:middle;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <!-- Subtask History (Collapsible) -->
+      <details class="card" open style="margin-top:20px;">
+        <summary class="card-header" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="color:var(--accent-purple);display:flex;align-items:center;gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;vertical-align:middle;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             Subtask Execution History
+            <span class="collapse-toggle-icon">▾</span>
           </span>
-        </div>
+        </summary>
         <!-- Filter bar — always visible, full-width -->
         <div style="display:flex;gap:8px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,.02);">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -620,9 +664,8 @@
             <div class="queue-empty">Select a session above to view history…</div>
           </div>
         </div>
-      </div>
+      </details>
     </section>
-
     <!-- ══════════════════════════════════════════════════════════
          TAB 6: PROFILE & LEADERBOARD
     ══════════════════════════════════════════════════════════ -->
@@ -1145,8 +1188,10 @@
 
       <details class="card" style="margin-bottom:20px;">
         <summary class="card-header" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
-          <span class="card-title" style="font-size:.82rem;">Add Node &amp; Link</span>
-          <span class="collapse-toggle-icon">▾</span>
+          <span class="card-title" style="font-size:.82rem;display:flex;align-items:center;gap:6px;">
+            Add Node &amp; Link
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
         </summary>
         <div class="card-body">
           <div class="session-controls" style="flex-wrap:wrap;">
@@ -1178,24 +1223,30 @@
         </div>
       </div>
 
-      <div class="card" style="margin-top:20px;">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
-          <span class="card-title" style="color:var(--accent-amber);">&#9200; Due-Review Queue (Ebbinghaus)</span>
+      <details class="card" open style="margin-top:20px;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <span class="card-title" style="color:var(--accent-amber);display:flex;align-items:center;gap:6px;">
+            &#9200; Due-Review Queue (Ebbinghaus)
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
           <div style="display:flex;align-items:center;gap:8px;">
             <span id="dagmem-bb-count" style="background:var(--accent-amber);color:#000;border-radius:12px;padding:2px 8px;font-size:12px;font-weight:700;">0</span>
-            <button id="dagmem-bb-refresh" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;">&#x1F504; Refresh Queue</button>
+            <button id="dagmem-bb-refresh" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;" onclick="event.stopPropagation();">&#x1F504; Refresh Queue</button>
           </div>
-        </div>
+        </summary>
         <div class="card-body" id="dagmem-blackboard-container" style="min-height:60px;">
           <div class="conv-empty">Load graph above, then click Refresh Queue to see due-review nodes.</div>
         </div>
-      </div>
+      </details>
 
-      <div class="card" style="margin-top:20px;">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
-          <span class="card-title" style="color:var(--accent-purple);">&#128202; Eisenhower Matrix</span>
-          <button id="eis-refresh" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;">&#x1F504; Refresh</button>
-        </div>
+      <details class="card" open style="margin-top:20px;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <span class="card-title" style="color:var(--accent-purple);display:flex;align-items:center;gap:6px;">
+            &#128202; Eisenhower Matrix
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+          <button id="eis-refresh" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;" onclick="event.stopPropagation();">&#x1F504; Refresh</button>
+        </summary>
         <div class="card-body">
           <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
             <input type="text" id="eis-task-input" placeholder="New task..." style="flex:1;min-width:200px;">
@@ -1207,12 +1258,15 @@
             <div class="conv-empty">Load a workspace above, then click Refresh.</div>
           </div>
         </div>
-      </div>
+      </details>
 
-      <div class="card" style="margin-top:20px;">
-        <div class="card-header">
-          <span class="card-title" style="color:var(--accent-red);">&#9203; Pomodoro Timer</span>
-        </div>
+      <details class="card" style="margin-top:20px;">
+        <summary class="card-header" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+          <span class="card-title" style="color:var(--accent-red);display:flex;align-items:center;gap:6px;">
+            &#9203; Pomodoro Timer
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+        </summary>
         <div class="card-body">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <input type="text" id="pomo-label-input" placeholder="What are you working on?" style="flex:1;min-width:180px;">
@@ -1227,9 +1281,8 @@
             <span id="pomo-display" style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;margin-left:auto;"></span>
           </div>
         </div>
-      </div>
+      </details>
     </section>
-
     <!-- ══════════════════════════════════════════════════════════
          TAB: HARNESS & MULTI-AGENT TELEMETRY
     ══════════════════════════════════════════════════════════ -->
@@ -1286,7 +1339,7 @@
 
       <!-- Interactive Node-Based Relay Flow Canvas (Multi-Agent Scope & Reasoning Graph) -->
       <details class="card" open style="margin-bottom:20px;">
-        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;cursor:pointer;">
           <div>
             <span class="card-title" style="display:flex;align-items:center;gap:8px;color:var(--accent-cyan);">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.5 8.5l7 7M6 9v9h9"/></svg>
@@ -1325,7 +1378,7 @@
 
       <!-- Harness-Wiki Nexus Knowledge Base Card -->
       <details class="card" id="harness-wiki-nexus" open style="margin-bottom:20px;">
-        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
           <span class="card-title" style="display:flex;align-items:center;gap:8px;">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-blue"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
             Knowledge Base Nexus (.free-llm-mcp/wiki)
@@ -1343,7 +1396,7 @@
 
       <!-- Harness Runs Table -->
       <details class="card" open style="margin-bottom:20px;">
-        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
           <span class="card-title" style="display:flex;align-items:center;gap:8px;">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-amber"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
             Harness Runs History
@@ -1425,7 +1478,6 @@
       </div>
 
     </section>
-
     <!-- ══════════════════════════════════════════════════════════
          TAB: MOVIE STUDIO & TIMELINE VISUALIZER
     ══════════════════════════════════════════════════════════ -->
@@ -1475,24 +1527,25 @@
             </div>
           </div>
 
-          <!-- Audio Master & DSP Oscilloscope -->
-          <div class="card" style="margin-bottom:0;display:flex;flex-direction:column;min-height:210px;">
-            <div class="card-header" style="padding:8px 14px;display:flex;align-items:center;justify-content:space-between;">
+          <!-- Audio Master & DSP Oscilloscope (Collapsible for compact video focus) -->
+          <details class="card" open style="margin-bottom:0;display:flex;flex-direction:column;min-height:auto;">
+            <summary class="card-header" style="padding:8px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
               <span class="card-title" style="font-size:.8rem;display:flex;align-items:center;gap:6px;">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-purple"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                 Audio Master &amp; DSP Oscilloscope
+                <span class="collapse-toggle-icon">▾</span>
               </span>
               <div style="display:flex;gap:6px;align-items:center;">
                 <span id="movie-audio-fx-tag" class="badge badge-purple" style="font-size:.65rem;">Direct Out</span>
               </div>
-            </div>
+            </summary>
             <div class="card-body" style="padding:0;background:#070712;position:relative;flex:1;min-height:170px;overflow:hidden;border-radius:0 0 var(--radius-sm) var(--radius-sm);">
               <canvas id="movie-waveform-canvas" style="width:100%;height:100%;display:block;"></canvas>
               <div style="position:absolute;bottom:8px;left:12px;font-size:.68rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">
                 Oscilloscope: <span id="movie-audio-meter">0.0 dB</span>
               </div>
             </div>
-          </div>
+          </details>
 
           <!-- Transport Bar -->
           <div class="card" style="margin-bottom:0;">
@@ -1542,7 +1595,6 @@
     </section>
 
   </main>
-
   <!-- ─── DSP Effect Modal ──────────────────────────────────────── -->
   <div id="movie-fx-modal" class="modal-backdrop" role="dialog" aria-modal="true" style="display:none;align-items:center;justify-content:center;">
     <div class="modal-card" style="max-width:480px;">

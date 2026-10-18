@@ -9,29 +9,34 @@
         <div class="pg-sidebar" id="pg-sidebar">
           
           <!-- Conversations Card -->
-          <div class="card" style="margin-bottom:12px; display:flex; flex-direction:column; max-height:280px; min-height:160px;">
-            <div class="card-header" style="padding:10px 16px; flex-shrink:0; display:flex; justify-content:space-between; align-items:center;">
+          <details class="card" open style="margin-bottom:12px; display:flex; flex-direction:column; max-height:280px; min-height:160px;">
+            <summary class="card-header" style="padding:10px 16px; flex-shrink:0; display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
               <span class="card-title" style="font-size:.82rem; display:flex; align-items:center; gap:6px;">
                 <span>🗂</span> Conversations
+                <span class="collapse-toggle-icon">▾</span>
               </span>
-              <button id="pg-new-conv-btn" class="btn btn-primary btn-sm" style="padding:2px 8px; font-size:.7rem; display:flex; align-items:center; gap:3px;" title="Start a new conversation">+ New</button>
-            </div>
+              <button id="pg-new-conv-btn" class="btn btn-primary btn-sm" style="padding:2px 8px; font-size:.7rem; display:flex; align-items:center; gap:3px;" title="Start a new conversation" onclick="event.stopPropagation();">+ New</button>
+            </summary>
             <div class="card-body" style="padding:8px; display:flex; flex-direction:column; overflow:hidden; flex:1; min-height:0;">
               <input type="text" id="pg-conv-search" placeholder="Search sessions..." style="font-size:.75rem; padding:6px 10px; margin-bottom:8px; border-radius:6px; flex-shrink:0; width:100%; border:1px solid var(--glass-border); background:rgba(255,255,255,0.03); color:var(--text-primary);">
               <div id="pg-conv-list" class="conv-list" style="overflow-y:auto; flex:1; min-height:0; display:flex; flex-direction:column; gap:4px;">
                 <div class="conv-empty">Loading conversations...</div>
               </div>
             </div>
-          </div>
+          </details>
 
-          <div class="card" style="margin-bottom:12px;">
-            <div class="card-header" style="padding:12px 16px;">
-              <span class="card-title" style="font-size:.82rem;">Select Tool</span>
-            </div>
+          <!-- Select Tool Card -->
+          <details class="card" open style="margin-bottom:12px;">
+            <summary class="card-header" style="padding:12px 16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+              <span class="card-title" style="font-size:.82rem;display:flex;align-items:center;gap:6px;">
+                Select Tool
+                <span class="collapse-toggle-icon">▾</span>
+              </span>
+            </summary>
             <div class="card-body" style="padding:8px;">
               <div class="tool-selector-list" id="tool-list"></div>
             </div>
-          </div>
+          </details>
 
           <!-- Params card -->
           <div class="card" id="pg-params-card">
@@ -63,12 +68,6 @@
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                 </button>
               </div>
-              <!-- Agentic is opt-in, independent of whether a workspace is set — workspace
-                   memory/context grounding and file/pdf reference resolution both already
-                   work without it. Agentic adds subtask decomposition + a pre-emptive
-                   full-workspace re-index, which is unnecessary overhead (and can mangle
-                   simple reference-only requests) unless you actually want multi-step
-                   planning. -->
               <label style="display:flex;gap:5px;align-items:center;font-size:.78rem;color:var(--text-muted);cursor:pointer;" title="Enable subtask decomposition + pre-emptive workspace re-indexing. Leave off for simple grounded Q&A, including PDF/file/image references — those already work via the workspace above.">
                 <input type="checkbox" id="pg-agentic-toggle" style="cursor:pointer;">
                 🧠 Agentic
@@ -108,4 +107,3 @@
 
       </div>
     </section>
-
