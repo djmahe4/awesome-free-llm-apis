@@ -88,7 +88,7 @@ body {
 }
 
 .hero-inner {
-  max-width: 1280px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 14px 24px;
   display: flex;
@@ -147,7 +147,7 @@ body {
 
 /* ─── Layout ────────────────────────────────────────────────── */
 .container {
-  max-width: 1280px;
+  max-width: 1600px;
   width: 100%;
   margin: 0 auto;
   padding: 0 24px;           /* horizontal padding only; panels add their own vertical */
@@ -198,6 +198,22 @@ body {
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 .tab-btn svg { width: 16px; height: 16px; }
+
+/* Group labels inside the tab bar (Start / Build / Knowledge / Control).
+   Kept as direct tabbar children — buttons stay valid ARIA tab children. */
+.tab-group-label {
+  align-self: center;
+  font-size: .6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding: 0 4px;
+  margin-left: 16px;
+  user-select: none;
+}
+.tab-group-label:first-child { margin-left: 0; }
 
 .tab-panel { display: none; animation: fadeUp .2s ease; }
 .tab-panel.active { display: block; }
@@ -533,6 +549,35 @@ select option { background: var(--bg-elevated); }
 .qs-tool-desc { font-size: .78rem; color: var(--text-muted); }
 .qs-tool-card table.qs-table { margin: 0 16px 14px; width: calc(100% - 32px); }
 .qs-guide-body { margin: 0 16px 16px; font-size: .82rem; line-height: 1.6; color: var(--text-secondary); }
+
+/* "Start here" onboarding strip on the Quick Start tab */
+.qs-steps { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
+.qs-step {
+  display: flex; align-items: center; gap: 9px;
+  flex: 1 1 240px;
+  padding: 11px 14px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font-size: .8rem;
+  color: var(--text-secondary);
+}
+.qs-step-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent-purple);
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 700;
+}
+.qs-step code {
+  background: rgba(255,255,255,.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .85em;
+}
 
 /* ─── Section Titles ─────────────────────────────────────────── */
 .section-title {
@@ -1196,11 +1241,18 @@ mark.wiki-line-hit {
 
 /* DAG Memory Graph — SVG node-link view */
 .dagmem-svg-wrap { position: relative; width: 100%; min-height: 400px; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--glass-border); border-radius: var(--radius-sm); overflow: hidden; display: flex; align-items: center; justify-content: center; }
-.dagmem-svg-wrap svg { width: 100%; height: 400px; }
+.dagmem-svg-wrap svg { width: 100%; height: 400px; touch-action: none; cursor: grab; }
+.dagmem-svg-wrap svg.panning { cursor: grabbing; }
+.dagmem-svg-node { cursor: grab; transition: opacity 0.25s ease; }
+.dagmem-svg-node.dagmem-active { cursor: grabbing; }
+.dagmem-svg-node.dagmem-out { opacity: 0.08; pointer-events: none; }
 .dagmem-svg-node circle { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1.5px; cursor: pointer; transition: stroke 0.2s ease, stroke-width 0.2s ease, filter 0.2s ease; }
 .dagmem-svg-node:hover circle { stroke: var(--accent-cyan); stroke-width: 2.5px; filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.5)); }
+.dagmem-svg-node.dagmem-active circle { stroke: #fff; stroke-width: 2.5px; filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.7)); }
 .dagmem-svg-node text { font-size: 11px; fill: var(--text-secondary); pointer-events: none; user-select: none; font-family: 'JetBrains Mono', monospace; }
-.dagmem-svg-edge { stroke: var(--glass-border); stroke-width: 1.5px; marker-end: url(#dagmem-arrow); transition: stroke 0.2s ease; }
+.dagmem-svg-edge { stroke: var(--glass-border); stroke-width: 1.5px; marker-end: url(#dagmem-arrow); transition: stroke 0.2s ease, opacity 0.2s ease; }
+/* Edges recede while dragging so node movement stays readable */
+.dagmem-svg-wrap svg.dragging .dagmem-svg-edge { opacity: 0.2; }
 .dagmem-svg-node.dim circle { opacity: 0.2; }
 .dagmem-svg-node.dim text { opacity: 0.2; }
 .dagmem-detail-card { margin-top: 14px; padding: 12px 16px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--glass-border); border-radius: var(--radius-sm); font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary); }
@@ -1356,9 +1408,35 @@ mark.wiki-line-hit {
   color: var(--text-muted);
 }
 
+/* Action buttons overlay the block's right edge so short clips keep their
+   title/meta visible; revealed on hover/focus instead of always occupying
+   flex space (which squeezed narrow blocks to zero-width content). */
 .block-actions {
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   gap: 2px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: rgba(10, 10, 18, 0.92);
+  border: 1px solid var(--glass-border);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 3;
+}
+
+.timeline-block:hover .block-actions,
+.timeline-block:focus-within .block-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.timeline-block:hover .block-content,
+.timeline-block:focus-within .block-content {
+  padding-right: 80px;
 }
 
 .block-btn {

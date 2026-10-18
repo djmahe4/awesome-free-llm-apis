@@ -20,6 +20,7 @@ const harnessRerunSubmit       = document.getElementById('harness-rerun-submit')
 const harnessRerunMsg          = document.getElementById('harness-rerun-msg');
 const harnessTasksView         = document.getElementById('harness-tasks-view');
 const harnessTraceView         = document.getElementById('harness-trace-view');
+const harnessHandoffsView      = document.getElementById('harness-handoffs-view');
 const harnessSessionMemoryView = document.getElementById('harness-session-memory-view');
 
 function initHarnessTab() {
@@ -143,6 +144,58 @@ function renderHarnessTelemetry(data) {
   }
 }
 
+function renderHarnessHandoffs(trace) {
+  if (!harnessHandoffsView) return;
+  const handoffs = (trace || []).filter(t => t.type === 'handoff');
+  if (handoffs.length === 0) {
+    harnessHandoffsView.innerHTML = '<div class="conv-empty" style="padding:16px;text-align:center;font-style:italic;color:var(--text-muted);font-size:.78rem;">No handoff events recorded for this run.</div>';
+    return;
+  }
+  const statusBadge = s => {
+    const map = { complete: 'badge-green', in_progress: 'badge-cyan pulse', blocked: 'badge-red', needs_user: 'badge-amber' };
+    return `<span class="badge ${map[s] || 'badge-gray'}" style="font-size:.62rem;">${esc(s)}</span>`;
+  };
+  harnessHandoffsView.innerHTML = handoffs.map(t => {
+    const h = t.data || t.payload || {};
+    const time = new Date(t.ts || t.timestamp || Date.now()).toLocaleTimeString();
+    const conf = Math.round((Number(h.confidence) || 0) * 100);
+    const confColor = conf >= 70 ? 'var(--accent-green)' : conf >= 40 ? 'var(--accent-amber, #f59e0b)' : 'var(--accent-red)';
+    const findings = Array.isArray(h.findings) ? h.findings : [];
+    const questions = Array.isArray(h.openQuestions) ? h.openQuestions : [];
+    const artifacts = Array.isArray(h.artifacts) ? h.artifacts : [];
+    const approval = h.requiresApproval || {};
+    return `
+      <div style="padding:10px 12px;border-bottom:1px solid var(--glass-border);display:flex;flex-direction:column;gap:6px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+            <span style="font-weight:700;font-size:.74rem;font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);">${esc(h.from || '?')}</span>
+            <span style="color:var(--accent-purple);font-size:.8rem;" title="handoff to">⟶</span>
+            <span style="font-weight:700;font-size:.74rem;font-family:'JetBrains Mono',monospace;color:var(--accent-purple);">${esc(h.to || '?')}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            ${statusBadge(h.status)}
+            <span style="font-size:.68rem;color:var(--text-muted);">${esc(time)}</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:.66rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;">confidence</span>
+          <div style="flex:0 0 120px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+            <div style="width:${conf}%;height:100%;background:${confColor};border-radius:3px;"></div>
+          </div>
+          <span style="font-size:.7rem;font-family:'JetBrains Mono',monospace;color:${confColor};">${conf}%</span>
+          ${h.nextAction ? `<span style="font-size:.68rem;color:var(--text-muted);margin-left:auto;">next: <code style="background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px;">${esc(h.nextAction)}</code></span>` : ''}
+        </div>
+        ${approval.needed ? `<div style="font-size:.7rem;color:var(--accent-amber, #f59e0b);">⚠ approval required${approval.action ? `: ${esc(approval.action)}` : ''}${approval.risk ? ` (risk: ${esc(approval.risk)})` : ''}</div>` : ''}
+        ${findings.length ? `<ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:2px;">${findings.slice(0, 3).map(f => `
+          <li style="font-size:.7rem;color:var(--text-secondary);">${esc(String(f.claim || '').slice(0, 220))}${String(f.claim || '').length > 220 ? '…' : ''}
+            ${f.source ? `<span style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:.64rem;"> — ${esc(f.source)}</span>` : ''}</li>`).join('')}</ul>` : ''}
+        ${questions.length ? `<div style="font-size:.68rem;color:var(--text-muted);">open: ${questions.slice(0, 3).map(q => `<em>${esc(q)}</em>`).join(' · ')}${questions.length > 3 ? ` (+${questions.length - 3})` : ''}</div>` : ''}
+        ${artifacts.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;">${artifacts.slice(0, 6).map(a => `<code style="font-size:.64rem;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);padding:1px 6px;border-radius:10px;">${esc(a)}</code>`).join('')}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
 async function inspectHarnessRun(runId) {
   currentHarnessRunId = runId;
   const ws = (harnessWorkspaceInput?.value || '').trim();
@@ -165,6 +218,7 @@ async function inspectHarnessRun(runId) {
         }).join('\n');
       }
     }
+    renderHarnessHandoffs(data.trace);
     if (harnessSessionMemoryView) {
       const mem = data.sessionMemory || [];
       if (mem.length === 0) {

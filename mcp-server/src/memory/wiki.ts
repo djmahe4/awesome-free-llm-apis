@@ -42,13 +42,33 @@ function getFilename(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9_-]/g, '_') + '.md';
 }
 
+const FRONTMATTER_BLOCK_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
+
+/**
+ * Remove every leading `---` block from a page body. The first block is the
+ * wiki's own metadata (handled by parseFrontmatter); any further blocks are
+ * embedded pseudo-frontmatter from older writers (e.g. the journal template
+ * used to prepend `type: journal/period/date`) and must neither render as
+ * body text nor be mistaken for page metadata.
+ */
+function stripLeadingFrontmatter(text: string): { firstBlock: string | null, rest: string } {
+  let rest = text;
+  let firstBlock: string | null = null;
+  let m: RegExpMatchArray | null;
+  while ((m = rest.match(FRONTMATTER_BLOCK_RE))) {
+    if (firstBlock === null) firstBlock = m[1];
+    rest = rest.slice(m[0].length);
+  }
+  return { firstBlock, rest };
+}
+
 function parseFrontmatter(fileContent: string): { frontmatter: Record<string, any>, body: string } {
-  const match = fileContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
-  if (!match) {
+  const { firstBlock, rest } = stripLeadingFrontmatter(fileContent);
+  if (firstBlock === null) {
     return { frontmatter: {}, body: fileContent };
   }
-  const yamlLines = match[1].split('\n');
-  const body = match[2];
+  const yamlLines = firstBlock.split('\n');
+  const body = rest;
   const frontmatter: Record<string, any> = {};
   for (const line of yamlLines) {
     const parts = line.split(':');
@@ -276,6 +296,10 @@ export class WikiMemory {
     confidence: number,
     adr_ref?: string
   ): Promise<WikiPage> {
+    // Strip any caller-embedded frontmatter so the written file always carries
+    // exactly one metadata block (heals legacy double-wrapped pages on save),
+    // and normalize whitespace so the returned page matches what read() gives.
+    content = stripLeadingFrontmatter(content).rest.trim();
     const existing = await this.read(title);
     const created = existing ? existing.created : new Date().toISOString();
     const updated = new Date().toISOString();

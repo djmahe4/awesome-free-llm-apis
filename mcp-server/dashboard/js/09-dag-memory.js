@@ -21,6 +21,8 @@ const dagMemFormStatus     = document.getElementById('dagmem-form-status');
 
 let _dagMemGraphData = { nodes: [], edges: [] };
 let dagMemInitialized = false;
+let _dagMemPan = { x: 0, y: 0 };   // pan offset applied to the graph group
+let _dagMemLastW = 0;              // container width at last render (RO guard)
 
 const DAG_NODE_TYPE_COLOR = {
   text: 'var(--accent-cyan)',
@@ -51,27 +53,43 @@ function renderDagMemGraph(filterText) {
   const q = (filterText || '').trim().toLowerCase();
   const matches = (n) => !q || n.id.toLowerCase().includes(q) || (n.content || '').toLowerCase().includes(q) || (n.tags || []).some(t => t.toLowerCase().includes(q));
 
-  const width = 600;
-  const height = 360;
+  // Self-aware sizing: fit the real container instead of a fixed 600×360.
+  // Height is fixed to the CSS-rendered svg height (400px) so the viewBox
+  // matches the box 1:1 — measuring the body height would vary with the
+  // detail card text and feed a ResizeObserver re-render loop.
+  const rect = dagMemGraphBody.getBoundingClientRect();
+  const width  = Math.max(560, Math.round(rect.width) || 600);
+  const height = 400;
+  _dagMemLastW = Math.round(rect.width);
   const cx = width / 2;
   const cy = height / 2;
-  const radius = Math.min(width, height) / 2 - 60;
+  // Elliptical ring so nodes spread across the available width (a circle
+  // would keep the graph narrow even on a 1600px container).
+  const twoRings = nodes.length > 10;
+  const rx = Math.max(200, width / 2 - 72);
+  const ry = Math.max(150, height / 2 - 56);
+  const rxIn = rx * 0.55;
+  const ryIn = ry * 0.55;
 
   const positions = {};
   nodes.forEach((n, i) => {
     const angle = (2 * Math.PI * i) / nodes.length - Math.PI / 2;
-    positions[n.id] = { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) };
+    const outer = !twoRings || i % 2 === 0;
+    const useRx = outer ? rx : rxIn;
+    const useRy = outer ? ry : ryIn;
+    positions[n.id] = { x: cx + useRx * Math.cos(angle), y: cy + useRy * Math.sin(angle) };
   });
 
   let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '">';
   svg += '<defs><marker id="dagmem-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--glass-border)"></path></marker></defs>';
+  svg += '<g class="dagmem-pan" transform="translate(' + _dagMemPan.x + ',' + _dagMemPan.y + ')">';
 
   edges.forEach(e => {
     const from = positions[e.from];
     const to = positions[e.to];
     if (!from || !to) return;
     const dimEdge = q && !matches({ id: e.from, content: '', tags: [] }) && !matches({ id: e.to, content: '', tags: [] });
-    svg += '<line class="dagmem-svg-edge" x1="' + from.x + '" y1="' + from.y + '" x2="' + to.x + '" y2="' + to.y + '" opacity="' + (dimEdge ? 0.15 : 1) + '"><title>' + esc(e.from) + ' -&gt; ' + esc(e.to) + ' (' + esc(e.relation) + ')</title></line>';
+    svg += '<line class="dagmem-svg-edge" data-from="' + esc(e.from) + '" data-to="' + esc(e.to) + '" x1="' + from.x + '" y1="' + from.y + '" x2="' + to.x + '" y2="' + to.y + '" opacity="' + (dimEdge ? 0.15 : 1) + '"><title>' + esc(e.from) + ' -&gt; ' + esc(e.to) + ' (' + esc(e.relation) + ')</title></line>';
   });
 
   nodes.forEach(n => {
@@ -85,39 +103,177 @@ function renderDagMemGraph(filterText) {
     svg += '</g>';
   });
 
-  svg += '</svg>';
+  svg += '</g></svg>';
 
   const detailId = 'dagmem-node-detail';
   dagMemGraphBody.innerHTML =
     '<div class="dagmem-svg-wrap">' + svg + '</div>' +
-    '<div id="' + detailId + '" class="dagmem-detail-card" style="margin-top:14px;"><span style="color:var(--text-muted);">💡 Click any node circle in the graph to inspect metadata, tags, and media pointer.</span></div>';
+    '<div id="' + detailId + '" class="dagmem-detail-card" style="margin-top:14px;"><span style="color:var(--text-muted);">💡 Drag a node to move it, drag the background to pan, click a node to inspect metadata, tags, and media pointer.</span></div>';
 
-  dagMemGraphBody.querySelectorAll('.dagmem-svg-node').forEach(g => {
-    g.addEventListener('click', () => {
-      const id = g.getAttribute('data-node-id');
-      const n = nodes.find(x => x.id === id);
-      if (!n) return;
-      const detail = document.getElementById(detailId);
-      if (detail) {
-        const color = DAG_NODE_TYPE_COLOR[n.type] || 'var(--accent-cyan)';
-        const tagBadges = (n.tags || []).map(t => '<span class="badge badge-purple" style="font-size:0.65rem;margin-right:4px;">#' + esc(t) + '</span>').join('');
-        detail.innerHTML =
-          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
-            '<span class="dagmem-badge" style="background:' + color + ';color:#000;">' + esc(n.type) + '</span>' +
-            '<strong style="color:var(--text-primary);font-size:0.85rem;">' + esc(n.id) + '</strong>' +
-            '<span class="badge badge-cyan" style="font-size:0.65rem;margin-left:auto;">Retention ' + ((n.confidence ?? 0) * 100).toFixed(0) + '%</span>' +
-          '</div>' +
-          '<div style="margin-bottom:6px;font-size:0.82rem;color:var(--text-primary);">' + esc(n.content || n.filePath || '') + '</div>' +
-          (tagBadges ? '<div style="margin-top:4px;">' + tagBadges + '</div>' : '');
-      }
+  _dagMemBindInteractions(positions, nodes, detailId);
+}
+
+// ─── Graph interaction: node drag, background pan, out-of-view fade ───
+function _dagMemBindInteractions(positions, nodes, detailId) {
+  const svg = dagMemGraphBody.querySelector('.dagmem-svg-wrap svg');
+  if (!svg) return;
+  const gPan = svg.querySelector('.dagmem-pan');
+
+  const toSvgLocal = (evt) => {
+    const pt = svg.createSVGPoint();
+    pt.x = evt.clientX; pt.y = evt.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  };
+  const toPanLocal = (evt) => {
+    const pt = svg.createSVGPoint();
+    pt.x = evt.clientX; pt.y = evt.clientY;
+    return pt.matrixTransform(gPan.getScreenCTM().inverse());
+  };
+
+  // Nodes whose center has left the visible viewBox fade out (with CSS
+  // transition) while dragging, so the remaining nodes stay readable.
+  const updateOutOfView = () => {
+    const dragging = svg.classList.contains('dragging');
+    const vb = svg.viewBox.baseVal;
+    svg.querySelectorAll('.dagmem-svg-node').forEach(g => {
+      const p = positions[g.getAttribute('data-node-id')];
+      if (!p) return;
+      const x = p.x + _dagMemPan.x;
+      const y = p.y + _dagMemPan.y;
+      const outside = x < -48 || x > vb.width + 48 || y < -48 || y > vb.height + 48;
+      g.classList.toggle('dagmem-out', dragging && outside);
     });
+  };
+
+  const refreshEdges = () => {
+    svg.querySelectorAll('.dagmem-svg-edge').forEach(l => {
+      const f = positions[l.dataset.from];
+      const t = positions[l.dataset.to];
+      if (!f || !t) return;
+      l.setAttribute('x1', f.x); l.setAttribute('y1', f.y);
+      l.setAttribute('x2', t.x); l.setAttribute('y2', t.y);
+    });
+  };
+
+  const showDetail = (id) => {
+    const n = nodes.find(x => x.id === id);
+    if (!n) return;
+    const detail = document.getElementById(detailId);
+    if (!detail) return;
+    const color = DAG_NODE_TYPE_COLOR[n.type] || 'var(--accent-cyan)';
+    const tagBadges = (n.tags || []).map(t => '<span class="badge badge-purple" style="font-size:0.65rem;margin-right:4px;">#' + esc(t) + '</span>').join('');
+    detail.innerHTML =
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+        '<span class="dagmem-badge" style="background:' + color + ';color:#000;">' + esc(n.type) + '</span>' +
+        '<strong style="color:var(--text-primary);font-size:0.85rem;">' + esc(n.id) + '</strong>' +
+        '<span class="badge badge-cyan" style="font-size:0.65rem;margin-left:auto;">Retention ' + ((n.confidence ?? 0) * 100).toFixed(0) + '%</span>' +
+      '</div>' +
+      '<div style="margin-bottom:6px;font-size:0.82rem;color:var(--text-primary);">' + esc(n.content || n.filePath || '') + '</div>' +
+      (tagBadges ? '<div style="margin-top:4px;">' + tagBadges + '</div>' : '');
+  };
+
+  // Node drag ──────────────────────────────────────────────────
+  svg.querySelectorAll('.dagmem-svg-node').forEach(g => {
+    let dragging = false, moved = false, start = null, startPos = null;
+    g.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      const id = g.getAttribute('data-node-id');
+      if (!positions[id]) return;
+      dragging = true; moved = false;
+      start = toPanLocal(e);
+      startPos = { ...positions[id] };
+      g.classList.add('dagmem-active');
+      svg.classList.add('dragging');
+      try { g.setPointerCapture(e.pointerId); } catch {}
+      updateOutOfView();
+    });
+    g.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const cur = toPanLocal(e);
+      const dx = cur.x - start.x;
+      const dy = cur.y - start.y;
+      if (!moved && Math.hypot(dx, dy) > 4) moved = true;
+      if (!moved) return;
+      const id = g.getAttribute('data-node-id');
+      positions[id] = { x: startPos.x + dx, y: startPos.y + dy };
+      const circle = g.querySelector('circle');
+      const text = g.querySelector('text');
+      circle.setAttribute('cx', positions[id].x);
+      circle.setAttribute('cy', positions[id].y);
+      text.setAttribute('x', positions[id].x);
+      text.setAttribute('y', positions[id].y + 26);
+      refreshEdges();
+      updateOutOfView();
+    });
+    const endDrag = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      g.classList.remove('dagmem-active');
+      svg.classList.remove('dragging');
+      svg.querySelectorAll('.dagmem-out').forEach(x => x.classList.remove('dagmem-out'));
+      if (!moved) showDetail(g.getAttribute('data-node-id'));  // click, not drag
+      try { g.releasePointerCapture(e.pointerId); } catch {}
+    };
+    g.addEventListener('pointerup', endDrag);
+    g.addEventListener('pointercancel', endDrag);
   });
+
+  // Background pan ─────────────────────────────────────────────
+  let panning = false, panStart = null, panOrigin = null, panMoved = false;
+  svg.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.dagmem-svg-node')) return;
+    panning = true; panMoved = false;
+    panStart = toSvgLocal(e);
+    panOrigin = { ..._dagMemPan };
+    svg.classList.add('panning', 'dragging');
+    try { svg.setPointerCapture(e.pointerId); } catch {}
+    updateOutOfView();
+  });
+  svg.addEventListener('pointermove', (e) => {
+    if (!panning) return;
+    const cur = toSvgLocal(e);
+    const dx = cur.x - panStart.x;
+    const dy = cur.y - panStart.y;
+    if (!panMoved && Math.hypot(dx, dy) > 4) panMoved = true;
+    _dagMemPan = { x: panOrigin.x + dx, y: panOrigin.y + dy };
+    gPan.setAttribute('transform', 'translate(' + _dagMemPan.x + ',' + _dagMemPan.y + ')');
+    updateOutOfView();
+  });
+  const endPan = (e) => {
+    if (!panning) return;
+    panning = false;
+    svg.classList.remove('panning', 'dragging');
+    svg.querySelectorAll('.dagmem-out').forEach(x => x.classList.remove('dagmem-out'));
+    try { svg.releasePointerCapture(e.pointerId); } catch {}
+  };
+  svg.addEventListener('pointerup', endPan);
+  svg.addEventListener('pointercancel', endPan);
+
+  // Re-fit only when the container WIDTH changes (self-aware layout).
+  // Height changes come from the detail card text and must not re-render,
+  // otherwise innerHTML rewrite → height change → RO → render loops forever.
+  _dagMemBindInteractions._ro?.disconnect();
+  if (typeof ResizeObserver !== 'undefined') {
+    _dagMemBindInteractions._ro = new ResizeObserver(() => {
+      if (!document.getElementById('panel-dagmemory')?.classList.contains('active')) return;
+      const w = Math.round(dagMemGraphBody.getBoundingClientRect().width);
+      if (Math.abs(w - _dagMemLastW) < 4) return;
+      clearTimeout(_dagMemBindInteractions._t);
+      _dagMemBindInteractions._t = setTimeout(() => {
+        if (document.getElementById('panel-dagmemory')?.classList.contains('active')) {
+          renderDagMemGraph(dagMemFilterInput?.value || '');
+        }
+      }, 150);
+    });
+    _dagMemBindInteractions._ro.observe(dagMemGraphBody);
+  }
 }
 
 async function loadDagMemGraph() {
   const ws = dagMemWorkspaceInput.value.trim();
   if (!ws) return;
   dagMemGraphBody.innerHTML = '<div class="conv-empty">Loading…</div>';
+  _dagMemPan = { x: 0, y: 0 };
   try {
     const result = await callManageMemoryDag({ action: 'graph_query' });
     if ((!result.nodes || result.nodes.length === 0) && (!result.edges || result.edges.length === 0)) {
@@ -167,6 +323,7 @@ async function linkDagMemNodes() {
 }
 
 dagMemLoadBtn?.addEventListener('click', loadDagMemGraph);
+dagMemFilterInput?.addEventListener('input', () => renderDagMemGraph(dagMemFilterInput.value));
 dagMemWorkspaceInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadDagMemGraph(); });
 dagMemWorkspaceInput?.addEventListener('change', () => {
   localStorage.setItem('mcp-workspace', dagMemWorkspaceInput.value.trim());

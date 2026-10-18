@@ -472,7 +472,8 @@ class HarnessVisualizer {
       }
 
       // Draw Relay / Claim Edges
-      for (const edge of this.edges) {
+      for (let ei = 0; ei < this.edges.length; ei++) {
+        const edge = this.edges[ei];
         const from = this.nodes.find(n => n.id === edge.from);
         const to = this.nodes.find(n => n.id === edge.to);
         if (!from || !to) continue;
@@ -483,6 +484,9 @@ class HarnessVisualizer {
         ctx.strokeStyle = edge.color;
         ctx.lineWidth = (this.hoveredNode && (this.hoveredNode.id === from.id || this.hoveredNode.id === to.id)) ? 2.5 : 1.2;
         ctx.stroke();
+
+        // Lightning bridge (shared helper from js/11-relay-canvas.js; guards its own flag)
+        if (window.drawRelayLightning) drawRelayLightning(ctx, from, to, ei, this.pulse);
 
         // Pulsing Particle
         const t = (Math.sin(this.pulse + from.x * 0.01) + 1) / 2;

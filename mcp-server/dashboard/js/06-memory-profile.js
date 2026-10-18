@@ -1,5 +1,9 @@
 'use strict';
 // ─── MEMORY TAB ──────────────────────────────────────────────────
+// Replaces the removed inline onsubmit="event.preventDefault();"
+// (profile-form has no JS submit action; guard stops Enter from reloading).
+document.getElementById('profile-form')?.addEventListener('submit', (e) => e.preventDefault());
+
 const memSessionInput  = document.getElementById('mem-session-input');
 const memSessionSelect = document.getElementById('mem-session-select');
 const memLoadBtn       = document.getElementById('mem-load-btn');

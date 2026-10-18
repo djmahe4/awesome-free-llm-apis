@@ -1,8 +1,4 @@
-function escapeHtml(str) {
-  const temp = document.createElement('div');
-  temp.textContent = str;
-  return temp.innerHTML;
-}
+// escapeHtml() now lives in js/01-utils.js (loaded earlier in index.html).
 
 async function refreshEisenhower() {
   const el = document.getElementById('dagmem-workspace-input');

@@ -3,7 +3,14 @@
     ══════════════════════════════════════════════════════════ -->
     <section class="tab-panel" id="panel-quickstart" role="tabpanel" aria-labelledby="tab-quickstart">
       <div class="section-title">⚙️ Quick Start</div>
-      <div class="section-sub">Get API keys, learn the tool schemas, and steer prompts effectively.</div>
+      <div class="section-sub">Without at least one API key you keep only offline/local models — each free key takes about 2 minutes and unlocks that provider's hosted models. Add one below, then try it in the playground.</div>
+
+      <!-- Start-here path: primary action visible first, reference tables below -->
+      <div class="qs-steps" id="qs-steps">
+        <div class="qs-step"><span class="qs-step-num">1</span><span>Add one free API key below (~2 min)</span></div>
+        <div class="qs-step"><span class="qs-step-num">2</span><span>Run <code>use_free_llm</code> in the Tool Playground</span></div>
+        <div class="qs-step"><span class="qs-step-num">3</span><span>Steer output with keywords &amp; personas</span></div>
+      </div>
 
       <!-- Provider API Keys -->
       <div class="section-title" style="margin-bottom:14px;">🔑 Provider API Keys</div>
@@ -37,25 +44,32 @@
         </div>
       </div>
 
-      <!-- Search & Web Grounding Providers -->
-      <div class="section-title" style="margin-bottom:14px;">🌐 Search & Web Grounding Providers</div>
-      <div class="section-sub" style="margin-bottom:14px;">Used automatically by <code>SearchRouterMiddleware</code> and web search tools with multi-provider fallback.</div>
-      <div class="card" style="margin-bottom:28px;">
-        <div class="card-body" style="overflow-x:auto;">
-          <table class="qs-table" id="qs-search-provider-table">
-            <thead><tr><th>Search Provider</th><th>Env Var</th><th>URL / Get API Key</th><th>Type & Notes</th></tr></thead>
-            <tbody>
-              <tr><td>Parallel AI</td><td><code>PARALLEL_API_KEY</code></td><td><a href="https://parallel.ai" target="_blank" rel="noopener noreferrer">parallel.ai</a></td><td><span class="badge badge-green">Keyless / Optional Key</span> High-throughput AI search</td></tr>
-              <tr><td>Tavily Search</td><td><code>TAVILY_API_KEY</code></td><td><a href="https://app.tavily.com/home" target="_blank" rel="noopener noreferrer">app.tavily.com/home</a></td><td><span class="badge badge-purple">Free API Key</span> 2-phase search & page extraction</td></tr>
-              <tr><td>TinyFish Search</td><td><code>TINYFISH_API_KEY</code></td><td><a href="https://tinyfish.ai" target="_blank" rel="noopener noreferrer">tinyfish.ai</a></td><td><span class="badge badge-purple">Free API Key</span> 30 RPM search & 150 RPM fetch</td></tr>
-              <tr><td>Jina AI</td><td><code>JINA_API_KEY</code></td><td><a href="https://jina.ai" target="_blank" rel="noopener noreferrer">jina.ai</a></td><td><span class="badge badge-green">Keyless / Optional Key</span> Search (`s.jina.ai`) + Reader (`r.jina.ai`)</td></tr>
-              <tr><td>Brave Search</td><td><code>BRAVE_API_KEY</code></td><td><a href="https://brave.com/search/api" target="_blank" rel="noopener noreferrer">brave.com/search/api</a></td><td><span class="badge badge-purple">Free API Key</span> Privacy-first web search API</td></tr>
-              <tr><td>SearXNG (Self-Hosted)</td><td><code>SEARXNG_URL</code> / <code>SEARXNG_BASE_URL</code></td><td><a href="https://docs.searxng.org" target="_blank" rel="noopener noreferrer">docs.searxng.org</a> &bull; <code>http://localhost:8080</code></td><td><span class="badge badge-cyan">Self-Hosted</span> Unlimited terminal fallback</td></tr>
-              <tr><td>DuckDuckGo (DDGS)</td><td><code>(Keyless)</code></td><td><a href="https://duckduckgo.com" target="_blank" rel="noopener noreferrer">duckduckgo.com</a></td><td><span class="badge badge-green">Keyless</span> Instant answer search engine</td></tr>
-            </tbody>
-          </table>
+      <!-- Search & Web Grounding Providers — secondary reference, collapsed by default -->
+      <details class="qs-tool-card" id="qs-search-disclosure" style="margin-bottom:28px;">
+        <summary>
+          <span class="qs-tool-name">🌐 Search &amp; Web Grounding Providers</span>
+          <span class="qs-tool-desc">Secondary reference — expand for the full provider table</span>
+        </summary>
+        <div style="padding:0 16px;">
+          <div class="section-sub" style="margin-bottom:14px;">Used automatically by <code>SearchRouterMiddleware</code> and web search tools with multi-provider fallback.</div>
+          <div class="card" style="margin-bottom:16px;">
+            <div class="card-body" style="overflow-x:auto;">
+              <table class="qs-table" id="qs-search-provider-table">
+                <thead><tr><th>Search Provider</th><th>Env Var</th><th>URL / Get API Key</th><th>Type & Notes</th></tr></thead>
+                <tbody>
+                  <tr><td>Parallel AI</td><td><code>PARALLEL_API_KEY</code></td><td><a href="https://parallel.ai" target="_blank" rel="noopener noreferrer">parallel.ai</a></td><td><span class="badge badge-green">Keyless / Optional Key</span> High-throughput AI search</td></tr>
+                  <tr><td>Tavily Search</td><td><code>TAVILY_API_KEY</code></td><td><a href="https://app.tavily.com/home" target="_blank" rel="noopener noreferrer">app.tavily.com/home</a></td><td><span class="badge badge-purple">Free API Key</span> 2-phase search & page extraction</td></tr>
+                  <tr><td>TinyFish Search</td><td><code>TINYFISH_API_KEY</code></td><td><a href="https://tinyfish.ai" target="_blank" rel="noopener noreferrer">tinyfish.ai</a></td><td><span class="badge badge-purple">Free API Key</span> 30 RPM search & 150 RPM fetch</td></tr>
+                  <tr><td>Jina AI</td><td><code>JINA_API_KEY</code></td><td><a href="https://jina.ai" target="_blank" rel="noopener noreferrer">jina.ai</a></td><td><span class="badge badge-green">Keyless / Optional Key</span> Search (`s.jina.ai`) + Reader (`r.jina.ai`)</td></tr>
+                  <tr><td>Brave Search</td><td><code>BRAVE_API_KEY</code></td><td><a href="https://brave.com/search/api" target="_blank" rel="noopener noreferrer">brave.com/search/api</a></td><td><span class="badge badge-purple">Free API Key</span> Privacy-first web search API</td></tr>
+                  <tr><td>SearXNG (Self-Hosted)</td><td><code>SEARXNG_URL</code> / <code>SEARXNG_BASE_URL</code></td><td><a href="https://docs.searxng.org" target="_blank" rel="noopener noreferrer">docs.searxng.org</a> &bull; <code>http://localhost:8080</code></td><td><span class="badge badge-cyan">Self-Hosted</span> Unlimited terminal fallback</td></tr>
+                  <tr><td>DuckDuckGo (DDGS)</td><td><code>(Keyless)</code></td><td><a href="https://duckduckgo.com" target="_blank" rel="noopener noreferrer">duckduckgo.com</a></td><td><span class="badge badge-green">Keyless</span> Instant answer search engine</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </div>
+      </details>
 
       <!-- MCP Tool Usage Schemas -->
       <div class="section-title" style="margin-bottom:14px;">🛠️ MCP Tool Schemas</div>

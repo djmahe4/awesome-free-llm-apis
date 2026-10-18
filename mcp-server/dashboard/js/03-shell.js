@@ -3,25 +3,41 @@
 const tabBtns   = document.querySelectorAll('.tab-btn');
 const tabPanels = document.querySelectorAll('.tab-panel');
 
-tabBtns.forEach(btn => {
-  btn.addEventListener('click', () => {
-    const target = btn.dataset.tab;
-    tabBtns.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
-    tabPanels.forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    btn.setAttribute('aria-selected','true');
-    document.getElementById(`panel-${target}`)?.classList.add('active');
+function activateTab(target) {
+  const btn = [...tabBtns].find(b => b.dataset.tab === target);
+  if (!btn) return false;
+  tabBtns.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
+  tabPanels.forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  btn.setAttribute('aria-selected','true');
+  document.getElementById(`panel-${target}`)?.classList.add('active');
 
-    // Tab-specific actions
-    if (target === 'memory')   { fetchSessions(); if (activeMemSid) startMemPoll(activeMemSid); }
-    if (target === 'providers') { fetchStats(); fetchSearchData(); }
-    if (target === 'playground') ensureModels();
-    if (target === 'profile')  { fetchUserConfig(); fetchLeaderboard(); }
-    if (target === 'wiki')     { initWikiTab(); }
-    if (target === 'dagmemory') { initDagMemoryTab(); }
-    if (target === 'harness')   { initHarnessTab(); }
-    if (target === 'movie')     { window.initMovieTab?.(); }
-  });
+  // Tab-specific actions
+  if (target === 'memory')   { fetchSessions(); if (activeMemSid) startMemPoll(activeMemSid); }
+  if (target === 'providers') { fetchStats(); fetchSearchData(); }
+  if (target === 'playground') ensureModels();
+  if (target === 'profile')  { fetchUserConfig(); fetchLeaderboard(); }
+  if (target === 'wiki')     { initWikiTab(); }
+  if (target === 'dagmemory') { initDagMemoryTab(); }
+  if (target === 'harness')   { initHarnessTab(); }
+  if (target === 'movie')     { window.initMovieTab?.(); }
+
+  try { localStorage.setItem('flm.activeTab', target); } catch {}
+  return true;
+}
+
+tabBtns.forEach(btn => {
+  btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+});
+
+// Status-quo: reopen the last visited tab (default stays Overview).
+// Deferred to window load — tab-specific actions call functions defined in
+// scripts that load after this one.
+window.addEventListener('load', () => {
+  try {
+    const saved = localStorage.getItem('flm.activeTab');
+    if (saved && saved !== 'overview') activateTab(saved);
+  } catch {}
 });
 
 // ─── SSE Connection ─────────────────────────────────────────────

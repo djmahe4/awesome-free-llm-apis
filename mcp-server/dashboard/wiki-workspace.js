@@ -962,13 +962,9 @@
       }
     }
 
-    createFrontmatter(period, dateValue) {
-      return ['---', 'type: journal', `period: ${period}`, `${period === 'daily' ? 'date' : 'month'}: ${dateValue}`, '---', ''].join('\n');
-    }
-
     buildJournalFromTemplate(period, dateValue, carryItems = []) {
       const cfg = this.templateConfig[period] || this.defaultTemplateConfig()[period];
-      const lines = [this.createFrontmatter(period, dateValue)];
+      const lines = [];
       const sections = cfg.sections.filter(s => s.enabled);
       sections.forEach((section, idx) => {
         const headingLevel = idx === 0 ? '# ' : '## ';

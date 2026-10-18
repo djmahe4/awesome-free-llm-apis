@@ -226,4 +226,56 @@ Some other details.`;
         const page500 = await wiki.read('Page 500');
         expect(page500).not.toBeNull();
     });
+
+    it('read() heals legacy double-frontmatter pages (embedded journal block stripped)', async () => {
+        const wiki = new WikiMemory(wsHash, testDir);
+        const dir = path.join(testDir, wsHash);
+        await fs.mkdir(dir, { recursive: true });
+
+        // Simulates the pre-fix write path: client template prepended its own
+        // journal frontmatter, and writePage wrapped a second block around it.
+        const legacyRaw = [
+            '---',
+            'title: journal/daily/2026-10-04',
+            'created: 2026-10-04T00:00:00.000Z',
+            'updated: 2026-10-04T00:00:00.000Z',
+            'confidence: 0.5',
+            'tier: episodic',
+            'tags: [journal, daily]',
+            'links: []',
+            '---',
+            '---',
+            'type: journal',
+            'period: daily',
+            'date: 2026-10-04',
+            '---',
+            '',
+            '# Today',
+            ''
+        ].join('\n');
+        await fs.writeFile(path.join(dir, 'journal_daily_2026-10-04.md'), legacyRaw, 'utf-8');
+
+        const page = await wiki.read('journal/daily/2026-10-04');
+        expect(page).not.toBeNull();
+        expect(page!.title).toBe('journal/daily/2026-10-04');
+        expect(page!.content).not.toContain('type: journal');
+        expect(page!.content).not.toContain('period: daily');
+        expect(page!.content.startsWith('---')).toBe(false);
+        expect(page!.content).toContain('# Today');
+    });
+
+    it('write() strips caller-embedded frontmatter so files carry exactly one block', async () => {
+        const wiki = new WikiMemory(wsHash, testDir);
+        const embedded = '---\ntype: journal\nperiod: daily\ndate: 2026-10-05\n---\n\n# Body\n';
+
+        const page = await wiki.write('journal/daily/2026-10-05', embedded);
+
+        expect(page.content).toBe('# Body');
+        expect(page.content).not.toContain('type: journal');
+
+        const raw = await fs.readFile(path.join(testDir, wsHash, 'journal_daily_2026-10-05.md'), 'utf-8');
+        const delimiterLines = raw.split('\n').filter(line => line.trim() === '---');
+        expect(delimiterLines.length).toBe(2);
+        expect(raw).not.toContain('type: journal');
+    });
 });

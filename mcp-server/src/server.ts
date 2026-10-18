@@ -1916,6 +1916,31 @@ export function createExpressApp(): express.Express {
       app.get('/sse', handleMcpRequest);
       app.post('/messages', handleMcpRequest);
 
+      // Security headers for dashboard documents (static routes registered
+      // below; API routes above finish before this middleware runs).
+      // script-src hashes cover index.html's two inline <script> blocks
+      // (importmap + mermaid bootstrap) — update them if either block changes.
+      const dashboardCsp = [
+        "default-src 'self'",
+        "script-src 'self' 'sha256-tGpJa3pSXa3a8oU4LBTwCr6knpiQndrqJNGgkEtIEqc=' 'sha256-d+I2Atf7cxRtJBWcPkEbKNzrWQMef8kek1LEMsFvUvo=' https://cdn.jsdelivr.net",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob: https:",
+        "media-src 'self' blob:",
+        "font-src 'self' data:",
+        "connect-src 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+      ].join('; ');
+      app.use((_req, res, next) => {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('X-Frame-Options', 'DENY');
+        res.setHeader('Referrer-Policy', 'no-referrer');
+        res.setHeader('Content-Security-Policy', dashboardCsp);
+        next();
+      });
+
       // Serve dashboard static files
       const dashboardPath = path.join(__dirname, '../dashboard');
       app.use(express.static(dashboardPath));

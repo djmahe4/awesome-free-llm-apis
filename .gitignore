@@ -27,3 +27,41 @@ mcp-server/scripts/secrets/
 mcp-server/models/
 *.onnx
 *.bin
+# Runtime movie_tool project dirs (manifests, compiled clips)
+mcp-server/projects/
+# Existing patterns preserved above this line...
+
+# Test output pruning — add these to ignore test artifact files:
+tests/dashboard-csp.test.ts
+tests/movie-tool-compile.test.ts
+tests/movie-tool-motion.test.ts
+dashboard/assets/
+
+# Keep these test dirs tracked but ignore runtime output:
+# (individual test files listed above; do not ignore entire tests/ dir)
+
+# Previously ignored (keep):
+*.node_modules/
+*.dist/
+*.data/
+*.env
+.env
+*.coverage/
+*.venv
+external/agent-prompt/prompt.json
+external/hermes/manifest.json
+**/external/cyber-tools-index/
+mcp-server/scripts/sandboxes/rust-sandbox-runner/target/
+mcp-server/scripts/sandboxes/rust-sandbox-runner/Cargo.lock
+mcp-server/scripts/sandboxes/go-sandbox-runner/sandbox-runner
+.claude/
+mcp-server/demo-verify.log
+mcp-server/extended_demo_out.log
+mcp-server/out.log
+mcp-server/scratch/
+.free-llm-mcp/
+mcp-server/scripts/secrets/
+mcp-server/models/
+*.onnx
+*.bin
+mcp-server/projects/

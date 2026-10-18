@@ -861,7 +861,7 @@ export async function createMCPServer(): Promise<Server> {
       },
       {
         name: 'movie_tool',
-        description: 'Vibe Movie Engine: multi-track media timeline management, asset generation (Pollinations keyframes, Kokoro voice, MusicGen audio), and DSP effects.',
+        description: 'Vibe Movie Engine: multi-track media timeline management, asset generation (Pollinations keyframes or motion video via wan2.2/wan2.1/ltx, Kokoro voice, MusicGen audio), DSP effects, and ffmpeg timeline compilation.',
         inputSchema: {
           type: 'object' as const,
           properties: {
@@ -875,9 +875,13 @@ export async function createMCPServer(): Promise<Server> {
             track: { type: 'string', enum: ['video', 'vfx', 'bgm', 'bgm_drums', 'bgm_bass', 'bgm_melody', 'vocal', 'song', 'script', 'dialogue'] },
             start_ms: { type: 'number', description: 'Start timestamp in milliseconds' },
             end_ms: { type: 'number', description: 'End timestamp in milliseconds' },
+            duration_ms: { type: 'number', description: 'Clip duration in milliseconds (generate_assets)' },
             label: { type: 'string', description: 'Artifact label' },
             prompt: { type: 'string', description: 'Prompt for media generation' },
             artifact_path: { type: 'string', description: 'Path to audio or video file' },
+            engine: { type: 'string', description: 'Motion engine for video track (wan2.2, wan2.1, wan2.1-i2v-14b, ltx, hunyuan-video, cogvideox-5b); omit for keyframe image URL' },
+            model: { type: 'string', description: 'Generation model id (e.g. flux keyframe model, story model)' },
+            metadata: { type: 'object', description: 'Generation hints (width, height, voice, emotion, tone, tempo_bpm, …)' },
             effect: { type: 'object', description: 'DSP effect descriptor (pitch, pan, tempo, reverb, eq, speed_ramp, lut, glitch)' }
           },
           required: ['action']

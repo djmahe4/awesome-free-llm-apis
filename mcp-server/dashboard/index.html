@@ -45,12 +45,23 @@
   <!-- ─── Main Content ─────────────────────────────────────────── -->
   <main class="container">
 
-    <!-- Tabs Navigation -->
+    <!-- Tabs Navigation (grouped: Start / Build / Knowledge / Control) -->
     <nav class="tabs-bar" role="tablist" aria-label="Dashboard sections">
+      <span class="tab-group-label" role="presentation" aria-hidden="true">Start</span>
       <button class="tab-btn active" data-tab="overview" role="tab" aria-selected="true" id="tab-overview">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
         Overview
       </button>
+      <button class="tab-btn" data-tab="quickstart" role="tab" aria-selected="false" id="tab-quickstart">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+        Quick Start
+      </button>
+      <button class="tab-btn" data-tab="profile" role="tab" aria-selected="false" id="tab-profile">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Profile & Leaderboard
+      </button>
+
+      <span class="tab-group-label" role="presentation" aria-hidden="true">Build</span>
       <button class="tab-btn" data-tab="providers" role="tab" aria-selected="false" id="tab-providers">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
         Providers
@@ -58,6 +69,16 @@
       <button class="tab-btn" data-tab="playground" role="tab" aria-selected="false" id="tab-playground">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
         Tool Playground
+      </button>
+      <button class="tab-btn" data-tab="movie" role="tab" aria-selected="false" id="tab-movie">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+        Movie Studio
+      </button>
+
+      <span class="tab-group-label" role="presentation" aria-hidden="true">Knowledge</span>
+      <button class="tab-btn" data-tab="wiki" role="tab" aria-selected="false" id="tab-wiki">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        Wiki
       </button>
       <button class="tab-btn" data-tab="memory" role="tab" aria-selected="false" id="tab-memory">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
@@ -67,18 +88,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.2 7.2L10.5 16M15.8 7.2L13.5 16M8.5 6h7"/></svg>
         Memory Graph
       </button>
-      <button class="tab-btn" data-tab="wiki" role="tab" aria-selected="false" id="tab-wiki">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-        Wiki
-      </button>
-      <button class="tab-btn" data-tab="profile" role="tab" aria-selected="false" id="tab-profile">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        Profile & Leaderboard
-      </button>
-      <button class="tab-btn" data-tab="quickstart" role="tab" aria-selected="false" id="tab-quickstart">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
-        Quick Start
-      </button>
+
+      <span class="tab-group-label" role="presentation" aria-hidden="true">Control</span>
       <button class="tab-btn" data-tab="steering" role="tab" aria-selected="false" id="tab-steering">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="4"/></svg>
         Keyword & Prompt Steering
@@ -87,12 +98,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         Harness & Multi-Agent
       </button>
-      <button class="tab-btn" data-tab="movie" role="tab" aria-selected="false" id="tab-movie">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
-        Movie Studio
-      </button>
     </nav>
-
     <!-- ══════════════════════════════════════════════════════════
          TAB 1: OVERVIEW
     ══════════════════════════════════════════════════════════ -->
@@ -605,7 +611,7 @@
         <div class="card">
           <div class="card-header"><span class="card-title">👤 Telemetry Profile Settings</span></div>
           <div class="card-body">
-            <form id="profile-form" class="playground-form" onsubmit="event.preventDefault();">
+            <form id="profile-form" class="playground-form">
               <div>
                 <label class="field-label" for="profile-username">Username</label>
                 <input type="text" id="profile-username" placeholder="e.g. dev-hero">
@@ -648,7 +654,14 @@
     ══════════════════════════════════════════════════════════ -->
     <section class="tab-panel" id="panel-quickstart" role="tabpanel" aria-labelledby="tab-quickstart">
       <div class="section-title">⚙️ Quick Start</div>
-      <div class="section-sub">Get API keys, learn the tool schemas, and steer prompts effectively.</div>
+      <div class="section-sub">Without at least one API key you keep only offline/local models — each free key takes about 2 minutes and unlocks that provider's hosted models. Add one below, then try it in the playground.</div>
+
+      <!-- Start-here path: primary action visible first, reference tables below -->
+      <div class="qs-steps" id="qs-steps">
+        <div class="qs-step"><span class="qs-step-num">1</span><span>Add one free API key below (~2 min)</span></div>
+        <div class="qs-step"><span class="qs-step-num">2</span><span>Run <code>use_free_llm</code> in the Tool Playground</span></div>
+        <div class="qs-step"><span class="qs-step-num">3</span><span>Steer output with keywords &amp; personas</span></div>
+      </div>
 
       <!-- Provider API Keys -->
       <div class="section-title" style="margin-bottom:14px;">🔑 Provider API Keys</div>
@@ -682,25 +695,32 @@
         </div>
       </div>
 
-      <!-- Search & Web Grounding Providers -->
-      <div class="section-title" style="margin-bottom:14px;">🌐 Search & Web Grounding Providers</div>
-      <div class="section-sub" style="margin-bottom:14px;">Used automatically by <code>SearchRouterMiddleware</code> and web search tools with multi-provider fallback.</div>
-      <div class="card" style="margin-bottom:28px;">
-        <div class="card-body" style="overflow-x:auto;">
-          <table class="qs-table" id="qs-search-provider-table">
-            <thead><tr><th>Search Provider</th><th>Env Var</th><th>URL / Get API Key</th><th>Type & Notes</th></tr></thead>
-            <tbody>
-              <tr><td>Parallel AI</td><td><code>PARALLEL_API_KEY</code></td><td><a href="https://parallel.ai" target="_blank" rel="noopener noreferrer">parallel.ai</a></td><td><span class="badge badge-green">Keyless / Optional Key</span> High-throughput AI search</td></tr>
-              <tr><td>Tavily Search</td><td><code>TAVILY_API_KEY</code></td><td><a href="https://app.tavily.com/home" target="_blank" rel="noopener noreferrer">app.tavily.com/home</a></td><td><span class="badge badge-purple">Free API Key</span> 2-phase search & page extraction</td></tr>
-              <tr><td>TinyFish Search</td><td><code>TINYFISH_API_KEY</code></td><td><a href="https://tinyfish.ai" target="_blank" rel="noopener noreferrer">tinyfish.ai</a></td><td><span class="badge badge-purple">Free API Key</span> 30 RPM search & 150 RPM fetch</td></tr>
-              <tr><td>Jina AI</td><td><code>JINA_API_KEY</code></td><td><a href="https://jina.ai" target="_blank" rel="noopener noreferrer">jina.ai</a></td><td><span class="badge badge-green">Keyless / Optional Key</span> Search (`s.jina.ai`) + Reader (`r.jina.ai`)</td></tr>
-              <tr><td>Brave Search</td><td><code>BRAVE_API_KEY</code></td><td><a href="https://brave.com/search/api" target="_blank" rel="noopener noreferrer">brave.com/search/api</a></td><td><span class="badge badge-purple">Free API Key</span> Privacy-first web search API</td></tr>
-              <tr><td>SearXNG (Self-Hosted)</td><td><code>SEARXNG_URL</code> / <code>SEARXNG_BASE_URL</code></td><td><a href="https://docs.searxng.org" target="_blank" rel="noopener noreferrer">docs.searxng.org</a> &bull; <code>http://localhost:8080</code></td><td><span class="badge badge-cyan">Self-Hosted</span> Unlimited terminal fallback</td></tr>
-              <tr><td>DuckDuckGo (DDGS)</td><td><code>(Keyless)</code></td><td><a href="https://duckduckgo.com" target="_blank" rel="noopener noreferrer">duckduckgo.com</a></td><td><span class="badge badge-green">Keyless</span> Instant answer search engine</td></tr>
-            </tbody>
-          </table>
+      <!-- Search & Web Grounding Providers — secondary reference, collapsed by default -->
+      <details class="qs-tool-card" id="qs-search-disclosure" style="margin-bottom:28px;">
+        <summary>
+          <span class="qs-tool-name">🌐 Search &amp; Web Grounding Providers</span>
+          <span class="qs-tool-desc">Secondary reference — expand for the full provider table</span>
+        </summary>
+        <div style="padding:0 16px;">
+          <div class="section-sub" style="margin-bottom:14px;">Used automatically by <code>SearchRouterMiddleware</code> and web search tools with multi-provider fallback.</div>
+          <div class="card" style="margin-bottom:16px;">
+            <div class="card-body" style="overflow-x:auto;">
+              <table class="qs-table" id="qs-search-provider-table">
+                <thead><tr><th>Search Provider</th><th>Env Var</th><th>URL / Get API Key</th><th>Type & Notes</th></tr></thead>
+                <tbody>
+                  <tr><td>Parallel AI</td><td><code>PARALLEL_API_KEY</code></td><td><a href="https://parallel.ai" target="_blank" rel="noopener noreferrer">parallel.ai</a></td><td><span class="badge badge-green">Keyless / Optional Key</span> High-throughput AI search</td></tr>
+                  <tr><td>Tavily Search</td><td><code>TAVILY_API_KEY</code></td><td><a href="https://app.tavily.com/home" target="_blank" rel="noopener noreferrer">app.tavily.com/home</a></td><td><span class="badge badge-purple">Free API Key</span> 2-phase search & page extraction</td></tr>
+                  <tr><td>TinyFish Search</td><td><code>TINYFISH_API_KEY</code></td><td><a href="https://tinyfish.ai" target="_blank" rel="noopener noreferrer">tinyfish.ai</a></td><td><span class="badge badge-purple">Free API Key</span> 30 RPM search & 150 RPM fetch</td></tr>
+                  <tr><td>Jina AI</td><td><code>JINA_API_KEY</code></td><td><a href="https://jina.ai" target="_blank" rel="noopener noreferrer">jina.ai</a></td><td><span class="badge badge-green">Keyless / Optional Key</span> Search (`s.jina.ai`) + Reader (`r.jina.ai`)</td></tr>
+                  <tr><td>Brave Search</td><td><code>BRAVE_API_KEY</code></td><td><a href="https://brave.com/search/api" target="_blank" rel="noopener noreferrer">brave.com/search/api</a></td><td><span class="badge badge-purple">Free API Key</span> Privacy-first web search API</td></tr>
+                  <tr><td>SearXNG (Self-Hosted)</td><td><code>SEARXNG_URL</code> / <code>SEARXNG_BASE_URL</code></td><td><a href="https://docs.searxng.org" target="_blank" rel="noopener noreferrer">docs.searxng.org</a> &bull; <code>http://localhost:8080</code></td><td><span class="badge badge-cyan">Self-Hosted</span> Unlimited terminal fallback</td></tr>
+                  <tr><td>DuckDuckGo (DDGS)</td><td><code>(Keyless)</code></td><td><a href="https://duckduckgo.com" target="_blank" rel="noopener noreferrer">duckduckgo.com</a></td><td><span class="badge badge-green">Keyless</span> Instant answer search engine</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </div>
+      </details>
 
       <!-- MCP Tool Usage Schemas -->
       <div class="section-title" style="margin-bottom:14px;">🛠️ MCP Tool Schemas</div>
@@ -1064,9 +1084,9 @@
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
             <div class="section-title" style="font-size:.88rem;margin:0;">🔍 Assembled Prompt & Workspace Context Inspector</div>
             <div style="display:flex;gap:6px;">
-              <button class="btn btn-outline btn-xs active" id="btn-inspect-tab-prompt" onclick="switchSteeringInspectTab('prompt')">📑 Assembled Prompt</button>
-              <button class="btn btn-outline btn-xs" id="btn-inspect-tab-workspace" onclick="switchSteeringInspectTab('workspace')">📂 Extracted Workspace & Tree</button>
-              <button class="btn btn-outline btn-xs" id="btn-inspect-tab-history" onclick="switchSteeringInspectTab('history')">💬 Chat & Session Turns</button>
+              <button class="btn btn-outline btn-xs active" id="btn-inspect-tab-prompt">📑 Assembled Prompt</button>
+              <button class="btn btn-outline btn-xs" id="btn-inspect-tab-workspace">📂 Extracted Workspace &amp; Tree</button>
+              <button class="btn btn-outline btn-xs" id="btn-inspect-tab-history">💬 Chat &amp; Session Turns</button>
             </div>
           </div>
           <div style="background:rgba(0,0,0,.3);border:1px solid var(--glass-border);border-radius:6px;padding:12px;">
@@ -1255,6 +1275,9 @@
             <button id="harness-flow-physics-toggle" class="btn btn-secondary btn-sm" style="font-size:.73rem;padding:4px 8px;cursor:pointer;">
               Dynamic Orbit: ON
             </button>
+            <button id="harness-flow-lightning-toggle" class="btn btn-secondary btn-sm" style="font-size:.73rem;padding:4px 8px;cursor:pointer;">
+              Lightning Bridge: ON
+            </button>
             <span id="harness-flow-stats" class="badge badge-purple" style="font-size:.7rem;">0 nodes &bull; 0 relays</span>
           </div>
         </div>
@@ -1359,6 +1382,14 @@
             </div>
           </div>
 
+          <!-- Agent Handoffs (validated Handoff chain from trace) -->
+          <div style="margin-top:16px;">
+            <h4 style="font-size:.82rem;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">Agent Handoffs</h4>
+            <div id="harness-handoffs-view" style="max-height:280px;overflow-y:auto;background:rgba(0,0,0,0.25);border:1px solid var(--glass-border);border-radius:var(--radius-sm);padding:4px;">
+              <div class="conv-empty" style="padding:16px;text-align:center;font-style:italic;color:var(--text-muted);font-size:.78rem;">Inspect a run to view its handoff chain.</div>
+            </div>
+          </div>
+
           <div style="margin-top:16px;">
             <h4 style="font-size:.82rem;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">Session Memory (last turns)</h4>
             <div id="harness-session-memory-view" class="diff-viewer" style="height:180px;overflow-y:auto;white-space:pre-wrap;background:rgba(0,0,0,0.25);">No session memory entries yet</div>
@@ -1389,79 +1420,96 @@
         </div>
       </div>
 
-      <!-- Dedicated Live Preview Stage & Audio Waveform Visualizer -->
-      <div style="display:grid;grid-template-columns:360px 1fr;gap:16px;margin-bottom:16px;">
-        <div class="card" style="margin-bottom:0;display:flex;flex-direction:column;">
-          <div class="card-header" style="padding:8px 14px;">
-            <span class="card-title" style="font-size:.8rem;display:flex;align-items:center;gap:6px;">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/></svg>
-              Live Video Preview
-            </span>
-            <span id="movie-preview-status" class="badge badge-gray" style="font-size:0.65rem;">Idle</span>
+      <!-- Preview Rail (video + audio + transport) beside the timeline so the
+           stage, scope, and transport stay visible while scrubbing. -->
+      <div style="display:grid;grid-template-columns:minmax(320px,400px) 1fr;gap:16px;margin-bottom:20px;align-items:stretch;">
+        <!-- LEFT RAIL -->
+        <div style="display:flex;flex-direction:column;gap:16px;min-width:0;">
+
+          <!-- Dedicated Live Preview Stage -->
+          <div class="card" style="margin-bottom:0;display:flex;flex-direction:column;flex:1;min-height:280px;">
+            <div class="card-header" style="padding:8px 14px;">
+              <span class="card-title" style="font-size:.8rem;display:flex;align-items:center;gap:6px;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/></svg>
+                Live Video Preview
+              </span>
+              <span id="movie-preview-status" class="badge badge-gray" style="font-size:0.65rem;">Idle</span>
+            </div>
+            <div class="card-body" style="padding:0;background:#05050a;display:flex;align-items:center;justify-content:center;flex:1;min-height:240px;position:relative;border-radius:0 0 var(--radius-sm) var(--radius-sm);overflow:hidden;">
+              <video id="movie-preview-video" style="width:100%;height:100%;max-height:360px;object-fit:contain;display:none;" playsinline></video>
+              <div id="movie-preview-placeholder" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--text-muted);font-size:.75rem;">
+                <video id="movie-demo-video" src="/assets/demo.mp4" muted loop autoplay playsinline preload="auto" aria-hidden="true" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.5;"></video>
+                <div style="position:relative;z-index:1;">
+                  <div style="font-size:2rem;margin-bottom:6px;opacity:.6;">🎬</div>
+                  <div>Scrub timeline or play to preview video frame</div>
+                  <div id="movie-active-cue" style="margin-top:6px;font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);font-size:.7rem;"></div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="card-body" style="padding:0;background:#05050a;display:flex;align-items:center;justify-content:center;min-height:190px;position:relative;border-radius:0 0 var(--radius-sm) var(--radius-sm);overflow:hidden;">
-            <video id="movie-preview-video" style="width:100%;height:100%;max-height:220px;object-fit:contain;display:none;" playsinline></video>
-            <div id="movie-preview-placeholder" style="text-align:center;padding:20px;color:var(--text-muted);font-size:.75rem;">
-              <div style="font-size:2rem;margin-bottom:6px;opacity:.6;">🎬</div>
-              <div>Scrub timeline or play to preview video frame</div>
-              <div id="movie-active-cue" style="margin-top:6px;font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);font-size:.7rem;"></div>
+
+          <!-- Audio Master & DSP Oscilloscope -->
+          <div class="card" style="margin-bottom:0;display:flex;flex-direction:column;min-height:210px;">
+            <div class="card-header" style="padding:8px 14px;display:flex;align-items:center;justify-content:space-between;">
+              <span class="card-title" style="font-size:.8rem;display:flex;align-items:center;gap:6px;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-purple"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                Audio Master &amp; DSP Oscilloscope
+              </span>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <span id="movie-audio-fx-tag" class="badge badge-purple" style="font-size:.65rem;">Direct Out</span>
+              </div>
+            </div>
+            <div class="card-body" style="padding:0;background:#070712;position:relative;flex:1;min-height:170px;overflow:hidden;border-radius:0 0 var(--radius-sm) var(--radius-sm);">
+              <canvas id="movie-waveform-canvas" style="width:100%;height:100%;display:block;"></canvas>
+              <div style="position:absolute;bottom:8px;left:12px;font-size:.68rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">
+                Oscilloscope: <span id="movie-audio-meter">0.0 dB</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Transport Bar -->
+          <div class="card" style="margin-bottom:0;">
+            <div class="card-body" style="padding:10px 14px;display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                <button id="movie-play-btn" class="btn btn-primary btn-sm" style="min-width:80px;">▶ Play</button>
+                <span id="movie-timecode-display" style="font-family:'JetBrains Mono',monospace;font-size:1.05rem;font-weight:700;color:var(--accent-cyan);">00:00.000</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-size:.72rem;color:var(--text-muted);">Duration:</span>
+                <select id="movie-max-duration-select" class="session-input" style="padding:4px 8px;font-size:.75rem;">
+                  <option value="30000">30s Short</option>
+                  <option value="60000" selected>60s Standard</option>
+                  <option value="120000">120s Cinematic</option>
+                  <option value="300000">5m Feature</option>
+                </select>
+                <span style="font-size:.72rem;color:var(--text-muted);">Zoom:</span>
+                <button id="movie-zoom-out" class="btn btn-secondary btn-sm" style="padding:4px 10px;">−</button>
+                <button id="movie-zoom-in" class="btn btn-secondary btn-sm" style="padding:4px 10px;">+</button>
+                <button id="movie-load-btn" class="btn btn-secondary btn-sm">🔄 Reload</button>
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="card" style="margin-bottom:0;display:flex;flex-direction:column;">
+        <!-- RIGHT: Timeline Main Viewport -->
+        <div class="card" style="margin-bottom:0;overflow:hidden;display:flex;flex-direction:column;min-width:0;">
           <div class="card-header" style="padding:8px 14px;display:flex;align-items:center;justify-content:space-between;">
             <span class="card-title" style="font-size:.8rem;display:flex;align-items:center;gap:6px;">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-purple"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-              Audio Master &amp; DSP Frequency Oscilloscope
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><circle cx="8" cy="6" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="10" cy="18" r="2" fill="currentColor"/></svg>
+              Multi-Track Timeline
             </span>
-            <div style="display:flex;gap:6px;align-items:center;">
-              <span id="movie-audio-fx-tag" class="badge badge-purple" style="font-size:.65rem;">Direct Out</span>
+            <span class="badge badge-gray" style="font-size:.65rem;">Video · VFX · BGM · Voice · Cues</span>
+          </div>
+          <div class="movie-timeline-wrapper" style="overflow-x:auto;position:relative;background:rgba(10,10,18,0.95);min-height:340px;flex:1;border-radius:0 0 var(--radius-sm) var(--radius-sm);">
+            <!-- Ruler -->
+            <div id="movie-timeline-ruler" class="movie-ruler-container" style="height:28px;position:relative;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,0.02);cursor:pointer;" title="Click or scrub to reposition playhead"></div>
+            <!-- Playhead Cursor Line -->
+            <div id="movie-playhead" class="movie-playhead-line" style="position:absolute;top:0;bottom:0;width:2px;background:#ef4444;z-index:30;pointer-events:none;transform:translateX(0);">
+              <div style="width:10px;height:10px;background:#ef4444;border-radius:50%;margin-left:-4px;margin-top:2px;"></div>
             </div>
+            <!-- Lanes -->
+            <div id="movie-timeline-lanes" class="movie-lanes-container" style="position:relative;padding-bottom:16px;"></div>
           </div>
-          <div class="card-body" style="padding:0;background:#070712;position:relative;flex:1;min-height:190px;overflow:hidden;border-radius:0 0 var(--radius-sm) var(--radius-sm);">
-            <canvas id="movie-waveform-canvas" style="width:100%;height:100%;display:block;"></canvas>
-            <div style="position:absolute;bottom:8px;left:12px;font-size:.68rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">
-              Oscilloscope: <span id="movie-audio-meter">0.0 dB</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Controls & Transport Bar -->
-      <div class="card" style="margin-bottom:16px;">
-        <div class="card-body" style="padding:12px 18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-          <div style="display:flex;align-items:center;gap:12px;">
-            <button id="movie-play-btn" class="btn btn-primary btn-sm" style="min-width:80px;">▶ Play</button>
-            <span id="movie-timecode-display" style="font-family:'JetBrains Mono',monospace;font-size:1.15rem;font-weight:700;color:var(--accent-cyan);">00:00.000</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-size:.78rem;color:var(--text-muted);">Duration:</span>
-            <select id="movie-max-duration-select" class="session-input" style="padding:4px 8px;font-size:.75rem;">
-              <option value="30000">30s Short</option>
-              <option value="60000" selected>60s Standard</option>
-              <option value="120000">120s Cinematic</option>
-              <option value="300000">5m Feature</option>
-            </select>
-            <span style="font-size:.78rem;color:var(--text-muted);">Zoom:</span>
-            <button id="movie-zoom-out" class="btn btn-secondary btn-sm" style="padding:4px 10px;">−</button>
-            <button id="movie-zoom-in" class="btn btn-secondary btn-sm" style="padding:4px 10px;">+</button>
-            <button id="movie-load-btn" class="btn btn-secondary btn-sm">🔄 Reload</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Timeline Main Viewport -->
-      <div class="card" style="margin-bottom:20px;overflow:hidden;">
-        <div class="movie-timeline-wrapper" style="overflow-x:auto;position:relative;background:rgba(10,10,18,0.95);min-height:340px;">
-          <!-- Ruler -->
-          <div id="movie-timeline-ruler" class="movie-ruler-container" style="height:28px;position:relative;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,0.02);cursor:pointer;" title="Click or scrub to reposition playhead"></div>
-          <!-- Playhead Cursor Line -->
-          <div id="movie-playhead" class="movie-playhead-line" style="position:absolute;top:0;bottom:0;width:2px;background:#ef4444;z-index:30;pointer-events:none;transform:translateX(0);">
-            <div style="width:10px;height:10px;background:#ef4444;border-radius:50%;margin-left:-4px;margin-top:2px;"></div>
-          </div>
-          <!-- Lanes -->
-          <div id="movie-timeline-lanes" class="movie-lanes-container" style="position:relative;padding-bottom:16px;"></div>
         </div>
       </div>
     </section>

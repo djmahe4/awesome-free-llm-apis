@@ -6,17 +6,28 @@ let relayEdges = [];
 let relaySelectedNode = null;
 let relayHoveredNode = null;
 let relayPhysicsEnabled = true;
+const relayReduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let relayLightningEnabled = !relayReduceMotion;
 
 const relayCanvas = document.getElementById('harness-relay-canvas');
 const relayTooltip = document.getElementById('harness-relay-tooltip');
 const relayStats = document.getElementById('harness-flow-stats');
 const relayDetail = document.getElementById('harness-relay-detail');
 const relayPhysicsToggle = document.getElementById('harness-flow-physics-toggle');
+const relayLightningToggle = document.getElementById('harness-flow-lightning-toggle');
 
 if (relayPhysicsToggle) {
   relayPhysicsToggle.addEventListener('click', () => {
     relayPhysicsEnabled = !relayPhysicsEnabled;
     relayPhysicsToggle.textContent = `Dynamic Orbit: ${relayPhysicsEnabled ? 'ON' : 'OFF'}`;
+  });
+}
+
+if (relayLightningToggle) {
+  if (relayReduceMotion) relayLightningToggle.textContent = 'Lightning Bridge: OFF';
+  relayLightningToggle.addEventListener('click', () => {
+    relayLightningEnabled = !relayLightningEnabled;
+    relayLightningToggle.textContent = `Lightning Bridge: ${relayLightningEnabled ? 'ON' : 'OFF'}`;
   });
 }
 
@@ -163,6 +174,59 @@ function initRelayCanvas(activeScopes = [], reasoningScopes = []) {
   startRelayLoop(ctx, width, height);
 }
 
+/**
+ * Shared lightning-bridge bolt: jagged traveling discharge along an edge.
+ * Used by the fallback relay loop below AND by harness-viz.js (the live
+ * HarnessVisualizer 2D renderer) — both guard on relayLightningEnabled.
+ * Coordinates are whatever the caller passes (canvas XY or mesh position XY).
+ */
+function drawRelayLightning(ctx, from, to, edgeIndex, phase) {
+  if (typeof relayLightningEnabled === 'undefined' || !relayLightningEnabled) return;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len <= 24) return;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const span = 0.24;
+  const lt = (phase * 0.5 + edgeIndex * 0.23 + 0.1) % 1;
+  const t0 = lt - span;
+  const steps = 7;
+  const flick = 0.65 + Math.random() * 0.35;
+  const pts = [];
+  for (let s = 0; s <= steps; s++) {
+    const frac = s / steps;
+    const t = Math.max(0, Math.min(1, t0 + span * frac));
+    const off = (Math.random() - 0.5) * 8 * Math.sin(Math.PI * frac);
+    pts.push(from.x + dx * t + nx * off, from.y + dy * t + ny * off);
+  }
+  ctx.save();
+  const tracePts = () => {
+    ctx.beginPath();
+    ctx.moveTo(pts[0], pts[1]);
+    for (let p = 2; p < pts.length; p += 2) ctx.lineTo(pts[p], pts[p + 1]);
+  };
+  tracePts();
+  ctx.strokeStyle = `rgba(56,242,255,${0.22 * flick})`;
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  tracePts();
+  ctx.shadowColor = '#38f2ff';
+  ctx.shadowBlur = 9;
+  ctx.strokeStyle = `rgba(214,246,255,${0.95 * flick})`;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  // Bolt head flash
+  ctx.beginPath();
+  ctx.arc(pts[pts.length - 2], pts[pts.length - 1], 2.4, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = '#38f2ff';
+  ctx.shadowBlur = 12;
+  ctx.fill();
+  ctx.restore();
+}
+
 function startRelayLoop(ctx, width, height) {
   if (relayCanvasAnimId) cancelAnimationFrame(relayCanvasAnimId);
 
@@ -197,7 +261,8 @@ function startRelayLoop(ctx, width, height) {
     }
 
     // Render Edges
-    for (const edge of relayEdges) {
+    for (let ei = 0; ei < relayEdges.length; ei++) {
+      const edge = relayEdges[ei];
       const from = relayNodes.find(n => n.id === edge.from);
       const to = relayNodes.find(n => n.id === edge.to);
       if (!from || !to) continue;
@@ -220,6 +285,9 @@ function startRelayLoop(ctx, width, height) {
       ctx.shadowBlur = 6;
       ctx.fill();
       ctx.shadowBlur = 0;
+
+      // Lightning bridge: jagged bolt traveling from → to along the edge
+      drawRelayLightning(ctx, from, to, ei, pulse);
     }
 
     // Render Nodes

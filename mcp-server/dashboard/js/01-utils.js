@@ -18,6 +18,12 @@ function esc(str) {
   return d.innerHTML;
 }
 
+// Single shared HTML escaper (loaded before dag-blackboard.js and
+// productivity-ui.js, which used to each carry their own copy).
+function escapeHtml(str) {
+  return esc(str);
+}
+
 function fmt(n) {
   if (n == null) return '0';
   return Number(n).toLocaleString();

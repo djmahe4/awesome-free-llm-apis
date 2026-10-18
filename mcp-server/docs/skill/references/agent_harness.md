@@ -108,6 +108,11 @@ harness:
   # so runs stay scoped to the audited project regardless of server cwd.
   allowedWorkspaceRoots: ['../..']
 
+handoff:
+  schemaVersion: 1
+  lowConfidenceThreshold: 0.7
+  maxDepth: 3
+
 roles:
   top_level:
     tools: [{ tool: manage_memory, actions: [search, wiki_search, wiki_read] }]

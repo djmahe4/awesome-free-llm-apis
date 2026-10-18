@@ -3,11 +3,7 @@ const elRefresh = document.getElementById('dagmem-bb-refresh');
 const elCount = document.getElementById('dagmem-bb-count');
 const elBlackboardContainer = document.getElementById('dagmem-blackboard-container');
 
-function escapeHtml(str) {
-  const temp = document.createElement('div');
-  temp.textContent = str;
-  return temp.innerHTML;
-}
+// escapeHtml() now lives in js/01-utils.js (loaded earlier in index.html).
 
 function ebbinghausRetention(node) {
   const days = (Date.now() - node.lastReviewedAt) / 86400000;
