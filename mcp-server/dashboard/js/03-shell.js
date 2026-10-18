@@ -30,11 +30,42 @@ tabBtns.forEach(btn => {
   btn.addEventListener('click', () => activateTab(btn.dataset.tab));
 });
 
-// Status-quo: reopen the last visited tab (default stays Overview).
-// Deferred to window load — tab-specific actions call functions defined in
-// scripts that load after this one.
+// ─── Domain Mode Filtering (Hick's Law / Chunking 7±2) ───────────
+const domainPills = document.querySelectorAll('.domain-pill');
+const groupLabels = document.querySelectorAll('.tab-group-label');
+
+function filterTabsByDomain(domain) {
+  domainPills.forEach(p => p.classList.toggle('active', p.dataset.domain === domain));
+  try { localStorage.setItem('flm.activeDomain', domain); } catch {}
+
+  const showAll = domain === 'all';
+  tabBtns.forEach(btn => {
+    const match = showAll || btn.dataset.group === domain;
+    btn.style.display = match ? 'inline-flex' : 'none';
+  });
+
+  groupLabels.forEach(lbl => {
+    const match = showAll || lbl.dataset.groupLabel === domain;
+    lbl.style.display = match ? 'inline-block' : 'none';
+  });
+
+  // If currently active tab is hidden, switch to the first visible tab in this domain
+  const activeBtn = [...tabBtns].find(b => b.classList.contains('active'));
+  if (activeBtn && activeBtn.style.display === 'none') {
+    const firstVis = [...tabBtns].find(b => b.style.display !== 'none');
+    if (firstVis) activateTab(firstVis.dataset.tab);
+  }
+}
+
+domainPills.forEach(pill => {
+  pill.addEventListener('click', () => filterTabsByDomain(pill.dataset.domain));
+});
+
+// Status-quo: reopen the last visited tab & domain.
 window.addEventListener('load', () => {
   try {
+    const savedDomain = localStorage.getItem('flm.activeDomain');
+    if (savedDomain && savedDomain !== 'all') filterTabsByDomain(savedDomain);
     const saved = localStorage.getItem('flm.activeTab');
     if (saved && saved !== 'overview') activateTab(saved);
   } catch {}

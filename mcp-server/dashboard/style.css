@@ -158,6 +158,49 @@ body {
   min-height: 0;             /* allow flex shrink below content height → enables scroll */
 }
 
+/* ─── Domain Mode Switcher (Hick's Law / Chunking 7±2) ────────── */
+.domain-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 6px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  overflow-x: auto;
+}
+.domain-label {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+  user-select: none;
+}
+.domain-pill {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  font-family: 'Inter', sans-serif;
+  font-size: .75rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 99px;
+  cursor: pointer;
+  transition: all .2s ease;
+  white-space: nowrap;
+}
+.domain-pill:hover {
+  background: var(--glass-hover);
+  color: var(--text-primary);
+  border-color: rgba(255,255,255,0.18);
+}
+.domain-pill.active {
+  background: var(--accent-purple);
+  border-color: var(--accent-purple);
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(124,58,237,0.35);
+}
+
 /* ─── Tabs ──────────────────────────────────────────────────── */
 .tabs-bar {
   display: flex;
