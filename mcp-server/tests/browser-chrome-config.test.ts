@@ -61,6 +61,7 @@ describe('resolveChromeExecutable', () => {
   });
 
   it('skips a non-executable CHROME_PATH on unix-like platforms (X_OK enforced)', async () => {
+    if (process.platform === 'win32') return; // Windows fs does not support POSIX X_OK bit checks
     const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'chrome-noexec-'));
     const exe = path.join(dir, 'chrome-stub');
     await fsp.writeFile(exe, 'not executable\n', { mode: 0o644 });
@@ -74,6 +75,15 @@ describe('resolveChromeExecutable', () => {
   });
 
   it('returns undefined when no candidate exists (Windows probe with no installs)', async () => {
+    if (process.platform === 'win32') {
+      const { access } = await import('node:fs/promises');
+      try {
+        await access('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
+        return; // Host has real Chrome installed, so fallback probe will locate it
+      } catch {
+        // proceed
+      }
+    }
     const resolved = await resolveChromeExecutable({
       platform: 'win32',
       env: {} as NodeJS.ProcessEnv, // no PROGRAMFILES/LOCALAPPDATA/CHROME_PATH — only hardcoded C:\ paths, absent on the test host

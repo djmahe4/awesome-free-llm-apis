@@ -56,4 +56,3 @@ handoff:
 # Cyber Bridge Allowlist (fail-closed):
 # cyberTools: [katana]  — uncomment to enable cyber_tool bridge dispatch through this declaration.
 # A bridge not named in cyberTools → needs_approval (absent list = no bridge dispatches through the harness at all).
-```

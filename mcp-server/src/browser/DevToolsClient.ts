@@ -79,8 +79,8 @@ export function chromeCandidates(opts: ChromeCandidateOptions = {}): string[] {
         push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
         push('/Applications/Chromium.app/Contents/MacOS/Chromium');
         if (env.HOME) {
-            push(path.join(env.HOME, 'Applications', 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome'));
-            push(path.join(env.HOME, 'Applications', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'));
+            push(path.posix.join(env.HOME, 'Applications', 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome'));
+            push(path.posix.join(env.HOME, 'Applications', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'));
         }
     } else {
         push('/usr/bin/chromium');
