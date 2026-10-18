@@ -5,9 +5,36 @@ let relayNodes = [];
 let relayEdges = [];
 let relaySelectedNode = null;
 let relayHoveredNode = null;
-let relayPhysicsEnabled = true;
 const relayReduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-let relayLightningEnabled = !relayReduceMotion;
+
+// Centralized Dashboard Visualization State Bus
+window.RelayVizState = {
+  physicsEnabled: true,
+  lightningEnabled: !relayReduceMotion,
+  setPhysics(enabled) {
+    this.physicsEnabled = !!enabled;
+    window.relayPhysicsEnabled = this.physicsEnabled;
+    const viz = typeof window.getHarnessVizInstance === 'function' ? window.getHarnessVizInstance() : null;
+    if (viz) viz.physicsEnabled = this.physicsEnabled;
+    const toggle = document.getElementById('harness-flow-physics-toggle');
+    if (toggle) toggle.textContent = `Dynamic Orbit: ${this.physicsEnabled ? 'ON' : 'OFF'}`;
+  },
+  setLightning(enabled) {
+    this.lightningEnabled = !!enabled;
+    window.relayLightningEnabled = this.lightningEnabled;
+    const toggle = document.getElementById('harness-flow-lightning-toggle');
+    if (toggle) toggle.textContent = `Lightning Bridge: ${this.lightningEnabled ? 'ON' : 'OFF'}`;
+  },
+  togglePhysics() {
+    this.setPhysics(!this.physicsEnabled);
+  },
+  toggleLightning() {
+    this.setLightning(!this.lightningEnabled);
+  }
+};
+
+window.relayPhysicsEnabled = window.RelayVizState.physicsEnabled;
+window.relayLightningEnabled = window.RelayVizState.lightningEnabled;
 
 const relayCanvas = document.getElementById('harness-relay-canvas');
 const relayTooltip = document.getElementById('harness-relay-tooltip');
@@ -18,24 +45,18 @@ const relayLightningToggle = document.getElementById('harness-flow-lightning-tog
 
 if (relayPhysicsToggle) {
   relayPhysicsToggle.addEventListener('click', () => {
-    relayPhysicsEnabled = !relayPhysicsEnabled;
-    relayPhysicsToggle.textContent = `Dynamic Orbit: ${relayPhysicsEnabled ? 'ON' : 'OFF'}`;
+    window.RelayVizState.togglePhysics();
   });
 }
 
 if (relayLightningToggle) {
   if (relayReduceMotion) {
-    relayLightningEnabled = false;
-    relayLightningToggle.textContent = 'Lightning Bridge: OFF';
+    window.RelayVizState.setLightning(false);
   }
-  window.relayLightningEnabled = relayLightningEnabled;
   relayLightningToggle.addEventListener('click', () => {
-    relayLightningEnabled = !relayLightningEnabled;
-    window.relayLightningEnabled = relayLightningEnabled;
-    relayLightningToggle.textContent = `Lightning Bridge: ${relayLightningEnabled ? 'ON' : 'OFF'}`;
+    window.RelayVizState.toggleLightning();
   });
 }
-window.relayLightningEnabled = relayLightningEnabled;
 
 function initRelayCanvas(activeScopes = [], reasoningScopes = []) {
   if (!relayCanvas) return;
@@ -255,7 +276,8 @@ function startRelayLoop(ctx, width, height) {
     }
 
     // Dynamic Physics / Gentle Orbit
-    if (relayPhysicsEnabled) {
+    const physicsOn = window.RelayVizState ? window.RelayVizState.physicsEnabled : true;
+    if (physicsOn) {
       for (const node of relayNodes) {
         if (node === relaySelectedNode) continue;
         node.x += node.vx;
@@ -414,8 +436,11 @@ function updateRelayVisualization(activeScopes = [], reasoningScopes = [], wikiP
         'harness-relay-canvas',
         'harness-relay-canvas-wrap',
         'harness-relay-tooltip',
-        'harness-node-detail'
+        'harness-relay-detail'
       );
+      if (window.RelayVizState && typeof _harnessVizInstance.physicsEnabled !== 'undefined') {
+        _harnessVizInstance.physicsEnabled = window.RelayVizState.physicsEnabled;
+      }
     }
     _harnessVizInstance.updateData(activeScopes, reasoningScopes, wikiPages, handoffs);
   } else {

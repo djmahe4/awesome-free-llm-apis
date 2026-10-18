@@ -21,8 +21,9 @@ class HarnessVisualizer {
     this.edges = [];
     this.wikiRays = [];
     this.hoveredNode = null;
-    this.selectedNode = null;
-    this.physicsEnabled = true;
+    this.physicsEnabled = (typeof window !== 'undefined' && window.RelayVizState && typeof window.RelayVizState.physicsEnabled !== 'undefined')
+      ? window.RelayVizState.physicsEnabled
+      : true;
     this.mouse = { x: 0, y: 0 };
     this.raycaster = null;
     this.pulse = 0;
@@ -435,7 +436,10 @@ class HarnessVisualizer {
   startThreeLoop() {
     const render = () => {
       this.pulse += 0.03;
-      if (this.physicsEnabled) {
+      const isPhysicsActive = (typeof window !== 'undefined' && window.RelayVizState && typeof window.RelayVizState.physicsEnabled !== 'undefined')
+        ? window.RelayVizState.physicsEnabled
+        : this.physicsEnabled;
+      if (isPhysicsActive) {
         this.nodes.forEach(n => {
           n.x += n.vx;
           n.y += n.vy;
@@ -517,7 +521,10 @@ class HarnessVisualizer {
       }
 
       // Physics
-      if (this.physicsEnabled) {
+      const isPhysicsActive = (typeof window !== 'undefined' && window.RelayVizState && typeof window.RelayVizState.physicsEnabled !== 'undefined')
+        ? window.RelayVizState.physicsEnabled
+        : this.physicsEnabled;
+      if (isPhysicsActive) {
         for (const n of this.nodes) {
           if (n === this.selectedNode) continue;
           n.x += n.vx;
