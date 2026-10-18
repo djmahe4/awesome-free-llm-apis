@@ -179,7 +179,7 @@ class HarnessVisualizer {
     `;
   }
 
-  updateData(activeScopes = [], reasoningScopes = [], wikiPages = []) {
+  updateData(activeScopes = [], reasoningScopes = [], wikiPages = [], handoffs = []) {
     const nodeMap = new Map();
     const edges = [];
     const wikiRays = [];
@@ -322,13 +322,86 @@ class HarnessVisualizer {
       }
     });
 
+    // 4. Agent Handoffs
+    (handoffs || []).forEach((h, hIdx) => {
+      const fromRole = h.from || 'agent';
+      const toRole = h.to || 'agent';
+      const fromId = `agent:${fromRole}`;
+      const toId = `agent:${toRole}`;
+
+      if (!nodeMap.has(fromId)) {
+        nodeMap.set(fromId, {
+          id: fromId,
+          label: fromRole,
+          sub: 'Handoff Origin',
+          type: 'agent',
+          color: '#06b6d4',
+          r: 17,
+          x: cx - 130 + (hIdx * 25) % 60,
+          y: cy - 40 + (hIdx * 35) % 80,
+          z: 20,
+          vx: (Math.random() - 0.5) * 0.25,
+          vy: (Math.random() - 0.5) * 0.25,
+          data: h
+        });
+      }
+
+      if (!nodeMap.has(toId)) {
+        nodeMap.set(toId, {
+          id: toId,
+          label: toRole,
+          sub: 'Handoff Target',
+          type: 'agent',
+          color: '#8b5cf6',
+          r: 17,
+          x: cx + 130 - (hIdx * 25) % 60,
+          y: cy - 40 + (hIdx * 35) % 80,
+          z: 20,
+          vx: (Math.random() - 0.5) * 0.25,
+          vy: (Math.random() - 0.5) * 0.25,
+          data: h
+        });
+      }
+
+      const confPct = Math.round((Number(h.confidence) || 0) * 100);
+      const edgeColor = h.status === 'blocked' ? '#ef4444' : h.status === 'complete' ? '#10b981' : '#38bdf8';
+      edges.push({
+        from: fromId,
+        to: toId,
+        type: 'handoff',
+        color: edgeColor,
+        label: `handoff: ${fromRole} ➔ ${toRole} (${confPct}%)`,
+        data: h
+      });
+    });
+
+    // 5. Rich Multi-Agent Demo Fallback if no live agents
+    const liveAgents = Array.from(nodeMap.values()).filter(n => n.type === 'agent');
+    if (liveAgents.length === 0) {
+      const demoAgents = [
+        { id: 'agent:researcher', label: 'researcher', sub: 'Research Agent', type: 'agent', color: '#06b6d4', r: 18, x: cx - 160, y: cy - 30, z: 20, vx: 0.15, vy: -0.1 },
+        { id: 'agent:coder-agent', label: 'coder-agent', sub: 'Implementation Worker', type: 'agent', color: '#8b5cf6', r: 18, x: cx, y: cy - 60, z: 20, vx: -0.1, vy: 0.15 },
+        { id: 'agent:security-reviewer', label: 'security-reviewer', sub: 'Audit Verifier', type: 'agent', color: '#ec4899', r: 18, x: cx + 160, y: cy - 30, z: 20, vx: 0.1, vy: 0.1 },
+        { id: 'file:src/server.ts', label: 'server.ts', sub: 'mcp-server/src/server.ts', type: 'file', color: '#10b981', r: 13, x: cx - 60, y: cy + 100, z: 0, vx: -0.05, vy: 0.05 },
+        { id: 'kw:harness-protocol', label: '#harness-protocol', sub: 'Reasoning Keyword', type: 'keyword', color: '#f59e0b', r: 11, x: cx + 60, y: cy + 100, z: -10, vx: 0.05, vy: -0.05 }
+      ];
+      demoAgents.forEach(d => nodeMap.set(d.id, d));
+      edges.push(
+        { from: 'agent:researcher', to: 'agent:coder-agent', type: 'handoff', color: '#38bdf8', label: 'handoff: researcher ➔ coder (88%)', data: { status: 'complete', confidence: 0.88 } },
+        { from: 'agent:coder-agent', to: 'agent:security-reviewer', type: 'handoff', color: '#10b981', label: 'handoff: coder ➔ security (95%)', data: { status: 'complete', confidence: 0.95 } },
+        { from: 'agent:coder-agent', to: 'file:src/server.ts', type: 'claim', color: 'rgba(16,185,129,0.5)', label: 'file lease lock' },
+        { from: 'agent:security-reviewer', to: 'kw:harness-protocol', type: 'relay', color: 'rgba(245,158,11,0.5)', label: 'reasoning collision' }
+      );
+    }
+
     this.nodes = Array.from(nodeMap.values());
     this.edges = edges;
     this.wikiRays = wikiRays;
 
     const stats = document.getElementById('harness-flow-stats');
     if (stats) {
-      stats.textContent = `${this.nodes.length} nodes • ${this.edges.length} relays • ${this.wikiRays.length} nexus rays`;
+      const handoffCount = this.edges.filter(e => e.type === 'handoff').length;
+      stats.textContent = `${this.nodes.length} nodes • ${this.edges.length} edges (${handoffCount} handoffs) • ${this.wikiRays.length} nexus rays`;
     }
 
     if (this.isWebGL) {
@@ -471,7 +544,7 @@ class HarnessVisualizer {
         ctx.setLineDash([]);
       }
 
-      // Draw Relay / Claim Edges
+      // Draw Relay / Claim / Handoff Edges
       for (let ei = 0; ei < this.edges.length; ei++) {
         const edge = this.edges[ei];
         const from = this.nodes.find(n => n.id === edge.from);
@@ -482,23 +555,50 @@ class HarnessVisualizer {
         ctx.moveTo(from.x, from.y);
         ctx.lineTo(to.x, to.y);
         ctx.strokeStyle = edge.color;
-        ctx.lineWidth = (this.hoveredNode && (this.hoveredNode.id === from.id || this.hoveredNode.id === to.id)) ? 2.5 : 1.2;
+        const isHovered = this.hoveredNode && (this.hoveredNode.id === from.id || this.hoveredNode.id === to.id);
+        ctx.lineWidth = isHovered ? 2.8 : (edge.type === 'handoff' ? 2.0 : 1.2);
+        if (edge.type === 'handoff') {
+          ctx.setLineDash([5, 3]);
+        } else {
+          ctx.setLineDash([]);
+        }
         ctx.stroke();
+        ctx.setLineDash([]);
 
-        // Lightning bridge (shared helper from js/11-relay-canvas.js; guards its own flag)
-        if (window.drawRelayLightning) drawRelayLightning(ctx, from, to, ei, this.pulse);
+        // Lightning bridge (shared helper from js/11-relay-canvas.js)
+        if (typeof window.drawRelayLightning === 'function') {
+          window.drawRelayLightning(ctx, from, to, ei, this.pulse);
+        }
 
-        // Pulsing Particle
-        const t = (Math.sin(this.pulse + from.x * 0.01) + 1) / 2;
+        // Pulsing Particle along edge
+        const t = (Math.sin(this.pulse * 1.5 + from.x * 0.01) + 1) / 2;
         const px = from.x + (to.x - from.x) * t;
         const py = from.y + (to.y - from.y) * t;
         ctx.beginPath();
-        ctx.arc(px, py, 2.5, 0, Math.PI * 2);
-        ctx.fillStyle = edge.type === 'claim' ? '#10b981' : '#ec4899';
-        ctx.shadowColor = edge.type === 'claim' ? '#10b981' : '#ec4899';
-        ctx.shadowBlur = 6;
+        ctx.arc(px, py, edge.type === 'handoff' ? 3.5 : 2.5, 0, Math.PI * 2);
+        const pColor = edge.type === 'handoff' ? '#38bdf8' : (edge.type === 'claim' ? '#10b981' : '#ec4899');
+        ctx.fillStyle = pColor;
+        ctx.shadowColor = pColor;
+        ctx.shadowBlur = edge.type === 'handoff' ? 10 : 6;
         ctx.fill();
         ctx.shadowBlur = 0;
+
+        // Draw Handoff Directional Arrow
+        if (edge.type === 'handoff') {
+          const midX = (from.x + to.x) / 2;
+          const midY = (from.y + to.y) / 2;
+          const angle = Math.atan2(to.y - from.y, to.x - from.x);
+          ctx.save();
+          ctx.translate(midX, midY);
+          ctx.rotate(angle);
+          ctx.beginPath();
+          ctx.moveTo(-6, -4);
+          ctx.lineTo(5, 0);
+          ctx.lineTo(-6, 4);
+          ctx.fillStyle = edge.color;
+          ctx.fill();
+          ctx.restore();
+        }
       }
 
       // Draw Nodes

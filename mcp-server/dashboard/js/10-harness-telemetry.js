@@ -142,6 +142,11 @@ function renderHarnessTelemetry(data) {
       }).join('');
     }
   }
+
+  window.lastHarnessTelemetryData = data;
+  if (runs.length > 0 && !currentHarnessRunId) {
+    inspectHarnessRun(runs[0].runId);
+  }
 }
 
 function renderHarnessHandoffs(trace) {
@@ -219,6 +224,16 @@ async function inspectHarnessRun(runId) {
       }
     }
     renderHarnessHandoffs(data.trace);
+
+    // Update relay & harness visualizer with handoff events from this run
+    const handoffEvents = (data.trace || []).filter(t => t.type === 'handoff').map(t => t.data || t.payload || {});
+    if (typeof updateRelayVisualization === 'function') {
+      const activeScopes = window.lastHarnessTelemetryData?.activeScopes || [];
+      const reasoningScopes = window.lastHarnessTelemetryData?.reasoningScopes || [];
+      const wikiPages = window.lastHarnessTelemetryData?.wikiPages || [];
+      updateRelayVisualization(activeScopes, reasoningScopes, wikiPages, handoffEvents);
+    }
+
     if (harnessSessionMemoryView) {
       const mem = data.sessionMemory || [];
       if (mem.length === 0) {

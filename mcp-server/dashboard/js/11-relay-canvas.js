@@ -24,12 +24,18 @@ if (relayPhysicsToggle) {
 }
 
 if (relayLightningToggle) {
-  if (relayReduceMotion) relayLightningToggle.textContent = 'Lightning Bridge: OFF';
+  if (relayReduceMotion) {
+    relayLightningEnabled = false;
+    relayLightningToggle.textContent = 'Lightning Bridge: OFF';
+  }
+  window.relayLightningEnabled = relayLightningEnabled;
   relayLightningToggle.addEventListener('click', () => {
     relayLightningEnabled = !relayLightningEnabled;
+    window.relayLightningEnabled = relayLightningEnabled;
     relayLightningToggle.textContent = `Lightning Bridge: ${relayLightningEnabled ? 'ON' : 'OFF'}`;
   });
 }
+window.relayLightningEnabled = relayLightningEnabled;
 
 function initRelayCanvas(activeScopes = [], reasoningScopes = []) {
   if (!relayCanvas) return;
@@ -181,7 +187,8 @@ function initRelayCanvas(activeScopes = [], reasoningScopes = []) {
  * Coordinates are whatever the caller passes (canvas XY or mesh position XY).
  */
 function drawRelayLightning(ctx, from, to, edgeIndex, phase) {
-  if (typeof relayLightningEnabled === 'undefined' || !relayLightningEnabled) return;
+  const enabled = typeof window.relayLightningEnabled !== 'undefined' ? window.relayLightningEnabled : relayLightningEnabled;
+  if (!enabled) return;
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const len = Math.hypot(dx, dy);
@@ -395,9 +402,12 @@ if (relayCanvas) {
   });
 }
 
+// Expose drawRelayLightning globally for harness-viz.js and external callers
+window.drawRelayLightning = drawRelayLightning;
+
 let _harnessVizInstance = null;
 
-function updateRelayVisualization(activeScopes = [], reasoningScopes = [], wikiPages = []) {
+function updateRelayVisualization(activeScopes = [], reasoningScopes = [], wikiPages = [], handoffs = []) {
   if (window.HarnessVisualizer) {
     if (!_harnessVizInstance) {
       _harnessVizInstance = new window.HarnessVisualizer(
@@ -407,15 +417,18 @@ function updateRelayVisualization(activeScopes = [], reasoningScopes = [], wikiP
         'harness-node-detail'
       );
     }
-    _harnessVizInstance.updateData(activeScopes, reasoningScopes, wikiPages);
+    _harnessVizInstance.updateData(activeScopes, reasoningScopes, wikiPages, handoffs);
   } else {
     initRelayCanvas(activeScopes, reasoningScopes);
   }
 }
 
+window.updateRelayVisualization = updateRelayVisualization;
+window.getHarnessVizInstance = () => _harnessVizInstance;
+
 // Hook into existing renderHarnessTelemetry
 const _prevRenderHarnessTelemetry = renderHarnessTelemetry;
 renderHarnessTelemetry = function(data) {
   _prevRenderHarnessTelemetry(data);
-  updateRelayVisualization(data.activeScopes || [], data.reasoningScopes || [], data.wikiPages || []);
+  updateRelayVisualization(data.activeScopes || [], data.reasoningScopes || [], data.wikiPages || [], data.handoffs || []);
 };
