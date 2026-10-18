@@ -281,6 +281,34 @@ body {
 .card-header { padding: 16px 20px; border-bottom: 1px solid var(--glass-border); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .card-title { font-size: .875rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .6px; }
 
+/* ─── Collapsible Card (Progressive Disclosure) ─────────────── */
+details.card > summary.card-header {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+details.card > summary.card-header::-webkit-details-marker { display: none; }
+details.card > summary.card-header:hover {
+  background: var(--glass-hover);
+}
+details.card > summary.card-header .collapse-toggle-icon {
+  font-size: .85rem;
+  color: var(--text-muted);
+  transition: transform .2s ease;
+  display: inline-block;
+  margin-left: 8px;
+}
+details.card[open] > summary.card-header .collapse-toggle-icon {
+  transform: rotate(180deg);
+}
+details.card:not([open]) {
+  border-color: rgba(255,255,255,0.06);
+}
+details.card:not([open]) .card-header {
+  border-bottom: none;
+}
+
 /* ─── Stat Cards ─────────────────────────────────────────────── */
 .stats-grid {
   display: grid;
