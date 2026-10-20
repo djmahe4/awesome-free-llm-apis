@@ -17,7 +17,7 @@ async function main() {
     }
 
     const preferredProvider = availableProviders.find(p => p.id === 'gemini') || availableProviders[0];
-    const model = preferredProvider.id === 'gemini' 
+    const model = preferredProvider.id === 'gemini'
         ? (preferredProvider.models.find(m => m.id === 'gemini-3.1-flash-lite')?.id || preferredProvider.models[0].id)
         : preferredProvider.models[0].id;
 

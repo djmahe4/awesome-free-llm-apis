@@ -112,17 +112,17 @@ describe('StructuralMarkdownMiddleware Unit Tests', () => {
     it('should enforce security boundaries and reject path traversal', async () => {
         // The regex v1.0.4 should reject this BEFORE file access
         (mockContext.request as any).sessionId = '../../etc/passwd';
-        
+
         await middleware.execute(mockContext, async () => {});
-        
+
         expect(fs.pathExists).not.toHaveBeenCalled();
     });
 
     it('should reject invalid sessionId characters', async () => {
         (mockContext.request as any).sessionId = 'session!@#';
-        
+
         await middleware.execute(mockContext, async () => {});
-        
+
         expect(fs.pathExists).not.toHaveBeenCalled();
     });
 });

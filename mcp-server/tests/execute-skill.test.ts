@@ -157,7 +157,7 @@ describe('execute_skill', () => {
     // Mock existence of files:
     // SKILL.md references references/doc1.md and resources/playbook.md
     const skillContent = 'Instructions here. Open `references/doc1.md` and `resources/playbook.md`';
-    
+
     vi.spyOn(fs, 'pathExists').mockImplementation(async (p: any) => {
       if (typeof p === 'string' && p.endsWith('SKILL.md')) return true;
       if (typeof p === 'string' && p.endsWith('doc1.md')) return true; // doc1 exists
@@ -187,14 +187,14 @@ describe('execute_skill', () => {
     });
 
     expect(result.success).toBe(true);
-    
+
     // verify useFreeLLM system prompt contains:
     // 1. Missing references note warning
     // 2. SKILL.md core content
     // 3. Document 1 content
     const callArgs = (useFreeLLM as any).mock.calls[0][0];
     const systemPrompt = callArgs.messages[0].content;
-    
+
     expect(systemPrompt).toContain('NOT available in this environment: `resources/playbook.md`');
     expect(systemPrompt).toContain('Instructions here');
     expect(systemPrompt).toContain('## Skill Reference File: references/doc1.md');

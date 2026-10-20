@@ -1,6 +1,6 @@
 /**
  * NetworkStateTracker & ContextSanitizer
- * 
+ *
  * Provides background network request and cookie delta awareness while enforcing
  * strict context bloat defense (surgically truncating long strings, JWTs, and large JSON payloads).
  */

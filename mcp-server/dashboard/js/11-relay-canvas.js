@@ -65,7 +65,7 @@ function initRelayCanvas(activeScopes = [], reasoningScopes = []) {
   const rect = relayCanvas.parentElement.getBoundingClientRect();
   const width = rect.width || 700;
   const height = rect.height || 380;
-  
+
   relayCanvas.width = width * dpr;
   relayCanvas.height = height * dpr;
   ctx.scale(dpr, dpr);

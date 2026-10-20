@@ -227,7 +227,7 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
     let skillDir = path.join(configDir, 'skills', skill);
 
     let skillMdPath = path.join(skillDir, 'SKILL.md');
-    
+
     // 3. Fallback to download if SKILL.md is missing
     if (!await fs.pathExists(skillMdPath)) {
       console.error(`[execute-skill] Local skill "${skill}" not found. Attempting to download...`);
@@ -242,7 +242,7 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
           error: `Skill "${skill}" could not be resolved or downloaded: ${loadResult.error}`
         };
       }
-      
+
       // Re-evaluate paths after load
       skillDir = path.join(configDir, 'skills', skill);
       skillMdPath = path.join(skillDir, 'SKILL.md');
@@ -262,7 +262,7 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
 
     // 6. Build the structured system prompt context
     let systemMessage = '';
-    
+
     // Safety guard for missing referenced files to prevent LLM hallucinations
     if (missingRefs.length > 0) {
       systemMessage += `⚠️ NOTE: The following referenced resource files are NOT available in this environment: ${missingRefs.map(m => `\`${m}\``).join(', ')}. Do NOT try to read or refer to their contents, and do not make assumptions about what they contain.\n\n`;

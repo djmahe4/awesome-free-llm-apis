@@ -25,7 +25,7 @@ async function main() {
     const availableProviders = providers.filter(p => p.isAvailable());
 
     console.log(`\nAvailable providers found: ${availableProviders.map(p => p.id).join(', ')}`);
-    
+
     if (availableProviders.length === 0) {
         console.error('[-] Error: No active providers available. Please check API keys in mcp-server/.env.');
         process.exit(1);
@@ -33,7 +33,7 @@ async function main() {
 
     // Prefer gemini for vision/general, otherwise use first available
     const preferredProvider = availableProviders.find(p => p.id === 'gemini') || availableProviders[0];
-    const model = preferredProvider.id === 'gemini' 
+    const model = preferredProvider.id === 'gemini'
         ? (preferredProvider.models.find(m => m.id === 'gemini-3.1-flash-lite')?.id || preferredProvider.models[0].id)
         : preferredProvider.models[0].id;
 
@@ -43,7 +43,7 @@ async function main() {
     // 2. Initialize Monorepo Sandbox
     const sandbox = new MonorepoSandbox();
     console.log(`\nSetting up mock monorepo sandbox at: ${sandbox.workspaceRoot}`);
-    
+
     await sandbox.setup();
     console.log('[+] Sandbox initialized successfully.');
 
@@ -106,13 +106,13 @@ async function main() {
     console.log('========================================================================');
     console.log(' ' + 'Scenario Name'.padEnd(38) + ' | ' + 'Status'.padEnd(8) + ' | ' + 'Subtasks Split');
     console.log('------------------------------------------------------------------------');
-    
+
     let allPassed = true;
     for (const [testName, result] of Object.entries(results)) {
         const statusText = result.success ? 'PASSED' : 'FAILED';
         const splitText = result.decomposed ? 'YES (Decomposed)' : 'NO (Monolithic)';
         const statusIcon = result.success ? '✅' : '❌';
-        
+
         console.log(`${statusIcon} ${testName.padEnd(35)} | ${statusText.padEnd(8)} | ${splitText}`);
         if (!result.success) allPassed = false;
     }

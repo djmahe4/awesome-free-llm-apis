@@ -92,7 +92,6 @@ export class TextRouterMiddleware implements Middleware {
             'poolside/laguna-s-2.1:free',
             'mistral-medium-3-5',
             'Qwen/Qwen3.5-397B-A17B',
-            'deepseek-ai/deepseek-v4.1-flash',
             'z-ai/glm-5.3-flash',
             'z-ai/glm-5.3',
             'Qwen/Qwen3.5-35B-A3B',
@@ -149,7 +148,6 @@ export class TextRouterMiddleware implements Middleware {
             'mistral-medium-3-5',
             'ministral-14b-2512',
             'microsoft/phi-4',
-            'deepseek-ai/deepseek-v4.1-flash',
             'deepseek-ai/deepseek-coder-6.7b-instruct',
             'nvidia/llama-3.3-nemotron-super-49b-v1',
             'mistralai/mistral-nemotron',
@@ -177,7 +175,6 @@ export class TextRouterMiddleware implements Middleware {
             'mistral-small-latest',
             'z-ai/glm-4.5-air:free',
             'meta-llama/Llama-3.1-8B-Instruct',
-            'meta/llama-3.1-8b-instruct',
             'nvidia/nemotron-3-nano-30b-a3b',
             'nvidia/nemotron-mini-4b-instruct',
             'nvidia/nemotron-mini-4b-instruct:free',
@@ -331,7 +328,6 @@ export class TextRouterMiddleware implements Middleware {
             'gemma4:31b',
             'nvidia/nemotron-3-ultra-550b-a55b',
             'nvidia/nemotron-3-ultra-550b-a55b:free',
-            'deepseek-ai/deepseek-v4.1-flash',
             '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
             '@cf/openai/gpt-oss-120b',
         ],
@@ -353,7 +349,6 @@ export class TextRouterMiddleware implements Middleware {
             'DeepSeek-V4-Flash-0731',
             'Qwen/Qwen2.5-7B-Instruct',
             'meta-llama/Llama-3.1-8B-Instruct',
-            'meta/llama-3.1-8b-instruct',
             'nvidia/nemotron-3-super-120b-a12b',
             'nvidia/nemotron-3-super-120b-a12b:free',
             'nvidia/nemotron-3-nano-30b-a3b',
@@ -407,7 +402,6 @@ export class TextRouterMiddleware implements Middleware {
             'stepfun-ai/Step-3.5-Flash',
             'nvidia/nemotron-3-ultra-550b-a55b:free',
             'nvidia/nemotron-3-ultra-550b-a55b',
-            'deepseek-ai/deepseek-v4.1-flash',
             'deepseek-ai/deepseek-coder-6.7b-instruct',
             'z-ai/glm-5.3-flash',
             'z-ai/glm-5.3',
@@ -453,7 +447,7 @@ export class TextRouterMiddleware implements Middleware {
         if (messages.length < 1) return false;
         const lastMsg = getMessageContent(messages[messages.length - 1]);
         const lines = lastMsg.split('\n');
-        
+
         let stepCount = 0;
         for (const line of lines) {
             if (/^\s*(?:\d+\.|\*|-)\s+(?:[Ss]tep|[Pp]hase)/.test(line)) {
@@ -465,7 +459,7 @@ export class TextRouterMiddleware implements Middleware {
 
     private async decomposeAndExecute(context: PipelineContext): Promise<void> {
         const lastMsg = getMessageContent(context.request.messages[context.request.messages.length - 1]);
-        
+
         const planningMessages = [
             {
                 role: 'system' as const,
@@ -476,9 +470,9 @@ export class TextRouterMiddleware implements Middleware {
                 content: lastMsg
             }
         ];
-        
+
         const planResponse = await this.executor.prompt(planningMessages);
-        
+
         const planContent = planResponse.choices?.[0]?.message?.content || '[]';
         let subtasks: any[] = [];
         try {
@@ -496,7 +490,7 @@ export class TextRouterMiddleware implements Middleware {
         for (let i = 0; i < subtasks.length; i++) {
             const task = subtasks[i];
             const taskStr = typeof task === 'string' ? task : (task.task || task.description || JSON.stringify(task));
-            
+
             const subtaskMessages = [
                 ...context.request.messages.slice(0, -1),
                 {
@@ -623,7 +617,7 @@ export class TextRouterMiddleware implements Middleware {
             ? getMessageContent(context.request.messages[context.request.messages.length - 1])
             : '';
         const lowerPrompt = rawLastMsg.toLowerCase();
-        
+
         const confused = isUserConfused(rawLastMsg);
         if (confused) {
             console.debug('[TextRouter] Confused user state detected (no clear prompt or only file references).');

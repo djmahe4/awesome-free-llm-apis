@@ -44,7 +44,7 @@ export class ImageRouterMiddleware {
     it('should update a model capability score', async () => {
         const updater = new RouterUpdater(testFilePath);
         await updater.updateCapability('model-a', 0.95);
-        
+
         const content = await fs.readFile(testFilePath, 'utf-8');
         expect(content).toContain("'model-a': 0.95");
         expect(content).not.toContain("'model-a': 0.8");
@@ -53,7 +53,7 @@ export class ImageRouterMiddleware {
     it('should update a vision model capability score', async () => {
         const updater = new RouterUpdater(testFilePath);
         await updater.updateCapability('vision-a', 0.85, true);
-        
+
         const content = await fs.readFile(testFilePath, 'utf-8');
         expect(content).toContain("'vision-a': 0.85");
         expect(content).not.toContain("'vision-a': 0.7");
@@ -62,7 +62,7 @@ export class ImageRouterMiddleware {
     it('should add a model to a task route if not present', async () => {
         const updater = new RouterUpdater(testFilePath);
         await updater.addTaskModel(TaskType.Coding, 'model-c');
-        
+
         const content = await fs.readFile(testFilePath, 'utf-8');
         expect(content).toContain("'model-c'");
         // Simple check to see if it's in the Coding list
@@ -72,11 +72,11 @@ export class ImageRouterMiddleware {
     it('should remove a model from a task route', async () => {
         const updater = new RouterUpdater(testFilePath);
         await updater.removeTaskModel(TaskType.Coding, 'model-a');
-        
+
         const content = await fs.readFile(testFilePath, 'utf-8');
         // Check that model-a is still in capabilities but gone from Coding route
         expect(content).toContain("'model-a': 0.8");
-        
+
         // This regex checks if model-a is still in the Coding list
         const codingRegex = /\[TaskType\.Coding\]\s*:\s*\[[\s\S]*?\]/;
         const codingBlock = content.match(codingRegex)?.[0];

@@ -28,7 +28,7 @@ export class WorkspaceIndexer {
      */
     async indexWorkspace(workspaceRoot: string, force: boolean = false): Promise<IndexingResult> {
         const wsHash = await this.workspaceScanner.getWorkspaceHash(workspaceRoot);
-        
+
         if (force) {
             await vectorStore.deleteIndex(wsHash);
             // Also clear the hash cache in long-term memory for this workspace
@@ -77,7 +77,7 @@ export class WorkspaceIndexer {
             try {
                 const relativePath = path.relative(workspaceRoot, file);
                 const vectorKey = `file:${wsHash}:${relativePath}`;
-                
+
                 // Get file stats to compare cheaper mtime before reading full file contents
                 const stats = await fs.stat(file);
                 const cacheKeyMtime = `${vectorKey}:mtime`;
@@ -112,7 +112,7 @@ export class WorkspaceIndexer {
                 const ext = path.extname(file).toLowerCase();
                 const { WorkspaceDependencyScanner } = await import('./dependency-scanner.js');
                 const profile = WorkspaceDependencyScanner.generateSemanticProfile(content, ext);
-                
+
                 const profileStr = `File: ${relativePath}
 Role: ${profile.docstring || 'Undocumented module'}
 Provides: ${profile.exports.join(', ')}
@@ -124,10 +124,10 @@ ${sanitizedContent.slice(0, 2000)}`;
                 await vectorStore.upsert(wsHash, {
                     id: vectorKey,
                     content: profileStr,
-                    metadata: { 
+                    metadata: {
                         type: 'file',
                         path: relativePath,
-                        ws: wsHash 
+                        ws: wsHash
                     },
                     contentHash,
                     timestamp: Date.now()
@@ -165,21 +165,21 @@ ${sanitizedContent.slice(0, 2000)}`;
         try {
             const mcpDir = path.join(workspaceRoot, '.free-llm-mcp');
             await fs.mkdir(mcpDir, { recursive: true });
-            
+
             const graphPath = path.join(mcpDir, 'repo_graph.json');
             const wikiPath = path.join(mcpDir, 'wiki_links.md');
             const metaPath = path.join(mcpDir, 'wiki_cache_meta.json');
 
             let runScan = true;
             let currentCommitHash = '';
-            
+
             // 5a. Determine if we can bypass scanning
             if (!force) {
                 try {
                     const diffScan = await DiffScanner.scan(workspaceRoot);
                     if (diffScan && diffScan.hasGit) {
                         currentCommitHash = diffScan.lastCommitHash || '';
-                        
+
                         // Compare with cached commit hash
                         try {
                             const metaContent = await fs.readFile(metaPath, 'utf-8');
@@ -199,17 +199,17 @@ ${sanitizedContent.slice(0, 2000)}`;
                 const { RepositoryGraph, WorkspaceDependencyScanner } = await import('./dependency-scanner.js');
                 const scanner = new WorkspaceDependencyScanner(workspaceRoot);
                 const graph = new RepositoryGraph(workspaceRoot);
-                
+
                 await scanner.scanWorkspace(graph);
-                
+
                 // Serialize graph
                 const serialized = graph.serialize();
                 await fs.writeFile(graphPath, JSON.stringify(serialized, null, 2), 'utf-8');
-                
+
                 // Generate Wiki links markdown
                 const wikiMd = scanner.generateWikiLinksMarkdown(graph);
                 await fs.writeFile(wikiPath, wikiMd, 'utf-8');
-                
+
                 // Save cache meta
                 const meta = {
                     lastCommitHash: currentCommitHash,
@@ -226,4 +226,3 @@ ${sanitizedContent.slice(0, 2000)}`;
         return result;
     }
 }
-

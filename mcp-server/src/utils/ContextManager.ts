@@ -42,7 +42,7 @@ export class ContextManager {
             totalChars += getMessageContent(msg).length;
         }
 
-        // Optimization: If the string is massive (> 20k chars), 
+        // Optimization: If the string is massive (> 20k chars),
         // return an accurate fast upper bound estimate immediately (~3.8 chars/token)
         if (totalChars > 20000) {
             return Math.ceil(totalChars / 3.8);
@@ -145,7 +145,7 @@ export class ContextManager {
                 systemMsgs = [systemMsgs[0], systemMsgs[systemMsgs.length - 1]];
                 systemTokens = this.countTokens(systemMsgs);
             }
-            
+
             // If still over budget, truncate the content of the largest system message
             if (systemTokens > systemBudget) {
                 systemMsgs = systemMsgs.map(msg => {
@@ -168,7 +168,7 @@ export class ContextManager {
 
         // Keep at minimum the last 4 messages (2 exchanges) verbatim
         const KEEP_RECENT = Math.min(4, nonSystemMsgs.length);
-        
+
         // PIN THE FIRST MESSAGE: The first user prompt usually contains the core task instructions.
         // We must never summarize it away in long histories, otherwise the agent will suffer from "task drift".
         // We only do this if the history is long enough to justify keeping an extra verbatim slot.
@@ -208,16 +208,16 @@ export class ContextManager {
         try {
             if (historyTextTokens > MAX_SUMMARY_CONTEXT) {
                 console.error(`[ContextManager] History too large (${historyTextTokens} tokens), chunking...`);
-                
+
                 // Robust chunking: split by word if possible, but hard-split by total tokens if words are too long
                 const chunks: string[] = [];
                 let currentChunkText = '';
                 let currentChunkTokens = 0;
-                
+
                 const words = historyText.split(/\s+/);
                 for (const word of words) {
                     const wordTokens = this.countStringTokens(word + ' ');
-                    
+
                     if (wordTokens > MAX_SUMMARY_CONTEXT) {
                         // Edge case: a single word is larger than the entire context limit!
                         // Flush current chunk if any
@@ -226,11 +226,11 @@ export class ContextManager {
                             currentChunkText = '';
                             currentChunkTokens = 0;
                         }
-                        
+
                         // Slice the massive word
                         let wordRemaining = word;
                         while (wordRemaining.length > 0) {
-                            const sliceChars = MAX_SUMMARY_CONTEXT * 2; 
+                            const sliceChars = MAX_SUMMARY_CONTEXT * 2;
                             const slice = wordRemaining.slice(0, sliceChars);
                             chunks.push(slice);
                             wordRemaining = wordRemaining.slice(sliceChars);
@@ -243,11 +243,11 @@ export class ContextManager {
                         currentChunkText = '';
                         currentChunkTokens = 0;
                     }
-                    
+
                     currentChunkText += word + ' ';
                     currentChunkTokens += wordTokens;
                 }
-                
+
                 if (currentChunkText) chunks.push(currentChunkText.trim());
 
                 const MAX_CHUNKS = 5;
@@ -318,7 +318,7 @@ export class ContextManager {
 
         const processMessage = (msg: Message): Message => {
             let content = getMessageContent(msg);
-            
+
             // Emergency pre-truncation for massive unstructured text (> 15k chars)
             if (content.length > 15000) {
                 content = content.substring(0, 5000) + ' [...truncated...] ' + content.substring(content.length - 1000);

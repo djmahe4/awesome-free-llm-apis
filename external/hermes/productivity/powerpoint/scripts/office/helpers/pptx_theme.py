@@ -87,7 +87,7 @@ def _shares(files: Mapping[str, bytes]):
             continue
         rels_path, element, theme = found
         if theme not in files:
-            continue  
+            continue
         if theme in owner:
             yield master, rels_path, element, theme, owner[theme]
         else:

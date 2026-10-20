@@ -20,7 +20,7 @@ function spawnAsync(command: string, args: string[], timeoutMs = 10000): Promise
         const child = spawn(command, args, { shell: useShell });
         let stdout = '';
         let stderr = '';
-        
+
         const timeout = setTimeout(() => {
             child.kill();
             reject(new Error(`Command '${command}' timed out after ${timeoutMs}ms`));
@@ -85,7 +85,7 @@ export class ContextGatherer {
 
         // MD5 of workspace root to create unique key
         const wsHash = crypto.createHash('md5').update(workspaceRoot).digest('hex');
-        
+
         // 1. Scan Git Diff (Background/non-blocking or quick cache)
         const scanResult = await DiffScanner.scan(workspaceRoot);
         const branch = scanResult.hasGit ? scanResult.currentBranch : 'main';
@@ -159,7 +159,7 @@ export class ContextGatherer {
 
         const fileRefMatches = normalizedQuery.match(/\b[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+\b/g) || [];
         fileRefMatches.forEach(f => terms.add(f.toLowerCase()));
-        
+
         const rawTerms = normalizedQuery.match(/\w+/g) || [];
         const stopwords = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'have', 'are', 'was', 'were', 'which', 'about', 'into', 'lets', 'see', 'how', 'why', 'could', 'would', 'should']);
         for (const term of rawTerms) {
@@ -186,7 +186,7 @@ export class ContextGatherer {
         // 3d. Fallback heuristics
         if (terms.size === 0) {
             const baseBroadKeywords = ['architecture', 'review', 'implementation', 'system', 'senior', 'software', 'project', 'please', 'could', 'would', 'where', 'how', 'what', 'why'];
-            
+
             let dynamicBroadKeywords: string[] = [];
             try {
                 const entries = await fs.readdir(workspaceRoot, { withFileTypes: true });
@@ -257,7 +257,7 @@ export class ContextGatherer {
             const normalizedCandidates = candidates.map(c => c.replace(/\\/g, '/'));
             const isLogOrJsonSearch = candidates.some(f => /\.(log|json|md|txt)$/i.test(f)) || /\.(log|json|md|txt)\b/i.test(query);
             const matchLimit = isLogOrJsonSearch ? '50' : '10';
-            
+
             if (tool === 'rg') {
                 const args = ['-m', matchLimit, '-n', '-i', '-C', contextLines, '--no-heading', '-H'];
                 if (overrideIgnores) args.push('-u');
@@ -266,7 +266,7 @@ export class ContextGatherer {
                 }
                 args.push('-e', `(${combinedPattern})`);
                 args.push(...normalizedCandidates);
-                
+
                 const res = await spawnAsync('rg', args, 15000);
                 stdout = res.stdout;
             } else if (tool === 'grep') {
@@ -321,7 +321,7 @@ export class ContextGatherer {
 
             if (stdout) {
                 const rawMatches = stdout.split('\n').filter(Boolean);
-                
+
                 // 8. Group by File and Deduplicate
                 const grouped = new Map<string, Array<{ line: number; content: string }>>();
                 const { Sanitizer } = await import('../../utils/Sanitizer.js');
@@ -400,12 +400,12 @@ export class ContextGatherer {
                     if (path.basename(file).toLowerCase() === 'agents.md') continue;
                     const lines = grouped.get(file)!.sort((a, b) => a.line - b.line);
                     const ext = path.extname(file).toLowerCase();
-                    
+
                     if ((ext === '.log' || ext === '.json' || ext === '.md' || ext === '.txt') && lines.length > 8) {
                         const defaultThreshold = (ext === '.md' || ext === '.txt') ? '0.55' : '0.82';
                         const threshold = parseFloat(process.env.LOG_COMPACTION_THRESHOLD || defaultThreshold);
                         results.push(`[Context] --- FILE: ${file} ---`);
-                        
+
                         // 1. Add head (first 2-5 matches based on file size)
                         const headCount = lines.length > 25 ? 5 : (lines.length > 12 ? 3 : 2);
                         const tailCount = lines.length > 25 ? 5 : (lines.length > 12 ? 3 : 2);
@@ -423,7 +423,7 @@ export class ContextGatherer {
                             lines: Array<{ line: number; content: string }>;
                             combinedContent: string;
                         }
-                        
+
                         const blocks: Block[] = [];
                         let currentBlock: Array<{ line: number; content: string }> | null = null;
                         let lastLineNum = -1;
@@ -431,7 +431,7 @@ export class ContextGatherer {
                         const flushCurrentBlock = () => {
                             if (!currentBlock) return;
                             // Only group contiguous lines as a single block if we are in a JSON file and the block is not composed entirely of self-contained single-line objects
-                            const isAllSelfContainedJson = currentBlock.every(item => 
+                            const isAllSelfContainedJson = currentBlock.every(item =>
                                 item.content.includes('{') && item.content.includes('}')
                             );
                             const shouldGroup = false;
@@ -455,7 +455,7 @@ export class ContextGatherer {
                         for (const item of middleLines) {
                             const content = item.content;
                             const isGap = lastLineNum !== -1 && item.line > lastLineNum + 1;
-                            
+
                             if (isGap) {
                                 flushCurrentBlock();
                                 currentBlock = [item];
@@ -656,7 +656,7 @@ export async function enrichWithGraph(
  * - PHP (composer.json)
  */
 async function resolveManifestDependencies(
-    workspaceRoot: string, 
+    workspaceRoot: string,
     manifestDeps: Set<string>,
     vulnerableDeps?: Set<string>
 ): Promise<void> {
@@ -847,4 +847,3 @@ async function resolveAuditVulnerabilities(
         // offline, no lockfile, non-npm project, or malformed JSON - fall back silently to heuristics
     }
 }
-

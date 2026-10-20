@@ -22,18 +22,18 @@ class MockProvider extends BaseProvider {
         this.id = id;
         this.name = `Mock ${id}`;
         this.envVar = `${id.toUpperCase()}_API_KEY`;
-        this.models = models.map(m => ({ 
-            contextWindow: 128000, 
-            ...m 
+        this.models = models.map(m => ({
+            contextWindow: 128000,
+            ...m
         }));
         this.rateLimits = { rpm: 1000 };
         vi.stubEnv(this.envVar, 'mock-key');
     }
-    
-    override getUsageStats() { 
-        return { requestCountMinute: 0, requestCountDay: 0, tokenCountMinute: 0, tokenCountDay: 0 }; 
+
+    override getUsageStats() {
+        return { requestCountMinute: 0, requestCountDay: 0, tokenCountMinute: 0, tokenCountDay: 0 };
     }
-    
+
     override isAvailable(): boolean { return true; }
 }
 
@@ -62,7 +62,7 @@ describe('Intelligent Router - Task Intelligence Matrix', () => {
             { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash' }
         ]);
         registry.registerProvider(prov);
-        
+
         vi.spyOn(executor, 'calculateTokens').mockReturnValue(500);
     });
 

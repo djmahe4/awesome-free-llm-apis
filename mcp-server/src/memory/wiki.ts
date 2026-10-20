@@ -144,12 +144,23 @@ export class WikiMemory {
   private wikiDir: string;
 
   constructor(workspaceHash: string, customBaseDir?: string) {
-    const base = customBaseDir || path.join(os.homedir(), '.free-llm-mcp', 'wiki');
+    const homeBase = process.env.FREE_LLM_MCP_HOME || os.homedir();
+    const base = customBaseDir || path.join(homeBase, '.free-llm-mcp', 'wiki');
     this.wikiDir = path.join(base, workspaceHash);
   }
 
   private async ensureDir(): Promise<void> {
-    await fs.mkdir(this.wikiDir, { recursive: true });
+    try {
+      await fs.mkdir(this.wikiDir, { recursive: true });
+    } catch (err: any) {
+      if (err.code === 'EPERM' || err.code === 'EACCES') {
+        const fallbackBase = path.join(process.cwd(), '.free-llm-mcp', 'wiki');
+        this.wikiDir = path.join(fallbackBase, path.basename(this.wikiDir));
+        await fs.mkdir(this.wikiDir, { recursive: true });
+      } else {
+        throw err;
+      }
+    }
   }
 
   // Keyed by title alone (not the full per-tags path) so every writer targeting the
@@ -564,11 +575,11 @@ export class WikiMemory {
 
     const adrContent = `# ${adrId}: ${title}
 
-**Status**: Accepted  
-**Date**: ${new Date().toISOString().split('T')[0]}  
-**Context**: ${title} implementation details.  
-**Decision**: ${title} was chosen/implemented.  
-**Consequences**: Documented in [[${title}]].  
+**Status**: Accepted
+**Date**: ${new Date().toISOString().split('T')[0]}
+**Context**: ${title} implementation details.
+**Decision**: ${title} was chosen/implemented.
+**Consequences**: Documented in [[${title}]].
 
 ## Content
 ${content}
@@ -602,8 +613,8 @@ ${content}
 
     const adrContent = `# ${adrId}: ${decision}
 
-**Status**: Accepted  
-**Date**: ${new Date().toISOString().split('T')[0]}  
+**Status**: Accepted
+**Date**: ${new Date().toISOString().split('T')[0]}
 
 ## Context
 ${context}

@@ -20,9 +20,9 @@ describe('load_skill_prompt', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    
+
     vi.spyOn(os, 'homedir').mockReturnValue('/home/user');
-    
+
     // Default mock for fetchJson (index)
     mockedFetch.mockImplementation(async (url: string) => {
       if (url.includes('skills.json')) {

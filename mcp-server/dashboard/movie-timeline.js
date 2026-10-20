@@ -145,8 +145,8 @@
         const fxBadge = fxCount > 0 ? `<span class="badge badge-purple" style="font-size:10px;padding:1px 4px;">${fxCount} FX</span>` : '';
 
         return `
-          <div class="timeline-block ${statusClass}" 
-               data-id="${esc(art.artifactId)}" 
+          <div class="timeline-block ${statusClass}"
+               data-id="${esc(art.artifactId)}"
                data-lane="${lane.id}"
                data-start="${art.start_ms}"
                data-end="${art.end_ms}"
@@ -226,8 +226,8 @@
         videoEl.style.display = 'block';
         if (videoEl.dataset.path !== activeVideoArt.artifact_path) {
           videoEl.dataset.path = activeVideoArt.artifact_path;
-          videoEl.src = activeVideoArt.artifact_path.startsWith('http') 
-            ? activeVideoArt.artifact_path 
+          videoEl.src = activeVideoArt.artifact_path.startsWith('http')
+            ? activeVideoArt.artifact_path
             : `/api/media/preview?file=${encodeURIComponent(activeVideoArt.artifact_path)}`;
         }
         const offsetSec = (timeMs - activeVideoArt.start_ms) / 1000;

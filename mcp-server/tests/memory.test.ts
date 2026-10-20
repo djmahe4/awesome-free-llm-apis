@@ -122,7 +122,7 @@ describe('Memory System Integration', () => {
 
         const wsHash = await workspaceScanner.getWorkspaceHash(root);
         await memoryManager.clear(wsHash);
-        
+
         const key = 'sync_test';
         const content = 'This must be found immediately!';
 
@@ -168,7 +168,7 @@ describe('Memory System Integration', () => {
         const { promises: fs } = await import('fs');
         const path = await import('path');
         const scriptPath = path.join(root, '.free-llm-mcp', 'skills', 'test-skill', 'scripts', 'run.sh');
-        
+
         const exists = existsSync(scriptPath);
         expect(exists).toBe(true);
         if (exists) {
@@ -190,13 +190,13 @@ describe('Memory System Integration', () => {
         // Store some memories (include 'Decision:' or slashes to pass the high-signal filter in MemoryManager)
         await memoryManager.storeToolOutput('auto_memory', { _ws: wsHash, id: '1' }, "Decision: We deployed the frontend to Vercel using Next.js");
         await memoryManager.storeToolOutput('auto_memory', { _ws: wsHash, id: '2' }, "The backend uses PostgreSQL for relational data storage (db/postgres)");
-        
+
         // Wait a bit just in case, though it's awaited
         await new Promise(r => setTimeout(r, 100));
 
         // Semantic search (query shouldn't match any exact words to test semantics)
         const semanticRes = await memoryManager.search(wsHash, "react hosting platform");
-        
+
         // It should match the Vercel string
         expect(semanticRes).toBeDefined();
         const found = semanticRes.find((r: any) => JSON.stringify(r).includes('Vercel'));

@@ -1,5 +1,68 @@
 # Changelog
 
+## v1.1.1 – Multi-Lane Movie Generation Pipeline, Multi-Agent Harness, DAG Subtask Blackboard, Cyber URL Autoloading, Hybrid PQC Wiki & Modular Dashboard (October 2026)
+
+### 🚀 Highlights
+
+- **`movie_tool` & Multi-Lane Media Generation Pipeline** (`src/tools/movie-tool.ts`, `src/tools/movie/`):
+  - Multi-track timeline orchestration engine (`video`, `audio`, `voice`, `effects`, `subtitles`) with JSON timeline manifests, frame-accurate positioning, and non-destructive asset layer composition.
+  - Dedicated media routers across free provider tiers for image/video generation (Wan 2.1, LTX-Video, Pollinations, Hugging Face Hub), music synthesis, audio effects, and neural text-to-speech (Kokoro ONNX weights auto-fetched in postbuild).
+  - Built-in audio DSP remix plugin suite (`tempo`, `pitch`, `reverb`, `eq`, `volume`, `compressor`, `fade`) with chained atempo filters and full undo/redo state tracking (`_path_history`, `effectId`).
+  - Interactive Movie Studio UI with dynamic timeline stretching, audio oscilloscope visualization, timeline ruler scrubbing, and REST endpoint aliases (`/api/movie/*`).
+
+- **`agent_harness` Multi-Agent Orchestration & Governance Engine** (`src/tools/agent-harness.ts`, `src/harness/`):
+  - Production-grade multi-agent execution framework with external declaration auto-discovery (`harness.yaml`), role assignment, and multi-lane execution cycles.
+  - Fine-grained role governance with `AGENTS.md` per-role skill allowlists, step engines with validated artifact handoffs, and strict default-deny policies locking `bridges.json` and harness configurations against unauthorized modification.
+  - Eisenhower review loop with automated priority ranking, quantum-compressed trace summaries, and cognitive Ebbinghaus memory recall with write-back reinforcement.
+  - Multi-stage research depth ladder (escalating from paper abstracts to deep HTML/PDF analysis) and multi-branch quantum reasoning trial-and-error exploration.
+
+- **`coding_agents` Subtask Blackboard & Multi-Tier Patching** (`src/tools/coding-agents.ts`, `src/tools/coding/`):
+  - Intelligent LLM-driven subtask decomposition with shared `tasks.md` blackboard state, task dependency analysis, and interactive SVG DAG memory graph visualization.
+  - Multi-strategy code patcher: fuzzy `SEARCH/REPLACE` block application, sliding-window chunk patching with content-fidelity hallucination guards, and structural `ast-grep` rewrites.
+  - Multi-language AST diagnostics verification (TypeScript/JavaScript, Python, Go, Rust), CAS per-file revision history tracking, rollback action (`undo_file`), and cross-process provider locking.
+
+- **`cyber_tool` Intelligent Loading, Package Resolution & Bridge Isolation** (`src/tools/cyber-tool.ts`, `src/utils/CyberToolsRegistry.ts`, `src/utils/GithubRepoScanner.ts`):
+  - Intelligent cyber tool URL auto-detection distinguishing GitHub repositories, Docker Hub images, apt package registries, and generic web tools.
+  - New `resolve_tool` action providing repo understanding, package registry discovery, installation instructions, and automated tool registration.
+  - Sandboxed execution bridge (`cyber_tool run_action`) with authorized framing gates and fail-closed bridge root containment.
+  - Built-in global cyber security binary database (`nmap`, `sqlmap`, `hydra`, `gobuster`, `ffuf`, `nikto`) with automatic flag and troubleshooting documentation seeding for `wiki_lookup`.
+  - DAG-reverse coach mode for iterative pentesting and CTF hypothesis traversal.
+
+- **Hybrid Post-Quantum Cryptography (PQC) & Wiki Security** (`src/server.ts`, `src/memory/wiki.ts`):
+  - Gated dashboard wiki APIs behind hybrid Post-Quantum Cryptography (PQC) lease tokens with strict origin validation, token expiry, and anti-replay guards.
+  - Modular wiki workspace architecture supporting typed bidirectional links, journal logs, and isolated storage namespaces.
+
+- **Modularized Dashboard Architecture & Progressive Disclosure** (`dashboard/`):
+  - Re-architected monolithic `index.html` and `app.js` into structured partials (`dashboard/partials/*.html`) and modular JS components (`dashboard/js/*.js`), compiled deterministically via `scripts/assemble-index.ts`.
+  - Unified canvas physics, interactive 2.5D visualizer, lightning state bus, domain mode switcher, and collapsible progressive disclosure cards across all dashboard tabs.
+  - Fixed tool response log truncation and standardized real-time MCP tool call rendering.
+
+- **Provider Catalog Expansion & Resilient Model Routing**:
+  - Added new free providers: AionLabs and Pollinations (with community models); refreshed active model catalogs and limits for Cloudflare, Groq, OpenRouter, ModelScope, Kilocode, Hugging Face, Cohere, Gemini, and NVIDIA NIM.
+  - Automated `taskRouteMap` synchronization with dynamic vision route derivation and isolated roleplay model filters.
+  - Resilient `SubtaskDecomposer` multi-path project state persistence supporting directory fallbacks across restricted Windows filesystem environments.
+
+- **Precommit Verifier & Test Suite Hardening**:
+  - Enforced comprehensive `npm run verify:precommit` quality gate: TypeScript build checks, byte-for-byte partial assembly validation, parameter schema matching, documentation model count parity, and zero npm audit vulnerabilities.
+  - Stabilized and isolated tests across `agentic-lazy-context-resolution`, `avst-tools-permutations`, `cyber-tool-dag`, `cyber-wiki`, and `encryption`.
+
+### Next updates (→ v1.1.2)
+
+- **Comprehensive End-to-End Smoke Test Suite**:
+  - Automated live API smoke test harness covering Ollama (local daemon at `http://localhost:11434` and Ollama Cloud), NVIDIA NIM, Groq, ModelScope, OpenRouter, and Pollinations.
+  - Dedicated JSONL streaming decoder smoke tests for local Ollama and streaming-capable providers within `coding_agents` and `use_free_llm`.
+  - Headless smoke test runner integrated into CI workflows with automatic mock fallbacks when live credentials are not present.
+- **Streaming Pipeline Middleware & Latency Optimization**:
+  - Native AsyncIterable / Server-Sent Events (SSE) streaming pipeline through `TextRouterMiddleware` and `AgenticMiddleware` to minimize time-to-first-token latency.
+  - Dynamic per-provider rate-limit and circuit breaker backoff utilizing HTTP 429 `Retry-After` headers and rolling latency telemetry.
+- **Multi-Modal Cross-Lane Pipeline Piping**:
+  - Direct asset piping between `SearchRouterMiddleware`, `browser_tool`, and `movie_tool` for automated contextual asset harvesting and script synthesis.
+  - Subtree-targeted DOM scraping with visual bounding box correlation for `browser_tool`.
+- **Sandbox Security & Process Isolation**:
+  - Lightweight sandboxed process runner for external tool bridges and code evaluation to prevent profile permission collisions (`EPERM`) across Windows and Unix environments.
+
+---
+
 ## v1.1.0 – Autonomous Coding Agents (OMP Pattern), Intelligent Session Naming, Local LLM Patching, OSINT Cyber Recon, VectorStore TF-IDF RAG & Dashboard Tool Docs (August 2026)
 
 ### 🚀 Highlights
@@ -47,12 +110,7 @@
 - **Upstream Catalog Sync & Deprecation Harmonization**:
   - Deprecated Cerebras and updated live model metadata across NVIDIA NIM, Groq, Kilo Code, and OpenRouter.
 
-### Next updates (→ v1.1.1)
-
-- **Firebase Auth hardening** (TDD security audit gate to evaluate credential token security).
-- **Researcher Persona** (deep semantic exploration of academic papers and arXiv content with interactive site skip controls).
-- **Browser Snapshot Subtree Targeter** (`extract`/`deep_scrape` mapping diffed nodes back to CSS selectors).
-- **Movie_tool** (new) — a multi-model pipeline with agentic capabilites ['music','lyrics','audio','video'] to generate movies from scratch. Need separate routers and integration pipelines with human creativity inputs.
+---
 
 ## v1.0.9 – Search Router, Cyber Tool Graph, Hermes Skills, Quantum Reasoning, Local LLM Patch & Browser Snapshot Diff (July 2026)
 
@@ -67,18 +125,6 @@
 - **Firebase identity-churn fix**: `exchangeRefreshToken()` had no retry logic and silently minted a brand-new anonymous account on any transient network failure during token refresh. It now retries with backoff (matching the pattern already used by `getUserStats()`/`getLeaderboard()`), logs the real HTTP rejection reason, and warns explicitly when falling through to a new account despite having saved credentials.
 - **`docs/` reference refactor**: `references/usages.md` split into one `.md` file per tool (`references/use_free_llm.md`, `references/browser_tool.md`, `references/cyber_tool.md`, `references/quantum_tool.md`, `references/local_llm_patch.md`, etc.), linked individually from `SKILL.md` so the skill doc stays focused on agentic workflow guidance rather than a growing test matrix.
 - `empero-ai/Qwythos-9B-Claude-Mythos-5-1M` confirmed present in the HuggingFace provider list and reachable via `TextRouterMiddleware` routing (verify-only, no code change needed).
-
-### Next updates (→ v1.1.0)
-
-- **Firebase Auth hardening** (password-based login for the dashboard/MCP server, moving cached tokens from in-memory to a credential file): scoped in the original v1.0.9 plan but pushed out — the identity-churn bug above was fixed as a smaller, isolated correction instead of bundling it with the larger auth-hardening rework. Could be avoided if username based IDOR vulnerability is potentially exploitable, so the fix is deferred to v1.1.0. [Note: This mechanism should be reterospected to analyse the feasibility by a test driven approach to look out for vulnerabilities, implement only if found necessary.]
-- `local_llm_patch` MCP/server wiring (`src/mcp/index.ts` tool registration, `POST /api/local_llm_patch`, dashboard Tool Playground entry) — the tool itself is implemented and tested but intentionally left unwired pending explicit sign-off on exposing a local-only, unauthenticated code-patching surface.
-- Full `coding_agents`: multi-file patches, LSP-grounded dataflow analysis, diff-preview in dashboard, and `local_llm_patch` MCP/server wiring. (ref. omp impplementation via context7 mcp for development and testing)
-- `repo_graph.json` → `VectorStore` semantic RAG for coding agents, and LSP-grounded variable-level dataflow analysis — both explicitly out of scope for the single-file `local_llm_patch` granularity; real, separately-scoped work for v1.1.0's full `coding_agents`.
-- `extract`/`deep_scrape` subtree-targeting via the new snapshot diff (mapping a diffed node back to a DOM selector) — the diff shape needs to prove out on `click`/`wait` first.
-- New 'researcher' persona some refs in the middleware already, should leverage the free search and the broser_tool diff mechanism to understand the changes in the DOM and also to be able to understand the site contents including research papers. (In depth semantic understanding and response and user can skip certain sites or ask for more information based on the research paper contents.)
-- `osint` tool (new) — a multi-step OSINT workflow that uses `search_tool`, `cyber_tool`, and `browser_tool` to gather information about a target domain, IP, or individual. The tool will be able to perform WHOIS lookups, DNS enumeration, subdomain discovery, and other OSINT techniques. To be integrated in the `cyber_tool` itself.
-- Full in-depth use case testing of all tools including agentic middleware and its activations.
-- Reterospect the user faclitation for the inclusion of audio/text/video generation tools using the free llm providers OR Improve the dashboard UI to improve the tool calling, rather than clicking on buttons, the user should be given an i button to know how to run the tools all alone.
 
 ---
 
@@ -110,70 +156,3 @@
 
 - **Unit & Integration Testing Hardening**:
   - Achieved 100% green test status across 16/16 unit test suites (`npx vitest run`).
-
-### Next Updates (v1.0.9, shipped — see the v1.0.9 section above for what actually landed)
-
-- Add `empero-ai/Qwythos-9B-Claude-Mythos-5-1M` to HuggingFace provider list and `TextRouterMiddleware` routing. (Done)
-- Migrate the search_tool call from gemini to route these in a `SearchRouterMiddleware` to free search providers like SearXNG, Jina, Tavily, Brave Search, Exa, Perplexity, and Parallel. The routing should be based on the availability of the free tier and the rate limits of each provider:
-
-  | Provider     | Free Tier               | Notes |
-  |--------------|-------------------------|-------|
-  | **SearXNG**  | ✅ Free                 | Open-source meta-search engine. You self-host it, so there is no per-query cost. The most "free" option here. |
-  | **Jina**     | 🟡 Limited free         | Offers a free tier/rate limit for its Reader/Search endpoints; paid beyond that. |
-  | **Tavily**   | 🟡 Free tier            | Provides a free plan with limited monthly credits, then usage-based pricing. |
-  | **Brave Search** | 🟡 Free tier        | Free API plan with rate limits; paid plans available for higher usage. |
-  | **Exa**      | 🟡 Free tier            | Offers a free developer tier, then usage-based pricing. |
-  | **Perplexity** | 🟡 Free / Experimental | Sonar API may have experimental/free access, but it is generally a paid API requiring an API key and credits. |
-  | **Parallel** | 🟡 Depends              | According to the `omp.sh` documentation, Parallel is listed, but each source is configured individually; there is no clear general free tier. |
-- `cyber_tool` should be properly logged/task graph should be rendered with search and visualization.
-- Firebase persistance for both mcp and dashboard should be established rather than key rotation.(If needed we can use password based login for firebase and also we can use the firebase auth to login to the dashboard and also to the mcp server.) **→ Deferred to a future release** (see v1.0.9 section above); a smaller, isolated identity-churn bug was fixed instead.
-- ~~`coding_agents` tool~~ **→ Deferred to v1.0.9**: Scope split into:
-  - v1.0.8: `browser_tool` + `cyber_tool` file-locked userprofile registry foundation
-  - v1.0.9: `local_llm_patch` stub (Ollama-driven single-file patching) (Done, unwired — see v1.0.9 section above)
-  - v1.1.0: Full `coding_agents` with LSP grounding + diff preview
-- [Hermes Skills Integration](docs/plans/hermes-agent-skills.md) – fetch, index, and execute remote skills from the `hermes-agent` repo. (Done)
-- `quantum_tool` - new tool for quantum cirtuit based reasoning for reseatch purposes. (Done)
-- 'docs/' refactor: 'references/' should maintain different .md files for each tool, remove the usages.md and architecture.md and move the relevant content to the tool-specific .md files, so that the SKILL.md remains lightweight and focused on the agentic workflow, and the tool-specific .md files can be used as a reference for the tools and their usage. (Done — `usages.md` split; `architecture.md` kept as-is, since it documents cross-cutting pipeline mechanics rather than a single tool.)
-- **Browser snapshot diff understanding mechanism**: `wait until:'dom-stable'` and the click/pagination-loop guards currently only know two things about a DOM state transition — did the sha256 fingerprint change, yes/no (`DomStateFingerprinter.hasStateChanged`). That's enough to detect a no-op click but not enough to explain *what* changed, so the LLM re-derives it from a full new snapshot every time. (Done — see v1.0.9 section above.)
-- **GitHub Models provider fully deprecated**: Removed `GitHubModelsProvider` from `ProviderRegistry` (persistent instability / recurring "scheduled retirement brownout" outages made it unreliable for routing). Provider class kept in `src/providers/github-models.ts` for reference only, marked `@deprecated`. Also dropped its `data.json`/README entries, dashboard row, skill-doc mentions, `TextRouterMiddleware` low-cost-provider entry, `update-models.ts` scraper wiring, and dedicated smoke-test script.
-
-### Next Updates (→ v1.1.0)
-
-- Full `coding_agents`: multi-file patches, LSP-grounded dataflow analysis, diff-preview UI, and `local_llm_patch` MCP/server wiring.
-- `repo_graph.json` → `VectorStore` semantic RAG for coding agents (embedding generation, cache invalidation on graph changes, new retrieval API).
-- Firebase Auth hardening: `signInWithPassword()`, credential file persistence under `~/.free-llm-mcp/`, dashboard login form.
-- `extract`/`deep_scrape` subtree-targeting via `SnapshotDiffer` (map a diffed node back to a DOM selector).
-
----
-
-## v1.0.7 – Wiki, Log Compaction, Process Locking, Dynamic Tokens, PDF Indexing + Testing Hardening (July 2026)
-
-### 🚀 Highlights
-
-- **Semantic Log & JSON Compaction**: Implemented a Jaccard-similarity-based compactor in context gathering middleware for large `.log` and `.json` files. Anchors the first 5 lines (head) and last 5 lines (tail), grouping intermediate lines/JSON blocks and collapsing identical or highly-similar entries using a Jaccard threshold (configured via `LOG_COMPACTION_THRESHOLD`).
-- **Code Block Preservation**: Enhanced Jaccard calculations to explicitly bypass and preserve code elements like `jsCode` and `pythonCode` fields inside nested workflow JSON files.
-- **Strict Vision Task Debugger Bypass**: Resolved issues where prompts with error keywords routed to vision models triggered debugger diagnostics, strictly restricting the injection of local PowerShell/Bash diagnostics to non-vision tasks.
-- **Dynamic Search Limit Adjustments**: Bumped the search match limit to `50` for `.log`/`.json` files (from a default of `10`) to guarantee compaction logic is triggered.
-- **Search Robustness**: Appended `-H` to `rg` and `--with-filename` to `grep` calls inside the search executor to ensure stable filename path-splitting on both Windows and POSIX environments.
-- **Process-Safe Exclusive File Locking**: Implemented atomic concurrency control in `src/utils/file-lock.ts` holding exclusive `wx` lock files with OS-level PID existence checks and 30-second stale age reaping to prevent database corruption during parallel indexing.
-- **Incremental PDF-Wiki RAG & Vision Indexing Pipeline**: Added a pipeline that renders pages, filters out small logos or thin divider lines (<40pt), upscales diagrams to 300 DPI, and injects rolling context into vision calls.
-- **Proportional Per-Page Budget Truncation**: Replaced heuristic markdown-based semantic compression with a deterministic proportional budget divider (`batchRawMaxChars / numPages`) to balance prompt space fairly across pages.
-- **Dynamic Output Token Budgeting**: Implemented model output `max_tokens` scaling based on first-pass creation/update states, batch page multipliers, and existing summary retention floors. Bounded vision calls dynamically between 100 and 500 tokens based on region size and context.
-- **Confused User Query Interception**: Automatically detects empty/boilerplate prompts or file-only attachments to:
-  - Reverse model fallback order (testing cheaper/faster models first like `gemini-3.1-flash-lite` to save budget).
-  - Append guiding system instructions.
-  - Set `skipIndexing = true` to bypass wiki maintenance and indexing runs.
-- **Project-Scoped Wiki & RAG Integration**: Developed a persistent repository-scoped wiki system (`src/memory/wiki.ts`) integrated with vector semantic storage (`src/memory/vector.ts`) to maintain structured knowledge and documentation.
-- **GitHub Repository Scanner & Analyzer**: Implemented `src/utils/GithubRepoScanner.ts` to fetch remote repository nodes, parse dependencies/imports, trace function flow, and dynamically index discovered tools.
-- **Global Wiki Namespace for Cyber Tools**: Standardized the `global-cyber-tools` shared wiki namespace across workspaces, gating tool validation via known cyber binaries (`sqlmap`, `nmap`, `wireshark`, etc.).
-- **Automatic Wiki Maintenance & Graph-Diff Linkage**: Built an event-driven maintainer (`src/memory/wiki-maintainer.ts`) that listens to repository file diff changes and parses import dependencies to automatically mark wiki pages stale when referencing code symbols are deleted.
-- **Robust Integration Test Suite**: Created `tests/log-compaction.test.ts` (unstructured logs/metrics JSON), `tests/file-lock.test.ts` (concurrency/stale PID/timeout rules), `tests/wiki-memory.test.ts` (confidence promotion/eviction limits), and updated `tests/pdf-vision-helper.test.ts`, `tests/pdf-wiki.test.ts`, and `tests/task-routing-matrix.test.ts`.
-
-### Next Updates
-
-- `browser_action` tool to be integrated with `use_free_llm` for browser automation tasks, leveraging `chrome-devtools-mcp` for headless browser control. Github scraping should be used to extract relevant information from repositories, and the tool should be able to handle dynamic content loading and pagination.
-- Migrate the firebase debugging to the 'chat-logs.json' instead of separate files.
-- Assess migration to stream mode for supported providers to reduce latency and token wastage on long responses.
-- `coding_agents` tool(not a one shot) which uses ollama driven local coding agents which has middleware acess to the workspace and can be used to generate code snippets, refactor code, and also to be able to understand the codebase and apply patches and preview diffs based on quantum based reasoning loops with lsp server integration for code understanding.
-- Present cyber library indexing should be retained but is misleading, it should be dynamic for all library and the wiki should be updated based on success and feedback from the tool runs.
-- `cyber_agents`tool a separate cyber routing middleware, which is isolated from the main routing middleware and can be used to handle cyber security related tasks. Dynamic tool dictionary(key: tool name, value: github_url) rather than a list of commonly used tools.

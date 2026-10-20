@@ -80,7 +80,7 @@ async function validateSandboxDependencies() {
   let pythonPath: string | null = null;
   const projectRoot = path.resolve(__dirname, '..');
   const isWin = process.platform === 'win32';
-  
+
   const venvPaths = [
     path.join(projectRoot, '.venv', isWin ? 'Scripts/python.exe' : 'bin/python3'),
     path.join(projectRoot, 'venv', isWin ? 'Scripts/python.exe' : 'bin/python3'),
@@ -89,15 +89,15 @@ async function validateSandboxDependencies() {
     path.join(projectRoot, '.venv', isWin ? 'python.exe' : 'bin/python3'),
     path.join(projectRoot, 'venv', isWin ? 'python.exe' : 'bin/python3'),
   ];
-  
+
   for (const vp of venvPaths) {
     if (fs.existsSync(vp)) {
       pythonPath = vp;
       break;
     }
   }
-  
-  const pythonCommands = isWin 
+
+  const pythonCommands = isWin
     ? ['python', 'python3', 'py']
     : ['python3', 'python'];
 
@@ -123,7 +123,7 @@ async function initTelemetry(force = false) {
       state.lastSyncFailedTime = undefined;
       await persistence.save(state);
     }
-    
+
     // Ensure userId is established (authenticate anonymously) and aligned with the active Firebase session
     const uid = await initFirebase();
     if (state.userId !== uid) {
@@ -131,7 +131,7 @@ async function initTelemetry(force = false) {
       state.username = state.username || `anonymous-${uid.substring(0, 6)}`;
       await persistence.save(state);
     }
-    
+
     // Check if session has expired or is not set
     const now = Date.now();
     if (!state.sessionToken || !state.sessionExpiresAt || now >= state.sessionExpiresAt) {
@@ -139,7 +139,7 @@ async function initTelemetry(force = false) {
       state.sessionExpiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
       await persistence.save(state);
     }
-    
+
     // Sync if more than 24 hours have passed since lastSyncTime, and at least 1 hour since last failure
     const hoursSinceSync = (now - (state.lastSyncTime || 0)) / (1000 * 60 * 60);
     const msSinceFailure = now - (state.lastSyncFailedTime || 0);
@@ -279,14 +279,14 @@ export function createExpressApp(): express.Express {
       app.post('/api/user-config', async (req, res) => {
         try {
           const { username, optOutTelemetry } = req.body;
-          
+
           if (username !== undefined) {
             if (typeof username !== 'string' || username.length < 3 || username.length > 20 || !/^[a-zA-Z0-9_-]+$/.test(username)) {
               res.status(400).json({ error: 'Username must be 3-20 alphanumeric characters, underscores or hyphens' });
               return;
             }
           }
-          
+
           const state = await persistence.load();
           if (username !== undefined) {
             state.username = username;
@@ -294,14 +294,14 @@ export function createExpressApp(): express.Express {
           if (optOutTelemetry !== undefined) {
             state.optOutTelemetry = !!optOutTelemetry;
           }
-          
+
           await persistence.save(state);
-          
+
           // Sync immediately to Firestore if telemetry is not opted out
           if (state.userId && !state.optOutTelemetry) {
             await syncStats(state.userId, state);
           }
-          
+
           res.json({ success: true, username: state.username, optOutTelemetry: state.optOutTelemetry });
         } catch (err) {
           res.status(500).json({ error: String(err) });
@@ -312,7 +312,7 @@ export function createExpressApp(): express.Express {
         try {
           const state = await persistence.load();
           const list = await getLeaderboard(state.userId);
-          
+
           // Local fallback: ensure the current user is always visible
           if (!list.some((u: any) => u.isCurrentUser)) {
             list.push({
@@ -324,7 +324,7 @@ export function createExpressApp(): express.Express {
             });
             list.sort((a: any, b: any) => b.lifetimeTokens - a.lifetimeTokens);
           }
-          
+
           res.json(list);
         } catch (err) {
           res.status(500).json({ error: String(err) });
@@ -475,6 +475,44 @@ export function createExpressApp(): express.Express {
               const toolTimer = setTimeout(() => toolAbort.abort(), TOOL_TIMEOUT_MS);
               const onClose = () => toolAbort.abort();
               req.on('close', onClose);
+
+              if (params.stream) {
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+                if (typeof (res as any).flushHeaders === 'function') {
+                  (res as any).flushHeaders();
+                }
+                try {
+                  const r = await useFreeLLM({
+                    messages,
+                    model: params.model,
+                    keywords: params.keywords,
+                    agentic: !!params.agentic,
+                    workspace_root: params.workspace_root,
+                    sessionId: sid || '__no_ws__',
+                    skipIndexing: !!params.skipIndexing,
+                    action: params.action,
+                    resume_input: params.resume_input,
+                    signal: toolAbort.signal,
+                    stream: true,
+                    onChunk: (chunk: string) => {
+                      res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+                    }
+                  });
+                  res.write(`data: ${JSON.stringify({ done: true, model: r?.model, provider: r?._providerId, latencyMs: Date.now() - start })}\n\n`);
+                  res.write('data: [DONE]\n\n');
+                  res.end();
+                } catch (err: any) {
+                  res.write(`data: ${JSON.stringify({ error: err?.message || String(err) })}\n\n`);
+                  res.end();
+                } finally {
+                  clearTimeout(toolTimer);
+                  req.off('close', onClose);
+                }
+                return;
+              }
+
               try {
                 const r = await useFreeLLM({
                   messages,
@@ -720,7 +758,7 @@ export function createExpressApp(): express.Express {
           let relativePath: string | undefined;
           if (workspaceRoot) {
             const wsAbs = path.resolve(workspaceRoot);
-            
+
             // Path traversal safety gate: restrict allowed roots
             const normAbs = wsAbs.replace(/\\/g, '/');
             const allowedPrefixes = [
@@ -735,7 +773,7 @@ export function createExpressApp(): express.Express {
               const normPrefix = prefix.replace(/\/$/, '') + '/';
               return normAbs === prefix || normAbs.startsWith(normPrefix);
             });
-            
+
             if (!isSafe) {
               res.status(400).json({ error: 'workspace_root path traversal check failed (Security Gate)' });
               return;
@@ -880,7 +918,7 @@ export function createExpressApp(): express.Express {
 
           // Denylist: strictly exclude all test/benchmark/fixture/vitest/mock directories that pollute the dashboard
           const DENYLIST_PREFIXES = [
-            'test-', 'bench-', 'smoke-', 'stress-', 'full-stress-', 'e2e-', 
+            'test-', 'bench-', 'smoke-', 'stress-', 'full-stress-', 'e2e-',
             'simulation-', 'study-', 'vitest-', 'fixture-', 'mock-', 'tmp-'
           ];
 

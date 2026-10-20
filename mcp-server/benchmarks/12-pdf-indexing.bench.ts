@@ -115,7 +115,7 @@ async function generateLogReport() {
   const isVisionNeededSparse = shouldUseVision(0.12, 'Sparse slide page with network diagram');
   const isVisionNeededDense = shouldUseVision(0.02, pdfTextContent);
   const visionPrompt = buildVisionPrompt('day3_sttp_on_Ethical_Hacking_and_Cyber_Forensics.pdf', 1, false, pdfTextContent);
-  
+
   // 2. Chunking
   const chunks = chunkText(pdfTextContent, 200, 30);
 

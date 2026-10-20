@@ -23,7 +23,7 @@ export interface TokenTrackingInfo {
 
 /**
  * LLMExecutor - Utility class for executing LLM API calls with token management.
- * 
+ *
  * This class extracts the core execution logic from TokenManagerMiddleware and
  * the removed LLMExecutionMiddleware so it can be called multiple times in fallback scenarios
  * without violating the middleware single-call contract.
@@ -134,7 +134,7 @@ export class LLMExecutor {
      */
     async init(): Promise<void> {
         const stats = await this.persistence.load();
-        
+
         // Merge persisted stats into tokenTracking
         for (const [id, prov] of Object.entries(stats.providers)) {
             this.tokenTracking[id] = {
@@ -228,11 +228,11 @@ export class LLMExecutor {
                 cooldownUntil: cb?.cooldownUntil || 0,
                 totalErrors: cb?.totalErrors || 0
             };
-            
+
             // Increment totals (PersistenceManager will merge these)
             state.lifetimeTotalRequests += tracker.localTotalRequests || 0;
             state.lifetimeTotalTokens += tracker.localTotalTokens || 0;
-            state.dailyTotalRequests += tracker.dailyTotalRequests || 0; 
+            state.dailyTotalRequests += tracker.dailyTotalRequests || 0;
             state.dailyTotalTokens += tracker.dailyTotalTokens || 0;
         }
 
@@ -248,7 +248,7 @@ export class LLMExecutor {
             totalChars += getMessageContent(msg).length;
         }
 
-        // Optimization: If the string is massive (> 20k chars), 
+        // Optimization: If the string is massive (> 20k chars),
         // return a safe upper bound estimate immediately
         // to avoid hanging on Tiktoken encoding.
         if (totalChars > 20000) {
@@ -336,9 +336,9 @@ export class LLMExecutor {
                 dailyTotalTokens: 0
             };
         }
-        
+
         const tracker = this.tokenTracking[providerId];
-        
+
         // Update local and daily totals
         tracker.localTotalRequests = (tracker.localTotalRequests || 0) + 1;
         tracker.localTotalTokens = (tracker.localTotalTokens || 0) + tokens;
@@ -433,10 +433,10 @@ export class LLMExecutor {
 
     /**
      * Try to execute an LLM request with a specific provider
-     * 
+     *
      * This method combines token management and LLM execution in one atomic operation,
      * allowing the router to try multiple providers without calling next() multiple times.
-     * 
+     *
      * @param context - The pipeline context
      * @param providerId - The provider to use
      * @param modelId - The model to request
@@ -475,7 +475,7 @@ export class LLMExecutor {
             const promptTokens = this.calculateTokens(context.request.messages);
             context.estimatedTokens = promptTokens;
         }
-        
+
         if (providerId === 'gemini') {
             sanitizedRequest.messages = sanitizedRequest.messages.map((m: any) => {
                 if (m.role === 'system') {
@@ -520,12 +520,40 @@ export class LLMExecutor {
             attempt++;
             try {
                 // Use sanitized request
-                const requestWithTimeout = { 
-                    ...sanitizedRequest, 
+                const requestWithTimeout = {
+                    ...sanitizedRequest,
                     timeoutMs,
-                    abortSignal: context.request.abortSignal 
+                    abortSignal: context.request.abortSignal,
+                    signal: context.request.signal || context.request.abortSignal,
+                    onChunk: context.request.onChunk,
                 };
-                response = await provider.chat(requestWithTimeout);
+                if (sanitizedRequest.stream || context.request.stream || context.request.onChunk) {
+                    let accumulatedContent = '';
+                    for await (const chunk of provider.chatStream(requestWithTimeout)) {
+                        accumulatedContent += chunk;
+                    }
+                    response = {
+                        id: `${providerId}-${Date.now()}`,
+                        object: 'chat.completion',
+                        created: Math.floor(Date.now() / 1000),
+                        model: modelId,
+                        choices: [
+                            {
+                                index: 0,
+                                message: { role: 'assistant', content: accumulatedContent },
+                                finish_reason: 'stop',
+                            }
+                        ],
+                        usage: {
+                            prompt_tokens: context.estimatedTokens || 0,
+                            completion_tokens: this.calculateTokens([{ role: 'assistant', content: accumulatedContent }]),
+                            total_tokens: (context.estimatedTokens || 0) + this.calculateTokens([{ role: 'assistant', content: accumulatedContent }])
+                        },
+                        _providerId: providerId
+                    };
+                } else {
+                    response = await provider.chat(requestWithTimeout);
+                }
                 break;
             } catch (err: any) {
                 const errorMessage = err.message?.toLowerCase() || '';
@@ -604,8 +632,8 @@ export class LLMExecutor {
     async prompt(
         messages: Message[],
         modelOverride: string = 'any',
-        options: { 
-            taskType?: string, 
+        options: {
+            taskType?: string,
             timeoutMs?: number,
             google_search?: boolean,
             sessionId?: string,
@@ -662,9 +690,9 @@ export class LLMExecutor {
             ];
         } else {
             targetModels = [...defaultTaskCandidates];
-            
+
             // If the prompt contains an image, prioritize vision-capable models (e.g. Gemini 3.1, Gemma 4)
-            const hasImage = messages.some(m => 
+            const hasImage = messages.some(m =>
                 Array.isArray(m.content) && m.content.some((item: any) => item.type === 'image_url')
             );
             if (hasImage) {

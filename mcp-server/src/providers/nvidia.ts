@@ -9,7 +9,6 @@ export class NvidiaProvider extends BaseProvider {
   rateLimits: RateLimits = { rpm: 40 };
   models: ProviderModel[] = [
     // Free Endpoint Models (Catalog & Live Preview)
-    { id: 'deepseek-ai/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
     { id: 'deepseek-ai/deepseek-coder-6.7b-instruct', name: 'DeepSeek Coder 6.7B' },
     { id: 'z-ai/glm-5.3-flash', name: 'GLM 5.3 Flash' },
     { id: 'z-ai/glm-5.3', name: 'GLM 5.3' },
@@ -33,7 +32,6 @@ export class NvidiaProvider extends BaseProvider {
     { id: 'nvidia/nemotron-nano-12b-v2-vl', name: 'Nemotron Nano 12B V2 VL (Vision)' },
     { id: 'meta/llama-3.2-11b-vision-instruct', name: 'Llama 3.2 11B Vision' },
     { id: 'meta/llama-3.2-90b-vision-instruct', name: 'Llama 3.2 90B Vision' },
-    { id: 'meta/llama-3.1-8b-instruct', name: 'Llama 3.1 8B Instruct' },
     { id: 'moonshotai/kimi-k3', name: 'Kimi K3' },
     { id: 'mistralai/mistral-nemotron', name: 'Mistral Nemotron' },
     { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B' },

@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 import path from 'node:path';
-import { listLocalModels, rankCandidateModels, chatLocal, type OllamaLocalChatResult } from '../providers/ollama-local.js';
+import { listLocalModels, rankCandidateModels, chatLocal, parseJsonlContent, type OllamaLocalChatResult } from '../providers/ollama-local.js';
 import { ContextGatherer } from '../pipeline/middlewares/context-gatherer.js';
 import { logToolCall } from '../utils/ChatLogger.js';
 
@@ -256,7 +256,8 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
     // SEARCH/REPLACE blocks aren't wrapped in a code fence (the format
     // explicitly forbids one) — extractCodeFromResponse would find no fence
     // and return the text unchanged anyway, but skip it outright for clarity.
-    const patch = isSearchReplace ? chatResult.content : extractCodeFromResponse(chatResult.content);
+    const rawContent = parseJsonlContent(chatResult.content);
+    const patch = isSearchReplace ? rawContent : extractCodeFromResponse(rawContent);
 
     // Guard against canned refusal responses ("I'm sorry, but I can't assist with that request.")
     const refusalPatterns = [

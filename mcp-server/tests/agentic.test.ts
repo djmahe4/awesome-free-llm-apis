@@ -211,7 +211,7 @@ describe('Agentic Intelligence & Middleware', () => {
             await new Promise(resolve => setTimeout(resolve, 2100));
             // queues.json is written multiple times - check if ANY call contains the steps
             const writeCalls = vi.mocked(fsp.writeFile).mock.calls;
-            const hasSteps = writeCalls.some((call: any[]) => 
+            const hasSteps = writeCalls.some((call: any[]) =>
                 typeof call[0] === 'string' && call[0].includes('state.json') && call[1].includes('Step')
             );
             expect(hasSteps).toBe(true);

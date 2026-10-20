@@ -31,7 +31,7 @@ graph TD
     Agentic --> Search[SearchRouterMiddleware]
     Search --> ImageRouter[ImageRouterMiddleware]
     ImageRouter --> TextRouter[TextRouterMiddleware]
-    
+
     subgraph Execution
         TextRouter --> Classifier[TaskClassifier]
         TextRouter --> Executor[LLMExecutor]

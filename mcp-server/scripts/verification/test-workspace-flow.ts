@@ -10,7 +10,7 @@ import { PipelineContext } from '../../src/pipeline/middleware.js';
 
 /**
  * TEST WORKSPACE FLOW
- * 
+ *
  * This script demonstrates how the MCP server handles agentic requests in a workspace environment.
  * It shows that the server does NOT apply changes directly, but rather provides the LLM with
  * the full file context and mandates a specific response format for the orchestrator to apply.

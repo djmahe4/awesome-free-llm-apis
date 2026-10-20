@@ -1,7 +1,7 @@
 # MCP Server Development Guide
- 
+
 This guide provides a structured overview of how to extend the `free-llm-apis` MCP server with new tools, providers, models, or custom middlewares.
- 
+
 ## Table of Contents
 - [Adding New Tools](#adding-new-tools)
 - [Adding New Providers](#adding-new-providers)
@@ -10,46 +10,46 @@ This guide provides a structured overview of how to extend the `free-llm-apis` M
 - [Extending the Request Lifecycle (Adding Middlewares)](#extending-the-request-lifecycle-adding-middlewares)
 - [Best Practices: Non-Blocking I/O](#best-practices-non-blocking-io)
 - [Architectural References](#architectural-references)
- 
+
 ---
- 
+
 ## Adding New Tools
- 
+
 To add a new tool to the MCP server, follow these steps:
- 
+
 ### 1. Implement the Tool
 Create a file in `src/tools/` (e.g., `src/tools/my-tool.ts`).
- 
+
 ```typescript
 export interface MyToolInput {
   text: string;
 }
- 
+
 export async function myTool(input: MyToolInput) {
   return { result: `Processed: ${input.text}` };
 }
 ```
- 
+
 ### 2. Export the Tool
 Export the function and types in `src/tools/index.ts`.
- 
+
 ### 3. Register in MCP Server
 Update `src/mcp/index.ts`:
 - Add the definition to the `ListToolsRequestSchema` handler.
 - Add the execution logic to the `CallToolRequestSchema` handler.
- 
+
 ---
- 
+
 ## Adding New Providers
- 
+
 Providers handle the actual LLM API calls. All providers inherit from `BaseProvider`.
- 
+
 ### 1. Create Provider Class
 Create a file in `src/providers/` (e.g., `src/providers/new-provider.ts`).
- 
+
 ```typescript
 import { BaseProvider } from './base.js';
- 
+
 export class NewProvider extends BaseProvider {
   name = 'New AI';
   id = 'new-ai';
@@ -59,26 +59,26 @@ export class NewProvider extends BaseProvider {
   rateLimits = { rpm: 10, rpd: 500 };
 }
 ```
- 
+
 ### 2. Register Provider
 Add your provider to the `ProviderRegistry` in [registry.ts](../src/providers/registry.ts).
- 
+
 ```typescript
 import { NewProvider } from './new-provider.js';
- 
+
 // Inside the constructor
 const allProviders: Provider[] = [
   // ... existing providers
   new NewProvider(),
 ];
 ```
- 
+
 ---
- 
+
 ## Adding New Models
- 
+
 To add new models to an existing or new provider:
- 
+
 1. **Define the Model**: Open [models.ts](file:///c:/Users/mahes/OneDrive/Desktop/Python-Projects/awesome-free-llm-apis/mcp-server/src/config/models.ts) (or your custom provider file) and add the model definition to the provider's `models` array:
    ```typescript
    { id: 'provider/model-name:free', name: 'Model Name', contextWindow: 131072 }
@@ -89,27 +89,27 @@ To add new models to an existing or new provider:
 3. **Classify the Model**:
    - If the model is a **reasoning/thinking** model, ensure it is registered or mapped in [TextRouterMiddleware.ts](../src/pipeline/middlewares/TextRouterMiddleware.ts) under the reasoning capabilities map so the router knows to use it for planning and subtask decomposition.
    - If it is a **coding** model, ensure it is added to the coding capability list.
- 
+
 ---
- 
+
 ## Updating the Text Router
- 
+
 The [TextRouterMiddleware.ts](../src/pipeline/middlewares/TextRouterMiddleware.ts) manages task-based model selection and quantum scoring.
 - **Task Weights**: To adjust how tasks are classified, update the `keywordTaskMap` in `TextRouterMiddleware.ts` or add new keywords to influence the classification weight.
 - **Model Scoring**: If a new model requires a custom capability multiplier (e.g., prioritizing it for search or coding), update the scoring logic inside the `scoreModelForTask` method.
- 
+
 ---
- 
+
 ## Extending the Request Lifecycle (Adding Middlewares)
- 
+
 To extend or modify the request lifecycle, you can add a new middleware component.
- 
+
 ### 1. Implement the Middleware
 Create a class in `src/pipeline/middlewares/` that implements the `Middleware` interface:
- 
+
 ```typescript
 import { Middleware, PipelineContext, NextFunction } from '../middleware.js';
- 
+
 export class LoggingMiddleware implements Middleware {
   name = 'LoggingMiddleware';
   async execute(context: PipelineContext, next: NextFunction): Promise<void> {
@@ -119,20 +119,20 @@ export class LoggingMiddleware implements Middleware {
   }
 }
 ```
- 
+
 ### 2. Register the Middleware
 Register your new middleware by adding it to the `PipelineExecutor` instantiation inside [instances.ts](../src/pipeline/instances.ts).
- 
+
 ### 3. Best Practices: Non-Blocking I/O
 **CRITICAL**: Never perform synchronous file I/O or heavy computations at the module level (during import) or within a middleware without `await`.
 - **Avoid Sync I/O**: Use `fs.promises` instead of `fs.readFileSync`.
 - **Memoization**: Cache expensive operations (like prompt loading) after the first execution to ensure subsequent requests remain fast.
 - **Async Factories**: Prefer async functions that return values over module-level constants that require immediate initialization.
- 
+
 ---
- 
+
 ## 📖 Architectural References
- 
+
 To avoid documentation drift, refer to the following single sources of truth:
 - For the full request lifecycle and routing design, see the [Workflow & Architecture Guide](guide.md) and [Architecture Steering Reference](skill/references/architecture.md).
 - For persistent memory, wiki structures, and state durability, see [Memory Usage Reference](skill/references/memory-usage.md).

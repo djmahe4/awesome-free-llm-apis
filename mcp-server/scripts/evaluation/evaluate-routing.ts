@@ -1,13 +1,13 @@
 /**
  * Router Efficiency Evaluation Script
- * 
+ *
  * Tests the IntelligentRouterMiddleware with real API calls to evaluate:
  * 1. Free-first routing effectiveness
  * 2. Fallback cascade behavior
  * 3. Provider coverage
  * 4. Task-specific model selection
  * 5. Response times and success rates
- * 
+ *
  * Run with: npx tsx --env-file=.env scripts/evaluate-routing.ts
  */
 
@@ -96,7 +96,7 @@ async function evaluateRouting() {
     if (isSimulated) {
         // Clear real providers and inject mocks into registry
         (registry as any).providers = new Map();
-        
+
         const mockModels = [
             { id: 'mock-logic-model', name: 'Logic Model', contextWindow: 8000 },
             { id: 'mock-coding-model', name: 'Coding Model', contextWindow: 32000 }
@@ -116,7 +116,7 @@ async function evaluateRouting() {
                 chat: async (req: any) => {
                     // Failover test support
                     if (req.model === 'failover-test') throw new Error('Simulated Failover');
-                    
+
                     // Hallucination test support
                     let content = 'Response Success';
                     if (req.messages.some((m: any) => m.content.includes('non-existent'))) {
@@ -243,7 +243,7 @@ async function evaluateRouting() {
         }
 
         const responseTime = Date.now() - start;
-        const isFree = true; 
+        const isFree = true;
 
         // Check for hallucinations
         let isHallucinated = false;

@@ -22,8 +22,8 @@ export class PromptCompressor {
         getRemainingTimeout: () => number,
         totalBudget: number
     ): Promise<{ estimatedTokens: number; contextCompressed: boolean }> {
-        const originalTokens = context.estimatedTokens ?? 
-                       (context.request as any).estimatedTokens ?? 
+        const originalTokens = context.estimatedTokens ??
+                       (context.request as any).estimatedTokens ??
                        this.executor.calculateTokens(context.request.messages);
         context.estimatedTokens = originalTokens;
 
@@ -37,7 +37,7 @@ export class PromptCompressor {
             summarizationAttempts++;
             const remaining = getRemainingTimeout();
 
-            // Strategic Bailout: If we've tried too many times or have < 60% budget left, 
+            // Strategic Bailout: If we've tried too many times or have < 60% budget left,
             // stop trying to summarize and fall back to Tier 2 (Truncation) which is instant.
             if (summarizationAttempts > MAX_SUMMARIZATION_ATTEMPTS || remaining < (totalBudget * 0.6)) {
                 throw new Error('Summarization budget or attempt limit exhausted');

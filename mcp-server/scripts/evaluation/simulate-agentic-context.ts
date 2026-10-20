@@ -115,7 +115,7 @@ async function simulate() {
 
     // 5. Assemble System Prompt (AgenticMiddleware style)
     const workspaceContext = `Project Structure:\n${dirTree}\n\nRelevant File Snippets:\n${grepContextStr}`;
-    
+
     const systemPromptBase = await getIntelligentSystemPrompt({
         context: QUERY,
         keywords: ['agentic', 'orchestration', ...simKeywords],
@@ -123,10 +123,10 @@ async function simulate() {
         workspace: workspaceContext,
         isSubtask: false
     });
-    
+
     const highLevelSteps = `\n\n## HIGH-LEVEL STEPS\nWhen responding to a task, always begin with a numbered list of at most **2** high-level steps.`;
     const groundingGate = `\n\n## 📖 READ-FIRST GATE ACTIVATED\nA README.md or project documentation is detected in the workspace root.\nYou MUST verify all assertions against the provided context blocks in this prompt.`;
-    
+
     const fullSystemPrompt = `${systemPromptBase}${highLevelSteps}${groundingGate}`;
 
     // 6. Assemble User Message Context (StructuralMarkdownMiddleware style)
@@ -135,7 +135,7 @@ async function simulate() {
 
     // --- REPORTING ---
     console.log('--- Token Breakdown ---');
-    
+
     const tBase = countTokens(systemPromptBase.split('Project Structure:')[0]);
     const tTree = countTokens(dirTree);
     const tShort = countTokens(grepContextStr);

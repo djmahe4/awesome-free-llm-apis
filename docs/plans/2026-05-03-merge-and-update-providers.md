@@ -4,7 +4,7 @@
 
 **Goal:** Merge latest changes from the parent repository and update the MCP server with the newest free LLM providers and models identified via search and upstream diffs.
 
-**Architecture:** 
+**Architecture:**
 1. Merge `upstream/main` to sync the `README.md` and any core changes.
 2. Implement new provider classes in `src/providers/` for OVHcloud and any others.
 3. Update existing provider model lists in `src/providers/*.ts`.

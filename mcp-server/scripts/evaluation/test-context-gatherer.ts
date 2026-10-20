@@ -5,7 +5,7 @@ import path from 'path';
 async function main() {
     const workspaceRoot = "c:\\Users\\mahes\\OneDrive\\Desktop\\Python-Projects\\Study-AI-Agent";
     const query = "Explain the implementation of `core/gemini_processor.py` and `SimpleGeminiCache` in this project.";
-    
+
     console.log(`Searching for context in: ${workspaceRoot}`);
     console.log(`Query: ${query}\n`);
 
@@ -16,7 +16,7 @@ async function main() {
         const score = originalScore.apply(WorkspaceWalker, args);
         return score;
     };
-    
+
     // Mock logging for WorkspaceWalker
     const originalFind = (WorkspaceWalker as any).findRelevantFiles;
     (WorkspaceWalker as any).findRelevantFiles = async (root: string, keywords: string[], limit: number, override: boolean) => {
@@ -32,7 +32,7 @@ async function main() {
         workspaceRoot,
         limit: 5
     });
-    
+
     console.log('\n--- RESULTS ---');
     if (results.length === 0) {
         console.log('No results found.');

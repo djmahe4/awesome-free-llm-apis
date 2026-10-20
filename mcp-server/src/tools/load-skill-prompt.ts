@@ -138,10 +138,10 @@ async function searchSkills(keywords: string[], baseDir: string): Promise<{ name
     keywords.forEach(k => {
       if (target.includes(normalize(k))) score++;
     });
-    return { 
-      name: entry.name || entry.id || '', 
-      description: entry.description || '', 
-      score 
+    return {
+      name: entry.name || entry.id || '',
+      description: entry.description || '',
+      score
     };
   })
   .filter(e => e.score > 0)

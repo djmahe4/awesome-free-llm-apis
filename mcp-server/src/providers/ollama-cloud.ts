@@ -97,4 +97,58 @@ export class OllamaCloudProvider extends BaseProvider {
       },
     };
   }
+
+  override async *chatStream(request: ChatRequest): AsyncIterable<string> {
+    this.checkRateLimit();
+    this.recordRequest();
+    const apiKey = this.getApiKey();
+    const url = `${this.baseURL}api/chat`;
+    const sig = request.signal || request.abortSignal;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: request.model || this.models[0].id,
+        messages: this.toNativeMessages(request.messages),
+        stream: true,
+        options: {
+          temperature: request.temperature,
+          num_predict: request.max_tokens,
+          top_p: request.top_p,
+        },
+      }),
+      signal: sig as any,
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+    if (!response.body) throw new Error('No response body');
+
+    let buffer = '';
+    const decoder = new TextDecoder();
+    for await (const chunk of response.body as any) {
+      buffer += decoder.decode(chunk, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          const content = (parsed.message?.content && parsed.message.content.length > 0) ? parsed.message.content : (parsed.message?.thinking ?? parsed.thinking ?? parsed.response);
+          if (content) {
+            if (request.onChunk) request.onChunk(content);
+            yield content;
+          }
+          if (parsed.done === true) return;
+        } catch {
+          // ignore incomplete lines
+        }
+      }
+    }
+  }
 }

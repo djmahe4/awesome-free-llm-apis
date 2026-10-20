@@ -176,10 +176,118 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
   };
   return {
     model: data.model,
-    content: data.message?.content || '',
+    content: parseJsonlContent(data.message?.content || ''),
     promptTokens: data.prompt_eval_count ?? 0,
     completionTokens: data.eval_count ?? 0,
   };
+}
+
+/**
+ * Safely unpacks concatenated JSONL objects (e.g. {"model":"...","message":{"content":"..."}})
+ * into pure message text if a local model or proxy returns raw JSON lines instead of plain text.
+ */
+export function parseJsonlContent(rawText: string): string {
+  if (!rawText || !rawText.trim().startsWith('{')) return rawText;
+  const lines = rawText.trim().split('\n');
+  let accumulated = '';
+  let isJsonl = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const obj = JSON.parse(trimmed);
+        if (obj.message?.content !== undefined || obj.response !== undefined) {
+          accumulated += obj.message?.content ?? obj.response ?? '';
+          isJsonl = true;
+          continue;
+        }
+      } catch {}
+    }
+    // Non-JSON line found, treat as regular text
+    return rawText;
+  }
+  return isJsonl ? accumulated : rawText;
+}
+
+export async function* chatLocalStream(
+  model: string,
+  messages: OllamaLocalMessage[],
+  options?: { temperature?: number; maxTokens?: number; numCtx?: number; signal?: AbortSignal; onChunk?: (chunk: string) => void }
+): AsyncIterable<string> {
+  const url = `${getBaseUrl()}/api/chat`;
+  const timeoutMs = computeChatTimeoutMs(messages);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  const sig = options?.signal;
+  if (sig) {
+    if (sig.aborted) controller.abort();
+    else sig.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
+  let numCtx = options?.numCtx;
+  if (!numCtx) {
+    const promptChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+    const estimatedPromptTokens = Math.ceil(promptChars / 3.5);
+    const headroom = options?.maxTokens ?? 4096;
+    const needed = estimatedPromptTokens + headroom;
+    numCtx = Math.min(Math.max(2048, needed), 32768);
+  }
+
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: true,
+        options: {
+          temperature: options?.temperature,
+          num_predict: options?.maxTokens,
+          num_ctx: numCtx,
+        },
+      }),
+      signal: controller.signal as any,
+    });
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Ollama local model '${model}' timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Ollama local server responded HTTP ${response.status}: ${text}`);
+  }
+  if (!response.body) throw new Error('No response body');
+
+  let buffer = '';
+  const decoder = new TextDecoder();
+  for await (const chunk of response.body as any) {
+    buffer += decoder.decode(chunk, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const data = JSON.parse(trimmed);
+        const token = (data.message?.content && data.message.content.length > 0) ? data.message.content : (data.message?.thinking ?? data.thinking ?? data.response);
+        if (token) {
+          if (options?.onChunk) options.onChunk(token);
+          yield token;
+        }
+        if (data.done === true) return;
+      } catch {
+        // ignore malformed line
+      }
+    }
+  }
 }
 
 export interface PatchOptions {
@@ -232,7 +340,7 @@ export async function applyPatchWithReinforce(
 ): Promise<PatchWithReinforceResult> {
   const effectiveOptions: PatchOptions = { ...options, coachTool };
   const patchResult = await patch(model, filePath, fileContent, instruction, effectiveOptions);
-  
+
   let reflection: string | undefined;
   let explanationFrame: any;
 
@@ -247,4 +355,3 @@ export async function applyPatchWithReinforce(
     reflection,
   };
 }
-

@@ -146,7 +146,7 @@ export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput): Prom
                     // 1a. Fetch relevant context (Memory + Workspace Scan)
                     let memoryContext: string | undefined;
                     let grepContext: string[] = [];
-                    
+
                     if (wsHash) {
                         // Vector Memory search
                         const memoryResults = await memoryManager.search(wsHash, instruction);
@@ -171,13 +171,13 @@ export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput): Prom
                         memory: memoryContext,
                         isSubtask: false
                     });
-                    
+
                     // Inject Grep Context manually into the prompt for grounding
-                    const grepContextStr = grepContext.length > 0 
+                    const grepContextStr = grepContext.length > 0
                         ? `\n\n## 🔍 WORKSPACE CONTEXT\nRelevant code snippets found in workspace:\n${grepContext.join('\n')}\n`
                         : '';
 
-                    const systemPrompt = `${baseSystemPrompt}${grepContextStr}\n\n## 🛠️ TASK: SCRIPT GENERATION\nYou are generating a script named '${filename}' for the current workspace. 
+                    const systemPrompt = `${baseSystemPrompt}${grepContextStr}\n\n## 🛠️ TASK: SCRIPT GENERATION\nYou are generating a script named '${filename}' for the current workspace.
 Use the workspace memory and context snippets provided above to ensure the script follows established patterns and correctly interfaces with existing modules.
 Output ONLY script content between delimiters:
 ${SKILL_SCRIPT_START}
@@ -188,9 +188,9 @@ No explanation.`;
                     const response = await useFreeLLM({
                         messages: [
                             { role: 'system', content: systemPrompt },
-                            { 
-                                role: 'user', 
-                                content: `Instruction for '${filename}': ${instruction}` 
+                            {
+                                role: 'user',
+                                content: `Instruction for '${filename}': ${instruction}`
                             }
                         ],
                         agentic: false, // Maintain non-agentic to avoid recursive reasoning loops

@@ -1,11 +1,11 @@
 import { Middleware, PipelineContext, NextFunction } from '../middleware.js';
 import path from 'path';
 import fs from 'fs-extra';
-import { 
-    PROJECTS_DIR, 
-    STATE_FILE, 
+import {
+    PROJECTS_DIR,
+    STATE_FILE,
     KNOWLEDGE_FILE,
-    SESSION_STATE_HEADER 
+    SESSION_STATE_HEADER
 } from './constants.js';
 import { extractMdContext } from '../../utils/md-extract.js';
 

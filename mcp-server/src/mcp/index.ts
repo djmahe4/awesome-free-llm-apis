@@ -39,7 +39,7 @@ async function deriveSessionIdFromArgs(args: Record<string, any> | null | undefi
 
 export async function createMCPServer(): Promise<Server> {
   const server = new Server(
-    { name: 'free-llm-apis', version: '1.0.8' },
+    { name: 'free-llm-apis', version: '1.1.1' },
     { capabilities: { tools: {} } }
   );
 
@@ -106,6 +106,7 @@ export async function createMCPServer(): Promise<Server> {
               description: 'Conversation messages. Always include at least one user message.',
             },
             model: { type: 'string', description: 'Specific model request. If omitted, the router picks the best model for the task.' },
+            stream: { type: 'boolean', description: 'Enable streaming mode: chunks are yielded via async stream / SSE' },
             keywords: {
               type: 'array',
               items: { type: 'string' },

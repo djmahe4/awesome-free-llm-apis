@@ -1,13 +1,13 @@
-export type Capability = 
-  | 'Classification' 
-  | 'Moderation' 
-  | 'Summarization' 
-  | 'EntityExtraction' 
-  | 'SemanticSearch' 
-  | 'Reasoning' 
-  | 'Coding' 
+export type Capability =
+  | 'Classification'
+  | 'Moderation'
+  | 'Summarization'
+  | 'EntityExtraction'
+  | 'SemanticSearch'
+  | 'Reasoning'
+  | 'Coding'
   | 'UserIntent'
-  | 'Chat' 
+  | 'Chat'
   | 'Vision';
 
 const CAPABILITY_WEIGHTS: Record<Capability, number> = {

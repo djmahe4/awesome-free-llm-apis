@@ -40,7 +40,7 @@ def parse_sections(prompt_text):
         "content": [],
         "level": 0
     }
-    
+
     # Header regex: Line that is mostly ALL CAPS and doesn't look like a list item
     header_regex = re.compile(r'^[A-Z0-9][A-Z0-9 \-_,“”]{3,}$')
 
@@ -51,7 +51,7 @@ def parse_sections(prompt_text):
             if current_section["content"]:
                 current_section["content"] = "\n".join(current_section["content"]).strip()
                 sections.append(current_section)
-            
+
             # Start new section
             current_section = {
                 "id": clean_line.lower().replace(" ", "_").replace("“", "").replace("”", "").replace(",", ""),
@@ -61,12 +61,12 @@ def parse_sections(prompt_text):
             }
         else:
             current_section["content"].append(line)
-            
+
     # Add last section
     if current_section["content"]:
         current_section["content"] = "\n".join(current_section["content"]).strip()
         sections.append(current_section)
-        
+
     return sections
 
 def generate_keywords(title, content):
@@ -74,19 +74,19 @@ def generate_keywords(title, content):
     Improved keyword extraction for matching.
     """
     stop_words = {
-        "about", "after", "again", "against", "also", "among", "been", "before", 
-        "being", "below", "between", "both", "could", "does", "doing", "down", "during", "each", 
-        "even", "ever", "from", "have", "having", "here", "into", "just", "more", "most", "only", 
-        "over", "some", "such", "than", "that", "them", "then", "there", "these", "they", "this", 
+        "about", "after", "again", "against", "also", "among", "been", "before",
+        "being", "below", "between", "both", "could", "does", "doing", "down", "during", "each",
+        "even", "ever", "from", "have", "having", "here", "into", "just", "more", "most", "only",
+        "over", "some", "such", "than", "that", "them", "then", "there", "these", "they", "this",
         "those", "through", "very", "were", "what", "when", "where", "which", "while", "with", "would",
         "work", "edit", "make", "use", "will", "should", "many"
     }
     title_words = set(re.findall(r'\b\w{4,}\b', title.lower()))
     content_words = re.findall(r'\b\w{4,}\b', content.lower())
-    
+
     filtered_title_words = [w for w in title_words if w not in stop_words]
     filtered_content_words = [w for w in content_words if w not in stop_words]
-    
+
     return sorted(list(set(filtered_title_words).union(set(filtered_content_words))))
 
 def main():
@@ -124,16 +124,16 @@ def main():
 
     marker = "You are the principal architect and builder"
     prompt_text = extract_main_prompt(content, marker)
-    
+
     if not prompt_text:
         print(f"Warning: Could not find prompt block in README.md")
         return
 
     raw_sections = parse_sections(prompt_text)
-    
+
     # NEW: Extract Reference Sections from full README content
     ref_sections = extract_reference_sections(content)
-    
+
     final_data = {
         "metadata": {
             "version": "1.2.0",
@@ -150,7 +150,7 @@ def main():
         else:
             section["keywords"] = generate_keywords(section["title"], section["content"])
             final_data["sections"].append(section)
-            
+
     # Add extracted references as valid PromptSections
     for ref_sec in ref_sections:
         ref_sec["keywords"] = generate_keywords(ref_sec["title"], ref_sec["content"])
@@ -158,7 +158,7 @@ def main():
 
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(final_data, f, indent=2)
-    
+
     print(f"Successfully processed {len(final_data['sections'])} sections (including references) into {json_path}")
 
 def extract_reference_sections(text):
@@ -166,7 +166,7 @@ def extract_reference_sections(text):
     Parses ## Research Appendix and ## Subsystem Reference Map headers.
     """
     sections = []
-    
+
     # 1. Research Appendix
     appendix_match = re.search(r'## Research Appendix\s*(.*?)(?=\n##|$)', text, re.DOTALL)
     if appendix_match:
@@ -188,7 +188,7 @@ def extract_reference_sections(text):
             "content": content,
             "level": 2
         })
-        
+
     return sections
 
 if __name__ == "__main__":

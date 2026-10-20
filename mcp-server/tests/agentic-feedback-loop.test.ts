@@ -23,7 +23,7 @@ describe('Agentic Middleware Feedback Loop Tests', () => {
             "could you provide", "I need more context", "I don't have access to",
             "can you share", "please provide the", "what is the value of"
         ];
-        
+
         const detectSignal = (text: string) => {
             return signalPatterns.some(p => text.toLowerCase().includes(p.toLowerCase()));
         };
@@ -193,4 +193,3 @@ describe('Agentic Middleware Feedback Loop Tests', () => {
         expect(context.request.messages.length).toBeLessThan(initialMessages.length + 3);
     });
 });
-

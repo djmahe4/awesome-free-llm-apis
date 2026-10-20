@@ -39,7 +39,7 @@ export function getModelContextLimit(modelId?: string): number {
     const registry = ProviderRegistry.getInstance();
     const provider = registry.getProviderForModel(modelId);
     if (provider) {
-      const model = provider.models.find(m => m.id === modelId) || 
+      const model = provider.models.find(m => m.id === modelId) ||
                     provider.visionModels?.find(m => m.id === modelId);
       if (model?.contextWindow) {
         return model.contextWindow;

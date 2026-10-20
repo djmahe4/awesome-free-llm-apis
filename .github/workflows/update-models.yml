@@ -49,19 +49,19 @@ jobs:
         run: |
           # Check for changes in src/providers
           git status --porcelain src/providers/
-          
+
           if [ -n "$(git status --porcelain mcp-server/src/providers/)" ]; then
             echo "Changes detected in provider files. Creating Pull Request..."
-            
+
             BRANCH_NAME="automated/update-provider-models-$(date +'%Y-%m-%d')"
             git config --global user.name "GitHub Actions Bot"
             git config --global user.email "actions@github.com"
-            
+
             git checkout -b "$BRANCH_NAME"
             git add mcp-server/src/providers/
             git commit -m "chore: automated weekly update of provider models"
             git push origin "$BRANCH_NAME"
-            
+
             # Use GitHub CLI to create the Pull Request
             gh pr create \
               --title "chore: automated weekly update of provider models" \

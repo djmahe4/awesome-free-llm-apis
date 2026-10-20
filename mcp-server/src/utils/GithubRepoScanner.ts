@@ -4,7 +4,8 @@ import fetch from 'node-fetch';
 export const GLOBAL_CYBER_WIKI_NS = 'global-cyber-tools';
 
 /** Cyber tools loaded from the external registry at startup. */
-export const CYBER_TOOL_NAMES: string[] = [];
+export const DEFAULT_CYBER_TOOL_NAMES = ['nmap', 'sqlmap', 'hydra', 'gobuster', 'ffuf', 'nikto'];
+export const CYBER_TOOL_NAMES: string[] = [...DEFAULT_CYBER_TOOL_NAMES];
 
 /** Dynamic tool pattern mappings - loaded from registry for auto-detection */
 export const TOOL_PATTERN_MAP: Record<string, RegExp[]> = {};
@@ -78,6 +79,7 @@ export class GithubRepoScanner {
    * Retrieves raw content of a file from a GitHub repository.
    */
     static async fetchRawContent(owner: string, repo: string, path: string, branch?: string): Promise<string> {
+    // HEAD resolves to the repo's default branch (e.g. `dev`), which main/master miss.
     const branches = branch ? [branch] : ['main', 'master', 'HEAD'];
     for (const b of branches) {
       const url = 'https://raw.githubusercontent.com/' + owner + '/' + repo + '/' + b + '/' + path;

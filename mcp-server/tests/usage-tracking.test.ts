@@ -13,7 +13,7 @@ class MockProvider extends BaseProvider {
     envVar = 'MOCK_API_KEY';
     rateLimits = { rpm: 60 };
     models = [{ id: 'mock-model', name: 'Mock Model' }];
-    
+
     async chat() {
         return {
             id: 'res-1',
@@ -28,7 +28,7 @@ class MockProvider extends BaseProvider {
 
 describe('Usage Tracking Hardening', () => {
     let executor: LLMExecutor;
-    
+
     beforeEach(() => {
         executor = new LLMExecutor();
         const registry = ProviderRegistry.getInstance();
@@ -46,7 +46,7 @@ describe('Usage Tracking Hardening', () => {
         await executor.tryProvider(context, 'mock-provider', 'mock-model');
 
         const state = executor.getTokenState()['mock-provider'];
-        
+
         expect(state).toBeDefined();
         expect(state.localTotalRequests).toBe(1);
         expect(state.localTotalTokens).toBeGreaterThan(0);

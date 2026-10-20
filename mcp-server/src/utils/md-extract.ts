@@ -5,7 +5,7 @@ import { toString } from 'mdast-util-to-string';
 
 /**
  * Universal Markdown Context Extractor (v1.0.4)
- * 
+ *
  * Instead of dumping raw markdown which causes context noise and hallucinations,
  * this utility parses the MD into an AST and extracts only the 'signal' nodes:
  * - Headings (max 8)
@@ -13,7 +13,7 @@ import { toString } from 'mdast-util-to-string';
  * - Code block metadata + headers
  * - Important bold key-value pairs
  * - Scaffolding comments
- * 
+ *
  * @param content The raw markdown content to compress
  * @param maxChars Maximum character budget for the extracted context
  * @returns A compressed, factual summary of the markdown structure
@@ -106,19 +106,19 @@ export async function extractMdContext(content: string, maxChars: number = 1500)
     });
 
     // v1.0.4 Refined Signal Logic:
-    // We treat headings and metadata as structural scaffolding. If we only found 
+    // We treat headings and metadata as structural scaffolding. If we only found
     // basic scaffolding (like a single title) but no "rich" substantive data (lists/code),
     // and the file is primarily prose, we fallback to the raw text excerpt.
     if (!substantiveSignalFound) {
         const rawExcerpt = content.split('\n').slice(0, 10).join('\n').trim();
-        
+
         // If we found multiple structural signals (e.g. multiple subheadings),
         // we trust the extracted structural view as a valid summary.
         if (sections.length > 1) {
             return sections.join('\n').trim();
         }
 
-        // If we only have one signal (unpopulated scaffold) or none, 
+        // If we only have one signal (unpopulated scaffold) or none,
         // we fallback to raw text if it contains prose we would have otherwise missed.
         if (rawExcerpt.length > sections.join('\n').length + 5) {
             return rawExcerpt.substring(0, maxChars).trim();

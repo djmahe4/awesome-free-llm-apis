@@ -142,14 +142,14 @@ export abstract class BaseProvider implements Provider {
     const url = `${this.baseURL}chat/completions`;
 
     // Sanitize request: Remove internal-only fields that strict APIs reject
-    const { 
-      agentic, 
-      google_search, 
-      sessionId, 
-      taskType, 
-      timeoutMs: _timeoutMs, 
-      abortSignal: _abort, 
-      ...sanitizedRequest 
+    const {
+      agentic,
+      google_search,
+      sessionId,
+      taskType,
+      timeoutMs: _timeoutMs,
+      abortSignal: _abort,
+      ...sanitizedRequest
     } = request as any;
 
     // Ensure model is set
@@ -159,7 +159,7 @@ export abstract class BaseProvider implements Provider {
     sanitizedRequest.messages = Sanitizer.sanitizeObject(sanitizedRequest.messages);
 
     const controller = new AbortController();
-    
+
     // Wire up external abort signal for Hedged Execution
     if (request.abortSignal) {
       if (request.abortSignal.aborted) {
@@ -237,12 +237,16 @@ export abstract class BaseProvider implements Provider {
     const url = `${this.baseURL}chat/completions`;
 
     // Sanitize request: Remove internal-only fields that strict APIs reject
-    const { 
-      agentic, 
-      google_search, 
-      sessionId, 
-      taskType, 
-      ...sanitizedRequest 
+    const {
+      agentic,
+      google_search,
+      sessionId,
+      taskType,
+      timeoutMs: _timeoutMs,
+      signal: _sig,
+      abortSignal: _abort,
+      onChunk: _onChunk,
+      ...sanitizedRequest
     } = request as any;
 
     // Ensure model is set
@@ -250,6 +254,7 @@ export abstract class BaseProvider implements Provider {
 
     sanitizedRequest.messages = await this.processImageMessages(sanitizedRequest.messages);
 
+    const sig = request.signal || request.abortSignal;
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -260,6 +265,7 @@ export abstract class BaseProvider implements Provider {
         Referer: new URL(this.baseURL).origin + '/',
       },
       body: JSON.stringify({ ...sanitizedRequest, stream: true }),
+      signal: sig as any,
     });
     if (!response.ok) {
       const text = await response.text();
@@ -271,20 +277,40 @@ export abstract class BaseProvider implements Provider {
     this.cooldownUntil = 0;
     this.recordRequest();
     if (!response.body) throw new Error('No response body');
+    let buffer = '';
     const decoder = new TextDecoder();
-    for await (const chunk of response.body) {
-      const text = decoder.decode(chunk as Buffer, { stream: true });
-      const lines = text.split('\n');
+    for await (const chunk of response.body as any) {
+      buffer += decoder.decode(chunk, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6).trim();
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data: ')) {
+          const data = trimmed.slice(6).trim();
           if (data === '[DONE]') return;
           try {
             const parsed = JSON.parse(data);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) yield content;
+            const delta = parsed.choices?.[0]?.delta;
+            const content = delta?.content ?? delta?.reasoning_content ?? delta?.reasoning ?? delta?.thinking;
+            if (content) {
+              if (request.onChunk) request.onChunk(content);
+              yield content;
+            }
           } catch {
             // skip malformed SSE lines
+          }
+        } else if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+          // JSONL stream format (e.g. Ollama or JSONL endpoints)
+          try {
+            const parsed = JSON.parse(trimmed);
+            const content = (parsed.message?.content && parsed.message.content.length > 0) ? parsed.message.content : (parsed.message?.thinking ?? parsed.thinking ?? parsed.response ?? parsed.choices?.[0]?.delta?.content ?? parsed.choices?.[0]?.text);
+            if (content) {
+              if (request.onChunk) request.onChunk(content);
+              yield content;
+            }
+            if (parsed.done === true) return;
+          } catch {
+            // skip malformed JSONL lines
           }
         }
       }
@@ -307,7 +333,7 @@ export abstract class BaseProvider implements Provider {
                 decodedPath = decodedPath.substring(1);
               }
               const imageFsPath = path.resolve(decodedPath);
-              
+
               try {
                 const buffer = await fs.readFile(imageFsPath);
                 const ext = path.extname(imageFsPath).toLowerCase().replace('.', '');

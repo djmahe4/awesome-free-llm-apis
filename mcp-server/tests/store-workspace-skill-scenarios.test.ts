@@ -65,7 +65,7 @@ describe('storeWorkspaceSkill Scenarios', () => {
         // Setup mocks
         const mockMemory = ['- Memory snippet 1'];
         const mockGrep = ['Grep snippet 1'];
-        
+
         (memoryManager.search as any).mockResolvedValue([{ content: 'Memory snippet 1' }]);
         (ContextGatherer.gatherContext as any).mockResolvedValue(mockGrep);
         (useFreeLLM as any).mockResolvedValue({
@@ -135,7 +135,7 @@ describe('storeWorkspaceSkill Scenarios', () => {
 
         if (!result.success) throw new Error(result.error);
         expect(result.success).toBe(true);
-        
+
         // Verify file content
         const scriptPath = path.join(root, '.free-llm-mcp', 'skills', 'raw-extract', 'scripts', 'raw.sh');
         const content = await fs.readFile(scriptPath, 'utf-8');
@@ -184,10 +184,10 @@ describe('storeWorkspaceSkill Scenarios', () => {
         });
 
         if (!result.success) throw new Error(result.error);
-        
+
         // Wait a small amount for FS sync on Windows
         await new Promise(resolve => setTimeout(resolve, 50));
-        
+
         const scriptPath = path.join(root, '.free-llm-mcp', 'skills', 'truncation-test', 'scripts', 'fix.sh');
         const content = await fs.readFile(scriptPath, 'utf-8');
         expect(result.success).toBe(true);

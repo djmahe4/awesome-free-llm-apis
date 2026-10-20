@@ -38,7 +38,7 @@ function downloadFile(url, destPath) {
 async function download() {
     const modelName = 'Xenova/bge-small-en-v1.5';
     console.log(`[Build] Pre-downloading embedding model: ${modelName}...`);
-    
+
     try {
         await pipeline('feature-extraction', modelName);
         console.log('[Build] Model downloaded and cached successfully.');

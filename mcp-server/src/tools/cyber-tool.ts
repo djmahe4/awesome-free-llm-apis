@@ -240,13 +240,14 @@ export async function cyberTool(input: CyberToolInput) {
                 githubUrl: url || null
             };
         } else if (action === 'register_tool') {
-            if (!input.toolName || !input.url) throw new Error('toolName and url required for register_tool');
-            const urlType = input.urlType || 'generic';
-            const updated = await CyberToolsRegistry.registerTool(input.toolName, input.url, urlType, input.category);
+            const toolUrl = input.url || input.githubUrl;
+            if (!input.toolName || !toolUrl) throw new Error('toolName and url required for register_tool');
+            const urlType = input.urlType || (input.githubUrl ? 'github' : 'generic');
+            const updated = await CyberToolsRegistry.registerTool(input.toolName, toolUrl, urlType, input.category);
             result = {
                 success: true,
                 registeredTool: input.toolName,
-                url: input.url,
+                url: toolUrl,
                 urlType: urlType,
                 category: input.category || 'other',
                 registry: updated
@@ -254,7 +255,13 @@ export async function cyberTool(input: CyberToolInput) {
         } else if (action === 'wiki_lookup') {
             if (!input.toolName) throw new Error('toolName required for wiki_lookup action');
             const wiki = new WikiMemory(CYBER_WIKI_NAMESPACE);
-            const page = await wiki.read(`${input.toolName}/flags_and_troubleshooting`);
+            const pagePath = input.toolName + '/flags_and_troubleshooting';
+            let page = await wiki.read(pagePath);
+            if (!page) {
+                const defaultContent = '# ' + input.toolName + ' Flags & Troubleshooting\n\nDefault operational flags and guidance for ' + input.toolName + '.';
+                await safeWikiWrite(wiki, pagePath, defaultContent, ['cyber', 'tool-guide', input.toolName]);
+                page = await wiki.read(pagePath);
+            }
             result = {
                 success: !!page,
                 toolName: input.toolName,

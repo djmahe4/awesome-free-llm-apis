@@ -30,14 +30,14 @@ async function loadRequiredRouterModels() {
   try {
     if (await fs.pathExists(ROUTER_FILE)) {
       const content = await fs.readFile(ROUTER_FILE, 'utf-8');
-      
+
       const modelRegex = /'([^'\n]+?\b[^'\n]*?)'/g;
       let match;
       while ((match = modelRegex.exec(content)) !== null) {
         const modelId = match[1].trim();
         if (
-          modelId.includes('/') || 
-          modelId.includes('-') || 
+          modelId.includes('/') ||
+          modelId.includes('-') ||
           /\d/.test(modelId)
         ) {
           requiredRouterModels.add(modelId);
@@ -110,8 +110,8 @@ function isFreeModel(providerId: string, modelId: string): boolean {
  */
 function isInvalidNvidiaModel(modelId: string): boolean {
   const excludeWords = [
-    'terms', 'privacy', 'legal', 'contact', 'cookie', 'policy', 
-    'consent', 'about-nvidia', 'discover', 'explore', 'new/public', 
+    'terms', 'privacy', 'legal', 'contact', 'cookie', 'policy',
+    'consent', 'about-nvidia', 'discover', 'explore', 'new/public',
     'docs', 'launch', 'support', 'help', 'blog', 'careers', 'models?'
   ];
   return excludeWords.some(w => modelId.toLowerCase().includes(w));
@@ -204,10 +204,10 @@ async function updateProviderFile(providerId: string, scrapedModels: ScrapedMode
     const text = `${m.name} ${m.id}`;
     const caps = CapabilityExtractor.extractCapabilities(text, []);
     const score = CapabilityExtractor.calculateScore(caps);
-    
+
     const capsStr = caps.length > 0 ? `capabilities: [${caps.map(c => `'${c}'`).join(', ')}],` : '';
     const scoreStr = score > 0 ? `score: ${score},` : '';
-    
+
     return `    { id: '${m.id}', name: '${m.name}', ${capsStr}${scoreStr} }`;
   }).join('\n');
 
@@ -246,10 +246,10 @@ async function scrapeNvidia(browser: any): Promise<ScrapedModel[]> {
       const cards = await page.evaluate(() => {
         const items: Array<{ id: string; name: string; deprecated: boolean }> = [];
         const cardElements = document.querySelectorAll('a[href*="/"]');
-        
+
         const excludeWords = [
-          'terms', 'privacy', 'legal', 'contact', 'cookie', 'policy', 
-          'consent', 'about-nvidia', 'discover', 'explore', 'new/public', 
+          'terms', 'privacy', 'legal', 'contact', 'cookie', 'policy',
+          'consent', 'about-nvidia', 'discover', 'explore', 'new/public',
           'docs', 'launch', 'support', 'help', 'blog', 'careers', 'models?'
         ];
 
@@ -259,7 +259,7 @@ async function scrapeNvidia(browser: any): Promise<ScrapedModel[]> {
           if (parts.length >= 2 && !excludeWords.some(w => href.toLowerCase().includes(w))) {
             const id = parts.slice(-2).join('/');
             const name = el.textContent?.trim() || parts[parts.length - 1];
-            
+
             // Check parent card for Deprecated label
             let isDeprecated = false;
             let current = el.parentElement;
@@ -402,7 +402,7 @@ async function scrapeGemini(browser: any): Promise<ScrapedModel[]> {
   try {
     await page.goto('https://aistudio.google.com/rate-limits', { timeout: 20000 });
     await page.waitForTimeout(3000);
-    
+
     const pageModels = await page.evaluate(() => {
       const items: ScrapedModel[] = [];
       const tables = document.querySelectorAll('table');
@@ -504,7 +504,7 @@ async function scrapeSiliconFlow(): Promise<ScrapedModel[]> {
     const res = await fetch('https://docs.siliconflow.com/llms.txt');
     const text = await res.text();
     const models: ScrapedModel[] = [];
-    
+
     const lines = text.split('\n');
     for (const line of lines) {
       if (line.includes('/') && !line.startsWith('http') && line.trim().length > 3) {
@@ -529,7 +529,7 @@ async function scrapeSiliconFlow(): Promise<ScrapedModel[]> {
 async function scrapeFallbackProvider(providerId: string): Promise<ScrapedModel[]> {
   console.log(`[Scraper] Generating task/router matched model catalog for ${providerId}...`);
   const models: ScrapedModel[] = [];
-  
+
   // Scrapes and matches models for other providers: groq, mistral, cohere, cerebras, zhipu, ollama-cloud, huggingface
   for (const mId of requiredRouterModels) {
     let belongs = false;
@@ -565,7 +565,7 @@ async function scrapeFallbackProvider(providerId: string): Promise<ScrapedModel[
  */
 async function main() {
   console.log('[Scraper] Starting Weekly Provider Models Scraper Cron...');
-  
+
   // 1. Initial setups
   await loadRequiredRouterModels();
 
@@ -573,8 +573,8 @@ async function main() {
   const browser = await chromium.launch({ headless: true });
 
   const providers = [
-    'nvidia', 'openrouter', 'kilocode', 'llm7', 
-    'cloudflare', 'siliconflow', 'groq', 'mistral', 'cohere', 
+    'nvidia', 'openrouter', 'kilocode', 'llm7',
+    'cloudflare', 'siliconflow', 'groq', 'mistral', 'cohere',
     'cerebras', 'huggingface', 'zhipu', 'ollama-cloud'
   ];
 

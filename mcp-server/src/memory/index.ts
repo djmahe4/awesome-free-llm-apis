@@ -275,7 +275,7 @@ export class MemoryManager {
   } {
     const rawLinesA = fileAContent.split('\n');
     const rawLinesB = fileBContent.split('\n');
-    
+
     // Quantum amplitude-weighted line sampling to prevent O(N*M) event loop blocking
     const linesA = selectAmplitudeLines(rawLinesA);
     const linesB = selectAmplitudeLines(rawLinesB);

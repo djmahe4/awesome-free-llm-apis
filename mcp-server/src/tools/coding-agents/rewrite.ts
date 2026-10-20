@@ -47,12 +47,12 @@ function applyPatternRewrite(content: string, pat: string, out: string): { conte
     return { content, matchCount: 0 };
   }
   regex.lastIndex = 0;
-  
+
   // Extract wildcard names from pat to map them to capture group indices
   const patWildcards = Array.from(pat.matchAll(/\$\$\$[A-Z0-9_]*/g)).map(m => m[0]);
 
   // If out has $$$ wildcard reference, replace it with $1, $2, etc based on index in pat
-  const targetOut = hasCapture 
+  const targetOut = hasCapture
     ? out.replace(/\$\$\$[A-Z0-9_]*/g, (match) => {
         const idx = patWildcards.indexOf(match);
         return idx !== -1 ? `$${idx + 1}` : match;

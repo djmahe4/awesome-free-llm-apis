@@ -18,7 +18,7 @@ export function resolveConfigDir(startDir: string): string {
   const normStart = path.resolve(startDir);
   const homeDir = path.resolve(os.homedir());
   const folderNames = ['.free-llms-mcp', '.free-llm-mcp'];
-  
+
   const searchDirs: string[] = [];
 
   // 1. Search up to 2 immediate parent directories (excluding os.homedir())

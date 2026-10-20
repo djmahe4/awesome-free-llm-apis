@@ -15,7 +15,7 @@ describe('Agentic Precision Tests', () => {
         console.log('Prompt contains LangGraph:', hasLangGraph);
         console.log('Prompt contains Phoenix:', hasPhoenix);
 
-        // With the new thresholds (minEntryScore = 2.5 for sections < 12 score), 
+        // With the new thresholds (minEntryScore = 2.5 for sections < 12 score),
         // these should be filtered out unless "graph" or "phoenix" was in the context.
         expect(hasLangGraph).toBe(false);
         expect(hasPhoenix).toBe(false);

@@ -9,10 +9,10 @@ import { LLMExecutor } from '../utils/LLMExecutor.js';
 
 /**
  * Pipeline Instance Registry (Hardened)
- * 
+ *
  * Provides lazy-loaded singleton instances of all middlewares to be shared across the application.
- * This pattern prevents ReferenceErrors during module initialization caused by circular 
- * dependencies between middlewares (e.g., AgenticMiddleware needing sharedRouter 
+ * This pattern prevents ReferenceErrors during module initialization caused by circular
+ * dependencies between middlewares (e.g., AgenticMiddleware needing sharedRouter
  * and sharedRouter needing the full pipeline definition).
  */
 
@@ -131,6 +131,3 @@ export function resetAllInstances(): void {
 }
 
 // Deprecated direct exports have been removed. All callers should use getter functions.
-
-
-

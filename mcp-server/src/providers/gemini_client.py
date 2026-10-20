@@ -16,7 +16,7 @@ async def main():
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY not found in environment")
-        
+
         model_id = input_data.get("model")
         messages = input_data.get("messages", [])
         stream = input_data.get("stream", False)
@@ -91,7 +91,7 @@ async def main():
                 contents=sdk_messages,
                 config=config
             )
-            
+
             # Prepare standard response
             result = {
                 "type": "response",

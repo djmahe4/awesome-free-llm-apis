@@ -10,7 +10,7 @@ An enterprise-grade [MCP (Model Context Protocol)](https://modelcontextprotocol.
 graph TD
     A[Agent / Client<br/>Claude · Cursor · Windsurf] -->|MCP Tool Call| B[MCP Server<br/>src/mcp/index.ts]
     B --> C[PipelineExecutor]
-    
+
     subgraph "Core Tools & Subsystems"
         J[MemoryManager<br/>src/memory/]
         K[CodingAgentsHandler<br/>src/tools/coding-agents.ts]
@@ -37,7 +37,7 @@ graph TD
     C --> Q
     C --> BR
     C --> AH
-    
+
     D -->|Cache Hit| A
     S1 --> H --> G --> F --> E --> D --> A
     M1 --> L1 --> K1 --> J1 --> I --> H --> G --> F --> E --> D --> A

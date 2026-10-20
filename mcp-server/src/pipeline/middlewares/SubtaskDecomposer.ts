@@ -1,3 +1,4 @@
+import os from 'os';
 import { LRUCache } from 'lru-cache';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -67,8 +68,26 @@ const queues = new LRUCache<string, QueueState>({
 });
 
 export class SubtaskDecomposer {
-    static async getOrLoadState(sessionId: string): Promise<QueueState> {
+    static async getOrLoadState(sessionId: string, projectDir?: string): Promise<QueueState> {
         let state = queues.get(sessionId);
+        if (!state) {
+            const candidatePaths = [
+                ...(projectDir ? [path.join(projectDir, STATE_FILE)] : []),
+                path.join(PROJECTS_DIR, sessionId, STATE_FILE),
+                path.join(process.cwd(), '.free-llm-mcp', 'projects', sessionId, STATE_FILE),
+                path.join(os.homedir(), '.free-llm-mcp', 'projects', sessionId, STATE_FILE),
+            ];
+            for (const sp of candidatePaths) {
+                try {
+                    const data = await fs.readFile(sp, 'utf-8');
+                    state = JSON.parse(data);
+                    if (state) {
+                        queues.set(sessionId, state);
+                        break;
+                    }
+                } catch {}
+            }
+        }
         if (!state) {
             try {
                 const statePath = path.join(PROJECTS_DIR, sessionId, STATE_FILE);

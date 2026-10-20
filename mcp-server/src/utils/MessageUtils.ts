@@ -16,10 +16,10 @@ export function getMessageContent(input: any): string {
     }
 
     if (content === undefined || content === null) return '';
-    
+
     // 1. String content
     if (typeof content === 'string') return content;
-    
+
     // 2. Array-based multi-modal content
     if (Array.isArray(content)) {
         return content
@@ -65,7 +65,7 @@ function extractTextField(obj: any): string {
  */
 export function prependToMessageContent(msg: any, prefix: string): void {
     if (!prefix) return;
-    
+
     if (typeof msg.content === 'string') {
         msg.content = (prefix + (msg.content || '')).trim();
     } else if (Array.isArray(msg.content)) {
@@ -92,7 +92,7 @@ export function prependToMessageContent(msg: any, prefix: string): void {
  */
 export function appendToMessageContent(msg: any, suffix: string): void {
     if (!suffix) return;
-    
+
     if (typeof msg.content === 'string') {
         msg.content = ((msg.content || '') + suffix).trim();
     } else if (Array.isArray(msg.content)) {
@@ -123,7 +123,7 @@ export function isUserConfused(text?: string): boolean {
     // Check if it contains file paths
     const hasFiles = /file:\/\/\/\S+/i.test(trimmed);
     const cleanOfFiles = trimmed.replace(/file:\/\/\/\S+/g, '').trim();
-    
+
     if (hasFiles && cleanOfFiles.length < 15) {
         return true;
     }

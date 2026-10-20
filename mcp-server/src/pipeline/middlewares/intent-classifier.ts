@@ -19,16 +19,16 @@ export function classifyIntent(prompt: string): IntentType {
 
     const questionWords = /\b(what|how|why|where|when|does|is|are|can|could|who|explain)\b/i;
     const taskVerbs = /\b(add|create|fix|write|refactor|update|delete|implement|run|test|compile|check|make|modify|setup)\b/i;
-    
+
     // Clarified confusion markers - removed 'problem' and 'issue' to avoid false positives
     const confusionMarkers = /\b(not sure|dont know|don't know|do not know|something seems|seems off|feels weird|feels odd|weird|off)\b/i;
-    
+
     // Codebase indicators: file extensions, symbols in backticks, or non-stop-word capital symbols
     const fileExtensionPattern = /\b[a-zA-Z0-9_\-\/\\.]+\.(ts|js|py|go|rs|md|json|sh|ps1|yml|yaml)\b/;
     const backtickSymbolPattern = /`[a-zA-Z0-9_\-\/\\.+]+`/;
-    
+
     const capitals = prompt.match(/\b[A-Z][a-zA-Z0-9]{3,}\b/g) || [];
-    const hasCapitalSymbol = capitals.some(word => 
+    const hasCapitalSymbol = capitals.some(word =>
         !/^(what|how|why|where|when|does|is|are|can|could|who|explain|add|create|fix|write|refactor|update|delete|implement|run|test|compile|check|make|modify|setup|the|this|that|here|there|some|them|they|have|has|had|does|do|did|not|sure|something|seems|feels|odd|weird|maybe|know|please|would|should|could)$/i.test(word)
     );
 

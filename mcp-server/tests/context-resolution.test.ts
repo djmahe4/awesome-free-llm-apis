@@ -42,7 +42,7 @@ describe('Context Resolution (v1.0.4) Unit Tests', () => {
         it('should inline a file reference if it is within workspace boundaries', async () => {
             const targetFile = path.join(mockWsRoot, 'plan.md');
             const targetContent = '# My Plan\nContent here.';
-            
+
             (fs.pathExists as any).mockResolvedValue(true);
             (fs.stat as any).mockResolvedValue({ isFile: () => true });
             (fs.readFile as any).mockResolvedValue(targetContent);
@@ -72,7 +72,7 @@ describe('Context Resolution (v1.0.4) Unit Tests', () => {
 
         it('should reject files outside allowed boundaries (Security Gate)', async () => {
             const outsideFile = '/etc/passwd';
-            
+
             const input = `file://${outsideFile}`;
             const result = await resolveFileRefs(input, [], mockWsRoot);
 
@@ -116,9 +116,9 @@ describe('Context Resolution (v1.0.4) Unit Tests', () => {
         it('should reject resolution if workspaceRoot is an empty string (Security Hardening)', async () => {
             const input = 'file:///C:/etc/passwd';
             const wsRoot = ''; // Potentially dangerous if resolved to process.cwd()
-            
+
             const result = await resolveFileRefs(input, [], wsRoot);
-            
+
             expect(result).toBe(input);
             expect(fs.readFile).not.toHaveBeenCalled();
         });

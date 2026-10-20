@@ -6,7 +6,7 @@ const KEYWORDS   = ['daily-nday-pipeline.import.json', 'splitInBatches', 'typeVe
 async function main() {
     console.log('=== WorkspaceWalker Candidate Audit ===');
     const candidates = await WorkspaceWalker.findRelevantFiles(WORKSPACE, KEYWORDS, 10, false, false);
-    
+
     if (candidates.length === 0) {
         console.error('⚠️  No candidates found.');
     } else {

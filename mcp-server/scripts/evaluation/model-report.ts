@@ -9,7 +9,7 @@ import { TaskType } from '../../src/pipeline/middleware.js';
 import { MODEL_METADATA, isImageGenModel, isAudioModel, isVideoModel } from '../../src/config/models.js';
 
 /**
- * Diagnostic tool to identify missing model-provider mappings 
+ * Diagnostic tool to identify missing model-provider mappings
  * and visualize provider-to-task coverage.
  */
 async function run() {
@@ -32,7 +32,7 @@ async function run() {
 
     const routerModels = new Set<string>();
     const modelToTasks: Record<string, string[]> = {};
-    
+
     for (const [task, models] of Object.entries(routerMap)) {
         models.forEach(m => {
             routerModels.add(m);
@@ -84,7 +84,7 @@ async function run() {
 
     console.error('\n--- 3. PROVIDER -> TASK COVERAGE MATRIX ---');
     console.error('(X = Provider has at least one model assigned to this task)\n');
-    
+
     const taskTypes = Object.values(TaskType);
     const header = 'Provider'.padEnd(20) + ' | ' + taskTypes.map(t => t.substring(0, 4).toUpperCase()).join(' | ');
     console.error(header);
@@ -102,7 +102,7 @@ async function run() {
 
     console.error('\n--- 4. MODEL TASK ASSIGNMENTS ---');
     console.error('(List of all registered models and the tasks they are assigned to)\n');
-    
+
     [...registeredModels].sort().forEach(m => {
         const tasks: string[] = [];
         for (const [task, models] of Object.entries(routerMap)) {
@@ -125,7 +125,7 @@ async function run() {
 
     console.error('\n--- 5. REASONING / PLANNING MODELS ---');
     console.error('(Models specialized for reasoning/thinking and their providers)\n');
-    
+
     Object.keys(MODEL_METADATA)
         .filter(mId => (MODEL_METADATA as any)[mId]?.isReasoning)
         .sort()

@@ -424,7 +424,7 @@ describe('CodingAgentsHandler — issue fixes', () => {
 
   it('logs warning when ts-morph AST structural rewrite fails', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    
+
     // Pass a directory as filePath, which ts-morph Project.createSourceFile will fail on
     // Or we mock ts-morph's Project to throw
     vi.doMock('ts-morph', () => {
@@ -437,7 +437,7 @@ describe('CodingAgentsHandler — issue fixes', () => {
 
     // Re-import the module under test since ts-morph is dynamically imported
     const { CodingAgentsHandler: MockedHandler } = await import('../src/tools/coding-agents.js?mock=' + Date.now());
-    
+
     await MockedHandler({
       goal: 'rename sum to add',
       workspaceRoot: ws,
@@ -646,5 +646,3 @@ describe('CodingAgentsHandler — DAG tasks.md, docs filtering & AST validation'
     listSpy.mockRestore();
   }, 30000);
 });
-
-

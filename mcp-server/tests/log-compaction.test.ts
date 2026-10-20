@@ -63,10 +63,10 @@ describe('Context Gatherer Log & JSON Compaction Tests', () => {
         expect(results.some(r => r.includes('FILE: test-metrics.json'))).toBe(true);
         expect(results.some(r => r.includes('SystemConfiguration'))).toBe(true);
         expect(results.some(r => r.includes('serverPort'))).toBe(true);
-        
+
         // Verify middle collapse
         expect(results.some(r => r.includes('similar lines collapsed via semantic matching'))).toBe(true);
-        
+
         // Verify tail matches (metrics verification summary)
         expect(results.some(r => r.includes('Metrics verification completed'))).toBe(true);
     });

@@ -21,12 +21,12 @@ describe('WikiMemory (Phase B)', () => {
     it('write() creates page with frontmatter and confidence=0.5', async () => {
         const wiki = new WikiMemory(wsHash, testDir);
         const page = await wiki.write('JWT Authentication', 'JWT tokens validated in middleware.', ['auth'], ['Express Middleware']);
-        
+
         expect(page.title).toBe('JWT Authentication');
         expect(page.confidence).toBe(0.5);
         expect(page.tags).toContain('auth');
         expect(page.links).toContain('Express Middleware');
-        
+
         // Check file exists
         const safeName = 'jwt_authentication.md';
         const filePath = path.join(testDir, wsHash, safeName);
@@ -39,7 +39,7 @@ describe('WikiMemory (Phase B)', () => {
 
     it('write() same page again increments confidence by 0.15', async () => {
         const wiki = new WikiMemory(wsHash, testDir);
-        
+
         // First write (confidence 0.5)
         let page = await wiki.write('JWT Authentication', 'JWT tokens validated in middleware.');
         expect(page.confidence).toBe(0.5);
@@ -57,12 +57,12 @@ describe('WikiMemory (Phase B)', () => {
 
     it('search() returns pages sorted by persona weight × confidence', async () => {
         const wiki = new WikiMemory(wsHash, testDir);
-        
+
         // Write a page with coder-relevant tag and lower confidence (e.g. 0.6)
         // Wait, write() twice gives confidence 0.65
         await wiki.write('Express Middleware', 'Express middleware description', ['ts', 'code']);
         await wiki.write('Express Middleware', 'Express middleware description', ['ts', 'code']);
-        
+
         // Write a page with researcher-relevant tag but high confidence (e.g. 0.8)
         // Wait, write() three times gives 0.80
         await wiki.write('Research Study', 'Researcher content description', ['study']);
@@ -94,7 +94,7 @@ describe('WikiMemory (Phase B)', () => {
 
     it('resolveLink() returns 3-line summary, not full page', async () => {
         const wiki = new WikiMemory(wsHash, testDir);
-        
+
         const longContent = `## Summary
 This is line 1 of the summary.
 This is line 2 of the summary.
@@ -106,7 +106,7 @@ Some other details.`;
 
         const summary = await wiki.resolveLink('JWT Authentication');
         const lines = summary.split('\n').filter(Boolean);
-        
+
         expect(lines.length).toBe(3);
         expect(lines[0]).toContain('line 1');
         expect(lines[2]).toContain('line 3');
@@ -114,14 +114,14 @@ Some other details.`;
 
     it('recordADR() triggers when confidence >= 0.85 and decision pattern detected', async () => {
         const wiki = new WikiMemory(wsHash, testDir);
-        
+
         // We write 4 times to get confidence >= 0.95 (0.5 -> 0.65 -> 0.80 -> 0.95)
         // Body contains decision pattern "decided to use PostgreSQL"
         let page;
         for (let i = 0; i < 4; i++) {
             page = await wiki.write(
-                'Database Choice', 
-                'We decided to use PostgreSQL for this project because of JSONB support.', 
+                'Database Choice',
+                'We decided to use PostgreSQL for this project because of JSONB support.',
                 ['db']
             );
         }
@@ -139,9 +139,9 @@ Some other details.`;
     it('markStale() sets confidence=0.0 and adds Stale header', async () => {
         const wiki = new WikiMemory(wsHash, testDir);
         await wiki.write('JWT Authentication', 'JWT validation middleware');
-        
+
         await wiki.markStale('JWT Authentication', 'File auth.ts deleted');
-        
+
         const page = await wiki.read('JWT Authentication');
         expect(page?.confidence).toBe(0.0);
         expect(page?.content).toContain('Stale — Source Deleted');
@@ -151,7 +151,7 @@ Some other details.`;
     it('write() rejects pages exceeding maxPageSizeBytes', async () => {
         const wiki = new WikiMemory(wsHash, testDir);
         const hugeContent = 'a'.repeat(wikiConfig.maxPageSizeBytes + 100);
-        
+
         await expect(
             wiki.write('Huge Page', hugeContent)
         ).rejects.toThrow(/exceeds/i);
@@ -208,10 +208,10 @@ Some other details.`;
 
     it('wiki capped at 500 pages, oldest low-confidence page evicted', async () => {
         const wiki = new WikiMemory(wsHash, testDir);
-        
+
         // First page is low confidence (0.5)
         await wiki.write('Old Page', 'Old content');
-        
+
         // Write 500 more pages of high confidence (say, 0.8, created by writing twice)
         for (let i = 1; i <= 500; i++) {
             await wiki.write(`Page ${i}`, `Content ${i}`);

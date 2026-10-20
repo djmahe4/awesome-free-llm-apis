@@ -47,7 +47,7 @@ describe('Firebase & Telemetry Encryption Phase 0 Tests', () => {
             // Tamper the encrypted data
             encryptedObj.data = encryptedObj.data.substring(0, encryptedObj.data.length - 2) + '00';
             const tamperedStr = JSON.stringify(encryptedObj);
-            
+
             await expect(decrypt(tamperedStr)).rejects.toThrow();
         });
     });
@@ -102,7 +102,7 @@ describe('Firebase & Telemetry Encryption Phase 0 Tests', () => {
                 providers: {},
                 lastSyncTime: now - 3600 * 1000 // 1 hour ago (within 24 hours)
             };
-            
+
             // If we check if sync is needed:
             const hoursSinceSync = (now - (state.lastSyncTime || 0)) / (1000 * 60 * 60);
             expect(hoursSinceSync).toBeLessThan(24);
@@ -124,7 +124,7 @@ describe('Firebase & Telemetry Encryption Phase 0 Tests', () => {
 
         it('error dump redacts API keys from prompt queue', async () => {
             const dirtyPrompt = 'Here is my key: AIzaSyAHrCor4QVkG0VBn407ESRbDG5ig_WlbqY and other stuff';
-            
+
             // Basic sanitization rule/helper
             const sanitize = (text: string) => {
                 return text.replace(/AIzaSy[A-Za-z0-9_\-]{33}/g, '[REDACTED_API_KEY]');

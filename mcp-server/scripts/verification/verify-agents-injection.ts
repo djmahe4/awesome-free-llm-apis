@@ -23,11 +23,11 @@ async function verifyAgentsInjection() {
 
     const hasGuidelines = gitPrompt.includes('TARGET PROJECT GUIDELINES');
     const hasGitWorkflow = gitPrompt.includes('Git Workflow') || gitPrompt.includes('git');
-    
+
     console.log(`  - Has TARGET PROJECT GUIDELINES block: ${hasGuidelines} (expected: true)`);
     console.log(`  - Has Git Workflow section matched: ${hasGitWorkflow} (expected: true)`);
     console.log(`  - Char length: ${gitPrompt.length}`);
-    
+
     // Extract and print the guidelines block
     const gitMatch = gitPrompt.match(/## 📋 TARGET PROJECT GUIDELINES\n<target_project_guidelines_isolation_gate>([\s\S]*?)<\/target_project_guidelines_isolation_gate>/);
     if (gitMatch) {
@@ -47,7 +47,7 @@ async function verifyAgentsInjection() {
 
     const hasTestGuidelines = testPrompt.includes('TARGET PROJECT GUIDELINES');
     const hasTestingSection = testPrompt.includes('Testing') || testPrompt.includes('test') || testPrompt.includes('pytest');
-    
+
     console.log(`  - Has TARGET PROJECT GUIDELINES block: ${hasTestGuidelines} (expected: true)`);
     console.log(`  - Has Testing section matched: ${hasTestingSection} (expected: true)`);
     console.log(`  - Char length: ${testPrompt.length}`);

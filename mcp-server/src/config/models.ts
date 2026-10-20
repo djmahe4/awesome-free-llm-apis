@@ -17,6 +17,7 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'liquid/lfm2.5-1.2b-thinking:free': { capability: 0.88, contextWindow: 32000, isReasoning: true },
     'microsoft/phi-4': { capability: 0.86, contextWindow: 128000, isReasoning: true },
     'empero-ai/Qwythos-9B-Claude-Mythos-5-1M': { capability: 0.95, contextWindow: 128000 },
+    'medismera/Qwen3.8-27B-OBLITERATED-Mythos-Class-Agentic': { capability: 0.95, contextWindow: 128000 },
 
     // S-Tier Generalists
     'gemma-4-31b-it': { capability: 0.95, contextWindow: 300000, isVision: true, isReasoning: true },
@@ -111,7 +112,6 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'meta-llama/llama-4-maverick:free': { capability: 0.88, contextWindow: 128000, isVision: true },
     'meta-llama/llama-4-scout:free': { capability: 0.88, contextWindow: 128000, isVision: true },
     'meta-llama/Llama-3.1-8B-Instruct': { capability: 0.75, contextWindow: 128000 },
-    'meta/llama-3.1-8b-instruct': { capability: 0.75, contextWindow: 128000 },
     'google/gemma-3-4b-it': { capability: 0.72, contextWindow: 130000, isVision: true },
     'arcee-ai/trinity-large-preview:free': { capability: 0.85, contextWindow: 128000 },
     'arcee-ai/trinity-mini:free': { capability: 0.75, contextWindow: 128000 },
@@ -129,7 +129,6 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'zai-org/GLM-4.7-Flash': { capability: 0.85, contextWindow: 128000 },
     'deepseek-ai/DeepSeek-V4-Pro': { capability: 0.98, contextWindow: 128000, isReasoning: true },
     'deepseek-ai/DeepSeek-V4.1-Flash': { capability: 0.90, contextWindow: 128000, isCoder: true, isReasoning: true },
-    'deepseek-ai/deepseek-v4.1-flash': { capability: 0.90, contextWindow: 128000, isCoder: true, isReasoning: true },
     'deepseek-ai/DeepSeek-V4-Flash': { capability: 0.88, contextWindow: 128000 },
     'deepseek-ai/DeepSeek-V3.2': { capability: 0.94, contextWindow: 128000 },
     'Qwen/Qwen3.5-397B-A17B': { capability: 0.96, contextWindow: 128000, isVision: true },
@@ -287,4 +286,3 @@ export function isVisionSupported(modelId: string, capabilities?: string[]): boo
 export function isVisionOnlyModel(modelId: string): boolean {
     return !!MODEL_METADATA[modelId]?.isVisionOnly;
 }
-

@@ -354,7 +354,7 @@ preferred persona: coder
 > --- 5. REASONING / PLANNING PROVIDERS ---
 > (Critical for agentic subtask decomposition, ordered by active model count)
 >
-> nvidia       (14 models)
+> nvidia       (13 models)
 > pollinations (9 models)
 > openrouter   (8 models)
 > kilocode     (6 models)

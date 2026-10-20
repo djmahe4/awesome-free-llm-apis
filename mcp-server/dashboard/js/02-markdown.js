@@ -21,7 +21,7 @@ async function renderMarkdown(text) {
       }
       return `<pre class="code-block" style="font-size:.78rem;">${esc(definition)}</pre>`;
     }
-    
+
     // Extract normal code blocks first to prevent inline replacements inside them
     let codeBlocks = [];
     let noCode = part.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
@@ -96,11 +96,11 @@ function renderQuantumFeedback(fb) {
   const isDrifted = fb.isDrifted;
   const driftColor = isDrifted ? 'var(--accent-red)' : 'var(--accent-green)';
   const driftText = isDrifted ? '⚠ Drift Detected' : '✓ Coherent';
-  
+
   let html = `<div class="card" style="margin-top:16px; border-color: ${driftColor};">`;
   html += `<div class="card-header" style="color:${driftColor}">⚛ Quantum Telemetry: ${driftText} (Score: ${fb.driftScore})</div>`;
   html += `<div class="card-body" style="font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">`;
-  
+
   if (fb.decoheredQubits && fb.decoheredQubits.length) {
     html += `<div><strong>Decohered Qubits:</strong> ${fb.decoheredQubits.map(q => `<span class="badge badge-amber">q${esc(q)}</span>`).join(' ')}</div>`;
   }
@@ -143,11 +143,11 @@ function renderCodingAgentsCard(res) {
   }
   html += `</div>`;
   html += `<div class="card-body" style="font-size:0.8rem; display:flex; flex-direction:column; gap:12px;">`;
-  
+
   if (res.anchors && res.anchors.length) {
     html += `<div><strong>Anchors:</strong> ${res.anchors.map(a => `<code style="background:rgba(255,255,255,.08);padding:2px 4px;border-radius:3px;margin-right:4px;">${esc(typeof a === 'string' ? a : (a.hashTag || a.filePath || JSON.stringify(a)))}</code>`).join('')}</div>`;
   }
-  
+
   if (res.diagnostics && res.diagnostics.length) {
     html += `<div><strong>Diagnostics:</strong><ul style="margin-left:0; padding-left:0; list-style:none; display:flex; flex-direction:column; gap:4px; margin-top:4px;">`;
     html += res.diagnostics.map(d => {
@@ -160,7 +160,7 @@ function renderCodingAgentsCard(res) {
     }).join('');
     html += `</ul></div>`;
   }
-  
+
   if (res.patchPlan && res.patchPlan.length) {
     html += `<div><strong>File Patches:</strong><div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">`;
     html += res.patchPlan.map(p => {
@@ -184,7 +184,7 @@ function renderCodingAgentsCard(res) {
     }).join('');
     html += `</div></div>`;
   }
-  
+
   html += `</div></div>`;
   return html;
 }
@@ -247,7 +247,6 @@ async function renderResponse(data) {
       extras += renderLocalPatchCard(result);
     }
   }
-  
+
   return baseHtml + extras;
 }
-

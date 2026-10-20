@@ -100,7 +100,7 @@ def _is_hidden(zf: zipfile.ZipFile, part: str) -> bool:
     try:
         with zf.open(part) as f:
             for _, root in ElementTree.iterparse(f, events=("start",)):
-                return root.get("show") in ("0", "false")  
+                return root.get("show") in ("0", "false")
     except (KeyError, ElementTree.ParseError):
         return False
     return False

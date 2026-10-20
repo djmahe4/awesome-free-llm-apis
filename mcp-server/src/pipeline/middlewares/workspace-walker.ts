@@ -1,8 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
 import ignore from 'ignore';
-import { 
-    EXCLUDE_DIRS, 
+import {
+    EXCLUDE_DIRS,
     EXCLUDE_EXTENSIONS,
     MAX_DEPTH,
     MAX_FILES_SCANNED
@@ -114,7 +114,7 @@ export class WorkspaceWalker {
                     relativePathToGitignore += '/';
                 }
 
-                // Skip if ignored (unless overridden or the entry name exactly matches a keyword — 
+                // Skip if ignored (unless overridden or the entry name exactly matches a keyword —
                 // explicit filename pinning always bypasses gitignore)
                 const isPinned = keywords.some(kw => entry.name.toLowerCase() === kw.toLowerCase());
                 if (!overrideIgnores && !isPinned && ig.ignores(relativePathToGitignore)) {
@@ -146,14 +146,14 @@ export class WorkspaceWalker {
 
                     state.filesScanned++;
                     const ext = path.extname(entry.name).toLowerCase();
-                    
+
                     // Simple extension filter (still useful to prune binaries quickly)
                     const isPinnedExt = keywords.some(kw => entry.name.toLowerCase() === kw.toLowerCase());
                     if (!isPinnedExt && EXCLUDE_EXTENSIONS.includes(ext)) continue;
 
                     const relativePath = path.relative(root, fullPath);
                     let score = this.calculateScore(entry.name, relativePath, ext, keywords, isTheoretical);
-                    
+
                     const isManifestDep = overrideIgnores && relativePath.includes('node_modules') && manifestDependencies && manifestDependencies.length > 0 && (() => {
                         const subPath = relativePath.replace(/\\/g, '/').split('/node_modules/').pop() || '';
                         const segments = subPath.split('/');
@@ -162,7 +162,7 @@ export class WorkspaceWalker {
                             return manifestDependencies.includes(clean);
                         });
                     })();
-                    
+
                     const isVulnerableDep = overrideIgnores && relativePath.includes('node_modules') && vulnerableDeps && vulnerableDeps.length > 0 && (() => {
                         const subPath = relativePath.replace(/\\/g, '/').split('/node_modules/').pop() || '';
                         const segments = subPath.split('/');
@@ -177,7 +177,7 @@ export class WorkspaceWalker {
                     } else if (isManifestDep) {
                         score += 30;
                     }
-                    
+
                     const isPriority = priorityFiles?.some(pf => {
                         const resolvedPf = path.isAbsolute(pf) ? pf : path.resolve(root, pf);
                         return resolvedPf === fullPath;
@@ -206,7 +206,7 @@ export class WorkspaceWalker {
         if (keywords.length > 0) {
             for (const kw of keywords) {
                 const kwLower = kw.toLowerCase();
-                
+
                 // Filename matches
                 if (nameLower.includes(kwLower)) {
                     keywordMatched = true;
@@ -223,12 +223,12 @@ export class WorkspaceWalker {
                         if (normalizedName === normalizedKw) score += 30;
                     }
                 }
-                
+
                 // Path matches (excluding filename itself to avoid double counting)
                 const dirPart = path.dirname(pathLower);
                 if (dirPart.includes(kwLower)) {
                     keywordMatched = true;
-                    
+
                     // Check if any directory segment exactly matches the keyword
                     const segments = dirPart.split(/[/\\]/);
                     const exactDirMatch = segments.some(seg => seg === kwLower);
@@ -249,7 +249,7 @@ export class WorkspaceWalker {
         // 2. Extension boost (prioritize source code or docs based on mode)
         const codeExtensions = ['.ts', '.js', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.h'];
         const docExtensions = ['.md', '.txt', '.pdf', '.json', '.yaml', '.yml'];
-        
+
         if (isTheoretical) {
             if (docExtensions.includes(ext)) score += 20;
             if (codeExtensions.includes(ext)) score += 5;
@@ -263,7 +263,7 @@ export class WorkspaceWalker {
         if (pathLower.includes('core') || pathLower.includes('src') || pathLower.includes('app') || pathLower.includes('lib')) {
             score += 20;
         }
-        
+
         // Penalize noise directories
         if (pathLower.includes('backup') || pathLower.includes('archive') || pathLower.includes('temp') || pathLower.includes('tmp') || pathLower.includes('mock')) {
             score -= 50;

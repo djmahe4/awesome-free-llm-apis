@@ -42,8 +42,8 @@ export function decomposeGoal(goal: string): { tasks: QueueTask[]; resolvedConte
     return SubtaskDecomposer.decomposeGoal(goal);
 }
 
-async function getOrLoadState(sessionId: string): Promise<QueueState> {
-    return SubtaskDecomposer.getOrLoadState(sessionId);
+async function getOrLoadState(sessionId: string, projectDir?: string): Promise<QueueState> {
+    return SubtaskDecomposer.getOrLoadState(sessionId, projectDir);
 }
 
 async function persistState(sessionId: string, projectDir: string): Promise<void> {
@@ -164,8 +164,18 @@ async function appendKnowledge(projectDir: string, sessionId: string, content: s
  * of where the MCP server process is launched from.
  */
 async function ensureProjectFiles(sessionId: string, workspaceRoot?: string): Promise<string> {
-    const projectDir = path.join(PROJECTS_DIR, sessionId);
-    await fs.mkdir(projectDir, { recursive: true });
+    let projectDir = path.join(PROJECTS_DIR, sessionId);
+    try {
+        await fs.mkdir(projectDir, { recursive: true });
+    } catch (err: any) {
+        if (err.code === 'EPERM' || err.code === 'EACCES') {
+            const fallbackBase = path.join(process.cwd(), '.free-llm-mcp', 'projects');
+            projectDir = path.join(fallbackBase, sessionId);
+            await fs.mkdir(projectDir, { recursive: true });
+        } else {
+            throw err;
+        }
+    }
 
     // Stamp workspace_root into the knowledge file on first creation.
     // This prevents cross-project knowledge bleed when a user reuses a custom sessionId.
@@ -236,18 +246,18 @@ function calculateCosineSimilarity(str1: string, str2: string): number {
     const words1 = getWords(str1);
     const words2 = getWords(str2);
     if (words1.length === 0 || words2.length === 0) return 0;
-    
+
     const freqs1 = new Map<string, number>();
     const freqs2 = new Map<string, number>();
     const allWords = new Set<string>();
-    
+
     words1.forEach(w => { freqs1.set(w, (freqs1.get(w) || 0) + 1); allWords.add(w); });
     words2.forEach(w => { freqs2.set(w, (freqs2.get(w) || 0) + 1); allWords.add(w); });
-    
+
     let dotProduct = 0;
     let magnitude1 = 0;
     let magnitude2 = 0;
-    
+
     allWords.forEach(w => {
         const val1 = freqs1.get(w) || 0;
         const val2 = freqs2.get(w) || 0;
@@ -255,7 +265,7 @@ function calculateCosineSimilarity(str1: string, str2: string): number {
         magnitude1 += val1 * val1;
         magnitude2 += val2 * val2;
     });
-    
+
     const mag1 = Math.sqrt(magnitude1);
     const mag2 = Math.sqrt(magnitude2);
     if (mag1 === 0 || mag2 === 0) return 0;
@@ -462,7 +472,7 @@ function addToQueues(
 
         const entry = JSON.stringify({ ts: new Date().toISOString(), type, ...cleanData });
         commsQueue.push(entry);
-        
+
         if (commsQueue.length > 10) {
             commsQueue.shift();
         }
@@ -489,14 +499,14 @@ export function compressSemantically(text: string, maxChars: number): string {
     const lines = text.split('\n');
     const resultLines: string[] = [];
     let currentLength = 0;
-    
+
     let inCodeBlock = false;
     let codeBlockLines: string[] = [];
     let codeBlockLang = '';
 
     const flushCodeBlock = () => {
         if (codeBlockLines.length === 0) return;
-        
+
         let blockText = codeBlockLines.join('\n');
         const maxBlockChars = Math.max(200, Math.floor(maxChars * 0.4)); // Allocate up to 40% of budget for a single block
 
@@ -518,7 +528,7 @@ export function compressSemantically(text: string, maxChars: number): string {
         const formattedBlock = `\`\`\`${codeBlockLang}\n${blockText}\n\`\`\``;
         resultLines.push(formattedBlock);
         currentLength += formattedBlock.length;
-        
+
         codeBlockLines = [];
         inCodeBlock = false;
     };
@@ -543,9 +553,9 @@ export function compressSemantically(text: string, maxChars: number): string {
         // Filter out conversational filler in non-code lines
         const lowerLine = line.toLowerCase();
         if (
-            lowerLine.startsWith('here is') || 
-            lowerLine.startsWith('sure,') || 
-            lowerLine.startsWith('i will') || 
+            lowerLine.startsWith('here is') ||
+            lowerLine.startsWith('sure,') ||
+            lowerLine.startsWith('i will') ||
             lowerLine.startsWith('let\'s') ||
             lowerLine.includes('hope this helps')
         ) {
@@ -554,9 +564,9 @@ export function compressSemantically(text: string, maxChars: number): string {
 
         // Keep headers, lists, and key statements
         if (
-            line.startsWith('#') || 
-            line.trim().startsWith('-') || 
-            line.trim().startsWith('*') || 
+            line.startsWith('#') ||
+            line.trim().startsWith('-') ||
+            line.trim().startsWith('*') ||
             line.trim().match(/^\d+\./) ||
             line.includes('**') ||
             line.includes('error') ||
@@ -589,19 +599,19 @@ export function compressSemantically(text: string, maxChars: number): string {
 
 export function summarizeResponse(text: string): string {
     if (text.length <= 2000) return text;
-    
+
     const tag = '\n\n<!-- TF-IDF SUMMARY -->';
     const limit = 2000 - tag.length;
-    
+
     // First 500 characters preserved verbatim as recency/head anchor
     const head = text.slice(0, 500);
     const remainder = text.slice(500);
-    
+
     // Quantum compress remainder to fit budget
     const targetRemainderChars = Math.max(100, limit - head.length);
     const estRatio = Math.max(0.1, Math.min(0.9, targetRemainderChars / remainder.length));
     let compressedRemainder = quantumCompress(remainder, estRatio);
-    
+
     let combined = `${head}${compressedRemainder}${tag}`;
     if (combined.length > 2000) {
         // If still over 2000 chars, trim compressedRemainder preserving head
@@ -862,7 +872,7 @@ async function executeSingleSubtask(
         const filePattern = /(?:[a-zA-Z]:)?[\\/][a-zA-Z0-9_\-\/\\\.]+\.[a-zA-Z0-9]+|\b([a-zA-Z0-9_\-\/\\\.]+\.[a-zA-Z0-9]+)\b/;
         const isSimpleRead = readKeywords.test(currentTask) && filePattern.test(currentTask);
         let handledProactively = false;
-        
+
         if (isSimpleRead) {
             const match = currentTask.match(filePattern);
             if (match) {
@@ -888,7 +898,7 @@ async function executeSingleSubtask(
                         addToQueues(commsQueue, promptQueue, 'proactive_context_injected', {
                             file: filename
                         });
-                        
+
                         context.response = {
                             choices: [{
                                 message: {
@@ -1020,7 +1030,7 @@ async function executeSingleSubtask(
                     const recoveryMsg = `[RECOVERY-CONTEXT] We noticed a potential hallucination or missing info. Here is the gathered recovery context:\n\n${recoveryAnswers.join('\n')}`;
                     context.request.messages.push({ role: 'user', content: recoveryMsg });
                     subtaskContexts.push(`🛡️ **Recovery Context**: Injected ${recoveryAnswers.length} lines to resolve hallucination.\n${excerptForLog(recoveryAnswers.join('\n'))}`);
-                    
+
                     let recoveryResponse;
                     try {
                         recoveryResponse = await executor.prompt(context.request.messages, context.request.model, {
@@ -1034,7 +1044,7 @@ async function executeSingleSubtask(
                         return false;
                     }
                     context.response = recoveryResponse;
-                    
+
                     if (recoveryResponse) {
                         const recoveryResponseContent = getResponseContent(context);
                         if (recoveryResponseContent) {
@@ -1249,7 +1259,7 @@ export class AgenticMiddleware implements Middleware {
 
         const workspaceRoot: string | undefined = context.workspaceRoot || (context.request as any)?.workspace_root;
         const projectDir = await ensureProjectFiles(sessionId, workspaceRoot);
-        const q = await getOrLoadState(sessionId);
+        const q = await getOrLoadState(sessionId, projectDir);
 
         // A background continuation from a previous budget-yielded call may still be running
         // for this session. Rather than starting a second concurrent run over the same
@@ -1501,20 +1511,20 @@ export class AgenticMiddleware implements Middleware {
                     ...nonSystemMsgs.slice(-KEEP_LAST_N_MESSAGES)
                 ];
             }
-            
+
             const plan = await buildExecutionPlan(q.nowQueue, workspaceRoot || process.cwd());
             const phase1Tasks = plan.phase1;
             if (phase1Tasks.length === 0) break;
 
             const isParallel = phase1Tasks.every(t => t.lane === 'parallel');
-            
+
             const registry = ProviderRegistry.getInstance();
             const activeProvider = registry.getAvailableProviders().find(p => p.id !== 'siliconflow') || registry.getProvider('gemini');
             const isLowThroughput = activeProvider && activeProvider.rateLimits?.rpm && activeProvider.rateLimits.rpm <= 15;
 
             if (isParallel && !isLowThroughput && phase1Tasks.length > 1) {
                 console.error(`[AgenticMiddleware] Parallel execution: running ${phase1Tasks.length} tasks concurrently`);
-                
+
                 // Pre-parallel indexing run: index once so children are fully up-to-date and lock-free.
                 // This single call is what prevents concurrent-indexing races between subtasks below —
                 // subtasks execute via executeSingleSubtask() directly and never re-enter the pipeline
@@ -1537,16 +1547,16 @@ export class AgenticMiddleware implements Middleware {
                             messages: context.request.messages.map(m => ({ ...m }))
                         }
                     } as any;
-                    
+
                     await executeSingleSubtask(t.task, t.id, (q.resolvedContext ??= {}), clonedCtx, sessionId, projectDir, workspaceRoot, subtaskIteration, q.history || [], this.executor, [], commsQueue, promptQueue);
                     return clonedCtx;
                 });
 
                 const results = await Promise.allSettled(parallelPromises);
-                
+
                 const outputs: string[] = [];
                 const errors: string[] = [];
-                
+
                 results.forEach((res, idx) => {
                     const taskName = phase1Tasks[idx].task;
                     if (res.status === 'fulfilled') {
@@ -1619,7 +1629,7 @@ export class AgenticMiddleware implements Middleware {
 
                 // 1. Detect if subtask requires a terminal run
                 const requiresTerminal = (/\b(?:run|execute|spawn|start|launch|npm|pip|cargo|go run|sh|bash|cmd|terminal|command)\b/i.test(currentTask) || /\bpython\s+/i.test(currentTask)) && !currentTask.includes('(User input:');
-                
+
                 if (requiresTerminal && !q.paused) {
                     if (!q.promptId) {
                         q.promptId = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -1629,7 +1639,7 @@ export class AgenticMiddleware implements Middleware {
                     await persistState(sessionId, projectDir);
 
                     console.error(`[AgenticMiddleware] Pausing pipeline for terminal run. promptId=${q.promptId}`);
-                    
+
                     context.response = {
                         id: `pause-${Date.now()}`,
                         object: 'chat.completion',
@@ -1676,7 +1686,7 @@ export class AgenticMiddleware implements Middleware {
                 await logChatTurn(sessionId, { role: 'subtask_start', tool: 'Agentic Subtask', content: currentTask });
 
                 const success = await executeSingleSubtask(currentTask, currentTaskNode.id, (q.resolvedContext ??= {}), context, sessionId, projectDir, workspaceRoot, subtaskIteration, q.history || [], this.executor, subtaskContexts, commsQueue, promptQueue);
-                
+
                 const responseContent = getResponseContent(context);
 
                 if (!success || !responseContent) {
@@ -1737,7 +1747,7 @@ export class AgenticMiddleware implements Middleware {
                     if (dataDemand.triggered) {
                         globalRetrospectionCount++;
                         console.error(`[AgenticMiddleware] Data-demand triggered (${globalRetrospectionCount}/2): ${dataDemand.cues.join(', ')}`);
-                        
+
                         const gathered = await ContextGatherer.gatherContext({
                             workspaceRoot: workspaceRoot || process.cwd(),
                             query: dataDemand.cues.join(' ')

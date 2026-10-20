@@ -2,12 +2,12 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { toMarkdownResponse } from '../utils/markdown.js';
 import { PipelineExecutor, TaskType, type PipelineContext } from '../pipeline/middleware.js';
-import { 
-  getStructuralMarkdownMiddleware, 
-  getSharedResponseCache, 
-  getWorkspaceContextMiddleware, 
-  getAgenticMiddleware, 
-  getSharedImageRouter 
+import {
+  getStructuralMarkdownMiddleware,
+  getSharedResponseCache,
+  getWorkspaceContextMiddleware,
+  getAgenticMiddleware,
+  getSharedImageRouter
 } from '../pipeline/instances.js';
 
 import { renderPdfPage } from '../utils/PdfRenderer.js';
@@ -122,7 +122,7 @@ export async function visionTool(input: VisionToolInput): Promise<VisionToolResu
   };
 
   const finalContext = await pipeline.execute(context);
-  
+
   if (!finalContext.response) {
     throw new Error('Pipeline completed but no response was generated.');
   }

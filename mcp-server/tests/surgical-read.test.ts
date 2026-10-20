@@ -44,11 +44,11 @@ ${'word '.repeat(1000)}
 
         // Read with maxTokens = 50
         const result = await surgicalRead(testFile, 'section one', { maxTokens: 50 });
-        
+
         // Count tokens using the same utility or a simple count check
         const { countStringTokens } = await import('../src/utils/tiktoken.js');
         const tokens = countStringTokens(result);
-        
+
         expect(tokens).toBeLessThanOrEqual(60); // Allow slight buffer for header formatting
     });
 

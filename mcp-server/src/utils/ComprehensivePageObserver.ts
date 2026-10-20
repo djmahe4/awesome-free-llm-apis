@@ -1,6 +1,6 @@
 /**
  * ComprehensivePageObserver & ElementalBehaviorEngine
- * 
+ *
  * Provides 100% page depth scrolling, interactive button classification,
  * stored data tracking (localStorage/sessionStorage/cookies), and background
  * network request delta observation.
@@ -39,12 +39,12 @@ export class ComprehensivePageObserver {
 
             // 2. Classify Interactive Buttons & Elements
             const interactiveNodes = Array.from(document.querySelectorAll('button, a[href], div[role="button"], div[role="tab"], div[class*="Filter"], div[class*="tab"]'));
-            
+
             const classifiedButtons = interactiveNodes.slice(0, 30).map((el, idx) => {
                 const text = (el.innerText || el.textContent || '').trim().replace(/\\n/g, ' ').slice(0, 40);
                 const role = el.getAttribute('role') || el.tagName.toLowerCase();
                 const className = (el.className || '').toString();
-                
+
                 let category = 'NAVIGATION_LINK';
                 if (role === 'tab' || className.includes('tab') || className.includes('Filter')) {
                     category = 'TAB_FILTER';

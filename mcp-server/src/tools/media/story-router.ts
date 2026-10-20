@@ -19,7 +19,7 @@ export async function generateStoryScript(input: StoryInput): Promise<string> {
     ? `\nCharacters:\n${input.characters.map((c) => `- ${c.name}: ${c.description}${c.motivation ? ` (Goal: ${c.motivation})` : ''}`).join('\n')}`
     : '';
 
-  const systemPrompt = `You are a master cinematic storyteller and roleplaying dramatist. 
+  const systemPrompt = `You are a master cinematic storyteller and roleplaying dramatist.
 Produce an immersive narrative scene with vivid dialogue, character tension, emotional subtext, and clear visual cues.
 Format with [SCENE], [VISUAL], [ACTION], and character lines.`;
 

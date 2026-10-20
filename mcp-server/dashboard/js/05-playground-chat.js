@@ -179,7 +179,7 @@ async function loadChatHistory(sid) {
     const r = await fetch(`/api/chat-log/${encodeURIComponent(sid)}`);
     if (!r.ok) return [];
     const { log, workspace } = await r.json();
-    
+
     if (workspace && workspace !== 'unknown') {
       pgWorkspace.value = workspace;
       localStorage.setItem('mcp-workspace', workspace);
@@ -188,7 +188,7 @@ async function loadChatHistory(sid) {
       localStorage.setItem('mcp-workspace', '');
     }
     updateWorkspaceUI();
-    
+
     return Array.isArray(log) ? log : [];
   } catch { return []; }
 }
@@ -272,7 +272,7 @@ function addSubtaskStartBubble(taskText, ts) {
 
 function addSubtaskResponseBubble(taskText, outputText, ts, contextInjected, model, provider) {
   chatEmpty.style.display = 'none';
-  
+
   // Remove any active spinner for this subtask to keep the flow clean
   const activeSpinners = chatLog.querySelectorAll('.subtask-active-spinner');
   activeSpinners.forEach(s => {
@@ -286,10 +286,10 @@ function addSubtaskResponseBubble(taskText, outputText, ts, contextInjected, mod
   div.className = 'chat-msg assistant subtask-collapse-card';
   div.style.margin = '8px 0 8px 16px';
   div.style.opacity = '0.85';
-  
+
   const uniqueId = 'subtask-' + Math.random().toString(36).substring(2, 9);
   const outputContainerId = 'subtask-out-' + Math.random().toString(36).substring(2, 9);
-  
+
   const contextHtml = Array.isArray(contextInjected) && contextInjected.length > 0
     ? `<details style="margin-top:8px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.04);">
         <summary style="cursor:pointer; font-size:.7rem; color:var(--accent-cyan); display:flex; align-items:center; gap:4px; outline:none; list-style:none;">
@@ -306,7 +306,7 @@ function addSubtaskResponseBubble(taskText, outputText, ts, contextInjected, mod
       <details id="${uniqueId}">
         <summary style="cursor:pointer; font-size:.78rem; font-weight:600; color:var(--text-secondary); display:flex; justify-content:space-between; align-items:center; outline:none; list-style:none;">
           <span style="display:flex; align-items:center; gap:6px;">
-            <span style="color:var(--accent-green)">✓</span> 
+            <span style="color:var(--accent-green)">✓</span>
             <span>Subtask: ${esc(taskText.replace('Completed: ', ''))}</span>
           </span>
           <span style="font-size:.7rem; color:var(--text-muted);">click to view output</span>
@@ -331,7 +331,7 @@ function addSubtaskResponseBubble(taskText, outputText, ts, contextInjected, mod
       }
     }).catch(() => {});
   }
-  
+
   chatLog.appendChild(div);
   scrollChatBottom();
   return div;
@@ -556,9 +556,9 @@ async function refreshConvList(filter = '') {
     const { sessions } = await r.json();
     const list = Array.isArray(sessions) ? sessions : [];
     const q = filter.toLowerCase().trim();
-    const filtered = q ? list.filter(s => 
-      s.id.toLowerCase().includes(q) || 
-      (s.name && s.name.toLowerCase().includes(q)) || 
+    const filtered = q ? list.filter(s =>
+      s.id.toLowerCase().includes(q) ||
+      (s.name && s.name.toLowerCase().includes(q)) ||
       (s.workspace && s.workspace.toLowerCase().includes(q))
     ) : list;
     renderConvList(filtered);
@@ -586,14 +586,14 @@ function renderConvList(sessions) {
     el.addEventListener('click', async () => {
       const sid = el.dataset.sid;
       if (sid === activeSessionId) return;
-      
+
       activeSessionId = sid;
       if (sid === '__no_ws__') {
         pgWorkspace.value = '';
         localStorage.setItem('mcp-workspace', '');
         updateWorkspaceUI();
       }
-      
+
       chatHistory = await loadChatHistory(sid);
       rebuildChatLog();
       refreshConvList(convSearch?.value || '');
@@ -845,4 +845,3 @@ pgClearBtn.addEventListener('click', async () => {
 
 // Render initial form
 renderToolForm(activeTool);
-

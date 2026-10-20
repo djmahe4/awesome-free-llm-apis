@@ -221,7 +221,7 @@ See [[run_pipeline.py]] for invocation.
       graph.addNode('server.ts', 'code');
       graph.addNode('agentic-middleware.ts', 'code');
       graph.addEdge('server.ts', 'agentic-middleware.ts', 'imports');
-      
+
       const serialized = graph.serialize();
       await fs.writeFile(path.join(mcpDir, 'repo_graph.json'), JSON.stringify(serialized));
 
@@ -230,7 +230,7 @@ See [[run_pipeline.py]] for invocation.
       const mockGrepSearch = async (query: string) => {
         grepCallsCount++;
         // Simulate grep/rg delay
-        await new Promise(r => setTimeout(r, 50)); 
+        await new Promise(r => setTimeout(r, 50));
         return ['mock file contents'];
       };
 
@@ -240,7 +240,7 @@ See [[run_pipeline.py]] for invocation.
         // Load graph from cache
         const graphData = JSON.parse(await fs.readFile(path.join(mcpDir, 'repo_graph.json'), 'utf8'));
         const loadedGraph = RepositoryGraph.deserialize(tempDir, graphData);
-        
+
         // Find matching node
         const matchingNode = loadedGraph.findNodeByKeyword(query);
         if (matchingNode) {

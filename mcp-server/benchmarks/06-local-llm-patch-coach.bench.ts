@@ -136,7 +136,7 @@ async function generateLogReport() {
   for (const target of MULTI_LANG_TARGETS) {
     const coach = new CoachTool();
     const frame = coach.explainInstruction(target.instruction);
-    
+
     const mcpInputPayload = {
       tool: 'coach_tool',
       action: 'patch',

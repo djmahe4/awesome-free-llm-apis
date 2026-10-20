@@ -46,7 +46,7 @@ vi.mock('../src/cache/workspace.js', () => ({
 }));
 
 describe('Agentic Intelligence Audit', () => {
-    
+
     describe('LLMExecutor Model Prioritization', () => {
         let executor: LLMExecutor;
         let mockProvider: any;
@@ -54,7 +54,7 @@ describe('Agentic Intelligence Audit', () => {
         beforeEach(() => {
             vi.clearAllMocks();
             executor = new LLMExecutor();
-            
+
             mockProvider = {
                 id: 'gemini',
                 models: [

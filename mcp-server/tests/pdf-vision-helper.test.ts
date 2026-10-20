@@ -95,7 +95,7 @@ describe('PdfVisionHelper', () => {
       await describePageVision(dummyPath, 'test.pdf', 5, [
         { image_path: dummyPath, rect: [0, 0, 200, 200], width_pt: 200, height_pt: 200 }
       ], 'page text', 'existing wiki content');
-      
+
       const tokensTried = chatSpy.mock.calls.map(c => c[0].max_tokens);
       expect(tokensTried).toContain(300);
       expect(tokensTried).toContain(100);

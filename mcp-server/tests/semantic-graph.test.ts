@@ -12,7 +12,7 @@ describe('Semantic Graph & Vector Profiling', () => {
     beforeEach(async () => {
         rmSync(testWs, { recursive: true, force: true });
         mkdirSync(testWs, { recursive: true });
-        
+
         const scanner = new (await import('../src/cache/workspace.js')).WorkspaceScanner(testWs);
         const wsHash = await scanner.getWorkspaceHash(testWs);
         await memoryManager.clear(wsHash);
@@ -178,14 +178,14 @@ fun initializeApp() {}
 
     it('should score semantic nodes correctly in RepositoryGraph', () => {
         const graph = new RepositoryGraph(testWs);
-        
+
         graph.addNode('src/planner.ts', 'code', { language: 'typescript', size: 100, commands: [] });
         graph.addNode('src/executor.ts', 'code', { language: 'typescript', size: 100, commands: [] });
         graph.addNode('docs/architecture.md', 'doc', { size: 100 });
 
         // Connect them (planner imports executor)
         graph.addEdge('src/planner.ts', 'src/executor.ts', 'imports');
-        
+
         // Match planner keyword without docs
         const scoredNoDocs = semanticScore('planner query', graph, false);
         expect(scoredNoDocs.length).toBe(1);

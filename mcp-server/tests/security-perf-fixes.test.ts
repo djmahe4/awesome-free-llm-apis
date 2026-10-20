@@ -95,11 +95,11 @@ describe('TDD Fixes Verification Suite', () => {
         it('should reject file URLs outside the workspace root', async () => {
             const { ImageRouterMiddleware } = await import('../src/pipeline/middlewares/ImageRouterMiddleware.js');
             const middleware = new ImageRouterMiddleware();
-            
+
             // Mock a context with workspaceRoot
             const workspaceRoot = path.resolve('c:/authorized/workspace');
             const outsideUrl = 'file:///c:/windows/system32/cmd.exe';
-            
+
             // Call the private/internal helper using bracket notation or a test runner
             const base64 = await (middleware as any).convertFileUrlToBase64(outsideUrl, workspaceRoot);
             expect(base64).toBeNull();
@@ -108,13 +108,13 @@ describe('TDD Fixes Verification Suite', () => {
         it('should allow file URLs inside the workspace root', async () => {
             const { ImageRouterMiddleware } = await import('../src/pipeline/middlewares/ImageRouterMiddleware.js');
             const middleware = new ImageRouterMiddleware();
-            
+
             const tempDir = path.resolve('./temp_test_image_dir');
             await fs.mkdir(tempDir, { recursive: true });
             const testImgPath = path.join(tempDir, 'test.png');
             // Write a dummy PNG
             await fs.writeFile(testImgPath, Buffer.from('dummy image content'));
-            
+
             try {
                 const imgUrl = `file:///${testImgPath.replace(/\\/g, '/')}`;
                 const base64 = await (middleware as any).convertFileUrlToBase64(imgUrl, tempDir);

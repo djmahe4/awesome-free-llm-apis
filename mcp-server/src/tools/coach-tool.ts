@@ -97,7 +97,7 @@ export class CoachTool {
    */
   public compressHistory(): void {
     let totalTokens = this.calculateHistoryTokens();
-    
+
     while (totalTokens > CoachTool.MAX_TOKEN_BUDGET && this.history.length > 1) {
       // Prune oldest entry explanation/details first, or shift oldest item off
       const oldest = this.history[0];

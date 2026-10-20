@@ -40,4 +40,12 @@ export class PollinationsProvider extends BaseProvider {
     { id: 'community/MarcosFRG/flux-1-schnell', name: 'FLUX.1 Schnell (Community Micro-Cost)' }
   ];
 
+  override async *chatStream(request: any): AsyncIterable<string> {
+    const res = await this.chat(request);
+    const content = res.choices?.[0]?.message?.content || '';
+    if (content) {
+      if (request.onChunk) request.onChunk(content);
+      yield content;
+    }
+  }
 }

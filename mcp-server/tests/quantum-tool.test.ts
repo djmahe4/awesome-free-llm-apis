@@ -203,14 +203,14 @@ describe('quantum_tool', () => {
     (useFreeLLM as any).mockResolvedValueOnce({
       choices: [{ message: { content: 'a b' } }],
     });
-    
+
     const result = await quantumTool({
       action: 'analyze',
       sessionId,
       query: 'valid query text',
       autoCollapseOnDrift: true,
     });
-    
+
     expect(result.success).toBe(true);
     expect(result.feedback.isDrifted).toBe(true);
     expect(result.feedback.driftScore).toBe(0);
@@ -244,7 +244,7 @@ describe('quantum_tool', () => {
     const state = stateResult.state;
     expect(state.branches[0].confidence).toBeGreaterThan(0.7);
     expect(state.branches[0].evidence.some((e: string) => e.includes('[WARNING]'))).toBe(true);
-    
+
     expect(state.branches[1].confidence).toBe(0);
     expect(state.branches[1].evidence.some((e: string) => e.includes('[DECOHERENCE]'))).toBe(true);
   });
@@ -258,7 +258,7 @@ describe('quantum_tool', () => {
       sessionId,
       query: 'test deduplication'
     });
-    
+
     const gates = result.feedback.recommendedGates;
     const q0Gates = gates.filter((g: any) => g.qubit === 0);
     expect(q0Gates.length).toBe(1);
@@ -267,11 +267,11 @@ describe('quantum_tool', () => {
 
   it('bounds state arrays to prevent unbounded growth', async () => {
     await quantumTool({ action: 'setup', sessionId, numBranches: 1 });
-    
+
     for (let i = 0; i < 55; i++) {
       await quantumTool({ action: 'modify', sessionId, gates: [{ qubit: 0, column: 0, gate: 'H' }] });
     }
-    
+
     const stateResult = await quantumTool({ action: 'get_state', sessionId });
     expect(stateResult.state.gates.length).toBe(55);
     expect(stateResult.state.circuitModifications.length).toBe(50);

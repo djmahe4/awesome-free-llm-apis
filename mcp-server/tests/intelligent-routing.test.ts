@@ -23,24 +23,24 @@ class MockProvider extends BaseProvider {
         this.name = `Mock ${id}`;
         this.envVar = `${id.toUpperCase()}_API_KEY`;
         // Ensure models have a default context window if not provided
-        this.models = models.map(m => ({ 
-            contextWindow: 8192, 
-            ...m 
+        this.models = models.map(m => ({
+            contextWindow: 8192,
+            ...m
         }));
         this.rateLimits = { rpm };
         vi.stubEnv(this.envVar, 'mock-key-is-sufficiently-long');
     }
-    
+
     // Support new token tracking metrics
-    override getUsageStats() { 
-        return { 
-            requestCountMinute: 0, 
-            requestCountDay: 0, 
-            tokenCountMinute: 0, 
-            tokenCountDay: 0 
-        }; 
+    override getUsageStats() {
+        return {
+            requestCountMinute: 0,
+            requestCountDay: 0,
+            tokenCountMinute: 0,
+            tokenCountDay: 0
+        };
     }
-    
+
     override isAvailable(): boolean {
         return true;
     }
@@ -94,7 +94,7 @@ describe('Intelligent Router - Dynamic Scoring & Filtering', () => {
 
         // Prov1: Low tokens (Worse)
         const prov1 = new MockProvider('prov1', [{ id: 'm1', name: 'M1' }], 100);
-        
+
         // Prov2: High tokens (Better)
         const prov2 = new MockProvider('prov2', [{ id: 'm1', name: 'M1' }], 100);
 
