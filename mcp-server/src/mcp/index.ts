@@ -624,7 +624,10 @@ export async function createMCPServer(): Promise<Server> {
         inputSchema: {
           type: 'object' as const,
           properties: {
-            action: { type: 'string', enum: ['list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'osint', 'osint_status', 'run_action'], description: 'Cyber tool action' },
+            action: { type: 'string', enum: ['list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'osint', 'osint_status', 'run_action', 'resolve_tool'], description: 'Cyber tool action. resolve_tool: ask about any registry tool in free text (prompt); grounded in GitHub/Docker Hub/apt evidence, asks follow-ups, carries the chosen tool+source forward per sessionId, and answers not_found/could_not_verify honestly' },
+            prompt: { type: 'string', description: 'For resolve_tool: free-text question, e.g. "what does hexstrike-ai depend on?"' },
+            source: { type: 'string', enum: ['github', 'apt', 'docker'], description: 'For resolve_tool: source to ground against (remembered per sessionId)' },
+            choice: { type: 'string', description: 'For resolve_tool: your answer to the pending follow-up question (tool name, source, or option label)' },
             toolName: { type: 'string', description: 'Security tool name (e.g. sqlmap, nmap, ffuf)' },
             githubUrl: { type: 'string', description: 'GitHub repository URL for tool registration' },
             sessionId: { type: 'string', description: 'Session/CTF-challenge id; keys the progress record and decision graph for learn/coach/save_graph/load_graph, and (with target) the background search run for osint/osint_status' },

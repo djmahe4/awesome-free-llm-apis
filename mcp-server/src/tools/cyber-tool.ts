@@ -19,8 +19,15 @@ const osintResultsCache = new Map<string, any[]>();
 export interface CyberToolInput {
     action: 'list_tools' | 'get_tool' | 'register_tool' | 'wiki_lookup'
     | 'learn' | 'coach' | 'save_graph' | 'load_graph' | 'tool_memory' | 'osint' | 'osint_status'
-    | 'run_action';
+    | 'run_action' | 'resolve_tool';
     toolName?: string;
+    // resolve_tool
+    /** Free-text question; the tool is matched against ALL registry tools by name/alias. */
+    prompt?: string;
+    /** Where to look; carried forward within a sessionId once chosen. */
+    source?: 'github' | 'apt' | 'docker';
+    /** Reply to the pending follow-up question (tool name, source, or option label). */
+    choice?: string;
     githubUrl?: string;
     url?: string;
     urlType?: 'github' | 'apt' | 'docker' | 'generic';
@@ -994,6 +1001,9 @@ export async function cyberTool(input: CyberToolInput) {
                     searchResults: osintResultsCache.get(osintRunKey) || [],
                 };
             }
+        } else if (action === 'resolve_tool') {
+            const { resolveTool } = await import('./resolve-tool.js');
+            result = await resolveTool({ prompt: input.prompt, toolName: input.toolName, source: input.source, choice: input.choice, sessionId });
         } else if (action === 'run_action') {
             // T8 — dispatch through a project-declared bridge subprocess
             // (general mechanism: any project's `.free-llm-mcp/bridges.json`,

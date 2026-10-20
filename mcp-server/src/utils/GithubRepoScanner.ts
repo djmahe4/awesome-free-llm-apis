@@ -15,14 +15,14 @@ export const TOOL_PATTERN_MAP: Record<string, RegExp[]> = {};
  */
 export function initializeToolPatterns(registry: Record<string, { githubUrl: string; category: string }>): void {
   CYBER_TOOL_NAMES.length = 0;
-  
+
   // Add tools with real GitHub URLs from registry (not test-tool entries)
   for (const [name, entry] of Object.entries(registry)) {
     const lowerName = name.toLowerCase();
     // Skip test-tool entries and add real tools
     if (!lowerName.startsWith('test-tool') && lowerName in registry) {
       CYBER_TOOL_NAMES.push(lowerName);
-      
+
       // Create regex patterns for this tool based on common CLI patterns
       const patterns: RegExp[] = [];
       switch (lowerName) {
@@ -78,7 +78,7 @@ export class GithubRepoScanner {
    * Retrieves raw content of a file from a GitHub repository.
    */
     static async fetchRawContent(owner: string, repo: string, path: string, branch?: string): Promise<string> {
-    const branches = branch ? [branch] : ['main', 'master'];
+    const branches = branch ? [branch] : ['main', 'master', 'HEAD'];
     for (const b of branches) {
       const url = 'https://raw.githubusercontent.com/' + owner + '/' + repo + '/' + b + '/' + path;
       const controller = new AbortController();
@@ -105,7 +105,7 @@ export class GithubRepoScanner {
     const importRegex = /import\s+.*?\s+from\s+['"]([^'"]+)['"]/g;
     const importSimpleRegex = /import\s+['"]([^'"]+)['"]/g;
     const requireRegex = /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-    
+
     let match;
     while ((match = importRegex.exec(code)) !== null) {
       if (!dependencies.includes(match[1])) dependencies.push(match[1]);
@@ -217,7 +217,7 @@ export class GithubRepoScanner {
    * Retrieves the repository tree using the Github API.
    */
   static async fetchRepoTree(owner: string, repo: string, branch?: string): Promise<{ path: string; type: string }[]> {
-    const branches = branch ? [branch] : ['main', 'master'];
+    const branches = branch ? [branch] : ['main', 'master', 'HEAD'];
     for (const br of branches) {
       const url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${br}?recursive=true`;
       try {
@@ -244,21 +244,21 @@ export class GithubRepoScanner {
    * Also detects which cyber tools are referenced in the code using dynamic patterns.
    */
   static async scanRepoCode(
-    owner: string, 
-    repo: string, 
-    branch?: string, 
+    owner: string,
+    repo: string,
+    branch?: string,
     commands?: string[],
     promptText?: string,
     registry: Record<string, { githubUrl: string; category: string }> = {}
-  ): Promise<{ 
-    treeSummary: string[]; 
-    scannedFiles: { path: string; dependencies: string[]; functions: string[]; flow: string[]; flags: string[]; invokedTools: string[] }[] 
+  ): Promise<{
+    treeSummary: string[];
+    scannedFiles: { path: string; dependencies: string[]; functions: string[]; flow: string[]; flags: string[]; invokedTools: string[] }[]
   }> {
     const tree = await this.fetchRepoTree(owner, repo, branch);
     const treeSummary = tree.filter(t => t.type === 'blob').map(t => t.path);
-    
+
     let matchedFiles: string[] = [];
-    
+
     // Check if any file in the tree is mentioned fully/partially in the prompt
     if (promptText) {
       const promptLower = promptText.toLowerCase();
@@ -272,23 +272,23 @@ export class GithubRepoScanner {
         matchedFiles = mentioned.slice(0, 3).map(m => m.path);
       }
     }
-    
+
     // Fallback to heuristic scoring if no file is explicitly mentioned
     if (matchedFiles.length === 0) {
       const candidates: { path: string; score: number }[] = [];
       const sourceExtensions = ['.ts', '.py', '.js', '.go', '.rs', '.c', '.cpp', '.cc', '.h', '.hpp', '.lua', '.sh', '.rb', '.php', '.cs'];
-      
+
       for (const entry of tree) {
         if (entry.type !== 'blob') continue;
         const extIndex = entry.path.lastIndexOf('.');
         if (extIndex === -1) continue;
         const ext = entry.path.slice(extIndex);
         if (!sourceExtensions.includes(ext.toLowerCase())) continue;
-        
+
         const pathLower = entry.path.toLowerCase();
         const basename = entry.path.substring(entry.path.lastIndexOf('/') + 1).toLowerCase();
         let score = 0;
-        
+
         if (commands) {
           for (const cmd of commands) {
             const cmdLower = cmd.toLowerCase();
@@ -301,19 +301,19 @@ export class GithubRepoScanner {
             }
           }
         }
-        
+
         if (basename.includes('main') || basename.includes('cli') || basename.includes('option') || basename.includes('args')) {
           score += 50;
         }
-        
+
         if (pathLower.includes('src/') || pathLower.includes('tools/') || pathLower.includes('utils/')) {
           score += 10;
         }
-        
+
         if (ext === '.h' || ext === '.hpp') {
           score -= 5;
         }
-        
+
         // Dynamic tool pattern matching
         if (Object.keys(TOOL_PATTERN_MAP).length > 0 && commands) {
           for (const cmd of commands) {
@@ -329,14 +329,14 @@ export class GithubRepoScanner {
             }
           }
         }
-        
+
         candidates.push({ path: entry.path, score });
       }
-      
+
       candidates.sort((a, b) => b.score - a.score);
       matchedFiles = candidates.slice(0, 3).map(c => c.path);
     }
-    
+
     // ... rest of the method
     const scannedFiles: { path: string; dependencies: string[]; functions: string[]; flow: string[]; flags: string[]; invokedTools: string[] }[] = [];
     for (const filePath of matchedFiles) {
@@ -374,7 +374,7 @@ export class GithubRepoScanner {
         // Continue
       }
     }
-    
+
     return {
       treeSummary: treeSummary.slice(0, 50),
       scannedFiles

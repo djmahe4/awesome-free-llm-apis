@@ -8,6 +8,7 @@
   },
   "main": "dist/server.js",
   "scripts": {
+    "smoke:registry": "tsx scripts/smoke/smoke_registry_sources.ts",
     "build": "tsc -p tsconfig.build.json",
     "postbuild": "node scripts/utils/postbuild.js",
     "start": "node dist/server.js",
