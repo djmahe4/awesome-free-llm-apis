@@ -27,6 +27,7 @@
 | `tool_memory` | `memoryOp` (`read` \| `write`) | `note`, `toolName` | Reads or appends persistent tactical notes associated with a tool or engagement. |
 | `osint` | `target` | `osintType` (`domain` \| `ip` \| `username` \| `all`), `autoSearch`, `allowPrivateIps`, `sessionId` | Performs passive DNS/infrastructure recon (A, AAAA, MX, TXT, NS), suggests tailored search dorks, optionally kicks off automated multi-step search recon via SearchProvider fallback (see below), and persists reports to the cyber wiki with built-in SSRF guards. |
 | `osint_status` | `target` | `sessionId` | Polls a background `autoSearch` run started by a prior `osint` call — see below. |
+| `resolve_tool` | `prompt` or `toolName` | `source` (`github`/`docker`/`apt`), `choice`, `sessionId` | Free-text questions about any registry tool, grounded in GitHub (deps, skills, MCP files, usage), Docker Hub and apt/Kali evidence. Asks follow-ups, carries tool + source forward per `sessionId`; returns `status: answer`, `question`, `not_found`, or `could_not_verify` (never "not found" for a network/rate-limit failure). |
 | `run_action` | `actionName`, `target`, `authorization` | `bridge`, `workspaceRoot`, `args` | Dispatches an action through a project-declared bridge subprocess (see below). |
 
 ---
@@ -130,4 +131,3 @@ If `sessionId` is omitted it defaults to a shared session (`cyber_tools_session`
   }
 }
 ```
-

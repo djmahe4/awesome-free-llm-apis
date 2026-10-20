@@ -41,7 +41,6 @@
       </div>
     </div>
   </header>
-
   <!-- ─── Main Content ─────────────────────────────────────────── -->
   <main class="container">
 
@@ -278,7 +277,7 @@
 
         <!-- LEFT: Tool Selector + Param Panel -->
         <div class="pg-sidebar" id="pg-sidebar">
-          
+
           <!-- Conversations Card -->
           <details class="card" open style="margin-bottom:12px; display:flex; flex-direction:column; max-height:280px; min-height:160px;">
             <summary class="card-header" style="padding:10px 16px; flex-shrink:0; display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
@@ -671,7 +670,7 @@
     ══════════════════════════════════════════════════════════ -->
     <section class="tab-panel" id="panel-profile" role="tabpanel" aria-labelledby="tab-profile">
       <div style="display:grid;grid-template-columns: 1fr 1fr; gap:20px;margin-bottom:28px;" class="profile-grid">
-        
+
         <!-- Profile Config -->
         <div class="card">
           <div class="card-header"><span class="card-title">👤 Telemetry Profile Settings</span></div>
@@ -713,7 +712,6 @@
     <style>
       .profile-grid { @media (max-width:768px) { grid-template-columns: 1fr !important; } }
     </style>
-
     <!-- ══════════════════════════════════════════════════════════
          TAB 5: QUICK START
     ══════════════════════════════════════════════════════════ -->
@@ -856,12 +854,15 @@
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>osint | list_tools | get_tool | register_tool | wiki_lookup | learn | coach | save_graph | load_graph | tool_memory</td></tr>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>osint | list_tools | get_tool | register_tool | wiki_lookup | learn | coach | save_graph | load_graph | tool_memory | resolve_tool</td></tr>
               <tr><td><code>target</code></td><td>string</td><td>for osint</td><td>Target domain, host, or username (e.g. <code>example.com</code>, <code>johndoe</code>)</td></tr>
               <tr><td><code>osintType</code></td><td>enum</td><td></td><td><code>all</code> | <code>domain</code> | <code>ip</code> | <code>username</code></td></tr>
               <tr><td><code>autoSearch</code></td><td>boolean</td><td></td><td>Execute top generated reconnaissance dorks via SearchProvider fallback</td></tr>
               <tr><td><code>allowPrivateIps</code></td><td>boolean</td><td></td><td>Bypass SSRF link-local & private subnet filter for internal testing</td></tr>
               <tr><td><code>toolName</code></td><td>string</td><td>for get_tool/register</td><td>Security binary name (e.g. <code>sqlmap</code>, <code>nmap</code>)</td></tr>
+              <tr><td><code>prompt</code></td><td>string</td><td>for resolve_tool</td><td>Free-text question about any registry tool (matched by name or repo alias); answers are grounded in GitHub, Docker Hub and apt evidence</td></tr>
+              <tr><td><code>source</code></td><td>enum</td><td></td><td><code>github</code> | <code>docker</code> | <code>apt</code> &mdash; remembered per <code>sessionId</code></td></tr>
+              <tr><td><code>choice</code></td><td>string</td><td></td><td>Your reply to resolve_tool's pending follow-up question (tool, source or option)</td></tr>
               <tr><td><code>observation</code></td><td>string</td><td>for coach</td><td>Observed port/service outputs to analyze</td></tr>
               <tr><td><code>graphNode</code></td><td>object</td><td>for save_graph</td><td>Decision node ({ id, type, label, from })</td></tr>
               <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Engagement identifier</td></tr>
@@ -1063,7 +1064,6 @@
       </div>
 
     </section>
-
     <!-- ══════════════════════════════════════════════════════════
          TAB 8: KEYWORD & PROMPT STEERING
     ══════════════════════════════════════════════════════════ -->
@@ -1162,7 +1162,6 @@
         </div>
       </div>
     </section>
-
     <!-- ══════════════════════════════════════════════════════════
          TAB: DAG MEMORY GRAPH
     ══════════════════════════════════════════════════════════ -->
@@ -1306,7 +1305,7 @@
 
       <!-- Live Scope Leases & Reasoning Collision Streams -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
-        
+
         <!-- Active File Leases Card -->
         <div class="card">
           <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
@@ -1707,7 +1706,6 @@
       </div>
     </div>
   </div>
-
   <footer class="footer">
     Free LLM APIs MCP Dashboard &bull; Built with ❤️ &bull;
     <a href="https://github.com/djmahe4/awesome-free-llm-apis" target="_blank" rel="noopener">GitHub Repo</a>

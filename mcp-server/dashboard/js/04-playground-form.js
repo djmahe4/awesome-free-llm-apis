@@ -84,7 +84,10 @@ const TOOLS = [
     id: 'cyber_tool', label: 'cyber_tool', icon: '🛡️',
     tag: 'Cyber Security',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['osint', 'osint_status', 'list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory'] },
+      { id: 'action', label: 'Action', type: 'select', options: ['osint', 'osint_status', 'list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'resolve_tool'] },
+      { id: 'prompt', label: 'Question (for resolve_tool)', type: 'textarea', placeholder: 'what libraries does hexstrike-ai depend on?' },
+      { id: 'source', label: 'Source (for resolve_tool)', type: 'select', options: ['', 'github', 'docker', 'apt'] },
+      { id: 'choice', label: 'Reply to follow-up (for resolve_tool)', type: 'text', placeholder: 'docker' },
       { id: 'target', label: 'Target (for osint)', type: 'text', placeholder: 'example.com or johndoe' },
       { id: 'osintType', label: 'OSINT Type (for osint)', type: 'select', options: ['all', 'domain', 'ip', 'username'] },
       { id: 'autoSearch', label: 'Auto Search Recon Dorks (osint)', type: 'select', options: ['false', 'true'] },
@@ -631,4 +634,3 @@ function collectParams(tool) {
 
   return params;
 }
-
