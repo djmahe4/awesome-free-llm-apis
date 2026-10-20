@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "@gradio/client": "^2.7.0",
-    "@huggingface/transformers": "^3.8.1",
+    "@huggingface/transformers": "^4.3.1",
     "@modelcontextprotocol/sdk": "^1.24.3",
     "@noble/post-quantum": "^0.7.1",
     "@types/multer": "^2.2.0",
@@ -60,7 +60,8 @@
     "esbuild": "^0.28.1",
     "fast-uri": "^3.1.6",
     "qs": "^6.16.0",
-    "yaml": "^2.8.3"
+    "yaml": "^2.8.3",
+    "@grpc/grpc-js": "^1.14.6"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.45.3",

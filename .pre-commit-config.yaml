@@ -2,6 +2,8 @@
 # Automates code quality gates: tsc compiler check, tool/docs/skills/dashboard sync,
 # and quickstart/playground schema validation.
 
+exclude: ^(node_modules|dist|\.agents|mcp-server/node_modules|mcp-server/dist)/|\.min\.js$|\.map$
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
@@ -22,5 +24,5 @@ repos:
         name: TypeScript Compiler & Tool/Docs/Dashboard Sync
         entry: npm run verify:precommit --prefix mcp-server
         language: system
-        files: ^mcp-server/(src|dashboard|docs|scripts)/.*
+        always_run: true
         pass_filenames: false

@@ -435,6 +435,61 @@ async function main() {
 
   console.log(`✓ All ${actualProviderReasoning.size} reasoning/planning providers match SKILL.md specification 100%.`);
 
+  // 6. Security Vulnerability Audit Check (Fail if moderate, high, or critical)
+  console.log('\n6. Verifying package security vulnerabilities (npm audit)...');
+  try {
+    const auditOutput = execSync('npm audit --json', {
+      cwd: mcpDir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    const auditReport = JSON.parse(auditOutput);
+    const vulns = auditReport.metadata?.vulnerabilities || {
+      info: 0,
+      low: 0,
+      moderate: 0,
+      high: 0,
+      critical: 0,
+      total: 0
+    };
+
+    const blockerCount = (vulns.moderate || 0) + (vulns.high || 0) + (vulns.critical || 0);
+    console.log(`Vulnerability summary: info=${vulns.info || 0}, low=${vulns.low || 0}, moderate=${vulns.moderate || 0}, high=${vulns.high || 0}, critical=${vulns.critical || 0}`);
+
+    if (blockerCount > 0) {
+      console.error(`✗ Security Audit Failed: Found ${blockerCount} unacceptable vulnerabilities higher than low/info!`);
+      console.error(`  ↳ Moderate: ${vulns.moderate || 0}, High: ${vulns.high || 0}, Critical: ${vulns.critical || 0}`);
+      process.exit(1);
+    } else {
+      console.log('✓ Security Audit Passed: 0 vulnerabilities higher than low or info.');
+    }
+  } catch (err: any) {
+    if (err.stdout) {
+      try {
+        const auditReport = JSON.parse(err.stdout);
+        if (auditReport.metadata?.vulnerabilities) {
+          const vulns = auditReport.metadata.vulnerabilities;
+          const blockerCount = (vulns.moderate || 0) + (vulns.high || 0) + (vulns.critical || 0);
+          console.log(`Vulnerability summary: info=${vulns.info || 0}, low=${vulns.low || 0}, moderate=${vulns.moderate || 0}, high=${vulns.high || 0}, critical=${vulns.critical || 0}`);
+
+          if (blockerCount > 0) {
+            console.error(`✗ Security Audit Failed: Found ${blockerCount} unacceptable vulnerabilities higher than low/info!`);
+            console.error(`  ↳ Moderate: ${vulns.moderate || 0}, High: ${vulns.high || 0}, Critical: ${vulns.critical || 0}`);
+            process.exit(1);
+          } else {
+            console.log('✓ Security Audit Passed: Found only allowed (low/info) vulnerabilities.');
+          }
+        } else if (auditReport.error || auditReport.message) {
+          console.warn(`⚠ Notice: npm audit endpoint unreachable (${auditReport.message || auditReport.error?.summary || 'network offline'}). Skipping live audit gate.`);
+        }
+      } catch (parseErr) {
+        console.warn(`⚠ Warning: Could not parse npm audit JSON output (${err.message})`);
+      }
+    } else {
+      console.warn(`⚠ Notice: npm audit check skipped (network offline or endpoint unreachable).`);
+    }
+  }
+
   console.log('\n=== All Pre-Commit Checks Passed Successfully ===');
 }
 

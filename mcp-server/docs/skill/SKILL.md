@@ -349,11 +349,11 @@ preferred persona: coder
 > 2. **Lack of Active Reasoning/Planning Providers** configured in the server. Reasoning models are required to decompose goals into subtasks.
 >
 > Ensure at least one of the following reasoning/planning providers is active with valid credentials:
-> 
+>
 > ```text
 > --- 5. REASONING / PLANNING PROVIDERS ---
 > (Critical for agentic subtask decomposition, ordered by active model count)
-> 
+>
 > nvidia       (14 models)
 > pollinations (9 models)
 > openrouter   (8 models)
