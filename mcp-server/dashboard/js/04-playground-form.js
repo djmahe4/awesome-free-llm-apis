@@ -47,7 +47,7 @@ const TOOLS = [
     id: 'manage_memory', label: 'manage_memory', icon: '🧠',
     tag: 'Memory',
     fields: [
-      { id: 'action',         label: 'Action', type: 'select', options: ['search','list','stats','clear','wiki_search','wiki_write','wiki_list','wiki_read','node_add','node_link','node_list','node_get','graph_query'] },
+      { id: 'action',         label: 'Action', type: 'select', options: ['search','list','stats','clear','wiki_search','wiki_write','wiki_list','wiki_read','node_add','node_link','node_list','node_get','node_review','graph_query','adr_write','adr_list','eisenhower_add','eisenhower_list','eisenhower_complete','pomodoro_start','pomodoro_stop','pomodoro_list'] },
       { id: 'query',          label: 'Query (for search / wiki_search)', type: 'text', placeholder: 'authentication patterns' },
       { id: 'limit',          label: 'Limit (results)', type: 'number', placeholder: '5' },
       { id: 'title',          label: 'Title (for wiki_write / wiki_read)', type: 'text', placeholder: 'Auth Overview' },
@@ -84,7 +84,7 @@ const TOOLS = [
     id: 'cyber_tool', label: 'cyber_tool', icon: '🛡️',
     tag: 'Cyber Security',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['osint', 'osint_status', 'list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'resolve_tool'] },
+      { id: 'action', label: 'Action', type: 'select', options: ['osint', 'osint_status', 'list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'run_action', 'resolve_tool'] },
       { id: 'prompt', label: 'Question (for resolve_tool)', type: 'textarea', placeholder: 'what libraries does hexstrike-ai depend on?' },
       { id: 'source', label: 'Source (for resolve_tool)', type: 'select', options: ['', 'github', 'docker', 'apt'] },
       { id: 'choice', label: 'Reply to follow-up (for resolve_tool)', type: 'text', placeholder: 'docker' },

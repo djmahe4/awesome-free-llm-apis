@@ -2,6 +2,7 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { extractServerActions, extractPlaygroundActions, extractQuickstartActionRows, findActionDrift } from './action-sync.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -274,6 +275,18 @@ async function main() {
   } else {
     console.log(`ℹ Schema check completed with ${driftWarnings} parameter variance notices (documented variances).`);
   }
+
+  // 3b. Action enums must be reachable from the playground and listed in the Quickstart (hard fail)
+  const actionProblems = findActionDrift(
+    extractServerActions(toolsBlock, registeredTools),
+    extractPlaygroundActions(appContent),
+    extractQuickstartActionRows(htmlContent),
+  );
+  if (actionProblems.length > 0) {
+    for (const p of actionProblems) console.error(`✗ Action drift ${p}`);
+    process.exit(1);
+  }
+  console.log('✓ Every tool action in src/mcp/index.ts is in the playground and Quickstart.');
 
   // 4. Provider Keys & Rate Limit / Health Tracking Sync
   console.log('\n4. Verifying .env.example provider keys against Quickstart tables and tracking...');

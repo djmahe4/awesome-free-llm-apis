@@ -854,7 +854,7 @@
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>osint | list_tools | get_tool | register_tool | wiki_lookup | learn | coach | save_graph | load_graph | tool_memory | resolve_tool</td></tr>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>osint | list_tools | get_tool | register_tool | wiki_lookup | learn | coach | save_graph | load_graph | tool_memory | osint_status | run_action | resolve_tool</td></tr>
               <tr><td><code>target</code></td><td>string</td><td>for osint</td><td>Target domain, host, or username (e.g. <code>example.com</code>, <code>johndoe</code>)</td></tr>
               <tr><td><code>osintType</code></td><td>enum</td><td></td><td><code>all</code> | <code>domain</code> | <code>ip</code> | <code>username</code></td></tr>
               <tr><td><code>autoSearch</code></td><td>boolean</td><td></td><td>Execute top generated reconnaissance dorks via SearchProvider fallback</td></tr>
@@ -926,7 +926,7 @@
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td><code>action</code></td><td>enum: search | list | stats | clear</td><td>✓</td><td>Action operation</td></tr>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>search | list | stats | clear | wiki_search | wiki_write | wiki_list | wiki_read | node_add | node_link | node_list | node_get | node_review | graph_query | adr_write | adr_list | eisenhower_add | eisenhower_list | eisenhower_complete | pomodoro_start | pomodoro_stop | pomodoro_list</td></tr>
               <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace directory root</td></tr>
               <tr><td><code>query</code></td><td>string</td><td>for search</td><td>Search terms for semantic lookup</td></tr>
               <tr><td><code>limit</code></td><td>number</td><td></td><td>Maximum returned items (default 10)</td></tr>
@@ -996,7 +996,7 @@
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>generate_manifest | render_timeline | transcribe_audio | generate_tts | generate_music | video_generation | status</td></tr>
+              <tr><td><code>action</code></td><td>enum</td><td>✓</td><td>init_project | get_timeline | propose_slots | add_artifact | approve_artifact | reroll_artifact | generate_assets | generate_story | apply_effect | undo_effect | compile_timeline</td></tr>
               <tr><td><code>prompt</code></td><td>string</td><td>✓</td><td>Creative scene or narrative prompt</td></tr>
               <tr><td><code>lane</code></td><td>enum</td><td></td><td>all | audio | video | music | metadata</td></tr>
               <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session identifier for manifest persistence</td></tr>
