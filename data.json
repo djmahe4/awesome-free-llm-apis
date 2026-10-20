@@ -1,5 +1,5 @@
 {
-  "lastUpdated": "2026-08-21",
+  "lastUpdated": "2026-10-05",
   "providers": [
     {
       "name": "Aion Labs",
@@ -155,6 +155,14 @@
       "description": "Free tier, no credit card. Free-tier prompts may be used by Google to improve products.",
       "footnoteRef": 1,
       "models": [
+        {
+          "id": "gemini-3.8-flash",
+          "name": "Gemini 3.8 Flash",
+          "context": "1M",
+          "maxOutput": "65K",
+          "modality": "Text + Image + Audio + Video",
+          "rateLimit": "—"
+        },
         {
           "id": "gemini-3.7-flash",
           "name": "Gemini 3.7 Flash",
@@ -348,7 +356,7 @@
       "flag": "🇺🇸",
       "url": "https://dash.cloudflare.com/profile/api-tokens",
       "baseUrl": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run",
-      "description": "10,000 Neurons/day free, no credit card required. 75+ models available on the free tier.",
+      "description": "10,000 Neurons/day free, no credit card required. 60+ models available on the free tier.",
       "footnoteRef": 11,
       "models": [
         {
@@ -396,7 +404,7 @@
           "name": "@cf/mistralai/mistral-small-3.1-24b-instruct",
           "context": "128K",
           "maxOutput": "Shared w/ context",
-          "modality": "Text",
+          "modality": "Text + Vision",
           "rateLimit": "10K neurons/day (shared)"
         },
         {
@@ -409,7 +417,7 @@
         },
         {
           "id": null,
-          "name": "+ 72 more models",
+          "name": "+ 55 more models",
           "context": "Varies",
           "maxOutput": "Varies",
           "modality": "Text, Image, Audio, Embeddings",
@@ -444,24 +452,8 @@
           "rateLimit": "30 RPM, 1,000 RPD"
         },
         {
-          "id": "groq/compound",
-          "name": "groq/compound",
-          "context": "131K",
-          "maxOutput": "8K",
-          "modality": "Text",
-          "rateLimit": "30 RPM, 250 RPD"
-        },
-        {
-          "id": "groq/compound-mini",
-          "name": "groq/compound-mini",
-          "context": "131K",
-          "maxOutput": "8K",
-          "modality": "Text",
-          "rateLimit": "30 RPM, 250 RPD"
-        },
-        {
-          "id": "qwen/qwen3.6-27b",
-          "name": "qwen/qwen3.6-27b",
+          "id": "qwen/qwen3.8-27b",
+          "name": "qwen/qwen3.8-27b",
           "context": "131K",
           "maxOutput": "16K",
           "modality": "Text",
@@ -626,6 +618,54 @@
           "maxOutput": "8K",
           "modality": "Text",
           "rateLimit": "200 req/hr"
+        },
+        {
+          "id": "kilo-auto/free",
+          "name": "kilo-auto/free",
+          "context": "256K",
+          "maxOutput": "32K",
+          "modality": "Text",
+          "rateLimit": "200 req/hr"
+        },
+        {
+          "id": "inclusionai/ling-3.1-flash",
+          "name": "inclusionai/ling-3.1-flash",
+          "context": "262K",
+          "maxOutput": "32K",
+          "modality": "Text",
+          "rateLimit": "200 req/hr"
+        },
+        {
+          "id": "inclusionai/ling-3.0-flash-sante:free",
+          "name": "inclusionai/ling-3.0-flash-sante:free",
+          "context": "262K",
+          "maxOutput": "32K",
+          "modality": "Text",
+          "rateLimit": "200 req/hr"
+        },
+        {
+          "id": "apodex/apodex-1.1-mini:free",
+          "name": "apodex/apodex-1.1-mini:free",
+          "context": "262K",
+          "maxOutput": "235K",
+          "modality": "Text",
+          "rateLimit": "200 req/hr"
+        },
+        {
+          "id": "qwen/qwen3.8-27b:free",
+          "name": "qwen/qwen3.8-27b:free",
+          "context": "262K",
+          "maxOutput": "235K",
+          "modality": "Multimodal",
+          "rateLimit": "200 req/hr"
+        },
+        {
+          "id": "dots-studio/dots-3-note-preview:free",
+          "name": "dots-studio/dots-3-note-preview:free",
+          "context": "512K",
+          "maxOutput": "460K",
+          "modality": "Text + Vision",
+          "rateLimit": "200 req/hr"
         }
       ]
     },
@@ -645,7 +685,7 @@
           "context": "128K",
           "maxOutput": "—",
           "modality": "Text",
-          "rateLimit": "10 RPM, 60 req/hr (anonymous)"
+          "rateLimit": "60 RPM, 250 req/hr (free token)"
         },
         {
           "id": "mistral-Nemo-Instruct-2407",
@@ -653,7 +693,7 @@
           "context": "128K",
           "maxOutput": "—",
           "modality": "Text",
-          "rateLimit": "10 RPM, 60 req/hr (anonymous)"
+          "rateLimit": "60 RPM, 250 req/hr (free token)"
         },
         {
           "id": "minimax-m2.7",
@@ -661,7 +701,15 @@
           "context": "180K",
           "maxOutput": "—",
           "modality": "Text (reasoning)",
-          "rateLimit": "10 RPM, 60 req/hr (anonymous)"
+          "rateLimit": "60 RPM, 250 req/hr (free token)"
+        },
+        {
+          "id": "DeepSeek-V4-Flash-0731",
+          "name": "DeepSeek-V4-Flash-0731",
+          "context": "400K",
+          "maxOutput": "—",
+          "modality": "Text (reasoning)",
+          "rateLimit": "60 RPM, 250 req/hr (free token)"
         }
       ]
     },
@@ -720,34 +768,10 @@
           "rateLimit": "40 RPM, 10,000 RPD"
         },
         {
-          "id": "nvidia/nemotron-3-nano-30b-a3b",
-          "name": "nvidia/nemotron-3-nano-30b-a3b",
-          "context": "262K",
-          "maxOutput": "32K",
-          "modality": "Text",
-          "rateLimit": "40 RPM, 10,000 RPD"
-        },
-        {
           "id": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
           "name": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
           "context": "128K",
           "maxOutput": "4K",
-          "modality": "Text",
-          "rateLimit": "40 RPM, 10,000 RPD"
-        },
-        {
-          "id": "meta/llama-3.3-70b-instruct",
-          "name": "meta/llama-3.3-70b-instruct",
-          "context": "128K",
-          "maxOutput": "4K",
-          "modality": "Text",
-          "rateLimit": "40 RPM, 10,000 RPD"
-        },
-        {
-          "id": "mistralai/mistral-nemotron",
-          "name": "mistralai/mistral-nemotron",
-          "context": "128K",
-          "maxOutput": "8K",
           "modality": "Text",
           "rateLimit": "40 RPM, 10,000 RPD"
         },
@@ -768,26 +792,10 @@
           "rateLimit": "40 RPM, 10,000 RPD"
         },
         {
-          "id": "minimaxai/minimax-m3",
-          "name": "minimaxai/minimax-m3",
-          "context": "1M",
-          "maxOutput": "~64K",
-          "modality": "Text",
-          "rateLimit": "40 RPM, 10,000 RPD"
-        },
-        {
           "id": "nvidia/nemotron-3-ultra-550b-a55b",
           "name": "nvidia/nemotron-3-ultra-550b-a55b",
           "context": "1M",
           "maxOutput": "262K",
-          "modality": "Text",
-          "rateLimit": "40 RPM, 10,000 RPD"
-        },
-        {
-          "id": "openai/gpt-oss-120b",
-          "name": "openai/gpt-oss-120b",
-          "context": "131K",
-          "maxOutput": "131K",
           "modality": "Text",
           "rateLimit": "40 RPM, 10,000 RPD"
         },
@@ -920,14 +928,6 @@
           "rateLimit": "20 RPM, 50 RPD"
         },
         {
-          "id": "openai/gpt-oss-20b:free",
-          "name": "openai/gpt-oss-20b:free",
-          "context": "131K",
-          "maxOutput": "32K",
-          "modality": "Text",
-          "rateLimit": "20 RPM, 50 RPD"
-        },
-        {
           "id": "cohere/north-mini-code:free",
           "name": "cohere/north-mini-code:free",
           "context": "256K",
@@ -949,22 +949,6 @@
           "context": "262K",
           "maxOutput": "32K",
           "modality": "Text + Image",
-          "rateLimit": "20 RPM, 50 RPD"
-        },
-        {
-          "id": "inclusionai/ling-3.0-flash:free",
-          "name": "inclusionai/ling-3.0-flash:free",
-          "context": "262K",
-          "maxOutput": "32K",
-          "modality": "Text",
-          "rateLimit": "20 RPM, 50 RPD"
-        },
-        {
-          "id": "nvidia/nemotron-3-nano-30b-a3b:free",
-          "name": "nvidia/nemotron-3-nano-30b-a3b:free",
-          "context": "256K",
-          "maxOutput": "—",
-          "modality": "Text",
           "rateLimit": "20 RPM, 50 RPD"
         },
         {
@@ -1000,6 +984,70 @@
           "rateLimit": "20 RPM, 50 RPD"
         },
         {
+          "id": "apodex/apodex-1.1-mini:free",
+          "name": "apodex/apodex-1.1-mini:free",
+          "context": "262K",
+          "maxOutput": "235K",
+          "modality": "Text",
+          "rateLimit": "20 RPM, 50 RPD"
+        },
+        {
+          "id": "inclusionai/ling-3.0-flash-sante:free",
+          "name": "inclusionai/ling-3.0-flash-sante:free",
+          "context": "262K",
+          "maxOutput": "32K",
+          "modality": "Text",
+          "rateLimit": "20 RPM, 50 RPD"
+        },
+        {
+          "id": "qwen/qwen3.8-27b:free",
+          "name": "qwen/qwen3.8-27b:free",
+          "context": "262K",
+          "maxOutput": "235K",
+          "modality": "Text + Image + Video",
+          "rateLimit": "20 RPM, 50 RPD"
+        },
+        {
+          "id": "dots-studio/dots-3-note-preview:free",
+          "name": "dots-studio/dots-3-note-preview:free",
+          "context": "512K",
+          "maxOutput": "460K",
+          "modality": "Text + Image",
+          "rateLimit": "20 RPM, 50 RPD"
+        },
+        {
+          "id": "liquid/lfm-2.5-2.6b:free",
+          "name": "liquid/lfm-2.5-2.6b:free",
+          "context": "64K",
+          "maxOutput": "8K",
+          "modality": "Text",
+          "rateLimit": "20 RPM, 50 RPD"
+        },
+        {
+          "id": "nvidia/nemotron-3.5-lightning:free",
+          "name": "nvidia/nemotron-3.5-lightning:free",
+          "context": "1M",
+          "maxOutput": "65K",
+          "modality": "Text",
+          "rateLimit": "20 RPM, 50 RPD"
+        },
+        {
+          "id": "thinkingmachines/inkling:free",
+          "name": "thinkingmachines/inkling:free",
+          "context": "1M",
+          "maxOutput": "262K",
+          "modality": "Text + Image + Audio",
+          "rateLimit": "20 RPM, 50 RPD"
+        },
+        {
+          "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+          "name": "nvidia/nemotron-3-ultra-550b-a55b:free",
+          "context": "1M",
+          "maxOutput": "65K",
+          "modality": "Text",
+          "rateLimit": "20 RPM, 50 RPD"
+        },
+        {
           "id": null,
           "name": "+ 6 more free models",
           "context": "Varies",
@@ -1022,9 +1070,9 @@
         {
           "id": "Qwen3.5-397B-A17B",
           "name": "Qwen3.5-397B-A17B",
-          "context": "131K",
+          "context": "262K",
           "maxOutput": "~32K",
-          "modality": "Text",
+          "modality": "Text + Vision",
           "rateLimit": "2 RPM (anonymous)"
         },
         {
@@ -1052,19 +1100,27 @@
           "rateLimit": "2 RPM (anonymous)"
         },
         {
+          "id": "Qwen3.8-27B",
+          "name": "Qwen3.8-27B",
+          "context": "262K",
+          "maxOutput": "—",
+          "modality": "Text + Vision",
+          "rateLimit": "2 RPM (anonymous)"
+        },
+        {
           "id": "Qwen3.6-27B",
           "name": "Qwen3.6-27B",
-          "context": "131K",
+          "context": "262K",
           "maxOutput": "~32K",
-          "modality": "Text",
+          "modality": "Text + Vision",
           "rateLimit": "2 RPM (anonymous)"
         },
         {
           "id": "Qwen3.5-9B",
           "name": "Qwen3.5-9B",
-          "context": "131K",
+          "context": "262K",
           "maxOutput": "~8K",
-          "modality": "Text",
+          "modality": "Text + Vision",
           "rateLimit": "2 RPM (anonymous)"
         },
         {
@@ -1076,17 +1132,9 @@
           "rateLimit": "2 RPM (anonymous)"
         },
         {
-          "id": "Qwen3-Coder-30B-A3B-Instruct",
-          "name": "Qwen3-Coder-30B-A3B-Instruct",
-          "context": "262K",
-          "maxOutput": "~32K",
-          "modality": "Text (code)",
-          "rateLimit": "2 RPM (anonymous)"
-        },
-        {
           "id": "Qwen2.5-VL-72B-Instruct",
           "name": "Qwen2.5-VL-72B-Instruct",
-          "context": "128K",
+          "context": "32K",
           "maxOutput": "~8K",
           "modality": "Text + Vision",
           "rateLimit": "2 RPM (anonymous)"
@@ -1103,14 +1151,6 @@
           "id": "Mistral-Nemo-Instruct-2407",
           "name": "Mistral-Nemo-Instruct-2407",
           "context": "128K",
-          "maxOutput": "~4K",
-          "modality": "Text",
-          "rateLimit": "2 RPM (anonymous)"
-        },
-        {
-          "id": "Mistral-7B-Instruct-v0.3",
-          "name": "Mistral-7B-Instruct-v0.3",
-          "context": "32K",
           "maxOutput": "~4K",
           "modality": "Text",
           "rateLimit": "2 RPM (anonymous)"
@@ -1145,7 +1185,7 @@
     },
     {
       "id": 2,
-      "text": "Groq shut down llama-3.3-70b-versatile and llama-3.1-8b-instant on August 16, 2026 ([deprecations](https://console.groq.com/docs/deprecations)). Remaining free-plan limits vary by model: compound and compound-mini get 250 RPD, most others 1,000 RPD ([rate limits](https://console.groq.com/docs/rate-limits))."
+      "text": "Groq shut down qwen/qwen3.6-27b on September 14, 2026 (replaced by qwen/qwen3.8-27b) and groq/compound and groq/compound-mini on September 21, 2026 ([deprecations](https://console.groq.com/docs/deprecations)). Free-plan limits vary by model; the chat models listed get 1,000 RPD ([rate limits](https://console.groq.com/docs/rate-limits))."
     },
     {
       "id": 3,
@@ -1157,7 +1197,7 @@
     },
     {
       "id": 5,
-      "text": "Kilo Code's free pool changes frequently, and the /api/gateway/models catalog can lag what is actually served: probe results have confirmed models absent from the catalog still answering. Every row listed here answered a live request between 2026-08-19 and 2026-08-21. Free models are reachable with no API key, at 200 requests per hour per IP ([authentication](https://kilo.ai/docs/gateway/authentication)). The kilo-auto/free router picks a model from the free pool, and Kilo's docs warn it \"may route your requests to providers that log prompts and outputs\". The NVIDIA free endpoints carry NVIDIA's own condition, quoted on Kilo's [models page](https://kilo.ai/docs/gateway/models-and-providers): \"Trial use only - do not submit personal or confidential data. Your use is logged for security purposes and to improve NVIDIA products and services.\""
+      "text": "Kilo Code's free pool changes frequently, and the /api/gateway/models catalog can lag what is actually served: probe results have confirmed models absent from the catalog still answering. Rows through liquid/lfm-2.5-2.6b:free answered a live request between 2026-08-19 and 2026-08-21; the rows after it were added on 2026-10-05 from the catalog, where they are priced at $0, and have not been probed. Free models are reachable with no API key, at 200 requests per hour per IP ([authentication](https://kilo.ai/docs/gateway/authentication)). The kilo-auto/free router picks a model from the free pool, and Kilo's docs warn it \"may route your requests to providers that log prompts and outputs\". The NVIDIA free endpoints carry NVIDIA's own condition, quoted on Kilo's [models page](https://kilo.ai/docs/gateway/models-and-providers): \"Trial use only - do not submit personal or confidential data. Your use is logged for security purposes and to improve NVIDIA products and services.\""
     },
     {
       "id": 6,
@@ -1173,11 +1213,11 @@
     },
     {
       "id": 10,
-      "text": "LLM7.io rotates its catalog frequently, so the model list changes between checks. Access is tier-based, not token-based: `turbo` models are reachable anonymously or with a free token, `pro` models need the paid plan ([models API](https://docs.llm7.io/guides/models-api)). Anonymous access is capped at 1 RPS, 10 RPM, 60 requests per hour and 500,000 tokens per 24 hours; a free token raises that to 2 RPS, 40 RPM, 100 requests per hour and 1,000,000 tokens per 24 hours ([limits](https://docs.llm7.io/limits)). A paid Pro plan is available at $12/month. Anonymous access with no key was confirmed by live request on 2026-08-21."
+      "text": "LLM7.io rotates its catalog frequently, so the model list changes between checks. Access is tier-based, not token-based: `turbo` models are reachable anonymously or with a free token, `pro` models need the paid plan ([models API](https://docs.llm7.io/guides/models-api)). A free token is capped at 1 RPS, 60 RPM, 250 requests per hour and 100,000 tokens per 24 hours, and the free quota may be reduced without notice ([limits](https://docs.llm7.io/limits)). A paid Pro plan is available at $12/month. The docs no longer list anonymous (no-key) limits; anonymous access was last confirmed by live request on 2026-08-21."
     },
     {
       "id": 11,
-      "text": "The 10,000 free Neurons are shared across all Workers AI usage, not per model, and all limits reset daily at 00:00 UTC. Going over does not bill you, the request fails. Five models are excluded from Workers Free billing and need the Workers Paid plan or prepaid AI Gateway credits: `@cf/moonshotai/kimi-k2.6`, `@cf/moonshotai/kimi-k2.7-code`, `@cf/zai-org/glm-5.2`, `@cf/deepseek-ai/deepseek-v4-flash-0731`, `@cf/deepseek-ai/deepseek-v4-pro-0813` ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/))."
+      "text": "The 10,000 free Neurons are shared across all Workers AI usage, not per model, and all limits reset daily at 00:00 UTC. Going over does not bill you, the request fails. Seven models are excluded from Workers Free billing and need the Workers Paid plan or prepaid AI Gateway credits: `@cf/moonshotai/kimi-k2.6`, `@cf/moonshotai/kimi-k2.7-code`, `@cf/zai-org/glm-5.2`, `@cf/zai-org/glm-5.3`, `@cf/zai-org/glm-5.3-flash`, `@cf/deepseek-ai/deepseek-v4-flash-0731`, `@cf/deepseek-ai/deepseek-v4-pro-0813` ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/))."
     },
     {
       "id": 12,
