@@ -3,8 +3,58 @@ import fetch from 'node-fetch';
 /** Fixed namespace shared across all workspaces for the cyber-tools wiki (see CHANGELOG "global wiki" item). */
 export const GLOBAL_CYBER_WIKI_NS = 'global-cyber-tools';
 
-/** Known security-tool binaries used to gate cyber-tool discovery/reinforcement. */
-export const CYBER_TOOL_NAMES = ['nmap', 'sqlmap', 'hydra', 'gobuster', 'nikto', 'hashcat', 'john', 'metasploit', 'wireshark', 'burpsuite'];
+/** Cyber tools loaded from the external registry at startup. */
+export const CYBER_TOOL_NAMES: string[] = [];
+
+/** Dynamic tool pattern mappings - loaded from registry for auto-detection */
+export const TOOL_PATTERN_MAP: Record<string, RegExp[]> = {};
+
+/**
+ * Initialize tool patterns from the cyber tools registry.
+ * Must be called after registry loads to set up dynamic pattern matching.
+ */
+export function initializeToolPatterns(registry: Record<string, { githubUrl: string; category: string }>): void {
+  CYBER_TOOL_NAMES.length = 0;
+  
+  // Add tools with real GitHub URLs from registry (not test-tool entries)
+  for (const [name, entry] of Object.entries(registry)) {
+    const lowerName = name.toLowerCase();
+    // Skip test-tool entries and add real tools
+    if (!lowerName.startsWith('test-tool') && lowerName in registry) {
+      CYBER_TOOL_NAMES.push(lowerName);
+      
+      // Create regex patterns for this tool based on common CLI patterns
+      const patterns: RegExp[] = [];
+      switch (lowerName) {
+        case 'nmap':
+          patterns.push(/nmap\s*\(/, /nmap\.\s*scan\s*\(/i, /nmap\s*-/i);
+          break;
+        case 'sqlmap':
+          patterns.push(/sqlmap/, /--url\s/, /--data\s/);
+          break;
+        case 'hydra':
+          patterns.push(/hydra/, /-l\s/, /-p\s/);
+          break;
+        case 'gobuster':
+          patterns.push(/gobuster/, /dir\s/, /brute/);
+          break;
+        case 'nikto':
+          patterns.push(/nikto/, /-h\s/, /-Tuning\s/);
+          break;
+        case 'ffuf':
+          patterns.push(/ffuf/, /-u\s/, /-request/);
+          break;
+        case 'hydra':
+          patterns.push(/hydra/, /-l\s/, /-p\s/);
+          break;
+        default:
+          // Generic pattern: tool name followed by space or dash
+          patterns.push(new RegExp(`\\b${lowerName}\\s*`, 'i'));
+      }
+      TOOL_PATTERN_MAP[lowerName] = patterns;
+    }
+  }
+}
 
 export class GithubRepoScanner {
   /**
@@ -191,16 +241,18 @@ export class GithubRepoScanner {
 
   /**
    * Scans a remote GitHub repository tree, downloads key source files, and parses their codebase structure.
+   * Also detects which cyber tools are referenced in the code using dynamic patterns.
    */
   static async scanRepoCode(
     owner: string, 
     repo: string, 
     branch?: string, 
     commands?: string[],
-    promptText?: string
+    promptText?: string,
+    registry: Record<string, { githubUrl: string; category: string }> = {}
   ): Promise<{ 
     treeSummary: string[]; 
-    scannedFiles: { path: string; dependencies: string[]; functions: string[]; flow: string[]; flags: string[] }[] 
+    scannedFiles: { path: string; dependencies: string[]; functions: string[]; flow: string[]; flags: string[]; invokedTools: string[] }[] 
   }> {
     const tree = await this.fetchRepoTree(owner, repo, branch);
     const treeSummary = tree.filter(t => t.type === 'blob').map(t => t.path);
@@ -262,6 +314,22 @@ export class GithubRepoScanner {
           score -= 5;
         }
         
+        // Dynamic tool pattern matching
+        if (Object.keys(TOOL_PATTERN_MAP).length > 0 && commands) {
+          for (const cmd of commands) {
+            const cmdLower = cmd.toLowerCase();
+            // Check if command matches any known tool pattern
+            for (const [toolName, patterns] of Object.entries(TOOL_PATTERN_MAP)) {
+              for (const pattern of patterns) {
+                if (pattern.test(cmdLower)) {
+                  score += 20; // Boost score for tool-related commands
+                  break;
+                }
+              }
+            }
+          }
+        }
+        
         candidates.push({ path: entry.path, score });
       }
       
@@ -269,14 +337,38 @@ export class GithubRepoScanner {
       matchedFiles = candidates.slice(0, 3).map(c => c.path);
     }
     
-    const scannedFiles: { path: string; dependencies: string[]; functions: string[]; flow: string[]; flags: string[] }[] = [];
+    // ... rest of the method
+    const scannedFiles: { path: string; dependencies: string[]; functions: string[]; flow: string[]; flags: string[]; invokedTools: string[] }[] = [];
     for (const filePath of matchedFiles) {
       try {
         const fileContent = await this.fetchRawContent(owner, repo, filePath, branch);
         const analysis = this.analyzeCode(fileContent);
+        // Detect invoked tools using dynamic patterns
+        const invokedTools: string[] = [];
+        if (Object.keys(TOOL_PATTERN_MAP).length > 0) {
+          for (const [toolName, patterns] of Object.entries(TOOL_PATTERN_MAP)) {
+            const lowerTool = toolName.toLowerCase();
+            // Check if tool name appears in the file content
+            const toolPattern = new RegExp(`\\b${lowerTool}\\b`, 'i');
+            if (toolPattern.test(fileContent)) {
+              // Verify it's not just a string variable or comment by checking context
+              const lines = fileContent.split('\n');
+              for (const line of lines) {
+                if (toolPattern.test(line) && !line.trim().startsWith('//') && !line.trim().startsWith('/*')) {
+                  invokedTools.push(lowerTool);
+                  break; // Only add once per tool
+                }
+              }
+            }
+          }
+        }
         scannedFiles.push({
           path: filePath,
-          ...analysis
+          dependencies: analysis.dependencies,
+          functions: analysis.functions,
+          flow: analysis.flow,
+          flags: analysis.flags,
+          invokedTools
         });
       } catch (err) {
         // Continue

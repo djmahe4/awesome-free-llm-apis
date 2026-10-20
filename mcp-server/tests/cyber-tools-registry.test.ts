@@ -28,7 +28,12 @@ describe('CyberToolsRegistry (UserProfile Path & File-Locking)', () => {
         const customUrl = 'https://github.com/example/' + customTool;
 
         const updatedRegistry = await CyberToolsRegistry.registerTool(customTool, customUrl);
-        expect(updatedRegistry[customTool]).toBe(customUrl);
+        // New format stores { url, urlType, category } object - verify structure
+        const entry = updatedRegistry[customTool];
+        expect(entry).toBeDefined();
+        expect(entry.url).toBe(customUrl);
+        expect(['github', 'generic', 'apt', 'docker']).toContain(entry.urlType);
+        expect(entry.category).toBe('other');
 
         const fetchedUrl = await CyberToolsRegistry.getToolGithubUrl(customTool);
         expect(fetchedUrl).toBe(customUrl);

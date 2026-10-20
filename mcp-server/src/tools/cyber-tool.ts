@@ -1,4 +1,4 @@
-import { CyberToolsRegistry } from '../utils/CyberToolsRegistry.js';
+import { CyberToolsRegistry, type CyberToolsRegistryCategory } from '../utils/CyberToolsRegistry.js';
 import { GlobalWikiManager } from '../utils/GlobalWikiManager.js';
 import { WikiMemory } from '../memory/wiki.js';
 import { RepositoryGraph } from '../memory/dependency-scanner.js';
@@ -18,10 +18,13 @@ const osintResultsCache = new Map<string, any[]>();
 
 export interface CyberToolInput {
     action: 'list_tools' | 'get_tool' | 'register_tool' | 'wiki_lookup'
-        | 'learn' | 'coach' | 'save_graph' | 'load_graph' | 'tool_memory' | 'osint' | 'osint_status'
-        | 'run_action';
+    | 'learn' | 'coach' | 'save_graph' | 'load_graph' | 'tool_memory' | 'osint' | 'osint_status'
+    | 'run_action';
     toolName?: string;
     githubUrl?: string;
+    url?: string;
+    urlType?: 'github' | 'apt' | 'docker' | 'generic';
+    category?: 'security' | 'testing' | 'other';
     sessionId?: string;
     // osint
     target?: string;
@@ -61,6 +64,10 @@ export interface CyberToolInput {
     nodeId?: string;
     statusOnly?: boolean;
     sliceSize?: number;
+
+    // New: workspace dependency scan
+    /** If true, scan the workspace root for dependency information (imports, commands, snippets) */
+    scanWorkspace?: boolean;
 }
 
 export interface DagNode {
@@ -99,7 +106,7 @@ For every step give: (1) the exact command, (2) a plain-English explanation of e
 If the target or goal is not clearly an authorized test, CTF, or lab exercise, refuse and explain why.
 Never claim you ran a command or observed real output — you only ever propose the next command for the human to run.`;
 
-async function callCoachLLM(messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, sessionId: string): Promise<string> {
+async function callCoachLLM(messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, sessionId: string, toolContext?: { registeredTools: Array<{ name: string; category: CyberToolsRegistryCategory; githubUrl: string }>; dependencyCommands: Array<{ file: string; command: string }>; invokedTools: string[] }): Promise<string> {
     const { useFreeLLM } = await import('./use-free-llm.js');
     const result = await useFreeLLM({
         messages,
@@ -226,12 +233,15 @@ export async function cyberTool(input: CyberToolInput) {
                 githubUrl: url || null
             };
         } else if (action === 'register_tool') {
-            if (!input.toolName || !input.githubUrl) throw new Error('toolName and githubUrl required for register_tool');
-            const updated = await CyberToolsRegistry.registerTool(input.toolName, input.githubUrl);
+            if (!input.toolName || !input.url) throw new Error('toolName and url required for register_tool');
+            const urlType = input.urlType || 'generic';
+            const updated = await CyberToolsRegistry.registerTool(input.toolName, input.url, urlType, input.category);
             result = {
                 success: true,
                 registeredTool: input.toolName,
-                githubUrl: input.githubUrl,
+                url: input.url,
+                urlType: urlType,
+                category: input.category || 'other',
                 registry: updated
             };
         } else if (action === 'wiki_lookup') {
@@ -248,6 +258,23 @@ export async function cyberTool(input: CyberToolInput) {
             const wiki = new WikiMemory(CYBER_WIKI_NAMESPACE);
 
             if (input.mode === 'dag_reverse') {
+                // Gather tool availability context for DAG reverse engineering
+                const workspaceRoot = input.workspaceRoot || process.cwd();
+                const { CyberToolsRegistry } = await import('../utils/CyberToolsRegistry.js');
+                const registeredTools = await CyberToolsRegistry.getToolNames();
+                const toolCategories = await CyberToolsRegistry.getToolCategories();
+
+                // Build registered tools list with categories
+                const toolsWithCategories: Array<{ name: string; category: CyberToolsRegistryCategory; githubUrl: string }> = [];
+                for (const toolName of registeredTools) {
+                    const githubUrl = await CyberToolsRegistry.getToolGithubUrl(toolName);
+                    toolsWithCategories.push({
+                        name: toolName,
+                        category: toolCategories[toolName] || 'other',
+                        githubUrl: githubUrl || ''
+                    });
+                }
+
                 if (!input.repoPath) throw new Error('repoPath required for learn action in dag_reverse mode');
                 if (!input.toolName) throw new Error('toolName required for learn action in dag_reverse mode');
 
@@ -341,10 +368,61 @@ export async function cyberTool(input: CyberToolInput) {
                 };
             } else {
                 if (!input.goal) throw new Error('goal parameter required for learn action');
+
+                // Gather tool availability and dependency context from workspace
+                const workspaceRoot = input.workspaceRoot || process.cwd();
+                const { CyberToolsRegistry } = await import('../utils/CyberToolsRegistry.js');
+                const registeredTools = await CyberToolsRegistry.getToolNames();
+                const toolCategories = await CyberToolsRegistry.getToolCategories();
+
+                // Build registered tools list with categories
+                const toolsWithCategories: Array<{ name: string; category: CyberToolsRegistryCategory; githubUrl: string }> = [];
+                for (const toolName of registeredTools) {
+                    const githubUrl = await CyberToolsRegistry.getToolGithubUrl(toolName);
+                    toolsWithCategories.push({
+                        name: toolName,
+                        category: toolCategories[toolName] || 'other',
+                        githubUrl: githubUrl || ''
+                    });
+                }
+
+                // Scan workspace for actual tool usage (commands found in code)
+                let dependencyCommands: Array<{ file: string; command: string }> = [];
+                let invokedTools: string[] = [];
+                try {
+                    const { WorkspaceDependencyScanner } = await import('../memory/dependency-scanner.js');
+                    const scanner = new WorkspaceDependencyScanner(workspaceRoot);
+                    const graph = new RepositoryGraph(workspaceRoot);
+                    await scanner.scanWorkspace(graph);
+
+                    const codeNodes = graph.getAllNodes().filter(n => n.type === 'code');
+                    for (const node of codeNodes) {
+                        const metadata = node.metadata as any;
+                        if (metadata?.commands) {
+                            for (const cmd of metadata.commands) {
+                                dependencyCommands.push({ file: node.id, command: cmd });
+                            }
+                        }
+                    }
+                    const invokes = graph.getAllEdges().filter(e => e.type === 'invokes');
+                    const invokeSet = new Set<string>();
+                    for (const edge of invokes) {
+                        invokeSet.add(edge.target);
+                    }
+                    invokedTools = Array.from(invokeSet);
+                } catch (e) {
+                    // If dependency scan fails, continue with empty context
+                    console.warn('[cyber_tool] Dependency scan failed:', e);
+                }
+
                 const walkthrough = await callCoachLLM([
                     { role: 'system', content: COACH_SYSTEM_PROMPT },
                     { role: 'user', content: `Learner level: ${level}.\nGoal: ${input.goal}\nGive a numbered, step-by-step walkthrough for this goal in an authorized/lab/CTF context.` }
-                ], sessionId);
+                ], sessionId, {
+                    registeredTools: toolsWithCategories,
+                    dependencyCommands: dependencyCommands.length > 0 ? dependencyCommands.slice(0, 20) : [],
+                    invokedTools: invokedTools.length > 0 ? invokedTools.slice(0, 20) : []
+                });
 
                 const progress: ProgressRecord = {
                     goal: input.goal,
@@ -371,6 +449,52 @@ export async function cyberTool(input: CyberToolInput) {
             }
         } else if (action === 'coach') {
             const wiki = new WikiMemory(CYBER_WIKI_NAMESPACE);
+
+            // Re-fetch tool availability and dependency context for coach
+            const workspaceRoot = input.workspaceRoot || process.cwd();
+            const { CyberToolsRegistry } = await import('../utils/CyberToolsRegistry.js');
+            const registeredTools = await CyberToolsRegistry.getToolNames();
+            const toolCategories = await CyberToolsRegistry.getToolCategories();
+
+            // Build registered tools list with categories
+            const toolsWithCategories: Array<{ name: string; category: CyberToolsRegistryCategory; githubUrl: string }> = [];
+            for (const toolName of registeredTools) {
+                const githubUrl = await CyberToolsRegistry.getToolGithubUrl(toolName);
+                toolsWithCategories.push({
+                    name: toolName,
+                    category: toolCategories[toolName] || 'other',
+                    githubUrl: githubUrl || ''
+                });
+            }
+
+            // Scan workspace for actual tool usage (commands found in code)
+            let dependencyCommands: Array<{ file: string; command: string }> = [];
+            let invokedTools: string[] = [];
+            try {
+                const { WorkspaceDependencyScanner } = await import('../memory/dependency-scanner.js');
+                const scanner = new WorkspaceDependencyScanner(workspaceRoot);
+                const graph = new RepositoryGraph(workspaceRoot);
+                await scanner.scanWorkspace(graph);
+
+                const codeNodes = graph.getAllNodes().filter(n => n.type === 'code');
+                for (const node of codeNodes) {
+                    const metadata = node.metadata as any;
+                    if (metadata?.commands) {
+                        for (const cmd of metadata.commands) {
+                            dependencyCommands.push({ file: node.id, command: cmd });
+                        }
+                    }
+                }
+                const invokes = graph.getAllEdges().filter(e => e.type === 'invokes');
+                const invokeSet = new Set<string>();
+                for (const edge of invokes) {
+                    invokeSet.add(edge.target);
+                }
+                invokedTools = Array.from(invokeSet);
+            } catch (e) {
+                // If dependency scan fails, continue with empty context
+                console.warn('[cyber_tool] Dependency scan failed:', e);
+            }
 
             if (input.mode === 'dag_reverse') {
                 const manifestKey = `dag_manifest/${sessionId}`;
@@ -439,7 +563,11 @@ export async function cyberTool(input: CyberToolInput) {
                     analysis = await callCoachLLM([
                         { role: 'system', content: COACH_SYSTEM_PROMPT },
                         { role: 'user', content: `Reverse-engineer the following security tools and their setup mechanisms. For each, produce concise notes on: (1) install command, (2) typical usage, (3) security testing use-case.\n\n${observation}` }
-                    ], sessionId);
+                    ], sessionId, {
+                        registeredTools: toolsWithCategories,
+                        dependencyCommands: dependencyCommands.length > 0 ? dependencyCommands.slice(0, 20) : [],
+                        invokedTools: invokedTools.length > 0 ? invokedTools.slice(0, 20) : []
+                    });
                 } catch (err: any) {
                     analysis = `(LLM call unavailable: ${err?.message || err})\n\nItems scanned:\n${itemSummary}`;
                 }
@@ -448,7 +576,7 @@ export async function cyberTool(input: CyberToolInput) {
                     const name = typeof item === 'string' ? item : item.name;
                     const note = typeof item === 'string'
                         ? `MCP endpoint: ${item} | From: hexstrike-ai server`
-                        : `Install: ${item.method} | URL: ${item.url} | Category: ${item.module}`;
+                        : `Install: ${item.method} | URL: ${item.url} | Category: ${item.module} | Use: security testing`;
                     const existing = await wiki.read(`${name}/run_suggestions`);
                     const appended = trimToByteBudget(existing ? `${existing.content}\n\n---\n${note}` : note, TOOL_MEMORY_MAX_BYTES);
                     await safeWikiWrite(wiki, `${name}/run_suggestions`, appended, ['cyber', manifest.toolName]);
@@ -535,7 +663,11 @@ export async function cyberTool(input: CyberToolInput) {
                 const advice = await callCoachLLM([
                     { role: 'system', content: COACH_SYSTEM_PROMPT },
                     { role: 'user', content: `${contextBlock}\n\n---\n\nLearner's latest observation: ${input.observation || '(none provided)'}\n\nDiagnose what happened and give the single next command to run, with explanation, expected output, and safety note.` }
-                ], sessionId);
+                ], sessionId, {
+                    registeredTools: toolsWithCategories,
+                    dependencyCommands: dependencyCommands.length > 0 ? dependencyCommands.slice(0, 20) : [],
+                    invokedTools: invokedTools.length > 0 ? invokedTools.slice(0, 20) : []
+                });
 
                 const isFailure = FAILURE_LANGUAGE.test(input.observation || '');
 
@@ -569,8 +701,10 @@ export async function cyberTool(input: CyberToolInput) {
 
                 if (input.toolName) {
                     const suggestionNote = advice.slice(0, TOOL_NOTE_CAP);
+                    // Store structured pattern: install command, typical flags, use case
+                    const structuredNote = `Install: ${suggestionNote}\nUse: security testing`;
                     const existing = await wiki.read(`${input.toolName}/run_suggestions`);
-                    const appended = trimToByteBudget(existing ? `${existing.content}\n\n---\n${suggestionNote}` : suggestionNote, TOOL_MEMORY_MAX_BYTES);
+                    const appended = trimToByteBudget(existing ? `${existing.content}\n\n---\n${structuredNote}` : structuredNote, TOOL_MEMORY_MAX_BYTES);
                     await safeWikiWrite(wiki, `${input.toolName}/run_suggestions`, appended, ['cyber']);
                     if (isFailure) {
                         GlobalWikiManager.logFailure(input.toolName);
@@ -620,9 +754,10 @@ export async function cyberTool(input: CyberToolInput) {
             const memoryOp = input.memoryOp || 'read';
             if (memoryOp === 'write') {
                 if (!input.note) throw new Error('note required for tool_memory write');
+                // Store structured pattern: install command, typical flags, use case
+                const structuredNote = `Install: ${capText(input.note, TOOL_NOTE_CAP)}\nUse: security testing`;
                 const existing = await wiki.read(`${input.toolName}/run_suggestions`);
-                const note = capText(input.note, TOOL_NOTE_CAP);
-                const appended = trimToByteBudget(existing ? `${existing.content}\n\n---\n${note}` : note, TOOL_MEMORY_MAX_BYTES);
+                const appended = trimToByteBudget(existing ? `${existing.content}\n\n---\n${structuredNote}` : structuredNote, TOOL_MEMORY_MAX_BYTES);
                 const written = await safeWikiWrite(wiki, `${input.toolName}/run_suggestions`, appended, ['cyber']);
                 result = { success: written, toolName: input.toolName, wikiPage: written ? await wiki.read(`${input.toolName}/run_suggestions`) : null };
             } else {
@@ -700,27 +835,27 @@ export async function cyberTool(input: CyberToolInput) {
                 try {
                     const a = await withDnsTimeout(dns.resolve4(target)).catch(() => []);
                     if (a.length) { dnsReport.A = a; resolvedIps.push(...a); }
-                } catch {}
+                } catch { }
 
                 try {
                     const aaaa = await withDnsTimeout(dns.resolve6(target)).catch(() => []);
                     if (aaaa.length) { dnsReport.AAAA = aaaa; resolvedIps.push(...aaaa); }
-                } catch {}
+                } catch { }
 
                 try {
                     const mx = await withDnsTimeout(dns.resolveMx(target)).catch(() => []);
                     if (mx.length) dnsReport.MX = mx;
-                } catch {}
+                } catch { }
 
                 try {
                     const txt = await withDnsTimeout(dns.resolveTxt(target)).catch(() => []);
                     if (txt.length) dnsReport.TXT = txt;
-                } catch {}
+                } catch { }
 
                 try {
                     const ns = await withDnsTimeout(dns.resolveNs(target)).catch(() => []);
                     if (ns.length) dnsReport.NS = ns;
-                } catch {}
+                } catch { }
             }
 
             const recommendedDorks: string[] = [];
@@ -904,7 +1039,7 @@ export async function cyberTool(input: CyberToolInput) {
         throw err;
     } finally {
         // Phase 3 Chat Logger Integration — Log each action step into chat-logs.json
-        await logToolCall(sessionId, `cyber_tool:${action}`, input, result, Date.now() - start, isError).catch(() => {});
+        await logToolCall(sessionId, `cyber_tool:${action}`, input, result, Date.now() - start, isError).catch(() => { });
     }
 
     return result;
