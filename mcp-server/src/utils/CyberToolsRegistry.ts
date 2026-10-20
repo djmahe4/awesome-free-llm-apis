@@ -24,9 +24,66 @@ private static DEFAULT_REGISTRY: CyberToolsRegistryMap = {
      * Gets the target userprofile file path: ~/.free-llm-mcp/cyber-tools-registry.json
      */
     public static getRegistryFilePath(): string {
-        const userHome = os.homedir();
+        // A test run must never resolve (let alone write) the real user-profile
+        // registry. tests/setup.ts sandboxes FREE_LLM_MCP_HOME, but a runner that
+        // skips it (IDE test panel, root-level `vitest`, another checkout without
+        // the sandbox) used to fall through to os.homedir() SILENTLY — that is how
+        // ~250 `test-tool-<ts>` entries accumulated in the real file. Fail loudly.
+        if (process.env.VITEST && !process.env.FREE_LLM_MCP_HOME) {
+            throw new Error(
+                'Refusing to resolve the real ~/.free-llm-mcp registry under vitest: FREE_LLM_MCP_HOME is unset, ' +
+                'so this test would read/write the user profile. tests/setup.ts sets it — run vitest from mcp-server/ ' +
+                'or set FREE_LLM_MCP_HOME to a temp dir.'
+            );
+        }
+        const userHome = process.env.FREE_LLM_MCP_HOME || os.homedir();
         const configDir = path.join(userHome, '.free-llm-mcp');
         return path.join(configDir, 'cyber-tools-registry.json');
+    }
+
+    /**
+     * True for the `test-tool-<ms-timestamp>` entries the registry test used to leave
+     * behind. Requires BOTH the name pattern and (when a url is supplied) the fake
+     * `github.com/example/` origin, so a real tool that merely starts with "test-tool"
+     * is never classified as debris. Used by the resolver (never suggest these) and
+     * by pruneTestDebris.
+     */
+    public static isTestDebris(name: string, url?: string): boolean {
+        if (!/^test-tool-\d+$/i.test(name)) return false;
+        if (url === undefined || url === '') return true;
+        return /^https?:\/\/github\.com\/example\//i.test(url);
+    }
+
+    /**
+     * Removes leaked test entries from the registry file. Dry-run by default so the
+     * caller sees exactly what would go; a real run writes a timestamped `.bak-*`
+     * copy first and swaps the new file in via rename, all under the registry lock.
+     */
+    public static async pruneTestDebris(opts: { dryRun?: boolean } = {}): Promise<{ removed: string[]; kept: number; backupPath?: string }> {
+        const dryRun = opts.dryRun !== false;
+        const filePath = this.getRegistryFilePath();
+        return await this.withFileLock(filePath, async () => {
+            let raw: string;
+            try { raw = await fs.readFile(filePath, 'utf-8'); }
+            catch (err: any) { if (err.code === 'ENOENT') return { removed: [], kept: 0 }; throw err; }
+            const parsed = JSON.parse(raw) as Record<string, unknown>;
+            const removed: string[] = [];
+            const keptEntries: Record<string, unknown> = {};
+            for (const [name, value] of Object.entries(parsed)) {
+                const url = typeof value === 'string' ? value : (value as { url?: string } | null)?.url;
+                if (this.isTestDebris(name, url)) removed.push(name);
+                else keptEntries[name] = value;
+            }
+            const kept = Object.keys(keptEntries).length;
+            if (dryRun || removed.length === 0) return { removed, kept };
+
+            const backupPath = `${filePath}.bak-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+            await fs.copyFile(filePath, backupPath);
+            const tmpPath = `${filePath}.tmp-${process.pid}`;
+            await fs.writeFile(tmpPath, JSON.stringify(keptEntries, null, 2), 'utf-8');
+            await fs.rename(tmpPath, filePath);
+            return { removed, kept, backupPath };
+        });
     }
 
     /**
