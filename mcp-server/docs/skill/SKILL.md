@@ -354,13 +354,15 @@ preferred persona: coder
 > --- 5. REASONING / PLANNING PROVIDERS ---
 > (Critical for agentic subtask decomposition, ordered by active model count)
 > 
-> nvidia       (7 models)
-> openrouter   (4 models)
-> kilocode     (3 models)
-> huggingface  (2 models)
-> cloudflare   (1 model)
+> nvidia       (14 models)
+> pollinations (9 models)
+> openrouter   (8 models)
+> kilocode     (6 models)
+> cloudflare   (4 models)
+> huggingface  (4 models)
+> modelscope   (3 models)
 > cohere       (1 model)
 > gemini       (1 model)
-> modelscope   (1 model)
-> pollinations (1 model)
+> groq         (1 model)
+> llm7         (1 model)
 > ```

@@ -331,6 +331,110 @@ async function main() {
   }
   console.log('✓ PersistenceManager implements durable rate limit & circuit breaker tracking for LLM and Search.');
 
+  // 5. Reasoning Model Count Verification (src/config/models.ts vs SKILL.md)
+  console.log('\n5. Verifying reasoning / planning provider model counts against SKILL.md...');
+
+  const modelsFilePath = path.join(mcpDir, 'src', 'config', 'models.ts');
+  const modelsContent = fs.readFileSync(modelsFilePath, 'utf-8');
+
+  // Extract model IDs marked with isReasoning: true
+  const reasoningModelIds = new Set<string>();
+  for (const line of modelsContent.split('\n')) {
+    if (line.includes('isReasoning: true')) {
+      const match = line.match(/'([^']+)'/);
+      if (match) {
+        reasoningModelIds.add(match[1]);
+      }
+    }
+  }
+
+  // Parse active providers from registry.ts
+  const registryPath = path.join(mcpDir, 'src', 'providers', 'registry.ts');
+  const registryContent = fs.readFileSync(registryPath, 'utf-8');
+  const activeProviderFiles = new Set<string>();
+  const newProviderMatches = [...registryContent.matchAll(/new\s+([A-Za-z0-9_]+)Provider\s*\(\)/g)];
+  for (const m of newProviderMatches) {
+    const className = m[1];
+    const importRegex = new RegExp(`import\\s*\\{[^}]*\\b${className}Provider\\b[^}]*\\}\\s*from\\s*'\\./([^']+)\\.js'`);
+    const importMatch = registryContent.match(importRegex);
+    if (importMatch) {
+      activeProviderFiles.add(`${importMatch[1]}.ts`);
+    }
+  }
+
+  const providersDir = path.join(mcpDir, 'src', 'providers');
+  const actualProviderReasoning = new Map<string, { count: number; models: string[] }>();
+
+  for (const provFile of fs.readdirSync(providersDir)) {
+    if (!provFile.endsWith('.ts') || !activeProviderFiles.has(provFile)) continue;
+    const provCode = fs.readFileSync(path.join(providersDir, provFile), 'utf-8');
+    const idMatch = provCode.match(/\bid\s*=\s*'([^']+)'/);
+    if (!idMatch) continue;
+    const providerId = idMatch[1];
+
+    // Extract all model IDs defined in this provider
+    const modelMatches = [...provCode.matchAll(/id:\s*'([^']+)'/g)].map(x => x[1]);
+    const matchedReasoning = modelMatches.filter(m => reasoningModelIds.has(m));
+    if (matchedReasoning.length > 0) {
+      actualProviderReasoning.set(providerId, {
+        count: matchedReasoning.length,
+        models: matchedReasoning,
+      });
+    }
+  }
+
+  // Parse documented counts in mcp-server/docs/skill/SKILL.md
+  const skillMdDocPath = path.join(mcpDir, 'docs', 'skill', 'SKILL.md');
+  const skillDocContent = fs.readFileSync(skillMdDocPath, 'utf-8');
+
+  const reasoningSectionMatch = skillDocContent.match(/---\s*5\.\s*REASONING\s*\/\s*PLANNING\s*PROVIDERS\s*---[\s\S]*?```/);
+  if (!reasoningSectionMatch) {
+    console.error('✗ Could not find section "--- 5. REASONING / PLANNING PROVIDERS ---" in SKILL.md');
+    process.exit(1);
+  }
+
+  const sectionText = reasoningSectionMatch[0];
+  const docLines = [...sectionText.matchAll(/(?:>\s*)?([a-z0-9_-]+)\s+\(([0-9]+)\s+models?\)/g)];
+  const documentedCounts = new Map<string, number>();
+
+  for (const m of docLines) {
+    documentedCounts.set(m[1], parseInt(m[2], 10));
+  }
+
+  let reasoningErrors = 0;
+
+  // Validate actual counts from models.ts against SKILL.md
+  for (const [providerId, data] of actualProviderReasoning.entries()) {
+    const docCount = documentedCounts.get(providerId);
+    if (docCount === undefined) {
+      console.error(`✗ Provider "${providerId}" has ${data.count} reasoning models in src/config/models.ts but is missing from SKILL.md!`);
+      console.error(`  ↳ Models: ${data.models.join(', ')}`);
+      reasoningErrors++;
+    } else if (docCount !== data.count) {
+      console.error(`✗ Provider "${providerId}" reasoning count mismatch: SKILL.md has (${docCount} models), but src/config/models.ts defines ${data.count} models!`);
+      console.error(`  ↳ Actual models: ${data.models.join(', ')}`);
+      reasoningErrors++;
+    } else {
+      console.log(`✓ Provider [${providerId}] verified: ${data.count} reasoning models match SKILL.md.`);
+    }
+  }
+
+  // Validate no phantom providers in SKILL.md
+  for (const [docProviderId, docCount] of documentedCounts.entries()) {
+    if (!actualProviderReasoning.has(docProviderId)) {
+      console.error(`✗ Provider "${docProviderId}" listed in SKILL.md with (${docCount} models) but has 0 reasoning models in src/config/models.ts!`);
+      reasoningErrors++;
+    }
+  }
+
+  if (reasoningErrors > 0) {
+    console.error(`\n✗ Reasoning model count verification failed with ${reasoningErrors} errors!`);
+    console.error('  Update SKILL.md to reflect the ground truth defined in src/config/models.ts.');
+    process.exit(1);
+  }
+
+  console.log(`✓ All ${actualProviderReasoning.size} reasoning/planning providers match SKILL.md specification 100%.`);
+
   console.log('\n=== All Pre-Commit Checks Passed Successfully ===');
 }
 

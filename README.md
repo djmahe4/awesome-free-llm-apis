@@ -31,7 +31,31 @@
 
 - [Provider APIs](#provider-apis)
 - [Inference providers](#inference-providers)
+- [Agentic Infrastructure](#agentic-infrastructure)
 - [Glossary](#glossary)
+
+## Agentic Infrastructure
+
+This repository is powered by an integrated **MCP (Model Context Protocol)** server and a dual-agentic skill set designed for autonomous, cost-efficient research and development.
+
+### 🤖 Agentic Skills
+
+| Skill | Focus | Trigger |
+|-------|-------|---------|
+| [**`free-llm-apis`**](free-llm-apis/SKILL.md) | **Provider Discovery & Onboarding** | Use for finding the best free provider, obtaining API keys, and initial configuration. |
+| [**`free-llms`**](mcp-server/docs/skill/SKILL.md) | **Advanced Orchestration & Memory** | Use for complex project-scoped tasks, persistent workspace memory, and grounded research. |
+
+### 🚀 Integrated MCP Server
+
+The [`mcp-server`](mcp-server/) directory contains an enterprise-grade MCP server (`@mcp:free-llm-apis`) exposing 15 zero-cost tools:
+- **Universal Chat Pipeline (`use_free_llm`)**: Deterministic quantum-inspired model routing across 70+ free models with automatic failover and background DAG subtask execution.
+- **Search Grounding (`SearchRouterMiddleware`)**: Free multi-provider web search fallback (`Parallel AI` &rarr; `TinyFish` &rarr; `Tavily` &rarr; `DuckDuckGo MCP` &rarr; `Jina AI` &rarr; `SearXNG`) with persistent circuit breaker tracking.
+- **Autonomous Multi-Agent Harness (`agent_harness`)**: Declarative agent workflows, file ownership locks, reasoning scope isolation, and human-in-the-loop approvals.
+- **Persistent Workspace Memory & Wiki (`manage_memory`)**: Content-addressed vector storage, automatic ADR harvesting, and persistent health tracking rooted to your project workspace.
+- **Refactoring & Diagnostics**: OMP-style multi-file refactoring (`coding_agents`), offline local model patching (`local_llm_patch`), multi-hypothesis reasoning (`quantum_tool`), real browser automation (`browser_tool`), and visual UI regression testing (`vision_tool`).
+
+> [!TIP]
+> To enable full agentic capabilities in your IDE (Claude Desktop, Cursor, Windsurf), follow the [MCP Setup Guide](mcp-server/docs/setup.md) and [Client Configurations](mcp-server/README.md#client-configurations).
 
 ## Provider APIs
 
