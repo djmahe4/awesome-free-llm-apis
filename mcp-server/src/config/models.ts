@@ -66,7 +66,7 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     // A-Tier & Multimodal Models
     'Qwen/Qwen3.8-Flash-Next': { capability: 0.92, contextWindow: 131072, isVision: true, isReasoning: true },
     'qwen/qwen3.8-27b': { capability: 0.90, contextWindow: 131072, isVision: true, isReasoning: true },
-    'qwen/qwen3.8-27b:free': { capability: 0.90, contextWindow: 131072, isVision: true, isReasoning: true, isCoder: true },
+    // 'qwen/qwen3.8-27b:free' deprecated on OpenRouter free tier (use qwen/qwen3.8-27b)
     'inclusionai/ling-3.0-flash-fin:free': { capability: 0.90, contextWindow: 262144, isCoder: true, isReasoning: true },
     'mistralai/mistral-nemotron': { capability: 0.88, contextWindow: 128000 },
     'open-mistral-nemo': { capability: 0.88, contextWindow: 400000 },
@@ -117,7 +117,7 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'arcee-ai/trinity-mini:free': { capability: 0.75, contextWindow: 128000 },
     'openrouter/free': { capability: 0.80, contextWindow: 128000 },
     'z-ai/glm-4.5-air:free': { capability: 0.75, contextWindow: 128000 },
-    'stepfun/step-3.7-flash:free': { capability: 0.84, contextWindow: 128000, isVision: true },
+    // 'stepfun/step-3.7-flash:free' pruned (unavailable)
     'glm-4.5-flash': { capability: 0.80, contextWindow: 128000 },
     'glm-4.7-flash': { capability: 0.85, contextWindow: 128000 },
     'glm-4.6V-flash': { capability: 0.82, contextWindow: 128000, isVision: true },
@@ -166,7 +166,6 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'minimaxai/minimax-m3': { capability: 0.90, contextWindow: 128000, isVision: true },
     'google/diffusiongemma-26b-a4b-it': { capability: 0.88, contextWindow: 128000, isReasoning: true },
     'moonshotai/kimi-k3': { capability: 0.92, contextWindow: 128000, isReasoning: true },
-    'tencent/hy3:free': { capability: 0.88, contextWindow: 128000, isReasoning: true },
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free': { capability: 0.90, contextWindow: 256000, isVision: true, isReasoning: true },
     'minimax-m2.7': { capability: 0.85, contextWindow: 128000 },
     'nvidia/nemotron-3-super-120b-a12b': { capability: 0.93, contextWindow: 1000000, isReasoning: true },
