@@ -14,6 +14,8 @@ export class NvidiaProvider extends BaseProvider {
     { id: 'z-ai/glm-5.3-flash', name: 'GLM 5.3 Flash' },
     { id: 'z-ai/glm-5.3', name: 'GLM 5.3' },
     { id: 'nvidia/nemotron-3.5-lightning-30b-a3b', name: 'Nemotron 3.5 Lightning 30B' },
+    { id: 'nvidia/nemotron-3.5-super-vl-120b-a12b', name: 'Nemotron 3.5 Super VL 120B' },
+    { id: 'stepfun-ai/step-5-preview', name: 'Step 5 Preview' },
     { id: 'meta/muse-glimmer-30b', name: 'Muse Glimmer 30B (Vision/Reasoning)' },
     { id: 'minimaxai/minimax-m3', name: 'MiniMax M3 (Vision)' },
     { id: 'google/diffusiongemma-26b-a4b-it', name: 'DiffusionGemma 26B' },

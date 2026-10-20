@@ -59,6 +59,9 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'openai/gpt-5.4-nano': { capability: 0.80, contextWindow: 400000 },
     'kilo-auto/free': { capability: 0.85, contextWindow: 128000, isCoder: true },
     'liquid/lfm-2.5-2.6b:free': { capability: 0.80, contextWindow: 32000 },
+    'cohere/north-mini-code:free': { capability: 0.84, contextWindow: 128000, isCoder: true },
+    'dots-studio/dots-3-note-preview:free': { capability: 0.88, contextWindow: 512000, isVision: true, isReasoning: true },
+    'DeepSeek-V4-Flash-0731': { capability: 0.90, contextWindow: 128000, isReasoning: true, isCoder: true },
 
     // A-Tier & Multimodal Models
     'Qwen/Qwen3.8-Flash-Next': { capability: 0.92, contextWindow: 131072, isVision: true, isReasoning: true },
@@ -145,6 +148,8 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     // NVIDIA NIM active & free models
     'nvidia/nemotron-3.5-lightning-30b-a3b': { capability: 0.92, contextWindow: 128000, isCoder: true, isReasoning: true },
     'nvidia/nemotron-3.5-lightning:free': { capability: 0.92, contextWindow: 128000, isCoder: true, isReasoning: true },
+    'nvidia/nemotron-3.5-super-vl-120b-a12b': { capability: 0.93, contextWindow: 128000, isVision: true, isReasoning: true },
+    'stepfun-ai/step-5-preview': { capability: 0.92, contextWindow: 128000, isVision: true, isReasoning: true },
     'meta/muse-glimmer-30b': { capability: 0.92, contextWindow: 128000, isVision: true, isReasoning: true },
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': { capability: 0.90, contextWindow: 128000, isVision: true, isReasoning: true },
     'nvidia/nemotron-3-nano-30b-a3b': { capability: 0.82, contextWindow: 128000 },
