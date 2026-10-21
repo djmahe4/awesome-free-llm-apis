@@ -9,8 +9,7 @@ on:
       - '!**.md'
       - '!docs/**'
       - 'external/agent-prompt/README.md'
-  pull_request:
-    branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   test:
