@@ -685,21 +685,14 @@ export function createExpressApp(): express.Express {
       app.post('/api/coding_agents', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
-          const { goal, workspaceRoot, dryRun, topKFiles, sessionId, verifyLspDiagnostics, resolve } = req.body || {};
-          if (!goal) {
-            res.status(400).json({ error: 'goal is required' });
+          const { normalizeCodingAgentsHttpInput } = await import('./tools/coding-agents/http-input.js');
+          const normalized = normalizeCodingAgentsHttpInput(req.body, process.cwd());
+          if ('error' in normalized) {
+            res.status(400).json({ error: normalized.error });
             return;
           }
           const { CodingAgentsHandler } = await import('./tools/coding-agents.js');
-          const result = await CodingAgentsHandler({
-            goal,
-            workspaceRoot: workspaceRoot ?? process.cwd(),
-            dryRun: dryRun ?? true,
-            topKFiles: topKFiles ?? 5,
-            sessionId,
-            verifyLspDiagnostics: verifyLspDiagnostics ?? true,
-            resolve
-          });
+          const result = await CodingAgentsHandler(normalized.input);
           res.json(result);
         } catch (err: any) {
           res.status(500).json({ error: err?.message || String(err) });
