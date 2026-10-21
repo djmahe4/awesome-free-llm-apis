@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'fs-extra';
-import { isTestFile, isExecutableSurface, assessPatchesForVerify, buildRepairBrief, withFeedback, readVerifyTestContext } from '../src/tools/coding-agents/verify-guard.js';
+import { isTestFile, isExecutableSurface, assessPatchesForVerify, buildRepairBrief, withFeedback, readVerifyTestContext, buildSyntaxBrief, detectSpecialCasing } from '../src/tools/coding-agents/verify-guard.js';
 import { CodingAgentsHandler } from '../src/tools/coding-agents.js';
 
 describe('isTestFile', () => {
@@ -161,6 +161,52 @@ describe('readVerifyTestContext (the failing tests are the spec: the agent may R
   });
 });
 
+describe('brief hints from the failure kind', () => {
+  it('"Missing expected exception" explains that the current logic ACCEPTS the input and must be tightened', () => {
+    const brief = buildRepairBrief({ command: 'c', exitCode: 1, outputTail: 'AssertionError [ERR_ASSERTION]: Missing expected exception (Error).', patchedFiles: [], failedCases: ['rejects "1.5h"'] });
+    expect(brief).toMatch(/should have thrown/i);
+    expect(brief).toMatch(/accepts/i);
+    expect(brief).toMatch(/do not add a special case/i);
+  });
+  it('no hint when the failure is an ordinary value mismatch', () => {
+    const brief = buildRepairBrief({ command: 'c', exitCode: 1, outputTail: 'actual: 3600\nexpected: 5400', patchedFiles: [], failedCases: ['parses 1h30m'] });
+    expect(brief).not.toMatch(/should have thrown/i);
+  });
+});
+
+describe('detectSpecialCasing (the edit hard-codes a failing test input)', () => {
+  it('finds a failing input that was added as a literal in the new lines', () => {
+    const added = ['  if (/^1\\.5h$/.test(text)) throw new Error("invalid duration: " + text);'];
+    expect(detectSpecialCasing(added, ['rejects "1.5h"'])).toEqual(['1.5h']);
+  });
+  it('catches plain string literals and ip-like case names', () => {
+    expect(detectSpecialCasing(['if (ip === "100.64.0.1") return true;'], ['private 100.64.0.1'])).toEqual(['100.64.0.1']);
+  });
+  it('does not flag normal logic, short tokens or unrelated literals', () => {
+    expect(detectSpecialCasing(['const m = /^(\\d+)h$/.exec(text);', 'return Number(m[1]) * 3600;'], ['rejects "1.5h"', 'parses 2h'])).toEqual([]);
+    expect(detectSpecialCasing(['x = "5"'], ['rejects "5"'])).toEqual([]);
+  });
+});
+
+describe('buildSyntaxBrief (an edit that does not parse is rolled back with the compiler messages)', () => {
+  const d = (filePath: string, line: number, message: string, severity: 'error' | 'warning' = 'error') => ({ filePath, line, message, severity, source: 'ast-syntactic' as const, code: 1005 });
+
+  it('lists error diagnostics with file and line, capped, and tells the model to fix them', () => {
+    const diags = Array.from({ length: 14 }, (_, i) => d('src/a.ts', i + 1, `error number ${i}`));
+    const brief = buildSyntaxBrief(diags as any);
+    expect(brief).toMatch(/does not parse|syntax/i);
+    expect(brief).toContain('src/a.ts:1');
+    expect(brief).toContain('error number 0');
+    expect(brief).not.toContain('error number 13');
+    expect(brief).toMatch(/\+4 more/);
+    expect(brief).toMatch(/do not run commands/i);
+  });
+  it('ignores warnings and returns nothing when there are no errors', () => {
+    expect(buildSyntaxBrief([d('a.ts', 1, 'just a warning', 'warning')] as any)).toBe('');
+    expect(buildSyntaxBrief([])).toBe('');
+  });
+});
+
 describe('withFeedback', () => {
   it('appends a bounded brief and leaves the goal alone when there is none', () => {
     expect(withFeedback('do x')).toBe('do x');
@@ -207,6 +253,17 @@ describe('CodingAgentsHandler: suspicious edits are withheld for the user to ver
     const r: any = await run({ targetFiles: ['src/app.js'], astEditOps: [{ pat: 'console.log($$$A)', out: 'require("fs").rmSync($$$A, { recursive: true })' }], verifyCommand: 'node check.js' });
     expect(r.applied).toBe(false);
     expect(r.verification.status).toBe('needs_user');
+  });
+
+  it('an edit that does not parse is rolled back and the compiler messages come back as rollbackBrief', async () => {
+    const original = ['export const v = "hello";', 'export const w = 1;', ''].join('\n');
+    await make({ 'src/a.ts': original });
+    const r: any = await run({ targetFiles: ['src/a.ts'], astEditOps: [{ pat: '"hello"', out: '"hello' }] });
+    expect(r.applied).toBe(false);
+    expect(r.restoredFiles).toContain('src/a.ts');
+    expect(r.rollbackBrief).toMatch(/does not parse/);
+    expect(r.rollbackBrief).toContain('src/a.ts');
+    expect(await fs.readFile(path.join(ws, 'src/a.ts'), 'utf-8')).toBe(original);
   });
 
   it('a failed gate rolls back and returns a debugger brief with the failing output', async () => {

@@ -35,12 +35,18 @@ describe('runWithRepairLoop', () => {
     expect(r.applied).toBe(false);
   });
 
-  it('a repeated identical failure first escalates the sampling temperature, then stops as stuck', async () => {
+  it('a repeated identical failure escalates the sampling temperature all the way up before stopping as stuck', async () => {
     const temps: Array<number | undefined> = [];
-    const r = await runWithRepairLoop({ ...input, maxRepairAttempts: 3 }, 's', undefined, async (i) => { temps.push(i.temperature); return regressed('same brief'); });
+    const r = await runWithRepairLoop({ ...input, maxRepairAttempts: 5 }, 's', undefined, async (i) => { temps.push(i.temperature); return regressed('same brief'); });
     // greedy decoding gives the same answer for the same prompt, so retries must vary the sample
-    expect(temps).toEqual([undefined, 0.3, 0.6]);
-    expect(r.repair).toMatchObject({ outcome: 'stuck', attemptCount: 3 });
+    expect(temps).toEqual([undefined, 0.3, 0.6, 0.9]);
+    expect(r.repair).toMatchObject({ outcome: 'stuck', attemptCount: 4 });
+  });
+
+  it('the attempt budget is capped at 5 however large the request', async () => {
+    let n = 0;
+    await runWithRepairLoop({ ...input, maxRepairAttempts: 99 }, 's', undefined, async () => regressed(`failure ${++n}`));
+    expect(n).toBe(6); // first try + 5 repairs
   });
 
   it('a different failure on the next attempt is progress, not stuck', async () => {
@@ -163,6 +169,113 @@ describe('rewrite mode on retries', () => {
     const results = [few(), passed()];
     await runWithRepairLoop(input, 's', undefined, async (i) => { seen.push(i.rewrite); return results.shift()!; });
     expect(seen).toEqual([undefined, undefined]);
+  });
+});
+
+describe('best attempt tracking: repair from the closest attempt, not the latest', () => {
+  const withFiles = (failing: number, content: string, checkpointId = 'cp-orig') => notGreen(`brief-${failing}-${content}`, {
+    checkpointId,
+    patchPlan: [{ filePath: 'src/x.js', isNewFile: false, fullPatchedContent: content } as any],
+    verification: { command: 'c', status: 'not_green', ok: false, baselineOk: false, exitCode: 1, timedOut: false, outputTail: '', durationMs: 1,
+      repairBrief: `brief-${failing}-${content}`, failedCases: Array.from({ length: failing }, (_, i) => `case ${i}`) },
+  });
+
+  it('restores the best near-miss (<=3 failing) before patching, when the latest attempt was worse', async () => {
+    const log: string[] = [];
+    const results = [withFiles(2, 'BEST'), withFiles(9, 'WORSE'), passed()];
+    // attempt 1 -> 2 failing (best, near-miss: patch in place). attempt 2 patches it -> 9 failing (worse).
+    // attempt 3 must go back to the best state (not stay on the worse one) and patch it.
+    const r = await runWithRepairLoop({ ...input, maxRepairAttempts: 3 }, 's', undefined,
+      async (i) => { log.push(`run(fb=${i.feedback})`); return results.shift()!; },
+      async (id) => { log.push(`rollback(${id})`); return []; },
+      async (files) => { log.push(`restore(${files.map(f => f.content).join(',')})`); });
+    expect(log).toEqual([
+      'run(fb=undefined)',
+      'run(fb=brief-2-BEST)',
+      'rollback(cp-orig)', 'restore(BEST)', 'run(fb=brief-2-BEST)',
+    ]);
+    expect(r.repair?.outcome).toBe('converged');
+  });
+
+  it('does not restore when the latest attempt is the best', async () => {
+    const log: string[] = [];
+    const results = [withFiles(3, 'A'), withFiles(1, 'B'), passed()];
+    await runWithRepairLoop({ ...input, maxRepairAttempts: 3 }, 's', undefined,
+      async (i) => { log.push(`run(fb=${i.feedback})`); return results.shift()!; },
+      async (id) => { log.push(`rollback(${id})`); return []; },
+      async (files) => { log.push('restore'); });
+    expect(log).toEqual(['run(fb=undefined)', 'run(fb=brief-3-A)', 'run(fb=brief-1-B)']);
+  });
+
+  it('without a restore callback it falls back to continuing from the latest state', async () => {
+    const results = [withFiles(2, 'BEST'), withFiles(9, 'WORSE'), passed()];
+    const r = await runWithRepairLoop({ ...input, maxRepairAttempts: 3 }, 's', undefined, async () => results.shift()!, async () => []);
+    expect(r.repair?.outcome).toBe('converged');
+  });
+});
+
+describe('syntax-error rollback is repaired too', () => {
+  it('uses the rollback brief as feedback even without a verifyCommand', async () => {
+    const broken = base({ applied: false, restoredFiles: ['src/a.ts'], rollbackBrief: 'SYNTAX: src/a.ts:3 unterminated string' });
+    const seen: Array<string | undefined> = [];
+    const results = [broken, base({ applied: true })];
+    const r = await runWithRepairLoop({ ...input, verifyCommand: undefined }, 's', undefined, async (i) => { seen.push(i.feedback); return results.shift()!; });
+    expect(seen[1]).toBe('SYNTAX: src/a.ts:3 unterminated string');
+    expect(r.repair?.outcome).toBe('converged');
+    expect(r.repair!.attempts[0].outcome).toBe('rolled_back_syntax');
+  });
+});
+
+describe('special-casing a failing input is called out in the next brief', () => {
+  it('adds a targeted nudge when the previous edit hard-coded a failing case', async () => {
+    const hardCoded = notGreen('BRIEF', {
+      patchPlan: [{ filePath: 'src/d.js', isNewFile: false, originalSnippet: 'throw new Error("x");', replacementSnippet: 'if (/^1\\.5h$/.test(t)) throw new Error("x");\nthrow new Error("x");', fullPatchedContent: 'c' } as any],
+      verification: { command: 'c', status: 'not_green', ok: false, baselineOk: false, exitCode: 1, timedOut: false, outputTail: '', durationMs: 1, repairBrief: 'BRIEF', failedCases: ['rejects "1.5h"'] },
+    });
+    // a second failing attempt is needed so the NEXT brief (built from the hard-coded one) is observed
+    const seen: Array<string | undefined> = [];
+    const results = [hardCoded, passed()];
+    await runWithRepairLoop({ ...input, maxRepairAttempts: 2 }, 's', undefined, async (i) => { seen.push(i.feedback); return results.shift()!; });
+    expect(seen[1]).toContain('BRIEF');
+    expect(seen[1]).toMatch(/hard-coded the input "1\.5h"/);
+  });
+});
+
+describe('the baseline counts as an attempt: never end up worse than where you started', () => {
+  const worse = (failing: number, baselineFailing: number) => notGreen(`brief-${failing}`, {
+    checkpointId: 'cp-orig',
+    verification: { command: 'c', status: 'not_green', ok: false, baselineOk: false, exitCode: 1, timedOut: false, outputTail: '', durationMs: 1,
+      repairBrief: `brief-${failing}`, failedCases: Array.from({ length: failing }, (_, i) => `c${i}`),
+      baselineFailedCases: Array.from({ length: baselineFailing }, (_, i) => `b${i}`), baselineBrief: 'BASELINE-BRIEF' },
+  });
+
+  it('when the first attempt is worse than a near-miss baseline, repair the ORIGINAL (targeted), do not rewrite', async () => {
+    const log: string[] = [];
+    const results = [worse(6, 1), passed()];
+    const r = await runWithRepairLoop({ ...input, maxRepairAttempts: 2 }, 's', undefined,
+      async (i) => { log.push(`run(fb=${i.feedback},rewrite=${i.rewrite})`); return results.shift()!; },
+      async (id) => { log.push(`rollback(${id})`); return []; },
+      async () => { log.push('restore'); });
+    expect(log).toEqual(['run(fb=undefined,rewrite=undefined)', 'rollback(cp-orig)', 'run(fb=BASELINE-BRIEF,rewrite=undefined)']);
+    expect(r.repair?.outcome).toBe('converged');
+  });
+
+  it('when the baseline was far from green, the first attempt that improves on it is the one to build on', async () => {
+    const log: string[] = [];
+    const results = [worse(2, 9), passed()];
+    await runWithRepairLoop({ ...input, maxRepairAttempts: 2 }, 's', undefined,
+      async (i) => { log.push(`run(fb=${i.feedback})`); return results.shift()!; },
+      async (id) => { log.push(`rollback(${id})`); return []; });
+    expect(log).toEqual(['run(fb=undefined)', 'run(fb=brief-2)']);
+  });
+
+  it('an attempt that did no worse than the baseline is kept as the best', async () => {
+    const log: string[] = [];
+    const results = [worse(1, 1), passed()];
+    await runWithRepairLoop({ ...input, maxRepairAttempts: 2 }, 's', undefined,
+      async (i) => { log.push(`run(fb=${i.feedback})`); return results.shift()!; },
+      async (id) => { log.push(`rollback(${id})`); return []; });
+    expect(log).toEqual(['run(fb=undefined)', 'run(fb=brief-1)']);
   });
 });
 

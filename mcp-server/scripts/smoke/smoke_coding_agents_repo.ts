@@ -16,7 +16,7 @@ import path from 'node:path';
 
 const arg = (k: string, d?: string) => { const i = process.argv.indexOf(`--${k}`); return i >= 0 ? process.argv[i + 1] : d; };
 const PORT = arg('port', '3111');
-const ATTEMPTS = Number(arg('attempts', '2'));
+const ATTEMPTS = Number(arg('attempts', '4'));
 const WANT = (arg('tasks', 'counter,slug,tests,roman,duration,unique') as string).split(',');
 const BASE = `http://localhost:${PORT}`;
 
@@ -100,6 +100,17 @@ const TASKS: Task[] = [
       'tests/unique.test.js': 'const test = require("node:test"); const assert = require("node:assert");\nconst { uniqueBy } = require("../src/unique.js");\ntest("by key", () => assert.deepStrictEqual(uniqueBy([{id:1,v:"a"},{id:2,v:"b"},{id:1,v:"c"}], x => x.id), [{id:1,v:"a"},{id:2,v:"b"}]));\ntest("identity", () => assert.deepStrictEqual(uniqueBy([3,1,3,2,1]), [3,1,2]));\ntest("does not mutate", () => { const a = [1,1,2]; uniqueBy(a); assert.deepStrictEqual(a, [1,1,2]); });\ntest("empty", () => assert.deepStrictEqual(uniqueBy([]), []));\ntest("NaN and 0/-0 keys", () => assert.deepStrictEqual(uniqueBy([NaN, NaN, 0, -0]), [NaN, 0]));\n',
     },
     target: 'src/unique.js', test: 'tests/unique.test.js', expect: 'green',
+  },
+
+  {
+    id: 'lastmile',
+    goal: 'parseDuration in src/duration.js is almost right but fails the tests. Fix it so it satisfies every case in tests/duration.test.js without breaking the ones that already pass.',
+    files: {
+      // correct except it accepts decimals like "1.5h" (parseFloat) and negative numbers
+      'src/duration.js': 'function parseDuration(text) {\n  const m = /^(?:(\\d+(?:\\.\\d+)?)h)?\\s*(?:(\\d+)m)?\\s*(?:(\\d+)s)?$/.exec(text.trim());\n  if (!text.trim() || !m) throw new Error("invalid duration: " + text);\n  const [, h, mi, se] = m;\n  return Math.round((h ? parseFloat(h) * 3600 : 0) + (mi ? Number(mi) * 60 : 0) + (se ? Number(se) : 0));\n}\n\nmodule.exports = { parseDuration };\n',
+      'tests/duration.test.js': 'const test = require("node:test"); const assert = require("node:assert");\nconst { parseDuration } = require("../src/duration.js");\nconst ok = [["1h30m",5400],["45s",45],["2h",7200],["1h 5m 10s",3910],["0s",0],["10m",600]];\nfor (const [t, n] of ok) test("parses " + t, () => assert.strictEqual(parseDuration(t), n));\nfor (const bad of ["", "abc", "5x", "1h1h", "30m1h", "h", "1.5h", "-5s"]) test("rejects " + JSON.stringify(bad), () => assert.throws(() => parseDuration(bad), Error));\n',
+    },
+    target: 'src/duration.js', test: 'tests/duration.test.js', expect: 'green',
   },
 ];
 

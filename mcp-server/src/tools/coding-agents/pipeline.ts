@@ -1,5 +1,5 @@
 import { validateVerifyCommand, runVerifyCommand } from './verify-command.js';
-import { assessPatchesForVerify, buildRepairBrief, withFeedback, isTestFile, readVerifyTestContext, type PatchFact } from './verify-guard.js';
+import { assessPatchesForVerify, buildRepairBrief, buildSyntaxBrief, withFeedback, isTestFile, readVerifyTestContext, type PatchFact } from './verify-guard.js';
 import { reviewPatch } from './reviewer.js';
 import { runWithRepairLoop } from './repair-loop.js';
 import path from 'node:path';
@@ -133,6 +133,12 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
         const { files } = await globalCasStore.restoreCheckpointToDisk(checkpointId, path.resolve(input.workspaceRoot || process.cwd()));
         for (const f of newFiles) await fs.remove(path.resolve(input.workspaceRoot || process.cwd(), f)).catch(() => {});
         return [...files, ...newFiles];
+      }, async (files) => {
+        const root = path.resolve(input.workspaceRoot || process.cwd());
+        for (const f of files) {
+          assertPatchPathAllowed(root, f.filePath);
+          await fs.outputFile(path.resolve(root, f.filePath), f.content, 'utf-8');
+        }
       });
       codingAgentsResultsCache.set(runKey, result);
       RunRegistry.finish(runKey, result.error);
@@ -954,6 +960,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         timedOut: after.timedOut,
         outputTail: after.outputTail,
         failedCases: after.failedCases,
+        baselineFailedCases: verifyBaseline.failedCases,
+        ...(verifyBaseline.ok ? {} : { baselineBrief: buildRepairBrief({ command: input.verifyCommand, exitCode: verifyBaseline.exitCode, timedOut: verifyBaseline.timedOut, outputTail: verifyBaseline.outputTail, failedCases: verifyBaseline.failedCases, patchedFiles: patches.map(p => p.filePath) }) }),
         durationMs: after.durationMs,
       };
       if (!after.ok) {
@@ -1017,6 +1025,9 @@ ${after.outputTail}`,
           }
           result.applied = false;
           result.restoredFiles = [...files, ...deletedNewFiles];
+          // Hand the compiler messages to a retry (the loop would otherwise see only a silent rollback).
+          const syntaxBrief = buildSyntaxBrief(diagnosticsList as any);
+          if (syntaxBrief) result.rollbackBrief = syntaxBrief;
           result.patchSummary = `Automatically rolled back ${restoredCount} file(s)${deletedNewFiles.length ? ` and removed ${deletedNewFiles.length} newly-created file(s)` : ''}: the applied patch introduced ${diagnosticsList.filter(d => d.severity === 'error').length} compiler error(s), which usually means the LLM's output doesn't actually belong to the target file. Checkpoint: ${result.checkpointId}. Re-run with a more explicit goal, astEditOps, or action:"resume".`;
         } catch (rollbackErr: any) {
           result.diagnostics.push({

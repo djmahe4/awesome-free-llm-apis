@@ -1,5 +1,6 @@
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
 import type { CodingAgentsInput, CodingAgentsResult, RepairAttempt } from './types.js';
+import { detectSpecialCasing } from './verify-guard.js';
 
 /**
  * Bounded repair loop around one pipeline run.
@@ -12,16 +13,22 @@ import type { CodingAgentsInput, CodingAgentsResult, RepairAttempt } from './typ
  * retries would only burn tokens) | needs_user (the human must run the tests) | error.
  */
 
-export const MAX_REPAIR_ATTEMPTS = 3;
-const DEFAULT_REPAIR_ATTEMPTS = 3;
+export const MAX_REPAIR_ATTEMPTS = 5;
+const DEFAULT_REPAIR_ATTEMPTS = 4;
 /** Greedy decoding returns the same answer for the same prompt, so each retry samples a little hotter. */
-const RETRY_TEMPERATURE = (attempt: number) => Math.min(0.9, 0.3 * (attempt - 1));
+const RETRY_TEMPERATURE = (attempt: number) => Math.min(0.9, Math.round(3 * (attempt - 1)) / 10);
 
 type Runner = (input: CodingAgentsInput, sessionId: string, run?: RunInfo) => Promise<CodingAgentsResult>;
 /** Restores the tree to a CAS checkpoint (and deletes files the agent created); returns what it restored. */
 type Rollback = (checkpointId: string, newFiles: string[]) => Promise<string[]>;
+/** Writes known file contents back (used to return to the best attempt after a worse one). */
+type RestoreFiles = (files: Array<{ filePath: string; content: string }>) => Promise<void>;
+
+/** Attempts at or under this many failing cases are patched in place; above it the file is rewritten. */
+const NEAR_MISS = 3;
 
 function attemptOutcome(r: CodingAgentsResult): string {
+  if (r.rollbackBrief) return 'rolled_back_syntax';
   if (r.verification?.status) return r.verification.status;
   if (r.review?.verdict === 'blocked') return 'review_blocked';
   if (r.error) return 'error';
@@ -29,6 +36,8 @@ function attemptOutcome(r: CodingAgentsResult): string {
 }
 
 function briefOf(r: CodingAgentsResult, input: CodingAgentsInput): string | undefined {
+  // An edit that does not parse is rolled back before any check can run; its compiler messages are the feedback.
+  if (r.rollbackBrief && !r.applied) return r.rollbackBrief;
   // With a verifyCommand the check is the judge (the reviewer does not even run: in live runs a 7B
   // reviewer repeatedly insisted spec-correct code was wrong).
   if (input.verifyCommand) {
@@ -45,6 +54,7 @@ export async function runWithRepairLoop(
   run: RunInfo | undefined,
   runner: Runner,
   rollback?: Rollback,
+  restoreFiles?: RestoreFiles,
 ): Promise<CodingAgentsResult> {
   // Deterministic AST edits cannot be "re-generated", so there is nothing to repair by retrying.
   const retriable = !(input.astEditOps && input.astEditOps.length > 0);
@@ -56,6 +66,9 @@ export async function runWithRepairLoop(
   let result!: CodingAgentsResult;
   // The first apply's checkpoint is the ORIGINAL tree; files the agent created across attempts.
   let originalCheckpoint: string | undefined;
+  // The closest attempt so far (fewest failing cases): later attempts repair THAT, not merely the latest.
+  let best: { failing: number; brief: string; files: Array<{ filePath: string; content: string }>; isOriginal?: boolean } | undefined;
+  let latestIsBest = false;
   const createdFiles = new Set<string>();
   let outcome: NonNullable<CodingAgentsResult['repair']>['outcome'] = 'converged';
 
@@ -63,7 +76,33 @@ export async function runWithRepairLoop(
     result = await runner(current, sessionId, run);
     if (!originalCheckpoint && result.checkpointId && result.applied) originalCheckpoint = result.checkpointId;
     for (const p of result.patchPlan ?? []) if ((p as any).isNewFile) createdFiles.add(p.filePath);
-    const brief = briefOf(result, input);
+    let brief = briefOf(result, input);
+    if (brief) {
+      // Lines the failed edit added; if they contain a failing test input verbatim, say so.
+      const added = (result.patchPlan ?? []).flatMap(p => {
+        const before = new Set(String((p as any).originalSnippet ?? '').split(/\r?\n/).map(l => l.trim()));
+        return String((p as any).replacementSnippet ?? '').split(/\r?\n/).filter(l => l.trim() && !before.has(l.trim()));
+      });
+      const hard = detectSpecialCasing(added, result.verification?.failedCases ?? []);
+      if (hard.length > 0) {
+        brief += `\n\nYour last edit hard-coded the input ${hard.map(h => `"${h}"`).join(', ')}. That is not a fix: find what makes the code accept or mishandle it in general, and change that.`;
+      }
+    }
+    const failing = result.verification?.failedCases?.length;
+    if (brief && failing !== undefined) {
+      const files = (result.patchPlan ?? [])
+        .filter(p => typeof (p as any).fullPatchedContent === 'string')
+        .map(p => ({ filePath: p.filePath, content: (p as any).fullPatchedContent as string }));
+      latestIsBest = !best || failing < best.failing;
+      if (latestIsBest) best = { failing, brief, files };
+      // The tree we started from is also a candidate: if it was closer to green than this attempt, the
+      // next attempt repairs THAT (with the baseline's brief) instead of rewriting or building on a regression.
+      const v = result.verification;
+      if (v?.baselineBrief && v.baselineFailedCases && v.baselineFailedCases.length < failing && v.baselineFailedCases.length < (best?.failing ?? Infinity) + (latestIsBest ? 1 : 0)) {
+        best = { failing: v.baselineFailedCases.length, brief: v.baselineBrief, files: [], isOriginal: true };
+        latestIsBest = false;
+      }
+    }
     attempts.push({
       attempt: n,
       outcome: attemptOutcome(result),
@@ -76,20 +115,33 @@ export async function runWithRepairLoop(
     if (result.verification?.status === 'needs_user') { outcome = 'needs_user'; break; }
     if (!brief) { outcome = 'converged'; break; }
     if (n > budget) { outcome = 'not_converged'; break; }
-    // The same failure twice at a raised temperature means more retries would only burn tokens.
-    if (brief === lastBrief && (current.temperature ?? 0) >= 0.6) { outcome = 'stuck'; break; }
+    // The same failure twice even at the hottest sampling temperature: more retries would only burn tokens.
+    // (Below that, a repeat is expected from a near-deterministic sampler and is not yet proof of being stuck.)
+    if (brief === lastBrief && (current.temperature ?? 0) >= 0.9) { outcome = 'stuck'; break; }
     lastBrief = brief;
     // Many failing cases mean the logic is wrong, not one line: patching it line by line moves sideways
     // (observed live), so regenerate the file from the requirements plus the brief.
     // A rewrite must start from the ORIGINAL file: shown its own broken code the model copies it
     // unchanged (observed live: identical no-op proposals, 6 failing every time).
     // Not sticky: an attempt that came close (few failing cases) is patched in place next time.
-    const wantRewrite = (result.verification?.failedCases?.length ?? 0) > 3;
-    const rewrite = wantRewrite && !!rollback && !!originalCheckpoint;
-    if (rewrite) {
+    const bestIsNearMiss = !!best && best.failing <= NEAR_MISS;
+    const canReset = !!rollback && !!originalCheckpoint;
+    let nextBrief = brief;
+    let rewrite = false;
+    if (bestIsNearMiss) {
+      // Patch the closest attempt in place; if the latest attempt was worse, go back to the best first.
+      if (!latestIsBest && canReset && (best!.isOriginal || (restoreFiles && best!.files.length > 0))) {
+        await rollback!(originalCheckpoint!, [...createdFiles]);
+        if (!best!.isOriginal) await restoreFiles!(best!.files);
+        nextBrief = best!.brief;
+      }
+    } else if (canReset && !!best && best.failing > NEAR_MISS) {
+      // Only when we KNOW many cases fail; with no failing count the attempt is simply continued.
+      rewrite = true;
       await rollback!(originalCheckpoint!, [...createdFiles]);
+      nextBrief = best?.brief ?? brief;
     }
-    current = { ...input, feedback: brief, temperature: RETRY_TEMPERATURE(n + 1), ...(rewrite ? { rewrite: true } : {}) };
+    current = { ...input, feedback: nextBrief, temperature: RETRY_TEMPERATURE(n + 1), ...(rewrite ? { rewrite: true } : {}) };
   }
 
   // Test-first work keeps a still-red attempt applied so the next one can build on it. If it never went

@@ -103,7 +103,7 @@ export interface CodingAgentsInput {
   rewrite?: boolean;
   /** Sampling temperature for generation (default 0). The repair loop raises it on retries so a repeat is not identical. */
   temperature?: number;
-  /** Automatic retries after a failed check or a blocking review (default 3, max 3; AST edits never retry). */
+  /** Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry). */
   maxRepairAttempts?: number;
   /** Independent review of the proposed diff before apply (default on; false disables it). */
   review?: boolean;
@@ -137,6 +137,8 @@ export interface CodingAgentsResult {
   message?: string;
   checkpointId?: string;
   restoredFiles?: string[];
+  /** Set when an apply was rolled back because the edit did not parse: the compiler messages as feedback for a retry. */
+  rollbackBrief?: string;
   /** Independent reviewer's verdict on the proposed diff. */
   review?: {
     verdict: 'ok' | 'concerns' | 'blocked' | 'skipped';
@@ -168,6 +170,9 @@ export interface CodingAgentsResult {
     outputTail: string;
     /** Failing case names from the whole run. */
     failedCases?: string[];
+    /** Failing cases BEFORE the edit (the baseline run), and the debugger brief built from them. */
+    baselineFailedCases?: string[];
+    baselineBrief?: string;
     durationMs: number;
   };
   /** undo_file: whether the previous version was restored to disk. */
