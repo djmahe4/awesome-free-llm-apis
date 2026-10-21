@@ -26,6 +26,44 @@ export interface OllamaLocalChatResult {
   content: string;
   promptTokens: number;
   completionTokens: number;
+  /** num_ctx actually sent to Ollama. */
+  numCtx?: number;
+  /**
+   * Ollama silently drops the head of a prompt that does not fit num_ctx. When the
+   * evaluated prompt filled the window we cannot tell what was cut, so callers must
+   * treat the reply as unreliable.
+   */
+  promptTruncated?: boolean;
+  /** The reply stopped at num_predict (done_reason "length"), so it may end mid-edit. */
+  outputTruncated?: boolean;
+}
+
+/** Fraction of num_ctx at which an evaluated prompt is treated as truncated. */
+const TRUNCATION_RATIO = 0.97;
+
+export function isPromptTruncated(promptTokens: number, numCtx: number): boolean {
+  return numCtx > 0 && promptTokens > 0 && promptTokens >= numCtx * TRUNCATION_RATIO;
+}
+
+/**
+ * Context size for a request: prompt estimate (~3 chars per token, which suits
+ * symbol-dense code better than the prose-oriented 4) plus room for the reply,
+ * never below 2048 and never above what the model supports.
+ */
+export function estimateNumCtx(messages: OllamaLocalMessage[], maxTokens: number | undefined, maxSupported: number): number {
+  const promptChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+  const needed = Math.ceil(promptChars / 3) + (maxTokens ?? 4096);
+  return Math.min(Math.max(2048, needed), maxSupported);
+}
+
+async function resolveNumCtx(model: string, messages: OllamaLocalMessage[], maxTokens: number | undefined): Promise<number> {
+  const envCtx = parseInt(process.env.OLLAMA_CONTEXT_LENGTH || '', 10);
+  let maxSupported = 32768;
+  try {
+    maxSupported = (await getModelInfo(model))?.contextLength ?? 32768;
+  } catch { /* keep default */ }
+  const sized = estimateNumCtx(messages, maxTokens, maxSupported);
+  return !isNaN(envCtx) && envCtx > 0 ? Math.max(envCtx, sized) : sized;
 }
 
 function getBaseUrl(): string {
@@ -116,28 +154,7 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  let numCtx = options?.numCtx;
-  if (!numCtx) {
-    const promptChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
-    const estimatedPromptTokens = Math.ceil(promptChars / 3.5);
-    const headroom = options?.maxTokens ?? 4096;
-    const needed = estimatedPromptTokens + headroom;
-
-    if (process.env.OLLAMA_CONTEXT_LENGTH) {
-      const envCtx = parseInt(process.env.OLLAMA_CONTEXT_LENGTH, 10);
-      if (!isNaN(envCtx) && envCtx > 0) numCtx = Math.max(envCtx, needed);
-    }
-
-    if (!numCtx) {
-      try {
-        const fitInfo = await getModelInfo(model);
-        const maxSupported = fitInfo?.contextLength ?? 32768;
-        numCtx = Math.min(Math.max(2048, needed), maxSupported);
-      } catch {
-        numCtx = Math.min(Math.max(2048, needed), 32768);
-      }
-    }
-  }
+  const numCtx = options?.numCtx || await resolveNumCtx(model, messages, options?.maxTokens);
 
   let response;
   try {
@@ -173,12 +190,17 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
     message: { role: string; content: string };
     prompt_eval_count?: number;
     eval_count?: number;
+    done_reason?: string;
   };
+  const promptTokens = data.prompt_eval_count ?? 0;
   return {
     model: data.model,
     content: parseJsonlContent(data.message?.content || ''),
-    promptTokens: data.prompt_eval_count ?? 0,
+    promptTokens,
     completionTokens: data.eval_count ?? 0,
+    numCtx,
+    promptTruncated: isPromptTruncated(promptTokens, numCtx),
+    outputTruncated: data.done_reason === 'length',
   };
 }
 
@@ -225,14 +247,8 @@ export async function* chatLocalStream(
     else sig.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
-  let numCtx = options?.numCtx;
-  if (!numCtx) {
-    const promptChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
-    const estimatedPromptTokens = Math.ceil(promptChars / 3.5);
-    const headroom = options?.maxTokens ?? 4096;
-    const needed = estimatedPromptTokens + headroom;
-    numCtx = Math.min(Math.max(2048, needed), 32768);
-  }
+  // Same sizing as chatLocal (it used to skip OLLAMA_CONTEXT_LENGTH and the model's real limit).
+  const numCtx = options?.numCtx || await resolveNumCtx(model, messages, options?.maxTokens);
 
   let response;
   try {
