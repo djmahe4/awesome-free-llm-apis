@@ -92,8 +92,20 @@ export async function agentHarness(input: AgentHarnessInput) {
     }
     case 'abort': {
       if (!input.runId) throw new Error('abort requires `runId`.');
-      const aborted = abortHarness(input.runId);
-      return { success: aborted };
+      if (abortHarness(input.runId)) return { success: true };
+      // Not live in this process (server restarted, or the registry entry expired): the
+      // persisted run is the truth. Cancel it there, or say exactly why nothing was cancelled.
+      const store = new HarnessStore(input.runId, input.workspace_root);
+      const persisted = await store.loadRun();
+      if (!persisted) return { success: false, error: `No run '${input.runId}' found${input.workspace_root ? ` in ${input.workspace_root}` : ''}.` };
+      if (persisted.status === 'complete' || persisted.status === 'failed' || persisted.status === 'aborted') {
+        return { success: false, error: `Run '${input.runId}' is already ${persisted.status}; nothing to abort.` };
+      }
+      persisted.status = 'aborted';
+      persisted.updatedAt = Date.now();
+      await store.saveRun(persisted);
+      await store.appendTrace({ runId: persisted.runId, role: 'top_level', type: 'error', data: { message: 'run aborted (no live process; persisted run cancelled)' } }).catch(() => {});
+      return { success: true, note: 'Run was not live in this process; the persisted run was marked aborted.' };
     }
     default:
       throw new Error(`Unsupported action: ${(input as any).action}`);
