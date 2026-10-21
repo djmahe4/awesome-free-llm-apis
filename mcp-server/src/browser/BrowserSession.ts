@@ -197,7 +197,7 @@ export interface ProfileDirOptions {
 /** Windows forbids `<>:"/\|?*` and reserved device names in file names. */
 function sanitizeProfileSegment(sessionId: string): string {
     const safe = (sessionId.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64)) || 'default';
-    return /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(safe) ? `s_${safe}` : safe;
+    return /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i.test(safe) ? `s_${safe}` : safe;
 }
 
 /** Expand `%NAME%` references (Windows-style) and strip stray surrounding quotes. */

@@ -83,20 +83,36 @@ import soundfile as sf
 from kokoro_onnx import Kokoro
 
 try:
-    kokoro = Kokoro(r"${modelPath}", r"${voicesPath}")
+    model_path = sys.argv[1]
+    voices_path = sys.argv[2]
+    output_path = sys.argv[3]
+    text = sys.argv[4]
+    voice = sys.argv[5]
+    speed = float(sys.argv[6])
+
+    kokoro = Kokoro(model_path, voices_path)
     samples, sample_rate = kokoro.create(
-        ${JSON.stringify(input.text)},
-        voice=${JSON.stringify(input.voice || 'af_heart')},
-        speed=${input.speed || 1.0},
+        text,
+        voice=voice,
+        speed=speed,
         lang="en-us"
     )
-    sf.write(r"${input.outputPath}", samples, sample_rate)
+    sf.write(output_path, samples, sample_rate)
     sys.exit(0)
 except Exception as e:
     sys.stderr.write(str(e))
     sys.exit(1)
 `;
-      const proc = spawn(pythonBin, ['-c', script]);
+      const proc = spawn(pythonBin, [
+        '-c',
+        script,
+        modelPath,
+        voicesPath,
+        input.outputPath,
+        input.text,
+        input.voice || 'af_heart',
+        String(input.speed || 1.0),
+      ]);
       proc.on('close', (code) => resolve(code === 0));
       proc.on('error', () => resolve(false));
     });

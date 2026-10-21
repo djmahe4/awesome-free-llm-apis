@@ -66,10 +66,24 @@ export function buildAudioDspFilter(effects: MediaEffect[]): string {
 
       case 'reverb': {
         // Reverb/echo simulation using aecho filter
-        const inGain = Number(eff.params.inGain ?? 0.8);
-        const outGain = Number(eff.params.outGain ?? 0.9);
-        const delays = String(eff.params.delays ?? '60');
-        const decays = String(eff.params.decays ?? '0.4');
+        const inGain = Math.max(0, Math.min(1, Number(eff.params.inGain ?? 0.8) || 0.8));
+        const outGain = Math.max(0, Math.min(1, Number(eff.params.outGain ?? 0.9) || 0.9));
+        // Validate delays: numeric values, clamped between 1 and 90000 ms, separated by '|'
+        const rawDelays = String(eff.params.delays ?? '60');
+        const validDelays = rawDelays
+          .split('|')
+          .map(d => Number(d.trim()))
+          .filter(n => !isNaN(n) && n > 0 && n <= 90000)
+          .map(n => Math.round(n));
+        const delays = validDelays.length > 0 ? validDelays.join('|') : '60';
+        // Validate decays: numeric values, clamped between 0 and 1, separated by '|'
+        const rawDecays = String(eff.params.decays ?? '0.4');
+        const validDecays = rawDecays
+          .split('|')
+          .map(d => Number(d.trim()))
+          .filter(n => !isNaN(n) && n >= 0 && n <= 1)
+          .map(n => Number(n.toFixed(3)));
+        const decays = validDecays.length > 0 ? validDecays.join('|') : '0.4';
         filters.push(`aecho=${inGain}:${outGain}:${delays}:${decays}`);
         break;
       }

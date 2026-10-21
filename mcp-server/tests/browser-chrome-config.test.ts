@@ -202,6 +202,9 @@ describe('profileDirFor (env-driven, Windows-safe)', () => {
     expect(path.basename(profileDirFor('con', { tmpdir: '/tmp' }))).toBe('s_con');
     expect(path.basename(profileDirFor('nul', { tmpdir: '/tmp' }))).toBe('s_nul');
     expect(path.basename(profileDirFor('COM3', { tmpdir: '/tmp' }))).toBe('s_COM3');
+    expect(path.basename(profileDirFor('con.txt', { tmpdir: '/tmp' }))).toBe('s_con.txt');
+    expect(path.basename(profileDirFor('nul.profile', { tmpdir: '/tmp' }))).toBe('s_nul.profile');
+    expect(path.basename(profileDirFor('aux.json', { tmpdir: '/tmp' }))).toBe('s_aux.json');
   });
 
   it('caps the segment at 64 chars and never produces an empty segment', () => {

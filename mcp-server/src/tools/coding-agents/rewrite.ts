@@ -163,11 +163,16 @@ export async function applyStructuralRewrite(
 
       // Extract literal tokens, ignoring wildcards and syntax punctuation
       const tokens = pat.split(/\$\$\$[A-Z0-9_]*|[()[\]{},;.\s]+/).filter(Boolean);
+      if (tokens.length === 0) {
+        // Guard against degenerate patterns containing only wildcards ($$$...)
+        // Bypasses AST tree traversal to avoid matching every node
+        return applyPatternRewrite(content, pat, out);
+      }
       let matchCount = 0;
 
       src.forEachDescendant((node, traversal) => {
         const text = node.getText();
-        const matchesTokens = tokens.length === 0 || tokens.every(token => text.includes(token));
+        const matchesTokens = tokens.every(token => text.includes(token));
         if (matchesTokens) {
             const rewritten = applyPatternRewrite(text, pat, out);
             if (rewritten.matchCount > 0 && rewritten.content !== text) {

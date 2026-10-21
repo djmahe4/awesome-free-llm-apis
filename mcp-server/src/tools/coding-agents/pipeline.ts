@@ -381,7 +381,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
 
       const fileExists = await fs.pathExists(fullPath);
       const originalContent = fileExists ? await fs.readFile(fullPath, 'utf-8') : '';
-      const lines = originalContent ? originalContent.split('\n') : [];
+      const lines = originalContent ? originalContent.split(/\r?\n/) : [];
       const tag = computeTag(originalContent);
       const hashTag = `[${relPath}#${tag}]`;
 
@@ -676,7 +676,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         }
       }
 
-      const replacementLines = patchedContent.split('\n');
+      const replacementLines = patchedContent ? patchedContent.split(/\r?\n/) : [];
       const { unifiedDiff, origSnippet, replSnippet, startLine: windowStartLine } = generateUnifiedDiff(
         relPath,
         hashTag,

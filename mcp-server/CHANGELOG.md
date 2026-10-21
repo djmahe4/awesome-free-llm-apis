@@ -48,6 +48,7 @@
 
 ### Next updates (→ v1.1.2)
 
+- `movie_tool` reverse enginneering of video/audio and images and entity or element extraction from frames for multi-lane generation.
 - **Comprehensive End-to-End Smoke Test Suite**:
   - Automated live API smoke test harness covering Ollama (local daemon at `http://localhost:11434` and Ollama Cloud), NVIDIA NIM, Groq, ModelScope, OpenRouter, and Pollinations.
   - Dedicated JSONL streaming decoder smoke tests for local Ollama and streaming-capable providers within `coding_agents` and `use_free_llm`.

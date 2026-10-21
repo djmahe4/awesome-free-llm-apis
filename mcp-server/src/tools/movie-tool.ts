@@ -12,7 +12,7 @@ import { synthesizeSpeechLocal } from './media/audio-router.js';
 import { generateStoryScript } from './media/story-router.js';
 import { applyMediaEffects, normalizeOrRandomizeEffect } from './media/dsp-router.js';
 import { toPublicArtifact, type TrackLane, type MediaEffect } from './media/types.js';
-import { pathParamWithinRoots, resolvePathWithinRoots } from '../utils/workspace-roots.js';
+import { pathParamWithinRoots, resolvePathWithinRoots, relativeSegmentError } from '../utils/workspace-roots.js';
 
 export interface MovieToolInput {
   action:
@@ -62,7 +62,19 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
   if (artifactPathGuard) {
     return { success: false, error: artifactPathGuard };
   }
-  const projectDir = input.projectDir || path.resolve(process.cwd(), 'projects', input.projectId || 'default');
+  const projectDirGuard = pathParamWithinRoots(input.projectDir, 'projectDir');
+  if (projectDirGuard) {
+    return { success: false, error: projectDirGuard };
+  }
+  const projectIdGuard = relativeSegmentError(input.projectId, 'projectId');
+  if (projectIdGuard) {
+    return { success: false, error: projectIdGuard };
+  }
+  const rawProjectDir = input.projectDir || path.resolve(process.cwd(), 'projects', input.projectId || 'default');
+  const projectDir = resolvePathWithinRoots(rawProjectDir);
+  if (!projectDir) {
+    return { success: false, error: 'projectDir is outside the allowed roots (WORKSPACE_ROOTS)' };
+  }
   const store = new TimelineManifestStore(projectDir);
 
   switch (input.action) {
