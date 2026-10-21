@@ -21,7 +21,7 @@ function installFakePool() {
 
 // No real DNS in tests: example.com is public, everything else unknown unless a test says otherwise.
 beforeEach(() => setBrowserUrlResolverForTesting(async (h: string) => (h === 'example.com' ? ['93.184.216.34'] : h === 'rebind.test' ? ['10.0.0.9'] : [])));
-afterEach(() => { setBrowserSessionPoolForTesting(null); setBrowserUrlResolverForTesting(null); delete process.env.BROWSER_ALLOW_PRIVATE; });
+afterEach(() => { setBrowserSessionPoolForTesting(null); setBrowserUrlResolverForTesting(null); delete process.env.BROWSER_ALLOW_PRIVATE; delete process.env.BROWSER_ALLOW_HOSTS; });
 
 const navigated = (calls: Array<{ name: string; args: any }>) => calls.filter(c => c.name === 'navigate_page');
 
@@ -94,6 +94,28 @@ describe('browser_tool navigate: URL guard', () => {
         const r = await dispatchBrowserAction({ action: 'scrape', url: 'http://10.0.0.1/admin', sessionId: 's-scrape' });
         expect(r.success).toBe(false);
         expect(calls.filter(c => c.name === 'navigate_page')).toHaveLength(0);
+        await pool.shutdownAll();
+    });
+});
+
+describe('browser_tool navigate: local testing', () => {
+    it('BROWSER_ALLOW_HOSTS opens exactly the listed local targets', async () => {
+        process.env.BROWSER_ALLOW_HOSTS = 'localhost:3111';
+        const { calls, pool } = installFakePool();
+        const ok = await dispatchBrowserAction({ action: 'navigate', url: 'http://localhost:3111/dashboard', sessionId: 's-lh' });
+        expect(ok.success).toBe(true);
+        const other = await dispatchBrowserAction({ action: 'navigate', url: 'http://localhost:9999/', sessionId: 's-lh2' });
+        expect(other.success).toBe(false);
+        expect(calls.filter(c => c.name === 'navigate_page')).toHaveLength(1);
+        await pool.shutdownAll();
+    });
+
+    it('cloud metadata stays blocked even with BROWSER_ALLOW_PRIVATE=1', async () => {
+        process.env.BROWSER_ALLOW_PRIVATE = '1';
+        const { pool } = installFakePool();
+        const r = await dispatchBrowserAction({ action: 'navigate', url: 'http://169.254.169.254/latest/meta-data/', sessionId: 's-meta' });
+        expect(r.success).toBe(false);
+        expect(JSON.stringify(r.errors)).toContain('METADATA_ADDRESS');
         await pool.shutdownAll();
     });
 });

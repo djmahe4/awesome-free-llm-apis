@@ -47,7 +47,7 @@ describe('checkPublicHttpUrl', () => {
   });
 
   it.each([
-    'http://127.0.0.1/', 'http://localhost/', 'http://LOCALHOST:8080/', 'http://foo.localhost/', 'http://[::1]/', 'http://169.254.169.254/latest/meta-data/',
+    'http://127.0.0.1/', 'http://localhost/', 'http://LOCALHOST:8080/', 'http://foo.localhost/', 'http://[::1]/', 'http://169.254.1.1/',
     'http://2130706433/', 'http://0x7f.1/', 'http://017700000001/', 'http://0/', 'http://10.0.0.1/', 'http://192.168.0.1/', 'http://100.64.0.1/',
     'http://[fe80::1]/', 'http://[fdab::1]/', 'http://[::ffff:127.0.0.1]/', 'http://metadata.google.internal/', 'http://intranet.internal/', 'http://printer.local/',
   ])('rejects private target %s', async (url) => {
@@ -79,5 +79,40 @@ describe('checkPublicHttpUrl', () => {
   it('allowPrivate opt-in permits private targets but still enforces the scheme', async () => {
     expect((await checkPublicHttpUrl('http://127.0.0.1:3000/', { resolve: pub, allowPrivate: true })).ok).toBe(true);
     expect((await checkPublicHttpUrl('file:///etc/passwd', { resolve: pub, allowPrivate: true })).ok).toBe(false);
+  });
+});
+
+describe('allowHosts (explicit local-testing allowlist)', () => {
+  const pub = async (h: string) => (h === 'example.com' ? ['93.184.216.34'] : []);
+
+  it('permits exactly the listed host:port and nothing else on loopback', async () => {
+    const opts = { resolve: pub, allowHosts: ['localhost:3111', '127.0.0.1:8080'] };
+    expect((await checkPublicHttpUrl('http://localhost:3111/dashboard', opts)).ok).toBe(true);
+    expect((await checkPublicHttpUrl('http://127.0.0.1:8080/', opts)).ok).toBe(true);
+    expect(await checkPublicHttpUrl('http://localhost:9999/', opts)).toMatchObject({ ok: false, code: 'PRIVATE_ADDRESS' });
+    expect(await checkPublicHttpUrl('http://127.0.0.1:3111/', opts)).toMatchObject({ ok: false, code: 'PRIVATE_ADDRESS' });
+    expect(await checkPublicHttpUrl('http://10.0.0.1:3111/', opts)).toMatchObject({ ok: false, code: 'PRIVATE_ADDRESS' });
+  });
+
+  it('a bare host entry matches any port of that host', async () => {
+    const opts = { resolve: pub, allowHosts: ['localhost'] };
+    expect((await checkPublicHttpUrl('http://localhost:5173/', opts)).ok).toBe(true);
+    expect((await checkPublicHttpUrl('http://localhost/', opts)).ok).toBe(true);
+    expect(await checkPublicHttpUrl('http://127.0.0.1:5173/', opts)).toMatchObject({ ok: false });
+  });
+
+  it('IPv6 loopback can be listed', async () => {
+    expect((await checkPublicHttpUrl('http://[::1]:3000/', { resolve: pub, allowHosts: ['[::1]:3000'] })).ok).toBe(true);
+  });
+
+  it('cloud metadata addresses stay blocked even when listed or when allowPrivate is on', async () => {
+    for (const url of ['http://169.254.169.254/latest/meta-data/', 'http://[fd00:ec2::254]/']) {
+      expect(await checkPublicHttpUrl(url, { resolve: pub, allowHosts: ['169.254.169.254', '[fd00:ec2::254]'] })).toMatchObject({ ok: false, code: 'METADATA_ADDRESS' });
+      expect(await checkPublicHttpUrl(url, { resolve: pub, allowPrivate: true })).toMatchObject({ ok: false, code: 'METADATA_ADDRESS' });
+    }
+  });
+
+  it('the scheme is still enforced for allowlisted hosts', async () => {
+    expect(await checkPublicHttpUrl('file://localhost/etc/passwd', { resolve: pub, allowHosts: ['localhost'] })).toMatchObject({ ok: false, code: 'BAD_SCHEME' });
   });
 });

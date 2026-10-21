@@ -87,13 +87,42 @@ export function isPrivateAddress(ip: string): boolean {
 
 export type UrlCheck =
   | { ok: true; url: URL }
-  | { ok: false; code: 'BAD_URL' | 'BAD_SCHEME' | 'CREDENTIALS_IN_URL' | 'PRIVATE_ADDRESS' | 'DNS_FAILED'; message: string };
+  | { ok: false; code: 'BAD_URL' | 'BAD_SCHEME' | 'CREDENTIALS_IN_URL' | 'PRIVATE_ADDRESS' | 'METADATA_ADDRESS' | 'DNS_FAILED'; message: string };
 
 export interface UrlCheckOptions {
   /** Permit private/loopback targets (local development). The scheme is still enforced. */
   allowPrivate?: boolean;
+  /**
+   * Explicit local-testing allowlist: `host` (any port) or `host:port`, e.g. `localhost:3111`,
+   * `127.0.0.1:8080`, `[::1]:3000`. Only those targets skip the private-address check; everything
+   * else private stays blocked. Cloud metadata addresses are never allowed.
+   */
+  allowHosts?: string[];
   /** Injectable resolver (tests); defaults to dns.lookup with all addresses. */
   resolve?: (host: string) => Promise<string[]>;
+}
+
+/** 169.254.0.0/16 (AWS/GCP/Azure metadata) and the AWS IPv6 metadata address. */
+function isMetadataAddress(ip: string): boolean {
+  if (net.isIPv4(ip)) return ip.startsWith('169.254.');
+  const g = expandV6(ip);
+  if (!g) return false;
+  if (g[0] === 0xfd00 && g[1] === 0x0ec2 && g.slice(2, 7).every(x => x === 0) && g[7] === 0x254) return true;
+  const mapped = g.slice(0, 5).every(x => x === 0) && g[5] === 0xffff;
+  return mapped && g[6] === 0xa9fe;
+}
+
+function isAllowListed(url: URL, host: string, allow?: string[]): boolean {
+  if (!allow || allow.length === 0) return false;
+  const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+  return allow.some(entry => {
+    const e = entry.trim().toLowerCase();
+    if (!e) return false;
+    const m = e.match(/^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/);
+    if (!m) return false;
+    const eHost = m[1].replace(/^\[|\]$/g, '');
+    return eHost === host && (m[2] === undefined || m[2] === port);
+  });
 }
 
 const PRIVATE_NAME_RE = /(^|\.)(localhost|local|internal|localdomain|home\.arpa)$/i;
@@ -116,10 +145,15 @@ export async function checkPublicHttpUrl(raw: string, opts: UrlCheckOptions = {}
   if (url.username || url.password) {
     return { ok: false, code: 'CREDENTIALS_IN_URL', message: 'URLs with embedded credentials are not allowed' };
   }
-  if (opts.allowPrivate) return { ok: true, url };
-
   // URL.hostname keeps IPv6 literals in brackets.
   const host = url.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+
+  // Cloud metadata endpoints hand out credentials; no opt-in unlocks them.
+  if (net.isIP(host) && isMetadataAddress(host)) {
+    return { ok: false, code: 'METADATA_ADDRESS', message: `${host} is a cloud metadata address and is never allowed` };
+  }
+  if (opts.allowPrivate) return { ok: true, url };
+  if (isAllowListed(url, host, opts.allowHosts)) return { ok: true, url };
   if (net.isIP(host)) {
     return isPrivateAddress(host)
       ? { ok: false, code: 'PRIVATE_ADDRESS', message: `${host} is a private, loopback, link-local or reserved address` }
