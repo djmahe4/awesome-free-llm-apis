@@ -140,6 +140,15 @@ export function windowReplyIsSuspicious(originalWindowLines: string[], replyLine
 interface SearchReplaceBlock { search: string; replace: string }
 
 export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
+  return parseSearchReplaceBlocksDetailed(text).blocks;
+}
+
+/**
+ * Like parseSearchReplaceBlocks, but also reports a block that was started and never
+ * closed with a REPLACE marker (typically a reply cut off at the output limit). Such a
+ * block is not applied, but callers must be able to tell it was lost.
+ */
+export function parseSearchReplaceBlocksDetailed(text: string): { blocks: SearchReplaceBlock[]; incomplete: number } {
   const blocks: SearchReplaceBlock[] = [];
   const lines = text.split(/\r?\n/);
   let state: 'OUTSIDE' | 'IN_SEARCH' | 'IN_REPLACE' = 'OUTSIDE';
@@ -187,7 +196,7 @@ export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
     }
   }
 
-  return blocks;
+  return { blocks, incomplete: state === 'OUTSIDE' ? 0 : 1 };
 }
 
 /**
@@ -269,9 +278,28 @@ export function findLineBlockMatch(
   return { index: -1, ambiguous: false, usedLineNumberStrip: false };
 }
 
+export interface ApplyOptions {
+  /**
+   * The instruction only ADDS code. Every non-blank SEARCH line must then survive in REPLACE
+   * (trimmed comparison); a small model that "adds" by rewriting the anchor deletes working code.
+   */
+  additive?: boolean;
+  /** Treat an empty SEARCH as "append to the end of the file" instead of an error. */
+  allowAppend?: boolean;
+}
+
+const ADD_WORDS = /\b(add|insert|append|introduce|implement|create|new)\b/i;
+const CHANGE_WORDS = /\b(remove|delete|replace|rename|change|fix|rewrite|refactor|modify|update|swap|drop|move)\b/i;
+
+/** True for instructions that only add code (so REPLACE must keep its SEARCH anchor). */
+export function isAdditiveInstruction(instruction: string): boolean {
+  return ADD_WORDS.test(instruction) && !CHANGE_WORDS.test(instruction);
+}
+
 export function applySearchReplaceBlocks(
   content: string,
-  blocks: SearchReplaceBlock[]
+  blocks: SearchReplaceBlock[],
+  options: ApplyOptions = {}
 ): { content: string; appliedCount: number; failures: string[] } {
   // CRLF-agnostic by construction (each line's own ending is discarded by
   // the split), and rejoined with whichever ending the original file
@@ -285,7 +313,16 @@ export function applySearchReplaceBlocks(
 
   for (const { search, replace } of blocks) {
     if (!search) {
-      failures.push('Empty SEARCH block (nothing to match)');
+      if (options.allowAppend || content.trim() === '') {
+        // New or empty file, or an explicit append: the text goes at the end.
+        const addition = replace.split(/\r?\n/);
+        const base = workingLines.length === 1 && workingLines[0] === '' ? [] : workingLines;
+        const trimmed = base.length > 0 && base[base.length - 1] === '' ? base.slice(0, -1) : base;
+        workingLines = [...trimmed, ...addition, ...(base.length > 0 && base[base.length - 1] === '' ? [''] : [])];
+        appliedCount++;
+        continue;
+      }
+      failures.push('Empty SEARCH block: include one or more existing lines as the anchor in SEARCH, and repeat them in REPLACE together with the new lines');
       continue;
     }
     if (STRAY_MARKER_RE.test(search) || STRAY_MARKER_RE.test(replace)) {
@@ -305,6 +342,14 @@ export function applySearchReplaceBlocks(
       // strip it there as well, or the "fix" would insert that literal
       // presentation-only text into the real file.
       const replaceLines = (usedLineNumberStrip ? replace.replace(new RegExp(LINE_NUMBER_PREFIX_RE.source, 'gm'), '') : replace).split(/\r?\n/);
+      if (options.additive) {
+        const kept = new Set(replaceLines.map(l => l.trim()).filter(Boolean));
+        const dropped = searchLines.map(l => l.trim()).filter(l => l && !kept.has(l));
+        if (dropped.length > 0) {
+          failures.push(`anchor not retained: REPLACE dropped existing line(s) ${JSON.stringify(dropped[0].slice(0, 60))}${dropped.length > 1 ? ` (+${dropped.length - 1} more)` : ''} but the instruction only adds code; repeat the SEARCH lines in REPLACE and add the new lines after them`);
+          continue;
+        }
+      }
       workingLines = [
         ...workingLines.slice(0, index),
         ...replaceLines,
@@ -462,12 +507,13 @@ export async function generateSearchReplacePatch(
     return { content: currentContent, appliedCount: 0, failures: [], hardFailure: `Model refused request ("${raw.trim().slice(0, 200)}")` };
   }
 
-  const blocks = parseSearchReplaceBlocks(raw);
+  const { blocks, incomplete } = parseSearchReplaceBlocksDetailed(raw);
   if (blocks.length === 0) {
     return { content: currentContent, appliedCount: 0, failures: [], hardFailure: 'No SEARCH/REPLACE blocks found in response' };
   }
 
-  const { content, appliedCount, failures } = applySearchReplaceBlocks(currentContent, blocks);
+  const { content, appliedCount, failures } = applySearchReplaceBlocks(currentContent, blocks, { additive: isAdditiveInstruction(instruction) });
+  if (incomplete > 0) failures.push(`${incomplete} block(s) were cut off before the REPLACE marker and were not applied`);
   return { content, appliedCount, failures };
 }
 

@@ -27,8 +27,9 @@ import {
 } from './tasks.js';
 import {
   extractWindowForInstruction,
-  parseSearchReplaceBlocks,
+  parseSearchReplaceBlocksDetailed,
   applySearchReplaceBlocks,
+  isAdditiveInstruction,
   searchReplaceRegressesTsErrors,
   looksLikeHallucinatedReplacement,
   generateSearchReplacePatch,
@@ -437,14 +438,15 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
                 : undefined,
             });
             if (srLlmResult.success && srLlmResult.patch?.trim()) {
-              const blocks = parseSearchReplaceBlocks(srLlmResult.patch);
+              const { blocks, incomplete } = parseSearchReplaceBlocksDetailed(srLlmResult.patch);
               if (blocks.length === 0) {
-                lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: no blocks found in response`;
+                lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: no ${incomplete ? 'complete ' : ''}blocks found in response${incomplete ? ' (the reply ended inside a block)' : ''}`;
               } else {
                 // Apply against the FULL current content by exact text match —
                 // independent of whatever window was shown to the model, so
                 // there's no line-offset bookkeeping to get wrong.
-                const { content, appliedCount, failures } = applySearchReplaceBlocks(patchedContent, blocks);
+                const { content, appliedCount, failures } = applySearchReplaceBlocks(patchedContent, blocks, { additive: isAdditiveInstruction(activeGoal) });
+                if (incomplete > 0) failures.push(`${incomplete} block(s) were cut off before the REPLACE marker and were not applied`);
                 const regressed = appliedCount > 0 && await searchReplaceRegressesTsErrors(relPath, patchedContent, content);
                 if (appliedCount > 0 && !regressed) {
                   patchedContent = content;
