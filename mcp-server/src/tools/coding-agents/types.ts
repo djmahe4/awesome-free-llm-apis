@@ -99,8 +99,28 @@ export interface CodingAgentsInput {
   verifyReport?: { exitCode: number; output: string; command?: string };
   /** Debugger brief from a previous failed attempt; appended to the goal for the retry. */
   feedback?: string;
+  /** Regenerate the (small) file from the requirements instead of patching it; set by the repair loop when many cases fail. */
+  rewrite?: boolean;
+  /** Sampling temperature for generation (default 0). The repair loop raises it on retries so a repeat is not identical. */
+  temperature?: number;
+  /** Automatic retries after a failed check or a blocking review (default 3, max 3; AST edits never retry). */
+  maxRepairAttempts?: number;
+  /** Independent review of the proposed diff before apply (default on; false disables it). */
+  review?: boolean;
   action?: 'plan' | 'execute' | 'resume' | 'status' | 'abort';
   pauseOnTaskPlan?: boolean;
+}
+
+export interface RepairAttempt {
+  attempt: number;
+  /** verification status, review_blocked, applied, proposed or error. */
+  outcome: string;
+  /** The brief that was fed to the next attempt (truncated). */
+  brief?: string;
+  /** Failing cases after this attempt (progress between attempts). */
+  failing?: number;
+  /** The attempt regenerated the file instead of patching it. */
+  rewrite?: boolean;
 }
 
 export interface CodingAgentsResult {
@@ -117,11 +137,24 @@ export interface CodingAgentsResult {
   message?: string;
   checkpointId?: string;
   restoredFiles?: string[];
+  /** Independent reviewer's verdict on the proposed diff. */
+  review?: {
+    verdict: 'ok' | 'concerns' | 'blocked' | 'skipped';
+    findings: Array<{ blocking: boolean; text: string }>;
+    brief?: string;
+    model?: string;
+  };
+  /** How the automatic repair loop ended (present when a check or review took part). */
+  repair?: {
+    outcome: 'converged' | 'not_converged' | 'stuck' | 'needs_user' | 'error';
+    attemptCount: number;
+    attempts: RepairAttempt[];
+  };
   /** Outcome of verifyCommand around an apply (absent when none was given or nothing was applied). */
   verification?: {
     command: string;
-    /** passed | regressed (passed before, fails after: rolled back) | baseline_failing | needs_user (edit withheld) | user_passed | user_failed */
-    status?: 'passed' | 'regressed' | 'baseline_failing' | 'needs_user' | 'user_passed' | 'user_failed';
+    /** passed | regressed (passed before, fails after: rolled back) | not_green (was failing before and still fails: test-first work, kept so the next attempt can build on it) | needs_user (edit withheld) | user_passed | user_failed */
+    status?: 'passed' | 'regressed' | 'not_green' | 'needs_user' | 'user_passed' | 'user_failed';
     /** Why an edit was withheld (needs_user). */
     reasons?: string[];
     /** Debugger-persona brief built from the failing output, ready to pass back as `feedback`. */
@@ -133,6 +166,8 @@ export interface CodingAgentsResult {
     exitCode: number | null;
     timedOut: boolean;
     outputTail: string;
+    /** Failing case names from the whole run. */
+    failedCases?: string[];
     durationMs: number;
   };
   /** undo_file: whether the previous version was restored to disk. */

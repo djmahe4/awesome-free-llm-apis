@@ -37,6 +37,8 @@ export interface VerifyRunResult {
   timedOut: boolean;
   /** Last ~4 KB of combined stdout+stderr, enough to see the failing assertion. */
   outputTail: string;
+  /** Names of failing cases collected across the WHOLE output (the tail only holds the last few). */
+  failedCases: string[];
   durationMs: number;
   /** The command failed validation and nothing was run. */
   rejected?: boolean;
@@ -44,6 +46,21 @@ export interface VerifyRunResult {
 }
 
 const TAIL_BYTES = 4096;
+const MAX_FAILED_CASES = 200;
+
+/** Failing-case name from one output line (node:test, vitest/jest, pytest, TAP), or null. */
+export function failedCaseName(line: string): string | null {
+  const t = line.trim();
+  let m = t.match(/^[\u2716\u00d7\u2717x]\s+(.+?)(?:\s+\(\d+(?:\.\d+)?ms\))?$/);
+  if (m && !/^failing tests:?$/i.test(m[1]) && !/^\d+ failed/i.test(m[1])) return m[1];
+  m = t.match(/^FAILED\s+(.+)$/);
+  if (m) return m[1];
+  m = t.match(/^FAIL\s+(.+)$/);
+  if (m) return m[1];
+  m = t.match(/^not ok\s+\d+\s*-?\s*(.+)$/);
+  if (m) return m[1];
+  return null;
+}
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 function killTree(pid: number | undefined): void {
@@ -58,7 +75,7 @@ export async function runVerifyCommand(
   opts: { timeoutMs?: number } = {},
 ): Promise<VerifyRunResult> {
   const v = validateVerifyCommand(command);
-  if (!v.ok) return { ok: false, exitCode: null, timedOut: false, outputTail: '', durationMs: 0, rejected: true, reason: v.reason };
+  if (!v.ok) return { ok: false, exitCode: null, timedOut: false, outputTail: '', failedCases: [], durationMs: 0, rejected: true, reason: v.reason };
 
   const timeoutMs = opts.timeoutMs ?? (parseInt(process.env.CODING_AGENTS_VERIFY_TIMEOUT_MS || '', 10) || DEFAULT_TIMEOUT_MS);
   const started = Date.now();
@@ -70,6 +87,9 @@ export async function runVerifyCommand(
 
   return new Promise<VerifyRunResult>(resolve => {
     let tail = '';
+    let pending = '';
+    const failed: string[] = [];
+    const seen = new Set<string>();
     let timedOut = false;
     const child = spawn(file, args, {
       cwd,
@@ -78,7 +98,19 @@ export async function runVerifyCommand(
       detached: process.platform !== 'win32',
       env: { ...process.env, CI: '1', FORCE_COLOR: '0' },
     });
-    const append = (d: Buffer) => { tail = (tail + d.toString()).slice(-TAIL_BYTES); };
+    const append = (d: Buffer) => {
+      const text = d.toString();
+      tail = (tail + text).slice(-TAIL_BYTES);
+      // Scan every complete line as it streams: the tail alone only holds the last few failures.
+      pending += text;
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? '';
+      if (pending.length > 2000) pending = '';
+      for (const l of lines) {
+        const name = failedCaseName(l);
+        if (name && !seen.has(name) && failed.length < MAX_FAILED_CASES) { seen.add(name); failed.push(name); }
+      }
+    };
     child.stdout?.on('data', append);
     child.stderr?.on('data', append);
     const timer = setTimeout(() => { timedOut = true; killTree(child.pid); }, timeoutMs);
@@ -89,6 +121,7 @@ export async function runVerifyCommand(
         exitCode,
         timedOut,
         outputTail: (tail + extra).slice(-TAIL_BYTES),
+        failedCases: failed,
         durationMs: Date.now() - started,
       });
     };

@@ -51,6 +51,8 @@ export interface LocalLlmPatchInput {
   workspace_root?: string;
   sessionId?: string;
   allowCreate?: boolean;
+  /** Sampling temperature (default 0: deterministic edits). */
+  temperature?: number;
   // Sliding-window support (orchestrated by coding_agents): when the caller
   // already knows the file is large and has located the relevant region,
   // it passes just that excerpt here instead of letting this function read
@@ -264,7 +266,7 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
           { role: 'user', content: prompt },
         ], {
           // Deterministic edits; explicit reply budget so num_ctx is sized for it.
-          temperature: 0,
+          temperature: input.temperature ?? 0,
           maxTokens: isSearchReplace ? 2048 : 8192,
         });
         const rejection = rejectReply(chatResult, isSearchReplace);
