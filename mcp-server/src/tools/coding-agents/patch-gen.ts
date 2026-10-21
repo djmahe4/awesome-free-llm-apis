@@ -4,6 +4,10 @@ import { type DiagnosticResult } from './types.js';
 import { runTsMorphCheck } from './diagnostics.js';
 import { extractCodeBlock } from './tasks.js';
 
+// Large enough that one declaration of the named symbol beats a dense run of plain mentions
+// (a 13-line neighborhood of mentions weighs about 5 x 13 = 65).
+const DECLARATION_BONUS = 100;
+
 export function extractWindowForInstruction(
   content: string,
   instruction: string,
@@ -12,13 +16,32 @@ export function extractWindowForInstruction(
   const lines = content.split(/\r?\n/);
   if (lines.length <= windowSize) return null;
 
-  const terms = (instruction.match(/\b[a-zA-Z][a-zA-Z0-9_-]{4,}\b/g) ?? [])
-    .map(t => t.toLowerCase());
-  const uniqueTerms = [...new Set(terms)].slice(0, 12);
+  const rawTerms = instruction.match(/\b[a-zA-Z][a-zA-Z0-9_-]{4,}\b/g) ?? [];
+  // An identifier-looking term (camelCase, PascalCase, snake_case) names a symbol; plain words
+  // like "method" or "change" occur everywhere and must not outvote it.
+  const isIdentifier = (t: string) => /[a-z][A-Z]|^[A-Z][a-z]+[A-Z]|_/.test(t);
+  const seen = new Set<string>();
+  const weighted: Array<{ term: string; weight: number; ident: boolean }> = [];
+  for (const raw of rawTerms) {
+    const term = raw.toLowerCase();
+    if (seen.has(term)) continue;
+    seen.add(term);
+    const ident = isIdentifier(raw);
+    weighted.push({ term, weight: ident ? 4 : 1, ident });
+  }
+  const uniqueTerms = weighted.slice(0, 12);
+  const declRe = /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:abstract\s+)?(?:class|function|interface|type|enum|def|const|let|struct|fn)\b/;
 
   const perLineScore = lines.map(line => {
     const lower = line.toLowerCase();
-    return uniqueTerms.filter(t => lower.includes(t)).length;
+    let score = 0;
+    for (const { term, weight, ident } of uniqueTerms) {
+      if (!lower.includes(term)) continue;
+      score += weight;
+      // The line that DECLARES the named symbol is where the edit belongs.
+      if (ident && declRe.test(line)) score += DECLARATION_BONUS;
+    }
+    return score;
   });
 
   // A single keyword-dense line (e.g. one ternary chaining status/complete/
@@ -32,14 +55,25 @@ export function extractWindowForInstruction(
   // thing it could see — applied cleanly (real text, no TS regression),
   // reported success, and silently missed the actual requested change.
   const neighborhood = 6;
-  let bestScore = -1;
-  let bestLine = Math.floor(lines.length / 2);
+  let bestScore = 0;
+  let bestLine = -1;
   for (let i = 0; i < lines.length; i++) {
     let windowScore = 0;
     for (let j = Math.max(0, i - neighborhood); j <= Math.min(lines.length - 1, i + neighborhood); j++) {
       windowScore += perLineScore[j];
     }
     if (windowScore > bestScore) { bestScore = windowScore; bestLine = i; }
+  }
+
+  // Nothing in the file matches (typical for "add X": X does not exist yet). The old code then
+  // kept the first zero-score line, i.e. the file HEAD, which is the wrong place to add code.
+  // New code goes after the module's last top-level declaration, so anchor there.
+  if (bestLine < 0) {
+    let lastDecl = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (/^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:abstract\s+)?(?:class|function|interface|type|enum|def|struct|fn)\b/.test(lines[i])) { lastDecl = i; break; }
+    }
+    bestLine = lastDecl >= 0 ? lastDecl : lines.length - 1;
   }
 
   const half = Math.floor(windowSize / 2);
@@ -106,6 +140,15 @@ export function windowReplyIsSuspicious(originalWindowLines: string[], replyLine
 interface SearchReplaceBlock { search: string; replace: string }
 
 export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
+  return parseSearchReplaceBlocksDetailed(text).blocks;
+}
+
+/**
+ * Like parseSearchReplaceBlocks, but also reports a block that was started and never
+ * closed with a REPLACE marker (typically a reply cut off at the output limit). Such a
+ * block is not applied, but callers must be able to tell it was lost.
+ */
+export function parseSearchReplaceBlocksDetailed(text: string): { blocks: SearchReplaceBlock[]; incomplete: number } {
   const blocks: SearchReplaceBlock[] = [];
   const lines = text.split(/\r?\n/);
   let state: 'OUTSIDE' | 'IN_SEARCH' | 'IN_REPLACE' = 'OUTSIDE';
@@ -153,7 +196,7 @@ export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
     }
   }
 
-  return blocks;
+  return { blocks, incomplete: state === 'OUTSIDE' ? 0 : 1 };
 }
 
 /**
@@ -235,9 +278,28 @@ export function findLineBlockMatch(
   return { index: -1, ambiguous: false, usedLineNumberStrip: false };
 }
 
+export interface ApplyOptions {
+  /**
+   * The instruction only ADDS code. Every non-blank SEARCH line must then survive in REPLACE
+   * (trimmed comparison); a small model that "adds" by rewriting the anchor deletes working code.
+   */
+  additive?: boolean;
+  /** Treat an empty SEARCH as "append to the end of the file" instead of an error. */
+  allowAppend?: boolean;
+}
+
+const ADD_WORDS = /\b(add|insert|append|introduce|implement|create|new)\b/i;
+const CHANGE_WORDS = /\b(remove|delete|replace|rename|change|fix|rewrite|refactor|modify|update|swap|drop|move)\b/i;
+
+/** True for instructions that only add code (so REPLACE must keep its SEARCH anchor). */
+export function isAdditiveInstruction(instruction: string): boolean {
+  return ADD_WORDS.test(instruction) && !CHANGE_WORDS.test(instruction);
+}
+
 export function applySearchReplaceBlocks(
   content: string,
-  blocks: SearchReplaceBlock[]
+  blocks: SearchReplaceBlock[],
+  options: ApplyOptions = {}
 ): { content: string; appliedCount: number; failures: string[] } {
   // CRLF-agnostic by construction (each line's own ending is discarded by
   // the split), and rejoined with whichever ending the original file
@@ -251,7 +313,16 @@ export function applySearchReplaceBlocks(
 
   for (const { search, replace } of blocks) {
     if (!search) {
-      failures.push('Empty SEARCH block (nothing to match)');
+      if (options.allowAppend || content.trim() === '') {
+        // New or empty file, or an explicit append: the text goes at the end.
+        const addition = replace.split(/\r?\n/);
+        const base = workingLines.length === 1 && workingLines[0] === '' ? [] : workingLines;
+        const trimmed = base.length > 0 && base[base.length - 1] === '' ? base.slice(0, -1) : base;
+        workingLines = [...trimmed, ...addition, ...(base.length > 0 && base[base.length - 1] === '' ? [''] : [])];
+        appliedCount++;
+        continue;
+      }
+      failures.push('Empty SEARCH block: include one or more existing lines as the anchor in SEARCH, and repeat them in REPLACE together with the new lines');
       continue;
     }
     if (STRAY_MARKER_RE.test(search) || STRAY_MARKER_RE.test(replace)) {
@@ -271,6 +342,14 @@ export function applySearchReplaceBlocks(
       // strip it there as well, or the "fix" would insert that literal
       // presentation-only text into the real file.
       const replaceLines = (usedLineNumberStrip ? replace.replace(new RegExp(LINE_NUMBER_PREFIX_RE.source, 'gm'), '') : replace).split(/\r?\n/);
+      if (options.additive) {
+        const kept = new Set(replaceLines.map(l => l.trim()).filter(Boolean));
+        const dropped = searchLines.map(l => l.trim()).filter(l => l && !kept.has(l));
+        if (dropped.length > 0) {
+          failures.push(`anchor not retained: REPLACE dropped existing line(s) ${JSON.stringify(dropped[0].slice(0, 60))}${dropped.length > 1 ? ` (+${dropped.length - 1} more)` : ''} but the instruction only adds code; repeat the SEARCH lines in REPLACE and add the new lines after them`);
+          continue;
+        }
+      }
       workingLines = [
         ...workingLines.slice(0, index),
         ...replaceLines,
@@ -428,12 +507,13 @@ export async function generateSearchReplacePatch(
     return { content: currentContent, appliedCount: 0, failures: [], hardFailure: `Model refused request ("${raw.trim().slice(0, 200)}")` };
   }
 
-  const blocks = parseSearchReplaceBlocks(raw);
+  const { blocks, incomplete } = parseSearchReplaceBlocksDetailed(raw);
   if (blocks.length === 0) {
     return { content: currentContent, appliedCount: 0, failures: [], hardFailure: 'No SEARCH/REPLACE blocks found in response' };
   }
 
-  const { content, appliedCount, failures } = applySearchReplaceBlocks(currentContent, blocks);
+  const { content, appliedCount, failures } = applySearchReplaceBlocks(currentContent, blocks, { additive: isAdditiveInstruction(instruction) });
+  if (incomplete > 0) failures.push(`${incomplete} block(s) were cut off before the REPLACE marker and were not applied`);
   return { content, appliedCount, failures };
 }
 
@@ -548,4 +628,3 @@ export async function generateCodePatchWithCloudLLM(
     return { patch: null, failureReason };
   }
 }
-

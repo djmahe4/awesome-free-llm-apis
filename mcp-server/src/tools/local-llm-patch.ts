@@ -25,6 +25,25 @@ import { logToolCall } from '../utils/ChatLogger.js';
  *    would defeat the cost/privacy reasons someone picked this tool.
  */
 
+/**
+ * Why a model reply cannot be used, or null when it can. A reply built on a truncated
+ * prompt edited a file the model never fully saw; a SEARCH/REPLACE reply with no complete
+ * block (prose, or cut off at the output limit) has nothing to apply.
+ */
+export function rejectReply(r: OllamaLocalChatResult, isSearchReplace: boolean): string | null {
+  if (r.promptTruncated) {
+    return `prompt truncated: ${r.promptTokens} tokens filled num_ctx ${r.numCtx}; the model did not see the whole input (send a smaller excerpt)`;
+  }
+  if (!isSearchReplace) return r.outputTruncated ? 'output truncated at the reply token limit' : null;
+  const complete = (r.content.match(/^>{7} REPLACE\s*$/gm) || []).length;
+  if (complete === 0) {
+    return r.outputTruncated
+      ? 'output truncated before any complete SEARCH/REPLACE block'
+      : 'reply contained no SEARCH/REPLACE block';
+  }
+  return null;
+}
+
 export interface LocalLlmPatchInput {
   filePath: string;
   instruction: string;
@@ -240,7 +259,17 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
                 : 'You are a precise code-editing assistant. Return only the complete new file content in a single code fence.',
           },
           { role: 'user', content: prompt },
-        ]);
+        ], {
+          // Deterministic edits; explicit reply budget so num_ctx is sized for it.
+          temperature: 0,
+          maxTokens: isSearchReplace ? 2048 : 8192,
+        });
+        const rejection = rejectReply(chatResult, isSearchReplace);
+        if (rejection) {
+          attemptErrors.push(`${candidate}: ${rejection}`);
+          chatResult = null;
+          continue;
+        }
         modelUsed = candidate;
         usedFallback = i > 0;
         break;
