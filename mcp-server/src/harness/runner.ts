@@ -772,7 +772,7 @@ async function runSteps(
   originalGoal: string,
   workspaceRoot: string | undefined,
   registryKey: string,
-  aborted: boolean,
+  isAborted: () => boolean,
   priorHandoff: Handoff | undefined,
   memoryContext?: string
 ): Promise<StepEngineResult> {
@@ -793,6 +793,12 @@ async function runSteps(
   }
 
   for (let i = startIndex; i < roles.length; i++) {
+    // abort() flips the registry controller at any time; a boolean read once at launch never saw it.
+    if (isAborted()) {
+      run.status = 'aborted';
+      await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'error', data: { message: 'run aborted before step ' + roles[i] } }).catch(() => {});
+      return { content: lastContent, lastRole, finalHandoff: handoff };
+    }
     // T5 — two views of the plan entry: stepId is the FULL plan id (what
     // tasks.md holds, so each lane cycle is its own task/cursor position),
     // role is the BASE name (what policy, handoffs, traces, budget.perRole
@@ -902,7 +908,7 @@ async function runSteps(
       }
       await beginTaskAttempt(store, originalGoal, stepId, `step ${callId}: attempting via browser_tool (navigate+extract) on ${url}`);
       callResult = await runScraperStep(store, run, decl, role, callId, url, registryKey);
-      stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
+      stepContent = applyResearchResult(run, role, callResult, goalTokens, isAborted()).content;
     } else if (role === 'pdf') {
       // P4b pdf escalation (previously deferred): its input is a pdf ref
       // extracted from the prior handoff, resolved via resolvePdfRef — a
@@ -935,7 +941,7 @@ async function runSteps(
         // that path and bypass endTaskAttempt's normal bookkeeping.
         return { response: resolved?.resolvedContent ?? '' };
       });
-      stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
+      stepContent = applyResearchResult(run, role, callResult, goalTokens, isAborted()).content;
     } else {
       const stepGoal = stepInputText(i, originalGoal, handoff, i === startIndex ? memoryContext : undefined);
       const memoryBlock = buildSessionMemoryPromptBlock(await recentSessionMemory(store.runDirPath));
@@ -971,11 +977,11 @@ async function runSteps(
       // approval/needs_budget already returned control to the human/budget
       // gate, they're not retried here) gets a bounded number of extra
       // attempts, each informed by past lessons for this exact role+tool.
-      stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
+      stepContent = applyResearchResult(run, role, callResult, goalTokens, isAborted()).content;
       const maxAttempts = Math.max(1, decl.limits?.maxAttemptsPerStep ?? 2);
       let attempt = 1;
       let statusAfterAttempt: HarnessRun['status'] = run.status;
-      while (statusAfterAttempt === 'failed' && !aborted && attempt < maxAttempts) {
+      while (statusAfterAttempt === 'failed' && !isAborted() && attempt < maxAttempts) {
         attempt++;
         const failure: StepFailure = { runId: run.runId, role, tool: dispatch.toolName, failureKind: 'empty_result', detail: run.error ?? '', attempt };
         const lessons = await recallLessons(store, run, decl, role, dispatch.toolName, workspaceRoot);
@@ -1002,7 +1008,7 @@ async function runSteps(
           retryDispatch.execute,
           retryDispatch.requestedTool
         );
-        stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
+        stepContent = applyResearchResult(run, role, callResult, goalTokens, isAborted()).content;
         statusAfterAttempt = run.status;
 
         if (statusAfterAttempt === 'complete') {
@@ -1178,12 +1184,12 @@ async function finishStepsAndEnvelope(
   goal: string,
   workspaceRoot: string | undefined,
   registryKey: string,
-  aborted: boolean,
+  isAborted: () => boolean,
   priorHandoff: Handoff | undefined,
   memoryContext: string | undefined,
   recall: { recalledNodes: { id: string; content: string }[] } | undefined
 ): Promise<void> {
-  const { content, finalHandoff } = await runSteps(store, run, decl, roles, startIndex, goal, workspaceRoot, registryKey, aborted, priorHandoff, memoryContext);
+  const { content, finalHandoff } = await runSteps(store, run, decl, roles, startIndex, goal, workspaceRoot, registryKey, isAborted, priorHandoff, memoryContext);
   if (run.status === 'complete' && content) {
     await writeBackToMemory(store, run, decl, goal, content, recall?.recalledNodes ?? [], workspaceRoot);
     if (finalHandoff) await submitOpenQuestions(store, run, decl, goal, finalHandoff, workspaceRoot);
@@ -1254,7 +1260,7 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
   (async () => {
     try {
       const recall = await recallMemoryContext(store, run, decl, input.goal, input.workspaceRoot, registryKey);
-      await finishStepsAndEnvelope(store, run, decl, roles, 0, input.goal, input.workspaceRoot, registryKey, runInfo.controller.signal.aborted, undefined, recall?.context, recall);
+      await finishStepsAndEnvelope(store, run, decl, roles, 0, input.goal, input.workspaceRoot, registryKey, () => runInfo.controller.signal.aborted, undefined, recall?.context, recall);
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
       run.status = 'failed';
@@ -1385,7 +1391,7 @@ async function resumeMonitoredRun(store: HarnessStore, run: HarnessRun): Promise
   const runInfo = RunRegistry.start(registryKey);
   (async () => {
     try {
-      await finishStepsAndEnvelope(store, run, decl, roles, pending.stepIndex + 1, run.goal, run.workspaceRoot, registryKey, runInfo.controller.signal.aborted, validated.handoff, undefined, undefined);
+      await finishStepsAndEnvelope(store, run, decl, roles, pending.stepIndex + 1, run.goal, run.workspaceRoot, registryKey, () => runInfo.controller.signal.aborted, validated.handoff, undefined, undefined);
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
       run.status = 'failed';
@@ -1454,7 +1460,7 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
       // continuing from a later step already had its chance at step 0's
       // memory context on the original deploy.
       const recall = startIndex === 0 ? await recallMemoryContext(store, run, decl, run.goal, run.workspaceRoot, registryKey) : undefined;
-      await finishStepsAndEnvelope(store, run, decl, roles, startIndex, run.goal, run.workspaceRoot, registryKey, runInfo.controller.signal.aborted, priorHandoff, recall?.context, recall);
+      await finishStepsAndEnvelope(store, run, decl, roles, startIndex, run.goal, run.workspaceRoot, registryKey, () => runInfo.controller.signal.aborted, priorHandoff, recall?.context, recall);
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
       run.status = 'failed';
@@ -1517,7 +1523,7 @@ export async function reorchestrateRole(input: ReorchestrateRoleInput): Promise<
     try {
       const priorHandoff = await lastHandoff(store);
       const combinedGoal = input.followupContext ? `${run.goal}\n\n[Followup Instructions for ${input.role}]: ${input.followupContext}` : run.goal;
-      await finishStepsAndEnvelope(store, run, decl, roles, startIndex, combinedGoal, input.workspaceRoot, registryKey, runInfo.controller.signal.aborted, priorHandoff, undefined, undefined);
+      await finishStepsAndEnvelope(store, run, decl, roles, startIndex, combinedGoal, input.workspaceRoot, registryKey, () => runInfo.controller.signal.aborted, priorHandoff, undefined, undefined);
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
       run.status = 'failed';
