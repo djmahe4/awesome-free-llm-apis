@@ -4,6 +4,10 @@ import { type DiagnosticResult } from './types.js';
 import { runTsMorphCheck } from './diagnostics.js';
 import { extractCodeBlock } from './tasks.js';
 
+// Large enough that one declaration of the named symbol beats a dense run of plain mentions
+// (a 13-line neighborhood of mentions weighs about 5 x 13 = 65).
+const DECLARATION_BONUS = 100;
+
 export function extractWindowForInstruction(
   content: string,
   instruction: string,
@@ -12,13 +16,32 @@ export function extractWindowForInstruction(
   const lines = content.split(/\r?\n/);
   if (lines.length <= windowSize) return null;
 
-  const terms = (instruction.match(/\b[a-zA-Z][a-zA-Z0-9_-]{4,}\b/g) ?? [])
-    .map(t => t.toLowerCase());
-  const uniqueTerms = [...new Set(terms)].slice(0, 12);
+  const rawTerms = instruction.match(/\b[a-zA-Z][a-zA-Z0-9_-]{4,}\b/g) ?? [];
+  // An identifier-looking term (camelCase, PascalCase, snake_case) names a symbol; plain words
+  // like "method" or "change" occur everywhere and must not outvote it.
+  const isIdentifier = (t: string) => /[a-z][A-Z]|^[A-Z][a-z]+[A-Z]|_/.test(t);
+  const seen = new Set<string>();
+  const weighted: Array<{ term: string; weight: number; ident: boolean }> = [];
+  for (const raw of rawTerms) {
+    const term = raw.toLowerCase();
+    if (seen.has(term)) continue;
+    seen.add(term);
+    const ident = isIdentifier(raw);
+    weighted.push({ term, weight: ident ? 4 : 1, ident });
+  }
+  const uniqueTerms = weighted.slice(0, 12);
+  const declRe = /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:abstract\s+)?(?:class|function|interface|type|enum|def|const|let|struct|fn)\b/;
 
   const perLineScore = lines.map(line => {
     const lower = line.toLowerCase();
-    return uniqueTerms.filter(t => lower.includes(t)).length;
+    let score = 0;
+    for (const { term, weight, ident } of uniqueTerms) {
+      if (!lower.includes(term)) continue;
+      score += weight;
+      // The line that DECLARES the named symbol is where the edit belongs.
+      if (ident && declRe.test(line)) score += DECLARATION_BONUS;
+    }
+    return score;
   });
 
   // A single keyword-dense line (e.g. one ternary chaining status/complete/
@@ -32,14 +55,25 @@ export function extractWindowForInstruction(
   // thing it could see — applied cleanly (real text, no TS regression),
   // reported success, and silently missed the actual requested change.
   const neighborhood = 6;
-  let bestScore = -1;
-  let bestLine = Math.floor(lines.length / 2);
+  let bestScore = 0;
+  let bestLine = -1;
   for (let i = 0; i < lines.length; i++) {
     let windowScore = 0;
     for (let j = Math.max(0, i - neighborhood); j <= Math.min(lines.length - 1, i + neighborhood); j++) {
       windowScore += perLineScore[j];
     }
     if (windowScore > bestScore) { bestScore = windowScore; bestLine = i; }
+  }
+
+  // Nothing in the file matches (typical for "add X": X does not exist yet). The old code then
+  // kept the first zero-score line, i.e. the file HEAD, which is the wrong place to add code.
+  // New code goes after the module's last top-level declaration, so anchor there.
+  if (bestLine < 0) {
+    let lastDecl = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (/^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:abstract\s+)?(?:class|function|interface|type|enum|def|struct|fn)\b/.test(lines[i])) { lastDecl = i; break; }
+    }
+    bestLine = lastDecl >= 0 ? lastDecl : lines.length - 1;
   }
 
   const half = Math.floor(windowSize / 2);
@@ -548,4 +582,3 @@ export async function generateCodePatchWithCloudLLM(
     return { patch: null, failureReason };
   }
 }
-
