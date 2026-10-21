@@ -9,13 +9,15 @@ export function setBrowserUrlResolverForTesting(resolve: ((host: string) => Prom
 
 /**
  * Gate for every URL browser_tool is asked to open or replay: http(s) only, no credentials, and
- * no private/loopback/link-local targets unless listed in BROWSER_ALLOW_HOSTS (comma-separated
- * `host` or `host:port`, e.g. `localhost:3111`) or BROWSER_ALLOW_PRIVATE=1 (everything private).
- * Cloud metadata addresses are never allowed.
+ * (by default) private/loopback targets are allowed for local testing. With BROWSER_ALLOW_PRIVATE=0
+ * they are refused except hosts in BROWSER_ALLOW_HOSTS (comma-separated `host` or `host:port`,
+ * e.g. `localhost:3111`). Cloud metadata addresses are never allowed in any mode.
  */
 export function checkBrowserUrl(url: string): Promise<UrlCheck> {
     return checkPublicHttpUrl(url, {
-        allowPrivate: process.env.BROWSER_ALLOW_PRIVATE === '1',
+        // Private targets are allowed by default so local apps can be tested; set
+        // BROWSER_ALLOW_PRIVATE=0 for a hardened deployment and list exceptions in BROWSER_ALLOW_HOSTS.
+        allowPrivate: process.env.BROWSER_ALLOW_PRIVATE !== '0',
         allowHosts: (process.env.BROWSER_ALLOW_HOSTS || '').split(',').map(h => h.trim()).filter(Boolean),
         resolve: resolverOverride ?? undefined,
     });

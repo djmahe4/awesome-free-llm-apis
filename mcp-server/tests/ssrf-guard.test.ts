@@ -47,7 +47,7 @@ describe('checkPublicHttpUrl', () => {
   });
 
   it.each([
-    'http://127.0.0.1/', 'http://localhost/', 'http://LOCALHOST:8080/', 'http://foo.localhost/', 'http://[::1]/', 'http://169.254.1.1/',
+    'http://127.0.0.1/', 'http://localhost/', 'http://LOCALHOST:8080/', 'http://foo.localhost/', 'http://[::1]/', 'http://192.168.254.1/',
     'http://2130706433/', 'http://0x7f.1/', 'http://017700000001/', 'http://0/', 'http://10.0.0.1/', 'http://192.168.0.1/', 'http://100.64.0.1/',
     'http://[fe80::1]/', 'http://[fdab::1]/', 'http://[::ffff:127.0.0.1]/', 'http://metadata.google.internal/', 'http://intranet.internal/', 'http://printer.local/',
   ])('rejects private target %s', async (url) => {

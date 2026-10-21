@@ -20,6 +20,7 @@ function installFakePool() {
 }
 
 // No real DNS in tests: example.com is public, everything else unknown unless a test says otherwise.
+beforeEach(() => { process.env.BROWSER_ALLOW_PRIVATE = '0'; });
 beforeEach(() => setBrowserUrlResolverForTesting(async (h: string) => (h === 'example.com' ? ['93.184.216.34'] : h === 'rebind.test' ? ['10.0.0.9'] : [])));
 afterEach(() => { setBrowserSessionPoolForTesting(null); setBrowserUrlResolverForTesting(null); delete process.env.BROWSER_ALLOW_PRIVATE; delete process.env.BROWSER_ALLOW_HOSTS; });
 
@@ -116,6 +117,18 @@ describe('browser_tool navigate: local testing', () => {
         const r = await dispatchBrowserAction({ action: 'navigate', url: 'http://169.254.169.254/latest/meta-data/', sessionId: 's-meta' });
         expect(r.success).toBe(false);
         expect(JSON.stringify(r.errors)).toContain('METADATA_ADDRESS');
+        await pool.shutdownAll();
+    });
+});
+
+describe('browser_tool navigate: default policy', () => {
+    it('allows private/loopback targets when BROWSER_ALLOW_PRIVATE is unset (local testing), still refusing file: and metadata', async () => {
+        delete process.env.BROWSER_ALLOW_PRIVATE;
+        const { calls, pool } = installFakePool();
+        expect((await dispatchBrowserAction({ action: 'navigate', url: 'http://localhost:3111/', sessionId: 's-d1' })).success).toBe(true);
+        expect((await dispatchBrowserAction({ action: 'navigate', url: 'file:///etc/passwd', sessionId: 's-d2' })).success).toBe(false);
+        expect((await dispatchBrowserAction({ action: 'navigate', url: 'http://169.254.169.254/', sessionId: 's-d3' })).success).toBe(false);
+        expect(calls.filter(c => c.name === 'navigate_page')).toHaveLength(1);
         await pool.shutdownAll();
     });
 });
