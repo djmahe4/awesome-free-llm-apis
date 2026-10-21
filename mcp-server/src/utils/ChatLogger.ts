@@ -1,9 +1,10 @@
 import path from 'path';
-import os from 'os';
+import { getMcpDir, sanitizeSessionId } from './mcp-home.js';
 import { writeFileAtomic } from './FileUtils.js';
 import fs from 'fs-extra';
 
-const PROJECTS_DIR = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+// Resolved per call (not at import) so FREE_LLM_MCP_HOME is honoured and tests cannot hit the real home.
+const projectsDir = () => path.join(getMcpDir(), 'projects');
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max) + '…[truncated]';
@@ -92,7 +93,7 @@ export function extractIntelligentTitle(content: string, workspaceRoot?: string)
  */
 export async function logChatTurn(sessionId: string, turn: Record<string, any>): Promise<void> {
   try {
-    const projectDir = path.join(PROJECTS_DIR, sessionId);
+    const projectDir = path.join(projectsDir(), sanitizeSessionId(sessionId));
     const logPath = path.join(projectDir, 'chat-logs.json');
     await fs.ensureDir(projectDir);
 
@@ -220,4 +221,3 @@ export async function logToolCall(
     isError,
   });
 }
-
