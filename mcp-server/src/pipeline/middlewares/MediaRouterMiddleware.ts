@@ -37,7 +37,10 @@ export class MediaRouterMiddleware implements Middleware {
     // 1. Try local Ollama first for zero-cost offline scripting
     try {
       const localModels = await listLocalModels();
-      const directorModel = localModels.find((m) => m.includes('qwen') || m.includes('llama') || m.includes('coder'));
+      // General-purpose text model: the old name match (qwen/llama/coder) could pick a vision-language
+      // or embedding model for scripting.
+      const { rankNamesForNeed, buildProfile, isEmbeddingModel } = await import('../../services/model-router.js');
+      const directorModel = rankNamesForNeed(localModels, 'general').find(m => !isEmbeddingModel(buildProfile(m)));
       if (directorModel) {
         const lastMsg = context.request.messages[context.request.messages.length - 1]?.content || '';
         const res = await chatLocal(directorModel, [

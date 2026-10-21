@@ -15,6 +15,8 @@ export interface LlmFitModelInfo {
   memoryRequiredGb?: number;
   bestQuant?: string;
   useCase?: string;
+  /** Minimum VRAM for the catalog's quantization (`llmfit list`), a hint, not the installed file's need. */
+  minVramGb?: number;
 }
 
 export interface LlmFitSystemInfo {
@@ -112,6 +114,49 @@ function runCommand(
   });
 }
 
+/**
+ * Comparison key for an Ollama tag: llmfit's catalog uses Hugging Face names, so
+ * `qwen2.5-coder:7b` has to be compared with `Qwen/Qwen2.5-Coder-7B-Instruct`.
+ * Registry and org prefixes go, size tags (`:7b`) stay, other tags (`:latest`, `:Q4_K_M`) go, as do
+ * `-GGUF` and every non-alphanumeric character.
+ */
+export function ollamaTagKey(tag: string): string {
+  let t = String(tag || '').trim().toLowerCase().replace(/^hf\.co\//, '');
+  if (!t) return '';
+  t = t.split('/').pop() as string;
+  const [name, rawTag] = t.split(':');
+  const size = rawTag && /^\d+(?:\.\d+)?[bm]$/.test(rawTag) ? rawTag : '';
+  return (name.replace(/-?gguf$/, '') + size).replace(/[^a-z0-9]/g, '');
+}
+
+const catalogKey = (name: string) => String(name || '').toLowerCase().split('/').pop()!.replace(/[^a-z0-9]/g, '');
+
+/** Finds the llmfit catalog entry for an Ollama tag (shortest name wins: the plain model, not a quantized variant). */
+export function pickLlmfitMatch<T extends { name?: string }>(tag: string, catalog: T[]): T | null {
+  const key = ollamaTagKey(tag);
+  if (!key) return null;
+  let best: { m: T; len: number } | null = null;
+  for (const m of catalog) {
+    const k = catalogKey(m.name ?? '');
+    if (k.startsWith(key) && (!best || k.length < best.len)) best = { m, len: k.length };
+  }
+  return best ? best.m : null;
+}
+
+let catalogCache: { models: any[]; timestamp: number } | null = null;
+const CATALOG_TTL_MS = 30 * 60 * 1000;
+
+/** Maps one `llmfit list --json` entry (fast: no subprocess per model). */
+export function catalogEntryToInfo(m: any): LlmFitModelInfo {
+  return {
+    name: m.name,
+    contextLength: m.context_length,
+    minVramGb: m.min_vram_gb,
+    bestQuant: m.quantization,
+    useCase: m.use_case,
+  };
+}
+
 function parseModelItem(m: any): LlmFitModelInfo {
   return {
     name: m.name,
@@ -183,8 +228,24 @@ export async function recommendModels(options?: {
   return result;
 }
 
+async function loadCatalog(binaryPath?: string, pythonPath?: string): Promise<any[]> {
+  if (catalogCache && Date.now() - catalogCache.timestamp < CATALOG_TTL_MS) return catalogCache.models;
+  let rawOutput = '';
+  if (binaryPath) {
+    rawOutput = (await runCommand(binaryPath, ['list', '--json'], 60000)).stdout;
+  } else if (pythonPath) {
+    const code = `import subprocess, sys; res = subprocess.run(['llmfit', 'list', '--json'], capture_output=True, text=True); sys.stdout.write(res.stdout)`;
+    rawOutput = (await runCommand(pythonPath, ['-c', code], 60000)).stdout;
+  } else {
+    throw new Error('llmfit is not installed in venv/Scripts');
+  }
+  const models = JSON.parse(rawOutput) as any[];
+  catalogCache = { models, timestamp: Date.now() };
+  return models;
+}
+
 /**
- * Searches models in the llmfit database.
+ * Searches models in the llmfit database (the ~14k-entry catalog is cached for 30 minutes).
  */
 export async function searchModels(
   query: string,
@@ -192,21 +253,7 @@ export async function searchModels(
 ): Promise<LlmFitModelInfo[]> {
   const { binaryPath, pythonPath } = resolveLlmFitExecutable(options?.workspaceRoot);
   const limit = options?.limit ?? 10;
-
-  let rawOutput = '';
-  if (binaryPath) {
-    const args = ['list', '--json'];
-    const res = await runCommand(binaryPath, args);
-    rawOutput = res.stdout;
-  } else if (pythonPath) {
-    const code = `import subprocess, sys; res = subprocess.run(['llmfit', 'list', '--json'], capture_output=True, text=True); sys.stdout.write(res.stdout)`;
-    const res = await runCommand(pythonPath, ['-c', code]);
-    rawOutput = res.stdout;
-  } else {
-    throw new Error('llmfit is not installed in venv/Scripts');
-  }
-
-  const allModels: any[] = JSON.parse(rawOutput);
+  const allModels = await loadCatalog(binaryPath, pythonPath);
   const q = query.toLowerCase();
   const matched = allModels.filter((m: any) =>
     (m.name && m.name.toLowerCase().includes(q)) ||
@@ -219,12 +266,21 @@ export async function searchModels(
 
 /**
  * Retrieves detailed info (including max/effective context size) for a model name or ollama tag.
+ * Ollama tags are mapped to llmfit's Hugging Face catalog names first (`qwen2.5-coder:7b` ->
+ * `Qwen/Qwen2.5-Coder-7B-Instruct`); `llmfit info` does not understand Ollama tags itself.
+
+ * `memoryBudgetGb` scores fit against that VRAM budget (llmfit --memory) instead of the whole GPU.
+ *
+ * `fast: true` answers from the cached catalog only (about 0.3 s once, then instant). The full
+ * `llmfit info` call reloads llmfit's database on every invocation and takes about 4 s per model,
+ * which is too slow for discovery across several models; use it only when the fit label is needed.
  */
 export async function getModelInfo(
   modelName: string,
-  options?: { workspaceRoot?: string }
+  options?: { workspaceRoot?: string; memoryBudgetGb?: number; fast?: boolean }
 ): Promise<LlmFitModelInfo | null> {
-  const cached = modelInfoCache.get(modelName);
+  const cacheKey = `${modelName}|${options?.memoryBudgetGb ?? ''}|${options?.fast ? 'fast' : 'full'}`;
+  const cached = modelInfoCache.get(cacheKey);
   if (cached && (Date.now() - cached.timestamp < CACHE_TTL_MS)) {
     return cached.data;
   }
@@ -232,42 +288,41 @@ export async function getModelInfo(
   const { binaryPath, pythonPath } = resolveLlmFitExecutable(options?.workspaceRoot);
   if (!binaryPath && !pythonPath) return null;
 
+  const memoryArgs = options?.memoryBudgetGb ? ['--memory', `${options.memoryBudgetGb}G`] : [];
   const tryQuery = async (query: string): Promise<string> => {
     if (binaryPath) {
-      const res = await runCommand(binaryPath, ['info', query, '--json']);
+      const res = await runCommand(binaryPath, [...memoryArgs, 'info', query, '--json']);
       return res.stdout;
     }
-    const code = `import subprocess, sys; res = subprocess.run(['llmfit', 'info', '${query}', '--json'], capture_output=True, text=True); sys.stdout.write(res.stdout)`;
+    const code = `import subprocess, sys; res = subprocess.run(['llmfit', ${memoryArgs.map(a => `'${a}'`).concat(["'info'", `'${query.replace(/'/g, "")}'`, "'--json'"]).join(', ')}], capture_output=True, text=True); sys.stdout.write(res.stdout)`;
     const res = await runCommand(pythonPath!, ['-c', code]);
     return res.stdout;
   };
 
   try {
-    let out = await tryQuery(modelName);
-    let data = out ? JSON.parse(out) : null;
     let resolved: LlmFitModelInfo | null = null;
+    const catalog = await loadCatalog(binaryPath, pythonPath).catch(() => [] as any[]);
+    const match = pickLlmfitMatch(modelName, catalog);
+    if (options?.fast) {
+      const fastInfo = match ? catalogEntryToInfo(match) : null;
+      modelInfoCache.set(cacheKey, { data: fastInfo, timestamp: Date.now() });
+      return fastInfo;
+    }
+    const query = match?.name ?? modelName;
+    const out = await tryQuery(query);
+    const data = out ? JSON.parse(out) : null;
     if (data?.models && data.models.length > 0) {
       resolved = parseModelItem(data.models[0]);
-    } else {
-      // If query was an Ollama tag like "qwen2.5-coder:7b", try resolving via search
-      const results = await searchModels(modelName, options);
-      if (results.length > 0) {
-        out = await tryQuery(results[0].name);
-        data = out ? JSON.parse(out) : null;
-        if (data?.models && data.models.length > 0) {
-          resolved = parseModelItem(data.models[0]);
-        } else {
-          resolved = results[0];
-        }
-      }
+    } else if (match) {
+      resolved = parseModelItem(match);
     }
 
-    modelInfoCache.set(modelName, { data: resolved, timestamp: Date.now() });
+    modelInfoCache.set(cacheKey, { data: resolved, timestamp: Date.now() });
     return resolved;
   } catch {
     // Return null if model not found or parsing failed
   }
 
-  modelInfoCache.set(modelName, { data: null, timestamp: Date.now() });
+  modelInfoCache.set(cacheKey, { data: null, timestamp: Date.now() });
   return null;
 }

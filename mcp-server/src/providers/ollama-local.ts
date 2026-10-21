@@ -19,6 +19,8 @@ import { getModelInfo } from '../services/llmfit.js';
 export interface OllamaLocalMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** Base64-encoded images (no data: prefix) for vision models, e.g. screenshots. */
+  images?: string[];
 }
 
 export interface OllamaLocalChatResult {
@@ -148,7 +150,7 @@ export function rankCandidateModels(availableModels: string[]): string[] {
   return [...preferred, ...rest];
 }
 
-export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number; numCtx?: number }): Promise<OllamaLocalChatResult> {
+export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number; numCtx?: number; keepAlive?: string | number }): Promise<OllamaLocalChatResult> {
   const url = `${getBaseUrl()}/api/chat`;
   const timeoutMs = computeChatTimeoutMs(messages);
   const controller = new AbortController();
@@ -165,6 +167,9 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
         model,
         messages,
         stream: false,
+        // 0 unloads the model right after the reply, so a staged pipeline (vision model, then code
+        // model) never has both resident in VRAM at once.
+        ...(options?.keepAlive !== undefined ? { keep_alive: options.keepAlive } : {}),
         options: {
           temperature: options?.temperature,
           num_predict: options?.maxTokens,

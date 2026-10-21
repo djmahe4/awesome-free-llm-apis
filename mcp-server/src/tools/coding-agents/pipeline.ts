@@ -360,7 +360,17 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         }
 
         if (!resolvedModel) {
-          const ranked = rankCandidateModels(models);
+          // Capability- and budget-aware choice among installed models (real /api/show
+          // capabilities and llmfit memory); falls back to name heuristics if discovery fails.
+          let ranked: string[];
+          try {
+            const { listModelProfiles, rankProfiles } = await import('../../services/model-router.js');
+            const profiles = (await listModelProfiles()).filter(p => models.includes(p.name));
+            ranked = rankProfiles(profiles, 'code').filter(r => r.fitsBudget).map(r => r.name);
+            if (ranked.length === 0) ranked = rankCandidateModels(models);
+          } catch {
+            ranked = rankCandidateModels(models);
+          }
           resolvedModel = ranked[0] ?? null;
         }
       } catch {

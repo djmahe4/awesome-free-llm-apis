@@ -1,6 +1,7 @@
 import fs from 'fs-extra';
 import path from 'node:path';
-import { listLocalModels, rankCandidateModels, chatLocal, parseJsonlContent, type OllamaLocalChatResult } from '../providers/ollama-local.js';
+import { rankNamesForNeed } from '../services/model-router.js';
+import { listLocalModels, chatLocal, parseJsonlContent, type OllamaLocalChatResult } from '../providers/ollama-local.js';
 import { ContextGatherer } from '../pipeline/middlewares/context-gatherer.js';
 import { logToolCall } from '../utils/ChatLogger.js';
 
@@ -144,7 +145,9 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
       throw new Error('No models available on the local Ollama server. Pull one first, e.g. `ollama pull qwen2.5-coder`.');
     }
 
-    const candidateModels = rankCandidateModels(availableModels);
+    // Capability-aware order (real /api/show capabilities when the router has seen the models,
+    // else name heuristics): code-specialised first, vision/embedding models last, over-budget last.
+    const candidateModels = rankNamesForNeed(availableModels, 'code');
 
     // A windowed excerpt (see excerptRange) stands in for reading the real
     // file — the caller has already located the relevant region and is
