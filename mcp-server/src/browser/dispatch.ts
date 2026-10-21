@@ -167,12 +167,13 @@ export async function dispatchBrowserAction(rawInput: unknown): Promise<BrowserA
 }
 
 async function handleNavigate(session: BrowserSession, input: BrowserToolInput, sessionId: string): Promise<BrowserActionResult> {
-    if (!input.url) {
-        return failResult({ action: 'navigate', sessionId, errors: [{ stage: 'navigate', code: 'MISSING_URL', message: 'navigate requires url', recoverable: true }] });
+    const url = (input.params?.url as string | undefined) ?? input.url;
+    if (!url) {
+        return failResult({ action: 'navigate', sessionId, errors: [{ stage: 'navigate', code: 'MISSING_URL', message: 'navigate requires url (top-level or params.url)', recoverable: true }] });
     }
-    await session.navigate(input.url);
+    await session.navigate(url);
     session.status = 'SURFACE_EXPLORED';
-    return okResult({ action: 'navigate', sessionId, url: input.url, data: { navigated: true } });
+    return okResult({ action: 'navigate', sessionId, url, data: { navigated: true } });
 }
 
 async function handleSnapshot(session: BrowserSession, input: BrowserToolInput, sessionId: string): Promise<BrowserActionResult> {

@@ -18,7 +18,8 @@ const waitSpec = z.object({
 export const BrowserActions = {
     navigate: {
         summary: 'Open a URL in the session; installs the network interceptor.',
-        params: z.object({ url: z.string(), waitFor: waitSpec, installInterceptor: z.boolean().optional() }),
+        // url is optional here: callers may send it top-level (the harness does) or in params; parseInput merges them.
+        params: z.object({ url: z.string().optional(), waitFor: waitSpec, installInterceptor: z.boolean().optional() }),
     },
     snapshot: {
         summary: 'Take an accessibility-tree snapshot of the current page.',
@@ -142,6 +143,10 @@ const topLevelSchema = z.object({
 export function parseInput(raw: unknown): BrowserToolInput {
     const top = topLevelSchema.parse(raw);
     const actionDef = BrowserActions[top.action];
-    const params = actionDef.params.parse(top.params ?? {});
+    // navigate accepts the url top-level or in params; params.url wins when both are present.
+    const rawParams = top.action === 'navigate' && top.url && !(top.params && 'url' in top.params)
+        ? { ...(top.params ?? {}), url: top.url }
+        : (top.params ?? {});
+    const params = actionDef.params.parse(rawParams);
     return { ...top, params };
 }

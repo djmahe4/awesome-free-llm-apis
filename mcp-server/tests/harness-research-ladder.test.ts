@@ -15,6 +15,7 @@ import { waitForSettled } from './helpers/wait-for-run.js';
 const useFreeLLMMock = vi.fn();
 const dispatchBrowserActionMock = vi.fn();
 
+import { parseInput } from '../src/browser/actionSchemas.js';
 vi.mock('../src/tools/use-free-llm.js', () => ({ useFreeLLM: (...args: any[]) => useFreeLLMMock(...args) }));
 vi.mock('../src/browser/dispatch.js', () => ({ dispatchBrowserAction: (...args: any[]) => dispatchBrowserActionMock(...args) }));
 
@@ -73,6 +74,9 @@ describe('research depth ladder — abstract to html escalation (integration)', 
 
     expect(dispatchBrowserActionMock).toHaveBeenCalledTimes(2);
     expect(dispatchBrowserActionMock.mock.calls[0][0]).toMatchObject({ action: 'navigate', url: 'https://example.com/paper' });
+    // dispatch is mocked above, so also prove the payload is accepted by the REAL input parser
+    // (it was rejected before: navigate required params.url while the harness sends it top-level).
+    expect(() => parseInput(dispatchBrowserActionMock.mock.calls[0][0])).not.toThrow();
     expect(dispatchBrowserActionMock.mock.calls[1][0]).toMatchObject({ action: 'extract' });
 
     expect(run?.status).toBe('complete');
