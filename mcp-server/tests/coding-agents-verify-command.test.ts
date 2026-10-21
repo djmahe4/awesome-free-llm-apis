@@ -48,6 +48,21 @@ describe('runVerifyCommand', () => {
     const r = await runVerifyCommand('node hang.js', ws, { timeoutMs: 600 });
     expect(r).toMatchObject({ ok: false, timedOut: true });
   }, 15000);
+  it('collects every failing case name even when the output is far larger than the tail', async () => {
+    ws = await makeWs({ 'many.js': 'for (let i = 0; i < 40; i++) { console.log("\u2716 private 10.0.0." + i + " (0.3ms)"); console.log("  AssertionError: " + "x".repeat(300)); }\nconsole.log("\u2714 public 8.8.8.8 (0.1ms)");\nconsole.log("\u2716 failing tests:");\nprocess.exit(1);' });
+    const r = await runVerifyCommand('node many.js', ws);
+    expect(r.ok).toBe(false);
+    expect(r.outputTail.length).toBeLessThanOrEqual(4096);
+    expect(r.failedCases).toHaveLength(40);
+    expect(r.failedCases[0]).toBe('private 10.0.0.0');
+    expect(r.failedCases).not.toContain('failing tests:');
+    expect(r.failedCases.some(c => /ms\)/.test(c))).toBe(false);
+  }, 20000);
+  it('recognises pytest, vitest and TAP failure lines', async () => {
+    ws = await makeWs({ 'mix.js': 'console.log("FAILED tests/test_a.py::test_x - AssertionError: assert 3 == 2");\nconsole.log(" FAIL  tests/ssrf.test.ts > isPrivate > 100.64.0.1");\nconsole.log("not ok 3 - parses octets");\nconsole.log("ok 4 - fine");\nprocess.exit(1);' });
+    const r = await runVerifyCommand('node mix.js', ws);
+    expect(r.failedCases).toEqual(['tests/test_a.py::test_x - AssertionError: assert 3 == 2', 'tests/ssrf.test.ts > isPrivate > 100.64.0.1', 'parses octets']);
+  });
   it('caps captured output', async () => {
     ws = await makeWs({ 'loud.js': 'for (let i = 0; i < 200000; i++) console.log("line " + i);' });
     const r = await runVerifyCommand('node loud.js', ws);
@@ -99,13 +114,14 @@ describe('CodingAgentsHandler verifyCommand gate', () => {
     expect(await fs.readFile(path.join(ws, SRC), 'utf-8')).toBe(ORIGINAL);
   });
 
-  it('does not blame the patch for a check that was already failing: patch kept, warning only', async () => {
+  it('a check that was already failing and still fails is reported as not_green (kept, with a brief), not blamed as a regression', async () => {
     ws = await makeWs({ [SRC]: ORIGINAL.replace('hello', 'BAD'), 'check.js': CHECK });
     const r2: any = await CodingAgentsHandler({
       goal: 'change the greeting', workspaceRoot: ws, dryRun: false, topKFiles: 1, targetFiles: [SRC],
       astEditOps: [{ pat: '"BAD"', out: '"still BAD"' }], resolve: { action: 'apply' }, verifyCommand: 'node check.js',
     } as any);
-    expect(r2.verification).toMatchObject({ baselineOk: false });
+    expect(r2.verification).toMatchObject({ baselineOk: false, status: 'not_green' });
+    expect(r2.verification.repairBrief).toContain('found BAD');
     expect(r2.applied).toBe(true);
     expect(r2.diagnostics.some((d: any) => d.source === 'verify-command' && d.severity === 'warning')).toBe(true);
   });

@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'fs-extra';
-import { isTestFile, isExecutableSurface, assessPatchesForVerify, buildRepairBrief, withFeedback } from '../src/tools/coding-agents/verify-guard.js';
+import { isTestFile, isExecutableSurface, assessPatchesForVerify, buildRepairBrief, withFeedback, readVerifyTestContext, buildSyntaxBrief, detectSpecialCasing } from '../src/tools/coding-agents/verify-guard.js';
 import { CodingAgentsHandler } from '../src/tools/coding-agents.js';
 
 describe('isTestFile', () => {
@@ -40,6 +40,10 @@ describe('assessPatchesForVerify', () => {
     const created = assessPatchesForVerify([{ filePath: 'tests/new.test.ts', before: null, after: 'it("x", () => {})', isNew: true }], 'npm test');
     expect(created).toMatchObject({ suspicious: false, manualRun: true });
     expect(created.manualReasons.join(' ')).toMatch(/created/);
+  });
+  it('a test file named by the verify command is still a test (manual run), not a script', () => {
+    const r = assessPatchesForVerify([{ ...ok, filePath: 'tests/counter.test.js' }], 'node --test tests/counter.test.js');
+    expect(r).toMatchObject({ suspicious: false, manualRun: true });
   });
   it('a plain production edit needs no manual run', () => {
     expect(assessPatchesForVerify([ok], 'npm test')).toMatchObject({ suspicious: false, manualRun: false });
@@ -96,6 +100,22 @@ describe('buildRepairBrief (debugger persona)', () => {
     expect(node).toContain('found BAD in app.ts');
     expect(node).toContain('app.ts:3');
   });
+  it('leads with the failing case names (with a count) so the model sees WHICH inputs fail', () => {
+    const cases = Array.from({ length: 30 }, (_, i) => `private 100.${64 + i}.0.1`);
+    const brief = buildRepairBrief({ command: 'node --test t.js', exitCode: 1, outputTail: 'AssertionError: actual: false expected: true', patchedFiles: ['src/ip.js'], failedCases: cases });
+    expect(brief).toMatch(/Failing cases \(30\)/);
+    expect(brief).toContain('private 100.64.0.1');
+    expect(brief).toContain('private 100.78.0.1');
+    expect(brief).not.toContain('private 100.93.0.1');
+    expect(brief).toMatch(/\+15 more/);
+    expect(brief.length).toBeLessThanOrEqual(2100);
+  });
+  it('with several failing cases it tells the model to rewrite the function, not patch single lines', () => {
+    const many = buildRepairBrief({ command: 'x', exitCode: 1, outputTail: '', patchedFiles: [], failedCases: ['a', 'b', 'c', 'd'] });
+    expect(many).toMatch(/rewrite the whole function/i);
+    const few = buildRepairBrief({ command: 'x', exitCode: 1, outputTail: '', patchedFiles: [], failedCases: ['a'] });
+    expect(few).not.toMatch(/rewrite the whole function/i);
+  });
   it('falls back to compacted raw output when nothing looks like a failure line', () => {
     const out = ['starting', ...Array.from({ length: 80 }, (_, i) => `step ${i} done in ${i + 5}ms`), 'finished'].join('\n');
     const brief = buildRepairBrief({ command: 'x', exitCode: 2, outputTail: out, patchedFiles: [] });
@@ -107,6 +127,83 @@ describe('buildRepairBrief (debugger persona)', () => {
     expect(big.length).toBeLessThanOrEqual(2100);
     expect(buildRepairBrief({ command: 'npm test', exitCode: null, timedOut: true, outputTail: '', patchedFiles: [] })).toMatch(/timed out/i);
     expect(buildRepairBrief({ command: 'npm test', exitCode: 1, outputTail: '', patchedFiles: [] })).toMatch(/printed nothing/i);
+  });
+});
+
+describe('readVerifyTestContext (the failing tests are the spec: the agent may READ them)', () => {
+  let ws = '';
+  afterEach(async () => { if (ws) await fs.remove(ws); ws = ''; });
+  const make = async (files: Record<string, string>) => {
+    ws = await fs.mkdtemp(path.join(os.tmpdir(), 'ca-ctx-'));
+    for (const [rel, c] of Object.entries(files)) { await fs.ensureDir(path.dirname(path.join(ws, rel))); await fs.writeFile(path.join(ws, rel), c); }
+  };
+
+  it('returns the content of test files named by the command, labelled read-only', async () => {
+    await make({ 'tests/a.test.js': 'assert.throws(() => f("1.5h"));', 'src/a.js': 'secret production code' });
+    const ctx = await readVerifyTestContext('node --test tests/a.test.js', ws);
+    expect(ctx).toContain('tests/a.test.js');
+    expect(ctx).toContain('f("1.5h")');
+    expect(ctx).toMatch(/read-only/i);
+    expect(ctx).not.toContain('secret production code');
+  });
+  it('ignores non-test files, missing files and paths that escape the workspace', async () => {
+    await make({ 'src/a.js': 'x', 'tests/a.test.js': 'ok' });
+    expect(await readVerifyTestContext('node src/a.js', ws)).toBe('');
+    expect(await readVerifyTestContext('node --test tests/missing.test.js', ws)).toBe('');
+    expect(await readVerifyTestContext('node --test ../outside.test.js', ws)).toBe('');
+    expect(await readVerifyTestContext('npm test', ws)).toBe('');
+  });
+  it('bounds the amount of test text included', async () => {
+    await make({ 'tests/big.test.js': 'x'.repeat(50000) });
+    const ctx = await readVerifyTestContext('node --test tests/big.test.js', ws);
+    expect(ctx.length).toBeLessThan(7000);
+    expect(ctx).toMatch(/truncated/i);
+  });
+});
+
+describe('brief hints from the failure kind', () => {
+  it('"Missing expected exception" explains that the current logic ACCEPTS the input and must be tightened', () => {
+    const brief = buildRepairBrief({ command: 'c', exitCode: 1, outputTail: 'AssertionError [ERR_ASSERTION]: Missing expected exception (Error).', patchedFiles: [], failedCases: ['rejects "1.5h"'] });
+    expect(brief).toMatch(/should have thrown/i);
+    expect(brief).toMatch(/accepts/i);
+    expect(brief).toMatch(/do not add a special case/i);
+  });
+  it('no hint when the failure is an ordinary value mismatch', () => {
+    const brief = buildRepairBrief({ command: 'c', exitCode: 1, outputTail: 'actual: 3600\nexpected: 5400', patchedFiles: [], failedCases: ['parses 1h30m'] });
+    expect(brief).not.toMatch(/should have thrown/i);
+  });
+});
+
+describe('detectSpecialCasing (the edit hard-codes a failing test input)', () => {
+  it('finds a failing input that was added as a literal in the new lines', () => {
+    const added = ['  if (/^1\\.5h$/.test(text)) throw new Error("invalid duration: " + text);'];
+    expect(detectSpecialCasing(added, ['rejects "1.5h"'])).toEqual(['1.5h']);
+  });
+  it('catches plain string literals and ip-like case names', () => {
+    expect(detectSpecialCasing(['if (ip === "100.64.0.1") return true;'], ['private 100.64.0.1'])).toEqual(['100.64.0.1']);
+  });
+  it('does not flag normal logic, short tokens or unrelated literals', () => {
+    expect(detectSpecialCasing(['const m = /^(\\d+)h$/.exec(text);', 'return Number(m[1]) * 3600;'], ['rejects "1.5h"', 'parses 2h'])).toEqual([]);
+    expect(detectSpecialCasing(['x = "5"'], ['rejects "5"'])).toEqual([]);
+  });
+});
+
+describe('buildSyntaxBrief (an edit that does not parse is rolled back with the compiler messages)', () => {
+  const d = (filePath: string, line: number, message: string, severity: 'error' | 'warning' = 'error') => ({ filePath, line, message, severity, source: 'ast-syntactic' as const, code: 1005 });
+
+  it('lists error diagnostics with file and line, capped, and tells the model to fix them', () => {
+    const diags = Array.from({ length: 14 }, (_, i) => d('src/a.ts', i + 1, `error number ${i}`));
+    const brief = buildSyntaxBrief(diags as any);
+    expect(brief).toMatch(/does not parse|syntax/i);
+    expect(brief).toContain('src/a.ts:1');
+    expect(brief).toContain('error number 0');
+    expect(brief).not.toContain('error number 13');
+    expect(brief).toMatch(/\+4 more/);
+    expect(brief).toMatch(/do not run commands/i);
+  });
+  it('ignores warnings and returns nothing when there are no errors', () => {
+    expect(buildSyntaxBrief([d('a.ts', 1, 'just a warning', 'warning')] as any)).toBe('');
+    expect(buildSyntaxBrief([])).toBe('');
   });
 });
 
@@ -156,6 +253,17 @@ describe('CodingAgentsHandler: suspicious edits are withheld for the user to ver
     const r: any = await run({ targetFiles: ['src/app.js'], astEditOps: [{ pat: 'console.log($$$A)', out: 'require("fs").rmSync($$$A, { recursive: true })' }], verifyCommand: 'node check.js' });
     expect(r.applied).toBe(false);
     expect(r.verification.status).toBe('needs_user');
+  });
+
+  it('an edit that does not parse is rolled back and the compiler messages come back as rollbackBrief', async () => {
+    const original = ['export const v = "hello";', 'export const w = 1;', ''].join('\n');
+    await make({ 'src/a.ts': original });
+    const r: any = await run({ targetFiles: ['src/a.ts'], astEditOps: [{ pat: '"hello"', out: '"hello' }] });
+    expect(r.applied).toBe(false);
+    expect(r.restoredFiles).toContain('src/a.ts');
+    expect(r.rollbackBrief).toMatch(/does not parse/);
+    expect(r.rollbackBrief).toContain('src/a.ts');
+    expect(await fs.readFile(path.join(ws, 'src/a.ts'), 'utf-8')).toBe(original);
   });
 
   it('a failed gate rolls back and returns a debugger brief with the failing output', async () => {

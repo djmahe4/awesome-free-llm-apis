@@ -244,6 +244,50 @@ const STRAY_MARKER_RE = /^(?:<{5,}|={5,}|>{5,})\s*(?:SEARCH|REPLACE)?\s*$/m;
 // failure mode worth a dedicated tolerant tier rather than just failing.
 const LINE_NUMBER_PREFIX_RE = /^\s*L\d+:\s?/;
 
+// Tolerant projections, modelled on OpenCode's replacer chain and Codex's seek_sequence: small models
+// mangle quotes, dashes, spacing and indentation far more often than they get the code wrong.
+const normalizeUnicode = (l: string) => l
+  .replace(/[\u2018\u2019\u201a\u201b]/g, "'")
+  .replace(/[\u201c\u201d\u201e\u201f]/g, '"')
+  .replace(/[\u2010-\u2015\u2212]/g, '-')
+  .replace(/[\u00a0\u2002-\u200a\u202f\u205f\u3000]/g, ' ');
+const collapseSpaces = (l: string) => normalizeUnicode(l).trim().replace(/\s+/g, ' ');
+
+/** Character-bigram Dice similarity of two lines after normalization (0..1). */
+function lineSimilarity(a: string, b: string): number {
+  const x = collapseSpaces(a);
+  const y = collapseSpaces(b);
+  if (x === y) return 1;
+  if (x.length < 2 || y.length < 2) return 0;
+  const grams = (s: string) => { const m = new Map<string, number>(); for (let i = 0; i < s.length - 1; i++) { const g = s.slice(i, i + 2); m.set(g, (m.get(g) ?? 0) + 1); } return m; };
+  const gx = grams(x);
+  const gy = grams(y);
+  let overlap = 0;
+  for (const [g, c] of gx) overlap += Math.min(c, gy.get(g) ?? 0);
+  return (2 * overlap) / (x.length - 1 + y.length - 1);
+}
+
+/** Minimum average similarity of the MIDDLE lines for a first/last-line anchored match. */
+const ANCHOR_MIDDLE_MIN = 0.6;
+
+/**
+ * The real file lines most similar to a failed SEARCH, with line numbers, so the retry can copy
+ * exact text (Cline-style: a failed match is answered with what the file actually says).
+ */
+export function closestLines(workingLines: string[], searchLines: string[], maxLines = 6): string {
+  const wanted = searchLines.map(l => l.trim()).filter(Boolean).slice(0, 3);
+  if (wanted.length === 0) return '';
+  const scored: Array<{ i: number; score: number }> = [];
+  for (let i = 0; i < workingLines.length; i++) {
+    if (!workingLines[i].trim()) continue;
+    const score = Math.max(...wanted.map(w => lineSimilarity(workingLines[i], w)));
+    if (score >= 0.55) scored.push({ i, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.i - b.i);
+  const top = scored.slice(0, maxLines).sort((a, b) => a.i - b.i);
+  return top.map(t => `L${t.i + 1}: ${workingLines[t.i].slice(0, 200)}`).join('\n');
+}
+
 export function findLineBlockMatch(
   workingLines: string[],
   searchLines: string[]
@@ -273,6 +317,26 @@ export function findLineBlockMatch(
   if (searchLines.some(l => LINE_NUMBER_PREFIX_RE.test(l))) {
     const lineNumberStripped = tryTier(l => l.trim().replace(LINE_NUMBER_PREFIX_RE, ''));
     if (lineNumberStripped.length > 0) return { index: lineNumberStripped[0], ambiguous: lineNumberStripped.length > 1, usedLineNumberStrip: true };
+  }
+
+  // Quotes, dashes and non-breaking spaces; internal whitespace runs collapsed.
+  const collapsed = tryTier(collapseSpaces);
+  if (collapsed.length > 0) return { index: collapsed[0], ambiguous: collapsed.length > 1, usedLineNumberStrip: false };
+
+  // First and last line match exactly (after normalization) and the lines in between are close
+  // enough. Needs >= 3 lines; two equally good candidates are ambiguous, never guessed.
+  if (searchLines.length >= 3) {
+    const n = searchLines.length;
+    const first = collapseSpaces(searchLines[0]);
+    const last = collapseSpaces(searchLines[n - 1]);
+    const good: number[] = [];
+    for (let i = 0; i + n <= workingLines.length; i++) {
+      if (collapseSpaces(workingLines[i]) !== first || collapseSpaces(workingLines[i + n - 1]) !== last) continue;
+      let sum = 0;
+      for (let j = 1; j < n - 1; j++) sum += lineSimilarity(workingLines[i + j], searchLines[j]);
+      if (sum / (n - 2) >= ANCHOR_MIDDLE_MIN) good.push(i);
+    }
+    if (good.length > 0) return { index: good[0], ambiguous: good.length > 1, usedLineNumberStrip: false };
   }
 
   return { index: -1, ambiguous: false, usedLineNumberStrip: false };
@@ -332,7 +396,8 @@ export function applySearchReplaceBlocks(
     const searchLines = search.split(/\r?\n/);
     const { index, ambiguous, usedLineNumberStrip } = findLineBlockMatch(workingLines, searchLines);
     if (index === -1) {
-      failures.push(`SEARCH text not found (even with whitespace-tolerant matching): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
+      const near = closestLines(workingLines, searchLines);
+      failures.push(`SEARCH text not found (even with whitespace-tolerant matching): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}${near ? `. The file actually contains these similar lines, copy them exactly:\n${near}` : ''}`);
     } else if (ambiguous) {
       failures.push(`SEARCH text matched multiple times (ambiguous, must be unique): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
     } else {

@@ -1,5 +1,7 @@
 import { validateVerifyCommand, runVerifyCommand } from './verify-command.js';
-import { assessPatchesForVerify, buildRepairBrief, withFeedback, type PatchFact } from './verify-guard.js';
+import { assessPatchesForVerify, buildRepairBrief, buildSyntaxBrief, withFeedback, isTestFile, readVerifyTestContext, type PatchFact } from './verify-guard.js';
+import { reviewPatch } from './reviewer.js';
+import { runWithRepairLoop } from './repair-loop.js';
 import path from 'node:path';
 import fs from 'fs-extra';
 import { VectorStore, DocumentNode } from '../../memory/VectorStore.js';
@@ -126,7 +128,18 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
   const run = RunRegistry.start(runKey);
   (async () => {
     try {
-      const result = await runCodingAgentsPipeline(input, sessionId, run);
+      // Real execution: a failed check or a blocking review is retried with a debugger brief (bounded).
+      const result = await runWithRepairLoop(input, sessionId, run, runCodingAgentsPipeline, async (checkpointId, newFiles) => {
+        const { files } = await globalCasStore.restoreCheckpointToDisk(checkpointId, path.resolve(input.workspaceRoot || process.cwd()));
+        for (const f of newFiles) await fs.remove(path.resolve(input.workspaceRoot || process.cwd(), f)).catch(() => {});
+        return [...files, ...newFiles];
+      }, async (files) => {
+        const root = path.resolve(input.workspaceRoot || process.cwd());
+        for (const f of files) {
+          assertPatchPathAllowed(root, f.filePath);
+          await fs.outputFile(path.resolve(root, f.filePath), f.content, 'utf-8');
+        }
+      });
       codingAgentsResultsCache.set(runKey, result);
       RunRegistry.finish(runKey, result.error);
     } catch (err: any) {
@@ -450,9 +463,12 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
             loadedTasks.map(t => `- [${t.status === 'completed' ? 'x' : (t.status === 'in_progress' ? '~' : ' ')}] ${t.task}`).join('\n')
           : undefined;
 
-        const augmentedInstruction = tasksContext
+        const baseInstruction = tasksContext
           ? `${activeGoal}\n\n[DAG Context]\n${tasksContext}`
           : activeGoal;
+        // The tests the verifyCommand runs are the specification: show them (read-only).
+        const testContext = input.verifyCommand ? await readVerifyTestContext(input.verifyCommand, workspaceRoot) : '';
+        const augmentedInstruction = testContext ? `${baseInstruction}\n\n${testContext}` : baseInstruction;
 
         // Try SEARCH/REPLACE first, local model then cloud — see
         // generateSearchReplacePatch: unchanged content never passes through
@@ -461,7 +477,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         // those older (guarded, but strictly weaker) strategies if no block
         // parses or every block fails to match — e.g. the model ignores the
         // requested format entirely.
-        if (resolvedModel) {
+        // rewrite mode (set by the repair loop) skips patching for small files and regenerates them.
+        const rewriteSmallFile = !!input.rewrite && patchedContent.split(/\r?\n/).length <= 200;
+        if (resolvedModel && !rewriteSmallFile) {
           try {
             // Routed through localLlmPatch (not a direct chatLocal call) so
             // this shares the exact same model-invocation, context-gathering,
@@ -474,6 +492,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
               instruction: augmentedInstruction,
               workspace_root: workspaceRoot,
               sessionId,
+              temperature: input.temperature,
               outputFormat: 'search-replace',
               contentOverride: windowInfo ? windowInfo.window : patchedContent,
               excerptRange: windowInfo
@@ -561,6 +580,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
               instruction: augmentedInstruction,
               workspace_root: workspaceRoot,
               sessionId,
+              temperature: input.temperature,
               contentOverride: windowInfo ? windowInfo.window : undefined,
               excerptRange: windowInfo
                 ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }
@@ -771,6 +791,35 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     // Trust boundary: when the edit touches anything the check could execute (tests, scripts, hooks),
     // creates a test, deletes a file or adds a destructive call, the check is NOT run automatically and
     // the edit is withheld; the user runs the check and reports the output (verifyReport).
+    // Independent review of the proposed diff (never executes anything). It can stop an apply only
+    // with a concrete input/expected/actual finding; otherwise it is reported and the edit proceeds.
+    let reviewBlocked = false;
+    // Runs only when there is NO objective check: with a verifyCommand the tests are the judge (a 7B
+    // reviewer kept insisting spec-correct code was wrong, and each review costs a model swap).
+    // Also skipped for test-only edits and for deterministic AST edits.
+    if (!dryRun && input.review !== false && !input.verifyCommand && !(input.astEditOps && input.astEditOps.length > 0) && resolvedModel && patchFacts.length > 0 && !patchFacts.every(f => isTestFile(f.filePath))) {
+      try {
+        const { chatLocal } = await import('../../providers/ollama-local.js');
+        const diff = patches.map(p => p.unifiedDiff).join('\n');
+        result.review = await reviewPatch({
+          instruction: input.goal,
+          diff,
+          model: resolvedModel,
+          chat: async (prompt) => (await chatLocal(resolvedModel as string, [
+            { role: 'system', content: 'You are a strict, concise code reviewer. Follow the reply format exactly.' },
+            { role: 'user', content: prompt },
+          ], { temperature: 0, maxTokens: 400 })).content,
+        });
+        if (result.review.verdict === 'blocked') {
+          reviewBlocked = true;
+          taskHadFailure = true;
+          result.message = `Not applied: the independent reviewer found a concrete failing case. ${result.review.findings.filter(f => f.blocking).map(f => f.text).join(' | ')}`;
+        }
+      } catch {
+        result.review = { verdict: 'skipped', findings: [], model: resolvedModel ?? undefined };
+      }
+    }
+
     let verifyWithheld = false;
     let verifyManual = false;
     if (!dryRun && input.resolve?.action === 'apply' && input.verifyCommand && patches.length > 0) {
@@ -793,7 +842,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         result.message = `Not applied: ${assessment.reasons.join('; ')}. Review the diff. To proceed, apply without verifyCommand, run \`${input.verifyCommand}\` yourself, and send its exit code and output back as verifyReport.`;
       }
     }
-    if (!dryRun && input.resolve?.action === 'apply' && patches.length > 0 && !verifyWithheld) {
+    if (!dryRun && input.resolve?.action === 'apply' && patches.length > 0 && !verifyWithheld && !reviewBlocked) {
       for (const patch of patches) {
         assertPatchPathAllowed(workspaceRoot, patch.filePath);
       }
@@ -895,7 +944,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     }
     result.pipelineStage = 'completed';
     // applied = true only when patches were actually written to disk
-    result.applied = !dryRun && input.resolve?.action === 'apply' && !verifyWithheld;
+    result.applied = !dryRun && input.resolve?.action === 'apply' && !verifyWithheld && !reviewBlocked;
 
     // Behavioural gate: re-run the check on the patched workspace. A regression (passed before,
     // fails now) is an error diagnostic, which the post-apply gate below turns into an automatic
@@ -904,12 +953,15 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       const after = await runVerifyCommand(input.verifyCommand, workspaceRoot);
       result.verification = {
         command: input.verifyCommand,
-        status: after.ok ? 'passed' : (verifyBaseline.ok ? 'regressed' : 'baseline_failing'),
+        status: after.ok ? 'passed' : (verifyBaseline.ok ? 'regressed' : 'not_green'),
         ok: after.ok,
         baselineOk: verifyBaseline.ok,
         exitCode: after.exitCode,
         timedOut: after.timedOut,
         outputTail: after.outputTail,
+        failedCases: after.failedCases,
+        baselineFailedCases: verifyBaseline.failedCases,
+        ...(verifyBaseline.ok ? {} : { baselineBrief: buildRepairBrief({ command: input.verifyCommand, exitCode: verifyBaseline.exitCode, timedOut: verifyBaseline.timedOut, outputTail: verifyBaseline.outputTail, failedCases: verifyBaseline.failedCases, patchedFiles: patches.map(p => p.filePath) }) }),
         durationMs: after.durationMs,
       };
       if (!after.ok) {
@@ -926,9 +978,11 @@ ${after.outputTail}`,
         };
         diagnosticsList.push(d);
         result.diagnostics.push(d);
-        if (regression) {
-          taskHadFailure = true;
-          result.verification.repairBrief = buildRepairBrief({ command: input.verifyCommand, exitCode: after.exitCode, timedOut: after.timedOut, outputTail: after.outputTail, patchedFiles: patches.map(p => p.filePath) });
+        // regressed: rolled back below. not_green (it was failing before too): kept, so a retry can build
+        // on it; either way the failing output becomes a debugger brief for the next attempt.
+        taskHadFailure = true;
+        {
+          result.verification.repairBrief = buildRepairBrief({ command: input.verifyCommand, exitCode: after.exitCode, timedOut: after.timedOut, outputTail: after.outputTail, failedCases: after.failedCases, patchedFiles: patches.map(p => p.filePath) });
         }
       }
     }
@@ -971,6 +1025,9 @@ ${after.outputTail}`,
           }
           result.applied = false;
           result.restoredFiles = [...files, ...deletedNewFiles];
+          // Hand the compiler messages to a retry (the loop would otherwise see only a silent rollback).
+          const syntaxBrief = buildSyntaxBrief(diagnosticsList as any);
+          if (syntaxBrief) result.rollbackBrief = syntaxBrief;
           result.patchSummary = `Automatically rolled back ${restoredCount} file(s)${deletedNewFiles.length ? ` and removed ${deletedNewFiles.length} newly-created file(s)` : ''}: the applied patch introduced ${diagnosticsList.filter(d => d.severity === 'error').length} compiler error(s), which usually means the LLM's output doesn't actually belong to the target file. Checkpoint: ${result.checkpointId}. Re-run with a more explicit goal, astEditOps, or action:"resume".`;
         } catch (rollbackErr: any) {
           result.diagnostics.push({

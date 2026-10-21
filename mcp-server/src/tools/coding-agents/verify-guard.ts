@@ -1,3 +1,5 @@
+import path from 'node:path';
+import fs from 'fs-extra';
 import { collapseSimilarLines } from '../../utils/log-compaction.js';
 
 /**
@@ -89,7 +91,7 @@ export function assessPatchesForVerify(patches: PatchFact[], command: string): V
   const flag = (file: string, why: string) => { files.add(file); reasons.push(`${file}: ${why}`); };
 
   for (const p of patches) {
-    if (isTestFile(p.filePath) && !isExecutableSurface(p.filePath, targets, false)) {
+    if (isTestFile(p.filePath)) {
       manualReasons.push(`${p.filePath}: ${p.isNew ? 'a test was created by the agent' : 'a test was changed by the agent'}; the agent does not run tests it wrote`);
     } else if (isExecutableSurface(p.filePath, targets, false)) {
       flag(p.filePath, p.isNew
@@ -107,6 +109,8 @@ export function assessPatchesForVerify(patches: PatchFact[], command: string): V
 
 export interface RepairBriefInput {
   command: string;
+  /** Failing case names collected from the whole run (see runVerifyCommand). */
+  failedCases?: string[];
   exitCode: number | null;
   timedOut?: boolean;
   outputTail: string;
@@ -117,10 +121,30 @@ const KEY_LINE_RE = /\b(FAIL(ED)?|ERROR|AssertionError|Assertion failed|Tracebac
 const FRAME_RE = /[\w./\\-]+\.[a-z]{1,4}:\d+(:\d+)?/i;
 const BRIEF_CAP = 2000;
 
+/** Quoted strings and ip/number-like tokens in failing case names: the inputs the tests use. */
+function caseInputs(cases: string[]): string[] {
+  const out = new Set<string>();
+  for (const c of cases) {
+    for (const m of c.matchAll(/"([^"]{3,})"|'([^']{3,})'/g)) out.add(m[1] ?? m[2]);
+    for (const m of c.matchAll(/\b\d[\w.:-]*\d\b/g)) if (m[0].length >= 3) out.add(m[0]);
+  }
+  return [...out];
+}
+
+/**
+ * A small model that cannot find the general bug adds the failing input as a literal (`if (x === "1.5h")`
+ * or a regex of it). Returns the failing inputs that appear in the newly added lines.
+ */
+export function detectSpecialCasing(addedLines: string[], failedCases: string[]): string[] {
+  const text = addedLines.join('\n').replace(/\\/g, '');
+  return caseInputs(failedCases).filter(lit => lit.length >= 3 && text.includes(lit));
+}
+
 /** Persona header kept short: a 7B model follows few, concrete rules. */
 const PERSONA = [
   'You are acting as the DEBUGGER for an edit that made a check fail.',
   'Rules: fix the production code under test. Do not edit tests, scripts, configs or hooks. Do not run commands or tests; the user runs them. Reply with only the corrected edit.',
+  'Check boundary values, and compare numbers as numbers (not as strings). Fix the general logic; never special-case a test input.',
 ].join('\n');
 
 /**
@@ -139,6 +163,15 @@ export function buildRepairBrief(i: RepairBriefInput): string {
   }
   const dedupe = (a: string[]) => [...new Set(a)];
   const parts: string[] = [PERSONA, `Check: ${i.command} (${i.timedOut ? 'timed out' : `exit ${i.exitCode}`})`];
+  const cases = i.failedCases ?? [];
+  if (cases.length) {
+    const shown = cases.slice(0, 15);
+    parts.push(`Failing cases (${cases.length}):\n${shown.join('\n')}${cases.length > shown.length ? `\n(+${cases.length - shown.length} more)` : ''}`);
+  }
+  if (/Missing expected exception|did not throw|expected .* to throw/i.test(i.outputTail)) {
+    parts.push('A call that should have thrown returned normally: the current logic ACCEPTS that input. Find the part that accepts it (a regex or condition that is too permissive) and tighten that. Do not add a special case for the input.');
+  }
+  if (cases.length > 3) parts.push('Several cases fail: rewrite the whole function from the requirements instead of patching single lines.');
   if (i.timedOut) parts.push('The check timed out: the edit probably introduced a hang or an infinite loop.');
   if (key.length) parts.push('Failures:\n' + dedupe(key).slice(0, 12).join('\n'));
   if (frames.length) parts.push('Frames in your edit:\n' + dedupe(frames).slice(0, 6).join('\n'));
@@ -146,6 +179,51 @@ export function buildRepairBrief(i: RepairBriefInput): string {
   if (!lines.length && !i.timedOut) parts.push('The check printed nothing.');
   const text = parts.join('\n\n');
   return text.length > BRIEF_CAP ? `${text.slice(0, BRIEF_CAP)}\n... (brief truncated)` : text;
+}
+
+const TEST_CTX_PER_FILE = 5000;
+const TEST_CTX_TOTAL = 6500;
+
+/**
+ * The tests a verifyCommand runs are the specification. The agent may READ them (never edit or run
+ * them): without them it only has the prose goal and cannot know that, say, "1.5h" must be rejected.
+ * Only test files named in the command, inside the workspace, are included; bounded.
+ */
+export async function readVerifyTestContext(command: string, workspaceRoot: string): Promise<string> {
+  const root = path.resolve(workspaceRoot);
+  const blocks: string[] = [];
+  let used = 0;
+  for (const target of commandTargets(command)) {
+    if (!isTestFile(target)) continue;
+    const abs = path.resolve(root, target);
+    if (abs !== root && !abs.startsWith(root + path.sep)) continue; // never leave the workspace
+    let text: string;
+    try { text = await fs.readFile(abs, 'utf-8'); } catch { continue; }
+    const room = Math.min(TEST_CTX_PER_FILE, TEST_CTX_TOTAL - used);
+    if (room <= 0) break;
+    const clipped = text.length > room ? `${text.slice(0, room)}\n... (truncated)` : text;
+    used += clipped.length;
+    blocks.push(`--- ${target} ---\n${clipped}`);
+  }
+  return blocks.length
+    ? `[Tests that must pass: read-only specification. Do not edit, delete or run them; make the production code satisfy them.]\n${blocks.join('\n')}`
+    : '';
+}
+
+/**
+ * Brief for an edit that was rolled back because it does not parse. OpenCode feeds LSP errors back
+ * after every edit; the pipeline already computes these diagnostics, they just never reached the retry.
+ */
+export function buildSyntaxBrief(diagnostics: Array<{ filePath: string; line?: number; message: string; severity?: string }>): string {
+  const errors = diagnostics.filter(d => d.severity === 'error');
+  if (errors.length === 0) return '';
+  const shown = errors.slice(0, 10).map(d => `${d.filePath}${d.line ? `:${d.line}` : ''} ${d.message.split('\n')[0].slice(0, 200)}`);
+  const more = errors.length > shown.length ? `\n(+${errors.length - shown.length} more)` : '';
+  return [
+    'Your last edit was rolled back: the file does not parse (syntax errors).',
+    `Errors:\n${shown.join('\n')}${more}`,
+    'Rules: return a corrected edit that is valid code. Do not run commands or tests; the user runs them.',
+  ].join('\n');
 }
 
 /** Appends a debugger brief to the goal for a retry. */
