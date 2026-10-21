@@ -3,12 +3,12 @@
  * @description Demonstrates live task execution with agentic memory and tool-calling capabilities.
  * Usage: tsx scripts/verification/demo-live-tasks.ts
  */
-import { 
-    PipelineExecutor, 
-    IntelligentRouterMiddleware, 
-    AgenticMiddleware, 
-    TaskType, 
-    PipelineContext 
+import {
+    PipelineExecutor,
+    IntelligentRouterMiddleware,
+    AgenticMiddleware,
+    TaskType,
+    PipelineContext
 } from '../../src/pipeline/index.js';
 import { StructuralMarkdownMiddleware } from '../../src/pipeline/middlewares/StructuralMiddleware.js';
 import { LLMExecutor } from '../../src/utils/LLMExecutor.js';
@@ -20,7 +20,7 @@ async function runTask(name: string, prompt: string, options: any = {}) {
 
     const executor = new LLMExecutor();
     const pipeline = new PipelineExecutor();
-    
+
     // Build the full production pipeline (minus cache)
     pipeline.use(new StructuralMarkdownMiddleware());
     pipeline.use(new AgenticMiddleware());
@@ -47,7 +47,7 @@ async function runTask(name: string, prompt: string, options: any = {}) {
         console.log(`✅ COMPLETED in ${duration}ms`);
         console.log(`🤖 MODEL: ${context.response?.model || 'Unknown'}`);
         console.log(`📊 TASK TYPE: ${context.taskType || 'N/A'}`);
-        
+
         const content = context.response?.choices[0]?.message?.content || '';
         console.log(`\n🤖 RESPONSE PREVIEW (First 1000 chars):`);
         console.log(`--------------------------------------------------`);

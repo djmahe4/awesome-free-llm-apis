@@ -12,7 +12,7 @@ export async function runVibeAuditorTest(workspaceRoot: string, model: string): 
     const result = await executeSkill({
         skill: 'vibe-code-auditor',
         input: `Please audit the following file for technical debt and security risks:
-        
+
 === FILE: packages/api/src/server.ts ===
 ${serverCode}`,
         model,

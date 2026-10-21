@@ -44,21 +44,21 @@ async function loadRequiredRouterModels() {
 
 // Vision/Multimodal signature detection rules
 const VISION_KEYWORDS = [
-  'vision', 'vl', 'vlm', 'multimodal', 'ocr', 'paligemma', 'glm-4.1v', 'glm-4.6v', 'glm-5v', 
-  'gpt-4o', 'gemini-2.5', 'gemini-3.1', 'gemma-4-', 'scout', 'maverick', 'kimi-k', 'dola-seed', 
+  'vision', 'vl', 'vlm', 'multimodal', 'ocr', 'paligemma', 'glm-4.1v', 'glm-4.6v', 'glm-5v',
+  'gpt-4o', 'gemini-2.5', 'gemini-3.1', 'gemma-4-', 'scout', 'maverick', 'kimi-k', 'dola-seed',
   'grok-build', 'kilo-auto/free', 'openrouter/free'
 ];
 
 function detectVisionCapability(id: string, name: string): boolean {
   const normalizedId = id.toLowerCase();
   const normalizedName = name.toLowerCase();
-  
+
   // Specific checks for known vision/multimodal models
   if (
-    normalizedId.includes('gemini-3.1') || 
-    normalizedId.includes('gemma-4-') || 
-    normalizedId.includes('phi-4-multimodal') || 
-    normalizedId.includes('nemotron-nano-2-vl') || 
+    normalizedId.includes('gemini-3.1') ||
+    normalizedId.includes('gemma-4-') ||
+    normalizedId.includes('phi-4-multimodal') ||
+    normalizedId.includes('nemotron-nano-2-vl') ||
     normalizedId.includes('nemotron-nano-12b-v2-vl') ||
     normalizedId.includes('cosmos-reason2') ||
     normalizedId.includes('paligemma') ||
@@ -178,10 +178,10 @@ async function updateProviderFile(providerId: string, scrapedVisionModels: Scrap
     const text = `${m.name} ${m.id}`;
     const caps = CapabilityExtractor.extractCapabilities(text, []);
     const score = CapabilityExtractor.calculateScore(caps);
-    
+
     const capsStr = caps.length > 0 ? `capabilities: [${caps.map(c => `'${c}'`).join(', ')}],` : '';
     const scoreStr = score > 0 ? `score: ${score},` : '';
-    
+
     return `    { id: '${m.id}', name: '${m.name}', ${capsStr}${scoreStr} }`;
   }).join('\n');
 
@@ -213,7 +213,7 @@ async function scrapeNvidiaVision(browser: any): Promise<ScrapedModel[]> {
 
     while (hasNext && pageNum <= 5) {
       console.log(`[NVIDIA-Vision] Processing page ${pageNum}...`);
-      await page.waitForTimeout(2000); 
+      await page.waitForTimeout(2000);
 
       // Remove OneTrust cookie overlays that block interaction
       await page.evaluate(() => {
@@ -224,7 +224,7 @@ async function scrapeNvidiaVision(browser: any): Promise<ScrapedModel[]> {
       const cards = await page.evaluate(() => {
         const items: Array<{ id: string; name: string }> = [];
         const cardElements = document.querySelectorAll('a[href*="/"]');
-        
+
         cardElements.forEach(el => {
           const href = el.getAttribute('href') || '';
           const parts = href.split('/').filter(Boolean);
@@ -407,7 +407,7 @@ async function scrapeSiliconFlowVision(): Promise<ScrapedModel[]> {
     const res = await fetch('https://docs.siliconflow.com/llms.txt');
     const text = await res.text();
     const models: ScrapedModel[] = [];
-    
+
     const lines = text.split('\n');
     for (const line of lines) {
       if (line.includes('/') && !line.startsWith('http') && line.trim().length > 3) {
@@ -434,7 +434,7 @@ async function scrapeSiliconFlowVision(): Promise<ScrapedModel[]> {
 async function main() {
   console.log('\n=== Vision Model Scraper (v0.1) ===');
   console.log('Targeting only free vision (image-to-text / multimodal) models.');
-  
+
   // 1. Initial setups
   await loadRequiredRouterModels();
 
@@ -449,7 +449,7 @@ async function main() {
     results['llm7'] = await scrapeLLM7Vision();
     results['cloudflare'] = await scrapeCloudflareVision(browser);
     results['siliconflow'] = await scrapeSiliconFlowVision();
-    
+
     // Google Gemini (preserves original pristine file gemini.ts)
     // results['gemini'] = [
     //   { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite Preview', isVision: true },

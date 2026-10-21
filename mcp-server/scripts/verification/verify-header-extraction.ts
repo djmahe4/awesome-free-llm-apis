@@ -31,7 +31,7 @@ async function verifyHeaderExtraction() {
 
     const executor = new LLMExecutor();
     const modelId = provider.models[0].id;
-    
+
     const context: PipelineContext = {
         request: {
             model: modelId,
@@ -42,10 +42,10 @@ async function verifyHeaderExtraction() {
     };
 
     console.error(`Making minimal request to ${providerId} (${modelId})...`);
-    
+
     try {
         const response = await executor.tryProvider(context, providerId, modelId);
-        
+
         if (!response) {
             console.error('Failed to get a response.');
             return;

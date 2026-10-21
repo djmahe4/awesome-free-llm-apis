@@ -13,7 +13,7 @@ export class DynamicDomExtractor {
         return `
         () => {
             const results = [];
-            
+
             // Helper to get clean text from an element
             const getText = (el) => el ? (el.innerText || el.textContent || '').trim() : '';
 

@@ -17,7 +17,7 @@ describe('FileUtils - Atomic Writes', () => {
     it('should write file content successfully', async () => {
         const content = JSON.stringify({ hello: 'world' });
         await writeFileAtomic(testFile, content);
-        
+
         const read = await fs.readFile(testFile, 'utf-8');
         expect(read).toBe(content);
     });
@@ -37,7 +37,7 @@ describe('FileUtils - Atomic Writes', () => {
 
         // Read the final file
         const finalContent = await fs.readFile(testFile, 'utf-8');
-        
+
         // Assert that the file is not corrupted (it must parse as valid JSON)
         const parsed = JSON.parse(finalContent);
         expect(parsed).toHaveProperty('id');

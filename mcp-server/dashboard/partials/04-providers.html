@@ -1,0 +1,57 @@
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 2: PROVIDERS
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-providers" role="tabpanel" aria-labelledby="tab-providers">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div class="section-title">Real-time Provider Quotas</div>
+          <div class="section-sub">Auto-refreshes every 5 seconds · Click Verify to health-check credentials</div>
+        </div>
+        <button class="btn btn-outline btn-sm" id="refresh-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.43"/></svg>
+          Refresh Now
+        </button>
+      </div>
+      <div class="providers-grid" id="providers-grid">
+        <div style="grid-column:1/-1;text-align:center;padding:60px 0;color:var(--text-muted);">
+          <div class="spinner" style="width:24px;height:24px;margin:0 auto 12px;"></div>
+          Connecting to MCP server…
+        </div>
+      </div>
+
+      <!-- Search Providers (v1.0.9 SearchRouterMiddleware) -->
+      <details class="card" open style="margin-top:28px;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <span class="card-title" style="display:flex;align-items:center;gap:6px;">
+            Search Providers &amp; Web Grounding
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+          <span class="section-sub" style="margin:0;font-size:.72rem;">Fallback: Parallel AI → Tavily → Jina → Brave → SearXNG</span>
+        </summary>
+        <div class="card-body" style="padding:16px;">
+          <div class="providers-grid" id="search-providers-grid">
+            <div style="grid-column:1/-1;text-align:center;padding:24px 0;color:var(--text-muted);">Loading…</div>
+          </div>
+        </div>
+      </details>
+
+      <details class="card" style="margin-top:16px;">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <span class="card-title" style="display:flex;align-items:center;gap:6px;">
+            Recent Search Queries
+            <span class="collapse-toggle-icon">▾</span>
+          </span>
+          <span class="section-sub" style="margin:0;font-size:.72rem;">Last 25 searches via SearchRouterMiddleware</span>
+        </summary>
+        <div class="card-body" style="padding:0;">
+          <table class="qs-table" id="search-logs-table" style="width:100%;">
+            <thead>
+              <tr><th>Time</th><th>Query</th><th>Provider</th><th>Count</th><th>Results</th></tr>
+            </thead>
+            <tbody id="search-logs-tbody">
+              <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>

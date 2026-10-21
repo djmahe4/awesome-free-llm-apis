@@ -3,7 +3,7 @@ import path from 'node:path';
 
 export class MonorepoSandbox {
     public workspaceRoot: string;
-    
+
     constructor() {
         const timestamp = Date.now();
         this.workspaceRoot = path.resolve(process.cwd(), `scratch/smoke_monorepo_${timestamp}`);
@@ -33,7 +33,7 @@ const app = express();
 const dbClient = new pg.Client({ connectionString: process.env.DATABASE_URL });
 
 // Hardcoded credential
-const DB_PASSWORD = "super_secret_db_password_12345"; 
+const DB_PASSWORD = "super_secret_db_password_12345";
 
 app.get('/user/:id', async (req, res) => {
     try {

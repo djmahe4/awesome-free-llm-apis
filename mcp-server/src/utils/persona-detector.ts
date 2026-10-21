@@ -5,7 +5,7 @@ import { findAgentsMdPath } from './agents-md-locator.js';
 /**
  * Heuristically detects the user/agent persona based on the query text
  * and optional workspace root AGENTS.md override.
- * 
+ *
  * Precedence: AGENTS.md preferred persona > heuristic detection > 'generic'
  */
 export function detectPersona(query: string, workspaceRoot?: string): string {

@@ -86,9 +86,9 @@ describe('High-Density Synthesis for Multi-Agent Workflows', () => {
     it('should prioritize sections based on combinatorial keyword matching', async () => {
         // High-density keywords matching multiple sections
         const keywords = ["arch", "security", "performance"];
-        const prompt = await getIntelligentSystemPrompt({ 
-            context: "Building a secure modular system with low latency", 
-            keywords 
+        const prompt = await getIntelligentSystemPrompt({
+            context: "Building a secure modular system with low latency",
+            keywords
         });
 
         expect(prompt).toContain("ARCHITECTURE PRINCIPLES");
@@ -98,7 +98,7 @@ describe('High-Density Synthesis for Multi-Agent Workflows', () => {
     });
 
     it('should enforce the 12k budget while keeping high-level sections', async () => {
-        // All 4 sections (2k each) + Reference Map + Intro might fit, 
+        // All 4 sections (2k each) + Reference Map + Intro might fit,
         // but let's see how close it gets.
         const keywords = ["arch", "security", "performance", "api", "reference"];
         const prompt = await getIntelligentSystemPrompt({
@@ -107,7 +107,7 @@ describe('High-Density Synthesis for Multi-Agent Workflows', () => {
         });
 
         expect(prompt.length).toBeLessThanOrEqual(PROMPT_CHAR_BUDGET + 500); // 12k budget + small buffer for protocol/intro
-        
+
         // Ensure level 1 sections are definitely there
         expect(prompt).toContain("ARCHITECTURE PRINCIPLES");
         expect(prompt).toContain("SECURITY PROTOCOLS");
@@ -140,7 +140,7 @@ describe('High-Density Synthesis for Multi-Agent Workflows', () => {
         expect(prompt).toContain("WORKSPACE MEMORY");
         expect(prompt).toContain("Memory Entry A");
         expect(prompt).toContain("Memory Entry B");
-        
+
         // Verify it's near the top (after introduction)
         const posMemory = prompt.indexOf("WORKSPACE MEMORY");
         const posSection = prompt.indexOf("PERFORMANCE OPTIMIZATION");

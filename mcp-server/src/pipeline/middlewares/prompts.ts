@@ -10,13 +10,13 @@ import { quantumCompress, quantumCompressWithAnchors } from '../../utils/quantum
 function calculateJaccardSimilarity(setA: Set<string>, str: string): number {
     const words = str.toLowerCase().split(/\W+/).filter(Boolean);
     if (words.length === 0) return 0;
-    
+
     let intersection = 0;
     const uniqueWords = new Set(words);
     uniqueWords.forEach(w => {
         if (setA.has(w)) intersection++;
     });
-    
+
     return intersection / (setA.size + uniqueWords.size - intersection);
 }
 
@@ -31,7 +31,7 @@ function compressContentSemantically(content: string, semanticTokens: Set<string
 
     for (const paragraph of paragraphs) {
         const trimmed = paragraph.trim();
-        
+
         // Preserve headers and markdown structure
         if (trimmed.startsWith('#') || trimmed.startsWith('---') || trimmed.startsWith('```') || /^[A-Z0-9\s_\-:]+$/.test(trimmed)) {
             keptParagraphs.push(paragraph);
@@ -178,7 +178,7 @@ export function resetPromptCache(): void {
  */
 const EMERGENCY_PROMPT_V1 = `
 # ⚠️ SYSTEM ALERT: RUNNING IN DEGRADED FALLBACK MODE
-The primary agent configuration (prompt.json) could not be loaded. 
+The primary agent configuration (prompt.json) could not be loaded.
 Reliability and workspace-awareness may be degraded.
 
 ## ROLE
@@ -268,22 +268,22 @@ async function getRelevantAgentsGuide(workspaceRoot: string, subtaskQuery: strin
                 }
             } catch {}
         }
-        
+
         if (!filePath) return '';
-        
+
         const content = await fsp.readFile(filePath, 'utf-8');
-        
+
         // Split AGENTS.md into sections based on headers (ignoring code blocks)
         const lines = content.split('\n');
         interface Section {
             title: string;
             content: string;
         }
-        
+
         const sections: Section[] = [];
         let currentSection: Section | null = null;
         let inCodeBlock = false;
-        
+
         for (const line of lines) {
             if (line.trim().startsWith('```')) {
                 inCodeBlock = !inCodeBlock;
@@ -307,9 +307,9 @@ async function getRelevantAgentsGuide(workspaceRoot: string, subtaskQuery: strin
         if (currentSection) {
             sections.push(currentSection);
         }
-        
+
         if (sections.length === 0) return '';
-        
+
         // Semantic selection using Jaccard/keyword overlap with the subtaskQuery
         const TECH_ACRONYMS = new Set(['ui', 'ip', 'os', 'db', 'id', 'ci', 'cd']);
         const STOPWORDS = new Set(['now', 'what', 'and', 'the', 'check', 'how', 'with', 'for', 'about', 'is', 'are']);
@@ -325,7 +325,7 @@ async function getRelevantAgentsGuide(workspaceRoot: string, subtaskQuery: strin
             const contentToInject = isSubtask ? quantumCompress(guide, 0.75, queryTokens) : guide;
             return `### 📋 Target Project Guide (${path.basename(filePath)})\n${contentToInject}\n`;
         }
-        
+
         const scoredSections = sections.map(sec => {
             const titleWords = new Set(sec.title.toLowerCase().split(/\W+/).filter(Boolean));
             const words = sec.content.toLowerCase().split(/\W+/).filter(Boolean);
@@ -344,28 +344,28 @@ async function getRelevantAgentsGuide(workspaceRoot: string, subtaskQuery: strin
             const jaccard = baseJaccard * titleBoost;
             return { sec, score: jaccard };
         });
-        
+
         // Sort and select top matching sections (score > 0.02)
         const relevant = scoredSections
             .filter(item => item.score > 0.02)
             .sort((a, b) => b.score - a.score)
             .slice(0, 3) // Limit to top 3 sections
             .map(item => item.sec);
-            
+
         if (relevant.length === 0) {
             // Default to introduction section if no specific match
             const guide = sections[0].content;
             const contentToInject = isSubtask ? quantumCompress(guide, 0.75, queryTokens) : guide;
             return `### 📋 Target Project Guide (Introduction)\n${contentToInject}\n`;
         }
-        
+
         let output = `### 📋 Target Project Guide (Contextually Filtered from ${path.basename(filePath)})\n`;
         for (const sec of relevant) {
             const hasHeader = sec.content.startsWith('#') || sec.content.startsWith(`### ${sec.title}`);
             const contentToInject = isSubtask ? quantumCompress(sec.content, 0.75, queryTokens) : sec.content;
             output += hasHeader ? `\n${contentToInject}\n` : `\n#### ${sec.title}\n${contentToInject}\n`;
         }
-        
+
         return output;
     } catch {
         return '';
@@ -397,7 +397,7 @@ export async function getIntelligentSystemPrompt(
     } else {
         context = contextOrOptions;
     }
-    
+
     const contextLower = context.toLowerCase();
     const data = await loadPromptData();
     if (!data) {
@@ -411,23 +411,23 @@ export async function getIntelligentSystemPrompt(
         }
     }
 
-    const introduction = isSubtask 
-        ? `${getMinimalIdentity(data)}\n\n### 🎯 Subtask Objective\n${context}\n` 
+    const introduction = isSubtask
+        ? `${getMinimalIdentity(data)}\n\n### 🎯 Subtask Objective\n${context}\n`
         : (`# ROLE\n${data.introduction || ""}\n`);
     let assembled = introduction;
 
     // Inject Workspace Memory and File Context at the very top of the assembled prompt
     if (workspaceContext) {
         const queryKeywords = context.split(/\W+/).filter(w => w.length >= 3);
-        const cappedWorkspace = workspaceContext.length > 5000 
-            ? quantumCompressWithAnchors(workspaceContext, queryKeywords, 0.7) 
+        const cappedWorkspace = workspaceContext.length > 5000
+            ? quantumCompressWithAnchors(workspaceContext, queryKeywords, 0.7)
             : workspaceContext;
         assembled = `## 📂 WORKSPACE CONTEXT\n<workspace_context_isolation_gate>\nRelevant file snippets and directory structures:\n${cappedWorkspace}\n</workspace_context_isolation_gate>\n\n` + assembled;
     }
     if (memoryContext) {
         const queryKeywords = context.split(/\W+/).filter(w => w.length >= 3);
-        const cappedMemory = memoryContext.length > 2000 
-            ? quantumCompressWithAnchors(memoryContext, queryKeywords, 0.7) 
+        const cappedMemory = memoryContext.length > 2000
+            ? quantumCompressWithAnchors(memoryContext, queryKeywords, 0.7)
             : memoryContext;
         assembled = `## 🧠 WORKSPACE MEMORY\n<memory_context_isolation_gate>\nRelevant prior knowledge for this workspace:\n${cappedMemory}\n</memory_context_isolation_gate>\n\n` + assembled;
     }
@@ -446,21 +446,21 @@ export async function getIntelligentSystemPrompt(
             return `\n\n## ${s.title}\n\n${content}`;
         })
         .join("");
-        
+
         return `${assembled}${GROUNDING_PROTOCOL}`;
     }
 
     // Tokenize both context and mainPrompt to build query tokens
     const tokens = new Set<string>();
     const stopwords = new Set(['and', 'the', 'with', 'your', 'from', 'that', 'this', 'for', 'are', 'you', 'was', 'were', 'been', 'have', 'has', 'had']);
-    
+
     const addTokens = (str: string) => {
         str.toLowerCase().split(/\W+/).forEach(t => {
             if (t.length >= 3 && !stopwords.has(t)) tokens.add(t);
         });
     };
 
-    const isStrictSteering = explicitKeywords && explicitKeywords.length > 0 && 
+    const isStrictSteering = explicitKeywords && explicitKeywords.length > 0 &&
         explicitKeywords.some(k => !['mcp', 'memory', 'filesystem'].includes(k.toLowerCase()));
 
     if (isStrictSteering) {
@@ -482,7 +482,7 @@ export async function getIntelligentSystemPrompt(
     // Score sections
     const scoredSections = data.sections.map(section => {
         let score = 0;
-        
+
         // Count keyword overlap to verify semantic relevance
         let keywordOverlapCount = 0;
         section.keywords.forEach(kw => {
@@ -508,10 +508,10 @@ export async function getIntelligentSystemPrompt(
         }
 
         // 2. Title relevance
-        const titleMatchSource = (explicitKeywords && explicitKeywords.length > 0) 
-            ? new Set(explicitKeywords.map(k => k.toLowerCase())) 
+        const titleMatchSource = (explicitKeywords && explicitKeywords.length > 0)
+            ? new Set(explicitKeywords.map(k => k.toLowerCase()))
             : tokens;
-            
+
         section.title.toLowerCase().split(/\W+/).forEach(t => {
             if (titleMatchSource.has(t)) {
                 score += getIDF(t) * 1.5;
@@ -569,7 +569,7 @@ export async function getIntelligentSystemPrompt(
         let content = section.content;
         const isRef = ['research_appendix', 'subsystem_reference_map', 'open_source_architecture_references'].includes(section.id);
         const isStructuredLayers = section.id === 'system_layers_to_build';
-        
+
         if (isRef) {
             const parts = content.split(/\n(?=\s*- )/).map(p => p.trim()).filter(p => p.length > 0);
             const scoredEntries: { entry: string, entryScore: number }[] = [];
@@ -633,19 +633,19 @@ export async function getIntelligentSystemPrompt(
         if (content.length > 0) {
             const header = `\n\n## ${section.title}\n\n`;
             const remainingBudget = budgetLimit - currentSize;
-            
+
             if (remainingBudget > header.length + 50) {
                 let blockContent = content;
                 const MAX_SECTION_SIZE = isSubtask ? 2000 : 4000;
                 if (blockContent.length > MAX_SECTION_SIZE) {
                     blockContent = quantumCompressWithAnchors(blockContent, tokens, 0.7);
                 }
-                
+
                 if (header.length + blockContent.length > remainingBudget) {
                     const ratio = Math.max(0.2, (remainingBudget - header.length) / blockContent.length);
                     blockContent = quantumCompressWithAnchors(blockContent, tokens, ratio);
                 }
-                
+
                 const block = header + blockContent;
                 assembled += block;
                 currentSize += block.length;

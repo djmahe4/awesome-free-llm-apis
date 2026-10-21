@@ -128,7 +128,7 @@ def run_sandboxed(code: str, data: str) -> tuple[str, str, bool]:
         glb['__builtins__'] = safe_builtins.copy()
         glb['__builtins__']['__import__'] = _safe_import
         glb['__builtins__']['print'] = builtin_print
-        
+
         # In RestrictedPython, the 'print' statement is transformed to use _print_
         glb['_print_'] = SharedCollector
         glb['_iter_unpack_sequence_'] = guarded_iter_unpack_sequence

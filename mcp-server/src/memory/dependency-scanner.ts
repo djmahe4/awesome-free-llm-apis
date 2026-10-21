@@ -85,7 +85,7 @@ export class RepositoryGraph {
         const visited = new Set<string>([normStart]);
         const resultNodes: Node[] = [];
         const resultEdges: Edge[] = [];
-        
+
         const startNode = this.getNode(normStart);
         if (startNode) {
             resultNodes.push(startNode);
@@ -109,7 +109,7 @@ export class RepositoryGraph {
                     if (!visited.has(neighbor)) {
                         visited.add(neighbor);
                         nextLevel.push(neighbor);
-                        
+
                         const neighborNode = this.getNode(neighbor);
                         if (neighborNode) {
                             resultNodes.push(neighborNode);
@@ -117,7 +117,7 @@ export class RepositoryGraph {
                             resultNodes.push({ id: neighbor, type: neighbor.includes('.') ? 'code' : 'concept' });
                         }
                     }
-                    
+
                     if (!resultEdges.some(re => re.source === edge.source && re.target === edge.target && re.type === edge.type)) {
                         resultEdges.push(edge);
                     }
@@ -132,7 +132,7 @@ export class RepositoryGraph {
 
     findNodeByKeyword(keyword: string): Node | null {
         const lowerKeyword = keyword.toLowerCase().trim();
-        
+
         // Exact match first
         const exactNode = this.getNode(lowerKeyword);
         if (exactNode) return exactNode;
@@ -190,7 +190,7 @@ export class WorkspaceDependencyScanner {
     async scanFile(filePath: string, graph: RepositoryGraph) {
         const relativePath = path.relative(this.workspaceRoot, filePath).replace(/\\/g, '/');
         const ext = path.extname(filePath).toLowerCase();
-        
+
         let fileContent = '';
         let stats;
         try {
@@ -340,7 +340,7 @@ export class WorkspaceDependencyScanner {
             const target = match[1].trim();
             // Handle anchors and parameters
             const cleanTarget = target.split('#')[0];
-            
+
             let nodeType: 'code' | 'doc' | 'concept' | 'pdf' = 'concept';
             if (cleanTarget.endsWith('.pdf')) {
                 nodeType = 'pdf';
@@ -359,7 +359,7 @@ export class WorkspaceDependencyScanner {
         // Scan for run commands inside comments/docstrings like "python run_pipeline.py"
         // Avoid crossing lines by using [ \t]+ instead of \s+ for options
         const commandRegex = /\b(python\d?|node|tsx|bun|go\s+run|cargo\s+run|npm\s+run)\b[ \t]+([a-zA-Z0-9_\-\.\/]+)(?:[ \t]+[a-zA-Z0-9_\-\.\/]+)*/gi;
-        
+
         let match;
         const commands: string[] = [];
         while ((match = commandRegex.exec(content)) !== null) {
@@ -375,7 +375,7 @@ export class WorkspaceDependencyScanner {
                 if (!node.metadata) node.metadata = {};
                 node.metadata.commands = commands;
             }
-            
+
             // Add self invokes edge or command nodes if desired
             for (const cmd of commands) {
                 graph.addNode(cmd, 'concept');
@@ -385,10 +385,10 @@ export class WorkspaceDependencyScanner {
     }
 
     private resolveAndAddDependency(
-        importPath: string, 
-        currentDir: string, 
-        fileRelPath: string, 
-        graph: RepositoryGraph, 
+        importPath: string,
+        currentDir: string,
+        fileRelPath: string,
+        graph: RepositoryGraph,
         extensions: string[]
     ) {
         let targetId = importPath;
@@ -482,7 +482,7 @@ export class WorkspaceDependencyScanner {
                 return candidate;
             }
         }
-        
+
         // Also check if it matches a folder index/init
         for (const ext of extensions) {
             if (ext.startsWith('/')) {
@@ -492,7 +492,7 @@ export class WorkspaceDependencyScanner {
                 }
             }
         }
-        
+
         return null;
     }
 
@@ -640,7 +640,7 @@ export class WorkspaceDependencyScanner {
 
     generateWikiLinksMarkdown(graph: RepositoryGraph): string {
         let md = '# Repository Concept & Dependency Graph Wiki\n\n';
-        
+
         const nodes = graph.getAllNodes();
         const codeNodes = nodes.filter(n => n.type === 'code');
         const docNodes = nodes.filter(n => n.type === 'doc');
@@ -653,7 +653,7 @@ export class WorkspaceDependencyScanner {
                 md += `### [[${node.id}]]\n`;
                 if (node.metadata?.language) md += `- **Language**: ${node.metadata.language}\n`;
                 if (node.metadata?.size) md += `- **Size**: ${node.metadata.size} bytes\n`;
-                
+
                 const edges = graph.getEdgesFrom(node.id);
                 const imports = edges.filter(e => e.type === 'imports');
                 const links = edges.filter(e => e.type === 'links');
@@ -687,7 +687,7 @@ export class WorkspaceDependencyScanner {
             for (const node of allDocs) {
                 md += `### [[${node.id}]]\n`;
                 md += `- **Type**: ${node.type}\n`;
-                
+
                 const edges = graph.getEdgesFrom(node.id);
                 if (edges.length > 0) {
                     md += `- **Links**:\n`;
@@ -717,7 +717,7 @@ export class WorkspaceDependencyScanner {
             }
         } else if (['.rs', '.dart', '.go', '.c', '.cpp', '.h', '.hpp', '.kt'].includes(ext)) {
             // Match consecutive lines starting with /// or //! or //
-            const rustDocMatch = content.match(/^(\s*\/\/\/.*(?:\r?\n\s*\/\/\/.*)*)/m) || 
+            const rustDocMatch = content.match(/^(\s*\/\/\/.*(?:\r?\n\s*\/\/\/.*)*)/m) ||
                                  content.match(/^(\s*\/\/!.*(?:\r?\n\s*\/\/!.*)*)/m) ||
                                  content.match(/^(\s*\/\/.*(?:\r?\n\s*\/\/.*)*)/m);
             if (rustDocMatch) {
@@ -755,7 +755,7 @@ export class WorkspaceDependencyScanner {
             } else if (ext === '.dart') {
                 exportPattern = /^\s*(class|enum|mixin|extension)\s+([a-zA-Z0-9_]+)/gm;
             }
-            
+
             let exportMatch;
             while ((exportMatch = exportPattern.exec(content)) !== null) {
                 profile.exports.push(exportMatch[2]);
@@ -908,4 +908,3 @@ export function semanticScore(
 
     return results.sort((a, b) => b.score - a.score).slice(0, topK);
 }
-

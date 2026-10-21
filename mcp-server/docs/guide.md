@@ -9,12 +9,12 @@ This guide explains the inner workings of the LLM Orchestration Pipeline, includ
 The system uses a middleware-based pipeline. Every request passes through a series of decoupled middleware layers before reaching the LLM provider.
 
 ### 🔄 Decoupled Pipeline Architecture (Phased Breakdown)
- 
+
 To make the pipeline execution easy to understand, it is broken down into three distinct phases:
- 
+
 #### Phase 1: Request & Cache Checking
 In this phase, the server sanitizes the request and attempts to serve it from the local cache.
- 
+
 ```mermaid
 graph TD
     A["User Request / Tool Call"] --> B["1. StructuralMarkdownMiddleware<br/>(Resolves file:// & artifact:// URIs)"]
@@ -22,10 +22,10 @@ graph TD
     C -->|Cache Hit| D["Return Cached Response<br/>(Saves tokens & time)"]
     C -->|Cache Miss| E["Proceed to Phase 2"]
 ```
- 
+
 #### Phase 2: Context Gathering & Agentic Planning
 If the cache misses, the server gathers workspace context and, if enabled, runs the agentic subtask execution loop.
- 
+
 ```mermaid
 graph TD
     A["Phase 2 Entry"] --> B["3. WorkspaceContextMiddleware<br/>(Injects vector memory & 2-level directory tree)"]
@@ -42,23 +42,27 @@ graph TD
     K -->|Yes| E
     K -->|No| D
 ```
- 
+
 * **Subtask Visual Grounding**: To support visual TDD, if a subtask prompt references local images or artifacts (e.g. `file:///path/to/screenshot.png`), `AgenticMiddleware` automatically invokes `ImageRouterMiddleware`'s processing engine to convert the URLs to base64 before calling the LLM executor.
 * **Vision Model Prioritization**: When executing an image-bearing subtask, `LLMExecutor` automatically detects the image payload and **prioritizes vision-capable models** (such as `gemini-3.1-flash-lite` or `google/gemma-4-31b-it:free`) to prevent routing failures to text-only models.
- 
+
 ---
- 
-#### Phase 3: Routing & LLM Execution
-Finally, the request is routed depending on whether it contains images, scored using the quantum router, and dispatched to the LLM. If a confused user state is detected, fallback trial ordering is reversed and a guiding system note is appended — this no longer affects indexing (see note below).
- 
+
+#### Phase 3: Routing, Grounded Search & LLM Execution
+Finally, if search grounding is requested, `SearchRouterMiddleware` executes the query across free search providers. Otherwise, the request is routed depending on whether it contains images, scored using the quantum router, and dispatched to the LLM. If a confused user state is detected, fallback trial ordering is reversed and a guiding system note is appended — this no longer affects indexing (see note below).
+
 ```mermaid
 graph TD
-    A["Phase 3 Entry"] --> B["5. ImageRouterMiddleware<br/>(Checks for images/multimodal)"]
+    A["Phase 3 Entry"] --> S["5. SearchRouterMiddleware<br/>(Checks google_search / SemanticSearch)"]
+    S -->|Search Match| S1["Execute SearchRouter Fallback Cascade<br/>Parallel -> TinyFish -> Tavily -> DDGS -> Jina -> SearXNG"]
+    S1 --> S2["Format Grounded Search Response<br/>CDP Soup Fallback for Full Page Content"]
+    S2 --> M["Return Final Response"]
+    S -->|Standard Request| B["6. ImageRouterMiddleware<br/>(Checks for images/multimodal)"]
     B -->|Contains Images| C["ImageRouter Exec"]
     C --> D{isUserConfused?}
     D -->|Yes| E["Reverse Order: Try Cheapest VLM First<br/>Append Guiding System Note"]
     D -->|No| F["Sort Descending: Try S-Tier VLM First<br/>Pass prompt as-is"]
-    B -->|Text Only| G["6. TextRouterMiddleware<br/>(Classifies TaskType)"]
+    B -->|Text Only| G["7. TextRouterMiddleware<br/>(Classifies TaskType)"]
     G --> H{isUserConfused?}
     H -->|Yes| I["Reverse Order: Try Cheapest LLM First<br/>Append Guiding System Note"]
     H -->|No| J["Quantum Scoring<br/>(Scores models by capability & context)"]
@@ -67,19 +71,20 @@ graph TD
     F --> L
     I --> L
     K --> L
-    L --> M["Return Final Response"]
+    L --> M
 ```
 
-### Pipeline Order (v1.0.7 Update)
+### Pipeline Order (v1.1.0 Update)
 1. **`StructuralMarkdownMiddleware`**: Resolves `file://` and `artifact://` URIs with security boundary checks.
 2. **`ResponseCacheMiddleware`**: Checks if a result exists in the persistent workspace-aware cache.
 3. **`WorkspaceContextMiddleware`**: Injects vector-searched memory and system prompts. Backgrounds (via `setImmediate`, non-blocking) a pre-emptive workspace re-index followed by wiki maintenance, gated on `agentic: true` + a `workspace_root`. **Bypassed only if the caller sets `skipIndexing: true` on the request itself** — see note below.
 4. **`AgenticMiddleware`**: Decomposes tasks into subtasks and manages execution loops.
-5. **`ImageRouterMiddleware`**: Intercepts local/remote image files, checks for confused/empty prompts (image-only), reverses model trial order to save token budget, and appends a guiding system note.
-6. **`TextRouterMiddleware`**: Routes text prompts. Reverses model trial order and appends a guiding system note for file-only/generic confused queries.
+5. **`SearchRouterMiddleware`**: Free-provider fallback search (`Parallel AI` &rarr; `TinyFish` &rarr; `Tavily` &rarr; `DuckDuckGo MCP` &rarr; `Jina AI` &rarr; `SearXNG`). Persists health & rate-limit circuit breakers to disk.
+6. **`ImageRouterMiddleware`**: Intercepts local/remote image files, checks for confused/empty prompts (image-only), reverses model trial order to save token budget, and appends a guiding system note.
+7. **`TextRouterMiddleware`**: Routes text prompts. Reverses model trial order and appends a guiding system note for file-only/generic confused queries. Employs quantum state scoring and collapse.
 
 > [!NOTE]
-> **`skipIndexing` is caller-set only.** `WorkspaceContextMiddleware` runs *before* `AgenticMiddleware`/`ImageRouterMiddleware`/`TextRouterMiddleware` in the pipeline and reads `skipIndexing` before calling `next()`, so none of those downstream middlewares can set it in time to have any effect — it must already be `true` on the incoming request (see `use_free_llm`'s `skipIndexing` parameter in `SKILL.md`). Earlier versions had the confused-user branches in `ImageRouterMiddleware`/`TextRouterMiddleware` also set this flag; that was dead code (set too late to matter) and was removed. PDF/image content reaching the workspace wiki is unaffected either way — see §8, which runs independently of this gate.
+> **`skipIndexing` is caller-set only.** `WorkspaceContextMiddleware` runs *before* downstream middlewares in the pipeline and reads `skipIndexing` before calling `next()`, so none of those downstream middlewares can set it in time to have any effect — it must already be `true` on the incoming request (see `use_free_llm`'s `skipIndexing` parameter in `SKILL.md`). PDF/image content reaching the workspace wiki is unaffected either way — see §8, which runs independently of this gate.
 
 ---
 
@@ -299,13 +304,13 @@ graph TD
     B --> C{Verify Page Visual Objects}
     C -->|Has Figures / Sparse Text| D["Trigger Vision descriptions"]
     C -->|Text-only / Dense text| E["Store standard text chunks in Vector database"]
-    
+
     D --> F["Ignore tiny logos & thin divider lines (<40pt)"]
     F --> G["Upscale graphics to 300 DPI for details"]
     G --> H["describePageVision (Injects previous context + max_tokens dynamically)"]
     H --> I["Augment page text with visual descriptions"]
     I --> E
-    
+
     E --> J["Accumulate 5 pages (Incremental triggers)"]
     J --> K["RAG query built locally via TF-IDF sentence extraction"]
     K --> L["Fetch semantically related wiki chunks"]
@@ -343,7 +348,7 @@ To prevent corruption and race conditions during concurrent workspace indexing o
 `quantum_tool` provides a mathematically grounded multi-perspective reasoning framework modeling hypothesis branches as qubits.
 
 > [!TIP]
-> **Beginner Intuition: What is a Quantum Reasoning Circuit?**  
+> **Beginner Intuition: What is a Quantum Reasoning Circuit?**
 > In standard LLM prompting, an AI often commits early to a single line of thought. In a quantum reasoning circuit:
 > - Each **qubit / branch** represents an independent hypothesis, point of view, or specialized persona (e.g. `Security Engineer`, `Performance Architect`, `Red Teamer`).
 > - **Confidence ($C$)** represents the probability ($0.0 \to 1.0$) of a hypothesis being true or favored ($C = 0.5$ is complete uncertainty / neutral superposition).
@@ -468,13 +473,13 @@ The Steering Studio in the web dashboard provides live simulation of the 5-layer
 ```mermaid
 flowchart TD
     A[Incoming User Request] --> B{agentic: true?}
-    
+
     B -- No: Single-Pass --> C[Broad System Prompt Engine]
     C --> C1[12,000 char prompt budget]
     C1 --> C2[Selects up to 7 prompt.json modular sections]
     C2 --> C3[Includes meta-planning & architectural sections]
     C3 --> C4[Injects full L1-L5 memory layers]
-    
+
     B -- Yes: Multi-Pass Agentic --> D{Input Format}
     D -- Structured DSL --> D1[Extract lines with >, -, 1.]
     D -- Normal Unstructured Text --> D2[Decompose via SubtaskDecomposer]
@@ -524,6 +529,3 @@ Every tool in the server adheres to the Model Context Protocol (MCP) JSON-RPC 2.
 | **`load_skill_prompt`** | `load`, `search` | Dynamic keyword discovery and prompt assembly from bundled Hermes skills or local `.agents/` catalog. | `type`, `name`, `keywords`, `workspaceDir` |
 | **`validate_provider`** | `validate` | Health check, API key verification, and latency measurement for individual LLM providers. | `provider` (`gemini`, `groq`, `openrouter`, `ollama`, `cohere`, etc.) |
 | **`get_token_stats`** | `read` | Real-time RPM/RPD token quotas, quota resets, and durable lifetime request telemetry across all providers. | *(No parameters required)* |
-
-
-

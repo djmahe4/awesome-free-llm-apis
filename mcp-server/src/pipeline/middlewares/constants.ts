@@ -6,7 +6,8 @@ import os from 'os';
  */
 
 // Centralized storage for all MCP projects
-export const PROJECTS_DIR = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+const homeBase = process.env.FREE_LLM_MCP_HOME || os.homedir();
+export const PROJECTS_DIR = path.join(homeBase, '.free-llm-mcp', 'projects');
 
 // Artifact Filenames
 export const STATE_FILE = 'state.json';
@@ -66,4 +67,3 @@ export const MAX_FILES_SCANNED = 5000;
 // result + resume handle instead of continuing to block. Many MCP clients (code editors)
 // kill a tool call at ~30s; default leaves headroom for serialization + the final persist.
 export const SUBTASK_BUDGET_MS = Number(process.env.MCP_SUBTASK_BUDGET_MS ?? 20_000);
-

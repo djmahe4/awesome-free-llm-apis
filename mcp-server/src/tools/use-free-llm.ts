@@ -43,6 +43,7 @@ export interface UseFreeLLMInput {
   max_tokens?: number;
   top_p?: number;
   stream?: boolean;
+  onChunk?: (chunk: string) => void;
   provider?: string;
   fallback?: boolean;
   workspace_root?: string;
@@ -65,6 +66,8 @@ export interface UseFreeLLMInput {
   // For action:'continue' — appended to the resumed subtask, same as the trailing text in
   // `continue <promptId> <resume_input>`.
   resume_input?: string;
+  // External abort signal to cancel long-running tool execution or HTTP requests
+  signal?: AbortSignal;
 }
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
@@ -106,7 +109,7 @@ export function summarizeTextLocally(text: string, limit: number): string {
 
   let result = "<!-- summarized -->\n";
   let currentLen = result.length;
-  // Keep original order if possible by filtering original sentences? 
+  // Keep original order if possible by filtering original sentences?
   // No, just take top N.
   for (const s of scored) {
     if (currentLen + s.text.length + 2 > limit) break;
@@ -151,7 +154,7 @@ export async function resolveFileRefs(
 ): Promise<any> {
   const isStringInput = typeof msgOrContent === 'string';
   const msg = isStringInput ? { role: 'user', content: msgOrContent } : msgOrContent;
-  
+
   let content = '';
   if (typeof msg.content === 'string') {
     content = msg.content;
@@ -624,9 +627,12 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     temperature,
     max_tokens,
     top_p,
-    stream,
+    stream: stream || !!input.onChunk,
+    onChunk: input.onChunk,
     agentic,
     skipIndexing,
+    abortSignal: (input as any).signal,
+    signal: (input as any).signal,
   };
 
   const pipeline = new PipelineExecutor();
@@ -828,7 +834,7 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
       const mdFiles = originalUserContent.match(/\b[\w\-./\\]+\.md\b/gi) || [];
       const jsonFiles = originalUserContent.match(/\b[\w\-./\\]+\.json\b/gi) || [];
       const logFiles = originalUserContent.match(/\b[\w\-./\\]+\.(log|txt)\b/gi) || [];
-      
+
       const targetMd = mdFiles[0] ? path.basename(mdFiles[0]) : 'file.md';
       const targetJson = jsonFiles[0] ? path.basename(jsonFiles[0]) : 'file.json';
       const targetLog = logFiles[0] ? path.basename(logFiles[0]) : 'large_file.bin';
@@ -973,6 +979,51 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
   return finalContext.response;
 }
 
+export async function* useFreeLLMStream(input: UseFreeLLMInput): AsyncIterable<string> {
+  const queue: string[] = [];
+  let done = false;
+  let error: any = null;
+  let notify: (() => void) | null = null;
+
+  const promise = useFreeLLM({
+    ...input,
+    stream: true,
+    onChunk: (chunk: string) => {
+      queue.push(chunk);
+      if (notify) {
+        notify();
+        notify = null;
+      }
+    }
+  }).catch((err) => {
+    error = err;
+    if (notify) {
+      notify();
+      notify = null;
+    }
+  }).finally(() => {
+    done = true;
+    if (notify) {
+      notify();
+      notify = null;
+    }
+  });
+
+  while (!done || queue.length > 0) {
+    if (queue.length > 0) {
+      yield queue.shift()!;
+    } else if (!done) {
+      await new Promise<void>((resolve) => {
+        notify = resolve;
+      });
+    }
+    if (error && queue.length === 0) {
+      throw error;
+    }
+  }
+  await promise;
+}
+
 export async function flushSystem(): Promise<void> {
   getSharedResponseCache().flush();
   // Persist pending usage counters before exit — deductTokens() only schedules a
@@ -981,6 +1032,12 @@ export async function flushSystem(): Promise<void> {
   // drops the last batch of request/token counts, which looked like usage
   // "resetting" on every restart.
   await getSharedRouter().persistNow();
+  try {
+    const { SearchProviderRegistry } = await import('../search/registry.js');
+    await SearchProviderRegistry.getInstance().persistState();
+  } catch {
+    // Best-effort search persistence
+  }
 }
 
 interface ParsedToolCall {

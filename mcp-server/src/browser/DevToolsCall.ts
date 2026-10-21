@@ -60,28 +60,42 @@ function tryParseBtEnvelope(text: string): ParsedDevToolsResult | null {
 
 /**
  * Wraps a page function so in-page throws surface as typed errors instead of the
- * empty `catch {}` swallowing at browser-action.ts:194/:387/:490/:548/:577, and so
- * values are passed via `args` rather than string-interpolated into the JS source
- * (the systematic_debug_all_tabs_stats.ts:88 injection pattern this replaces).
+ * empty `catch {}` swallowing at browser-action.ts:194/:387/:490/:548/:577.
+ *
+ * Args are transported as base64 (never raw in the source): chrome-devtools-mcp's
+ * `args` parameter is an array of element-uid strings only, so passing an object
+ * there fails its input validation, and raw interpolation would put caller text
+ * into executable source. Thenable results are awaited so async page functions
+ * serialize their resolved value, not `{}`.
  */
 export async function evaluateStructured<T = any>(
     client: DevToolsClient,
     fnSource: string,
     args?: Record<string, any>
 ): Promise<ParsedDevToolsResult> {
-    const wrapped = `(ARGS) => {
+    const payload = Buffer.from(JSON.stringify(args ?? {}), 'utf8').toString('base64');
+    // Must be a FUNCTION EXPRESSION, not an IIFE: chrome-devtools-mcp does
+    // `evaluateHandle("(fnSource)")` then *calls* the resulting handle — an IIFE
+    // returns a string and fails with "Error: fn is not a function". It also
+    // JSON.stringify's the return value itself, so we return the envelope object
+    // and let the MCP do the serialization.
+    const wrapped = `async () => {
+        const bin = atob('${payload}');
+        const ARGS = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
         const USERFN = (${fnSource});
+        const fail = (e) => ({ __bt: 1, ok: false, error: String((e && e.message) || e) });
         try {
-            const data = USERFN(ARGS);
-            return JSON.stringify({ __bt: 1, ok: true, data });
+            let data = USERFN(ARGS);
+            if (data && typeof data.then === 'function') data = await data;
+            return { __bt: 1, ok: true, data };
         } catch (e) {
-            return JSON.stringify({ __bt: 1, ok: false, error: String((e && e.message) || e) });
+            return fail(e);
         }
     }`;
 
     const raw = await client.callTool({
         name: 'evaluate_script',
-        arguments: { function: wrapped, args: args ? [args] : [{}] },
+        arguments: { function: wrapped },
     });
 
     return parseDevToolsResult(raw);

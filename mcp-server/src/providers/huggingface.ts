@@ -15,10 +15,13 @@ export class HuggingFaceProvider extends BaseProvider {
     { id: 'google/gemma-4-31B-it', name: 'Gemma 4 31B' },
     { id: 'google/gemma-4-26B-A4B-it', name: 'Gemma 4 26B' },
     { id: 'deepseek-ai/DeepSeek-R1', name: 'DeepSeek R1' },
+    { id: 'deepseek-ai/DeepSeek-V4.1-Flash', name: 'DeepSeek V4.1 Flash' },
     { id: 'Qwen/Qwen2.5-Coder-7B-Instruct', name: 'Qwen2.5 Coder 7B Instruct' },
+    { id: 'Qwen/Qwen3.8-Flash-Next', name: 'Qwen 3.8 Flash Next' },
     { id: 'google/gemma-3-4b-it', name: 'Gemma 3 4B' },
     { id: 'meta-llama/Llama-3.1-8B-Instruct', name: 'Llama 3.1 8B Instruct' },
     { id: 'microsoft/phi-4', name: 'Phi-4' },
     { id: 'empero-ai/Qwythos-9B-Claude-Mythos-5-1M', name: 'Qwythos 9B Claude Mythos 5.1M' },
+    { id: 'medismera/Qwen3.8-27B-OBLITERATED-Mythos-Class-Agentic', name: 'Qwen 3.8 27B OBLITERATED Mythos Class Agentic' },
   ];
 }

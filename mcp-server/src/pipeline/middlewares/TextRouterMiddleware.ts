@@ -12,7 +12,10 @@ import {
     getModelContextLimit,
     isReasoningModel,
     isCoderModel,
-    isVisionOnlyModel
+    isVisionSupported,
+    isVisionOnlyModel,
+    isRoleplayingModel,
+    MODEL_METADATA
 } from '../../config/models.js';
 
 export class TextRouterMiddleware implements Middleware {
@@ -55,14 +58,16 @@ export class TextRouterMiddleware implements Middleware {
             'command-a-plus-05-2026',
             'command-a-reasoning-08-2025',
             'zai-org/GLM-5.1',
-            'z-ai/glm-5.2',
             'nvidia/nemotron-3.5-lightning-30b-a3b',
             'nvidia/nemotron-3.5-lightning:free',
+            'nvidia/nemotron-3.5-super-vl-120b-a12b',
+            'stepfun-ai/step-5-preview',
             'meta/muse-glimmer-30b',
             'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
-            'tencent/hy3:free',
+            'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+            'dots-studio/dots-3-note-preview:free',
+            'DeepSeek-V4-Flash-0731',
             'google/diffusiongemma-26b-a4b-it',
-            'moonshotai/kimi-k3',
             'Qwen/Qwen2.5-Coder-7B-Instruct',
             'google/gemma-4-26b-a4b-it:free',
             'google/gemma-4-31b-it:free',
@@ -73,26 +78,47 @@ export class TextRouterMiddleware implements Middleware {
             'google/gemma-4-26B-A4B-it',
             'nvidia/nemotron-3-super-120b-a12b',
             'nvidia/nemotron-3-super-120b-a12b:free',
-            'mistralai/mistral-nemotron',
             'nvidia/nemotron-3-ultra-550b-a55b',
             'nvidia/nemotron-3-ultra-550b-a55b:free',
+            'nvidia/llama-3.3-nemotron-super-49b-v1',
+            'moonshotai/kimi-k3',
+            'mistralai/mistral-nemotron',
             '@cf/meta/llama-4-scout-17b-16e-instruct',
             'meta-llama/llama-4-scout:free',
-            'deepseek-ai/deepseek-v4-pro-0813',
             'deepseek-ai/DeepSeek-V4-Pro',
+            'deepseek-ai/DeepSeek-V4.1-Flash',
+            'qwen/qwen3.8-flash',
+            'poolside/laguna-s-2.1',
+            'poolside/laguna-s-2.1:free',
             'mistral-medium-3-5',
             'Qwen/Qwen3.5-397B-A17B',
+            'z-ai/glm-5.3-flash',
+            'z-ai/glm-5.3',
+            'Qwen/Qwen3.5-35B-A3B',
+            'community/AkshayCoder48/grok-4-fast',
+            'community/AkshayCoder48/kilo-auto-free',
+            'community/AkshayCoder48/gemini-2.5-flash',
+            'community/AkshayCoder48/nvidia-nemotron-3-super-120b-a12b-free',
+            'inclusionai/ling-3.0-flash-fin:free',
+            'qwen/qwen3.8-27b',
+            '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
+            '@cf/nvidia/nemotron-3-120b-a12b',
+            '@cf/openai/gpt-oss-120b',
+            '@cf/qwen/qwen3.8-27b',
         ],
         [TaskType.Coding]: [
             'qwen/qwen3-coder-480b-a35b:free',
-            'deepseek-ai/deepseek-v4-pro-0813',
+            'qwen/qwen3.8-flash',
+            'poolside/laguna-s-2.1',
+            'poolside/laguna-s-2.1:free',
+            'cohere/north-mini-code:free',
+            'DeepSeek-V4-Flash-0731',
+            'Qwen/Qwen3.8-Flash-Next',
             'Qwen/Qwen2.5-Coder-7B-Instruct',
             'nvidia/nemotron-3.5-lightning-30b-a3b',
             'nvidia/nemotron-3.5-lightning:free',
-            'deepseek-ai/deepseek-v4-flash-0731',
-            'z-ai/glm-5.2',
             'openai/gpt-oss-120b',
-            'qwen/qwen3.6-27b',
+            'qwen/qwen3.8-27b',
             'google/gemma-4-26b-a4b-it:free',
             'google/gemma-4-31b-it:free',
             'google/gemma-4-31b-it',
@@ -104,6 +130,7 @@ export class TextRouterMiddleware implements Middleware {
             '@cf/qwen/qwen2.5-coder-32b-instruct',
             '@cf/qwen/qwq-32b',
             'gpt-oss:20b',
+            'gemini-3.5-flash-lite',
             'gemini-3.1-flash-lite',
             'mistral-large-latest',
             'meta-llama/Llama-3.3-70B-Instruct',
@@ -112,40 +139,31 @@ export class TextRouterMiddleware implements Middleware {
             'gemma-4-31b-it',
             'gemma-4-26b-a4b-it',
             'kilo-auto/free',
-            'mistralai/mistral-nemotron',
             '@cf/google/gemma-4-26b-a4b-it',
             'mistral-medium-latest',
             '@cf/mistralai/mistral-small-3.1-24b-instruct',
             'Qwen/Qwen3-Coder-30B-A3B-Instruct',
             'deepseek-ai/DeepSeek-V4-Pro',
-            'poolside/laguna-s-2.1:free',
+            'deepseek-ai/DeepSeek-V4.1-Flash',
             'mistral-medium-3-5',
             'ministral-14b-2512',
             'microsoft/phi-4',
+            'deepseek-ai/deepseek-coder-6.7b-instruct',
+            'nvidia/llama-3.3-nemotron-super-49b-v1',
+            'mistralai/mistral-nemotron',
+            'z-ai/glm-5.3',
+            'Qwen/Qwen3.5-35B-A3B',
+            'Qwen/Qwen3.5-27B',
+            'community/AkshayCoder48/cohere-north-mini-code:free',
+            'community/AkshayCoder48/kilo-auto-free',
+            'community/AkshayCoder48/grok-4-fast',
+            'inclusionai/ling-3.0-flash-fin:free',
+            '@cf/openai/gpt-oss-120b',
+            '@cf/qwen/qwen3-30b-a3b-fp8',
+            '@cf/qwen/qwen3.8-27b',
+            '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
         ],
-        [TaskType.Vision]: [
-            'qwen/qwen3.6-27b',
-            'meta/muse-glimmer-30b',
-            'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
-            'nvidia/llama-3.1-nemotron-nano-vl-8b-v1',
-            'nvidia/nemotron-nano-12b-v2-vl',
-            'meta/llama-3.2-11b-vision-instruct',
-            'meta/llama-3.2-90b-vision-instruct',
-            'minimaxai/minimax-m3',
-            'google/gemma-3-4b-it',
-            'gemma-4-31b-it',
-            'gemma-4-26b-a4b-it',
-            'gemini-3.1-flash-lite',
-            'meta-llama/llama-4-maverick:free',
-            'c4ai-aya-vision-32b',
-            'command-a-plus-05-2026',
-            '@cf/meta/llama-4-scout-17b-16e-instruct',
-            'meta-llama/llama-4-scout:free',
-            'glm-4.6V-flash',
-            'Qwen/Qwen3.5-397B-A17B',
-            'Qwen/Qwen3-VL-235B-A22B-Instruct',
-            'stepfun-ai/Step-3.5-Flash',
-        ],
+        [TaskType.Vision]: Object.keys(MODEL_METADATA).filter(m => isVisionSupported(m)),
         [TaskType.Classification]: [
             'google/gemma-4-31b-it:free',
             'google/gemma-4-31B-it',
@@ -156,19 +174,22 @@ export class TextRouterMiddleware implements Middleware {
             'gemini-3.1-flash-lite',
             'mistral-small-latest',
             'z-ai/glm-4.5-air:free',
-            'nvidia/nemotron-3-nano-30b-a3b',
-            'nvidia/llama-3.3-nemotron-super-49b-v1',
-            'meta/llama-3.1-8b-instruct',
             'meta-llama/Llama-3.1-8B-Instruct',
+            'nvidia/nemotron-3-nano-30b-a3b',
+            'nvidia/nemotron-mini-4b-instruct',
+            'nvidia/nemotron-mini-4b-instruct:free',
             'glm-4.7-flash',
             'glm-4.5-flash',
             'zai-org/GLM-5.2',
-            'z-ai/glm-5.2',
             'deepseek-ai/DeepSeek-V4-Flash',
+            'DeepSeek-V4-Flash-0731',
             '@cf/zai-org/glm-4.7-flash',
             'zai-org/GLM-4.7-Flash',
             'ministral-8b-2512',
             'ministral-3b-2512',
+            'openai/gpt-5.4-nano',
+            'z-ai/glm-5.3-flash',
+            'community/AkshayCoder48/stepfun-step-3.7-flash-free',
         ],
         [TaskType.UserIntent]: [
             'google/gemma-4-31b-it:free',
@@ -180,19 +201,23 @@ export class TextRouterMiddleware implements Middleware {
             'Qwen/Qwen2.5-7B-Instruct',
             'gemini-3.1-flash-lite',
             'z-ai/glm-4.5-air:free',
-            'nvidia/nemotron-mini-4b-instruct:free',
             'nvidia/nemotron-mini-4b-instruct',
+            'nvidia/nemotron-mini-4b-instruct:free',
             'glm-4.7-flash',
             'glm-4.5-flash',
             'zai-org/GLM-5.2',
-            'z-ai/glm-5.2',
             'deepseek-ai/DeepSeek-V4-Flash',
+            'DeepSeek-V4-Flash-0731',
             '@cf/zai-org/glm-4.7-flash',
             'zai-org/GLM-4.7-Flash',
             'ministral-8b-2512',
             'ministral-3b-2512',
+            'openai/gpt-5.4-nano',
+            'z-ai/glm-5.3-flash',
+            'community/AkshayCoder48/stepfun-step-3.7-flash-free',
         ],
         [TaskType.SemanticSearch]: [
+            'google/gemini-2.5-flash-lite:search',
             'google/gemma-4-31b-it:free',
             'google/gemma-4-31b-it',
             'google/gemma-4-31B-it',
@@ -201,11 +226,10 @@ export class TextRouterMiddleware implements Middleware {
             'nvidia/nemotron-3-super-120b-a12b',
             'nvidia/nemotron-3-super-120b-a12b:free',
             'nvidia/llama-3.3-nemotron-super-49b-v1',
+            'dots-studio/dots-3-note-preview:free',
+            'DeepSeek-V4-Flash-0731',
             'arcee-ai/trinity-large-preview:free',
-            'groq/compound',
-            'groq/compound-mini',
             'Qwen/Qwen2.5-72B-Instruct',
-            'qwen/qwen3.6-27b',
             'command-r-plus-08-2024',
             'gemini-3.1-flash-lite',
             'mistral-large-latest',
@@ -215,17 +239,20 @@ export class TextRouterMiddleware implements Middleware {
             'deepseek-ai/DeepSeek-V3.2',
             'mistral-medium-3-5',
             'zai-org/GLM-5',
+            'community/AkshayCoder48/gemini-3.1-flash-lite',
+            'community/AkshayCoder48/nvidia-nemotron-3-super-120b-a12b-free',
         ],
         [TaskType.Summarization]: [
             'google/gemma-4-31b-it:free',
             'google/gemma-4-31B-it',
             'google/gemma-3-27b-it',
             'gemma-4-31b-it',
-            'moonshotai/kimi-k3',
             'mistral-small-latest',
             'gemini-3.1-flash-lite',
             'gemma-4-26b-a4b-it',
             'microsoft/phi-4',
+            'moonshotai/kimi-k3',
+            'nvidia/nemotron-3-nano-30b-a3b',
             'Qwen/Qwen2.5-72B-Instruct',
             'Qwen/Qwen2.5-7B-Instruct',
             'meta-llama/Llama-3.3-70B-Instruct',
@@ -235,16 +262,17 @@ export class TextRouterMiddleware implements Middleware {
             'z-ai/glm-4.5-air:free',
             'gpt-oss:120b',
             'openai/gpt-oss-120b',
-            '@cf/moonshotai/kimi-k2.6',
             '@cf/mistralai/mistral-small-3.1-24b-instruct',
             'glm-4.7-flash',
             'glm-4.5-flash',
             'zai-org/GLM-5',
             'deepseek-ai/DeepSeek-V4-Flash',
+            'DeepSeek-V4-Flash-0731',
             'zai-org/GLM-4.7-Flash',
             'ministral-14b-2512',
             'ministral-8b-2512',
             'ministral-3b-2512',
+            'community/AkshayCoder48/gemini-3.1-flash-lite',
         ],
         [TaskType.EntityExtraction]: [
             'gpt-oss:120b',
@@ -263,8 +291,8 @@ export class TextRouterMiddleware implements Middleware {
             'microsoft/phi-4',
             'meta-llama/Llama-3.3-70B-Instruct',
             'zai-org/GLM-5.2',
-            'z-ai/glm-5.2',
             'deepseek-ai/DeepSeek-V4-Flash',
+            'DeepSeek-V4-Flash-0731',
         ],
         [TaskType.Moderation]: [
             'google/gemma-4-31b-it:free',
@@ -279,59 +307,69 @@ export class TextRouterMiddleware implements Middleware {
             'mistral-medium-latest',
             'gemma4:31b',
             'nvidia/nemotron-3.5-content-safety',
+            '@cf/meta/llama-guard-3-8b',
             '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
             '@cf/zai-org/glm-4.7-flash',
             'zai-org/GLM-4.7-Flash',
         ],
         [TaskType.Cyber]: [
-            'z-ai/glm-5.2',
-            'deepseek-ai/deepseek-v4-flash-0731',
             'deepseek-ai/DeepSeek-R1',
             'deepseek-ai/DeepSeek-V4-Pro',
             'nvidia/nemotron-3.5-lightning-30b-a3b',
             'nvidia/nemotron-3.5-lightning:free',
+            'nvidia/nemotron-3.5-super-vl-120b-a12b',
+            'stepfun-ai/step-5-preview',
             'empero-ai/Qwythos-9B-Claude-Mythos-5-1M',
-            'moonshotai/kimi-k3',
-            '@cf/moonshotai/kimi-k2.6',
             'qwen/qwen3-coder-480b-a35b:free',
-            'tencent/hy3:free',
-            'minimaxai/minimax-m3',
+            'dots-studio/dots-3-note-preview:free',
+            'DeepSeek-V4-Flash-0731',
+            'moonshotai/kimi-k3',
+            'deepseek-ai/deepseek-coder-6.7b-instruct',
             'gemma4:31b',
             'nvidia/nemotron-3-ultra-550b-a55b',
             'nvidia/nemotron-3-ultra-550b-a55b:free',
+            '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
+            '@cf/openai/gpt-oss-120b',
         ],
         [TaskType.Chat]: [
+            'qwen/qwen3.8-flash',
+            'meta/llama-4-scout',
+            'mistralai/mistral-small-3.2',
             'deepseek-ai/DeepSeek-R1',
             'deepseek-ai/DeepSeek-V3',
             'nvidia/nemotron-3.5-lightning-30b-a3b',
             'nvidia/nemotron-3.5-lightning:free',
+            'nvidia/nemotron-3.5-super-vl-120b-a12b',
+            'stepfun-ai/step-5-preview',
             'meta/muse-glimmer-30b',
             'google/diffusiongemma-26b-a4b-it',
-            'moonshotai/kimi-k3',
-            'tencent/hy3:free',
             'liquid/lfm-2.5-2.6b:free',
-            'groq/compound-mini',
+            'dots-studio/dots-3-note-preview:free',
+            'cohere/north-mini-code:free',
+            'DeepSeek-V4-Flash-0731',
             'Qwen/Qwen2.5-7B-Instruct',
-            'meta/llama-3.1-8b-instruct',
             'meta-llama/Llama-3.1-8B-Instruct',
             'nvidia/nemotron-3-super-120b-a12b',
             'nvidia/nemotron-3-super-120b-a12b:free',
+            'nvidia/nemotron-3-nano-30b-a3b',
+            'nvidia/nemotron-mini-4b-instruct',
+            'nvidia/nemotron-mini-4b-instruct:free',
+            'nvidia/llama-3.3-nemotron-super-49b-v1',
+            'moonshotai/kimi-k3',
+            'mistralai/mistral-nemotron',
             'google/gemma-4-31b-it',
             'google/gemma-4-31b-it:free',
             'google/gemma-4-26b-a4b-it:free',
-            'openai/gpt-oss-20b:free',
             'openai/gpt-oss-20b',
             'meta-llama/Llama-3.3-70B-Instruct',
             'Qwen/Qwen2.5-72B-Instruct',
             'c4ai-aya-expanse-32b',
             'openai/gpt-oss-120b',
-            'mistralai/mistral-nemotron',
             'mistral-Nemo-Instruct-2407',
             'Qwen/Qwen3-8B',
             'arcee-ai/trinity-mini:free',
-            'nvidia/nemotron-nano-12b-v2-vl',
-            'nvidia/nemotron-mini-4b-instruct',
             'openrouter/free',
+            'gemini-3.5-flash-lite',
             'gemini-3.1-flash-lite',
             'gemma-4-26b-a4b-it',
             'open-mistral-nemo',
@@ -341,43 +379,75 @@ export class TextRouterMiddleware implements Middleware {
             'nemotron-3-nano:30b',
             'nemotron-3-super',
             'nemotron-3-ultra',
-            'minimaxai/minimax-m3',
             'minimax-m3',
             'minimax-m2.7',
             'gemma4:31b',
-            'groq/compound',
             'poolside/laguna-s-2.1:free',
             '@cf/google/gemma-4-26b-a4b-it',
             '@cf/google/gemma-3-12b-it',
-            '@cf/moonshotai/kimi-k2.6',
             'ministral-8b-latest',
             'glm-4.7-flash',
             'glm-4.5-flash',
             'glm-4.6V-flash',
             'zai-org/GLM-5.2',
-            'z-ai/glm-5.2',
             'zai-org/GLM-5.1',
             'zai-org/GLM-5',
             '@cf/zai-org/glm-4.7-flash',
             'zai-org/GLM-4.7-Flash',
             'deepseek-ai/DeepSeek-V4-Pro',
+            'deepseek-ai/DeepSeek-V4.1-Flash',
             'deepseek-ai/DeepSeek-V4-Flash',
             'deepseek-ai/DeepSeek-V3.2',
-            'deepseek-ai/deepseek-v4-flash-0731',
             'Qwen/Qwen3-Coder-30B-A3B-Instruct',
             'stepfun-ai/Step-3.5-Flash',
-            'stepfun/step-3.7-flash:free',
             'nvidia/nemotron-3-ultra-550b-a55b:free',
             'nvidia/nemotron-3-ultra-550b-a55b',
+            'deepseek-ai/deepseek-coder-6.7b-instruct',
+            'z-ai/glm-5.3-flash',
+            'z-ai/glm-5.3',
+            'Qwen/Qwen3.5-35B-A3B',
+            'Qwen/Qwen3.5-27B',
+            'openai/gpt-5.4-nano',
+            'community/AkshayCoder48/stepfun-step-3.7-flash-free',
+            'community/AkshayCoder48/grok-4-fast',
+            'community/AkshayCoder48/kilo-auto-free',
+            'community/AkshayCoder48/gemini-3.1-flash-lite',
+            'community/AkshayCoder48/gemini-2.5-flash',
+            'community/AkshayCoder48/nvidia-nemotron-3-super-120b-a12b-free',
+            'inclusionai/ling-3.0-flash-fin:free',
+            '@cf/openai/gpt-oss-120b',
+            '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
+            '@cf/qwen/qwen3.8-27b',
+            '@cf/qwen/qwen3-30b-a3b-fp8',
+            '@cf/nvidia/nemotron-3-120b-a12b',
+            '@cf/openai/gpt-oss-20b',
+            '@cf/meta/llama-3.1-8b-instruct-fp8',
+            '@cf/meta/llama-3.2-3b-instruct',
+            '@cf/meta/llama-3.2-1b-instruct',
+            '@cf/ibm-granite/granite-4.0-h-micro',
+            '@cf/aisingapore/gemma-sea-lion-v4-27b-it',
+        ],
+        [TaskType.Media]: [
+            'gemini-3.5-flash-lite',
+            'gemini-3.1-flash-lite',
+            'openai/gpt-oss-120b',
+            'deepseek-ai/DeepSeek-R1',
+        ],
+        [TaskType.Roleplaying]: [
+            'aion-labs/aion-3.5',
+            'aion-labs/aion-3.5-mini',
+            'aion-labs/aion-3.0',
+            'aion-labs/aion-3.0-mini',
+            'aion-labs/aion-2.0',
+            'aion-labs/aion-rp-llama-3.1-8b',
         ]
     };
 
-
-    private isComplex(messages: Message[]): boolean {
+        private isComplex(messages: Message[]): boolean {
         if (messages.length < 1) return false;
         const lastMsg = getMessageContent(messages[messages.length - 1]);
         const lines = lastMsg.split('\n');
-        
+
         let stepCount = 0;
         for (const line of lines) {
             if (/^\s*(?:\d+\.|\*|-)\s+(?:[Ss]tep|[Pp]hase)/.test(line)) {
@@ -389,7 +459,7 @@ export class TextRouterMiddleware implements Middleware {
 
     private async decomposeAndExecute(context: PipelineContext): Promise<void> {
         const lastMsg = getMessageContent(context.request.messages[context.request.messages.length - 1]);
-        
+
         const planningMessages = [
             {
                 role: 'system' as const,
@@ -400,9 +470,9 @@ export class TextRouterMiddleware implements Middleware {
                 content: lastMsg
             }
         ];
-        
+
         const planResponse = await this.executor.prompt(planningMessages);
-        
+
         const planContent = planResponse.choices?.[0]?.message?.content || '[]';
         let subtasks: any[] = [];
         try {
@@ -420,7 +490,7 @@ export class TextRouterMiddleware implements Middleware {
         for (let i = 0; i < subtasks.length; i++) {
             const task = subtasks[i];
             const taskStr = typeof task === 'string' ? task : (task.task || task.description || JSON.stringify(task));
-            
+
             const subtaskMessages = [
                 ...context.request.messages.slice(0, -1),
                 {
@@ -500,6 +570,11 @@ export class TextRouterMiddleware implements Middleware {
              finalTierModels = [...new Set([...finalTierModels, ...allAvailable])];
         }
 
+        // Strict isolation: roleplaying models are dedicated for movie_tool / Roleplaying task only
+        if (taskType !== TaskType.Roleplaying) {
+            finalTierModels = finalTierModels.filter(m => !isRoleplayingModel(m));
+        }
+
         if (context.request.google_search) {
             const geminiModels = finalTierModels.filter(m => m.toLowerCase().includes('gemini'));
             const otherModels = finalTierModels.filter(m => !m.toLowerCase().includes('gemini'));
@@ -542,7 +617,7 @@ export class TextRouterMiddleware implements Middleware {
             ? getMessageContent(context.request.messages[context.request.messages.length - 1])
             : '';
         const lowerPrompt = rawLastMsg.toLowerCase();
-        
+
         const confused = isUserConfused(rawLastMsg);
         if (confused) {
             console.debug('[TextRouter] Confused user state detected (no clear prompt or only file references).');
@@ -591,6 +666,7 @@ export class TextRouterMiddleware implements Middleware {
         if (requestedModel === 'any') {
             const allAvailableModels = availableProviders.flatMap(p => p.models.map(m => m.id));
             for (const mId of allAvailableModels) {
+                if (taskType !== TaskType.Roleplaying && isRoleplayingModel(mId)) continue;
                 if (!finalTierModels.includes(mId)) {
                     finalTierModels.push(mId);
                 }
@@ -836,6 +912,15 @@ export class TextRouterMiddleware implements Middleware {
                         break;
                     case TaskType.Summarization:
                         alignment = cap * 1.2;
+                        break;
+                    case TaskType.Chat:
+                        // Plain chat carries no signal that it needs reasoning-tier power —
+                        // alignment = cap alone let the highest-capability (flagship
+                        // reasoning) models always win a trivial "ping"/"say hello", since
+                        // nothing in this formula ever asked whether the prompt needed it.
+                        // Cap at a "chat-sufficient" ceiling so cheap/fast models compete
+                        // evenly; genuinely-classified Reasoning/Coding keep full cap above.
+                        alignment = Math.min(cap, 0.6);
                         break;
                     default:
                         alignment = cap;

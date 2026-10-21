@@ -203,7 +203,7 @@ export async function initWorkspace(workspaceRoot: string): Promise<boolean> {
       const fallbackDir = path.join(os.homedir(), '.free-llm-mcp');
       await fs.mkdir(fallbackDir, { recursive: true });
       const fallbackPath = path.join(fallbackDir, 'agents-config.json');
-      
+
       const fallbackConfig = {
         workspace: resolvedPath,
         projectType,

@@ -1,6 +1,6 @@
 /**
  * PageDepthObserver & ElementHierarchyTree
- * 
+ *
  * Provides deep awareness of page scroll depth, element tree hierarchy,
  * and background network request deltas fired during dynamic page navigation.
  */

@@ -88,7 +88,7 @@ describe('WorkspaceInitializer (Phase A)', () => {
 
         const result = await initWorkspace(testDir);
         expect(result).toBe(true);
-        
+
         const fallbackPath = path.join(customHome, '.free-llm-mcp', 'agents-config.json');
         expect(existsSync(fallbackPath)).toBe(true);
     });

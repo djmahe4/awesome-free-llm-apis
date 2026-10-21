@@ -31,7 +31,7 @@ Agent → use_free_llm() ─┬─ [keywords only]          → Majority-Voting 
 
 ### Pattern 1 — Bare Minimum (no keywords, no model)
 
-**Inputs:** `messages` only — zero steering.  
+**Inputs:** `messages` only — zero steering.
 **Routing:** Falls through to the first available provider.
 
 ```json
@@ -55,7 +55,7 @@ Agent → use_free_llm() ─┬─ [keywords only]          → Majority-Voting 
 
 ### Pattern 2 — Chat Keyword Auto-Routing
 
-**Inputs:** `keywords: ["chat"]`, no model.  
+**Inputs:** `keywords: ["chat"]`, no model.
 **Routing:** Majority-voting classifies as `chat` → lightweight chat-tier model.
 
 ```json
@@ -83,7 +83,7 @@ A middleware pipeline is a sequence of middleware components that process HTTP r
 
 ### Pattern 3 — Coding Keyword Steering
 
-**Inputs:** `keywords: ["coding", "typescript"]`, no model.  
+**Inputs:** `keywords: ["coding", "typescript"]`, no model.
 **Routing:** Majority-voting → `coding` tier → code-specialized model.
 
 ```json
@@ -108,7 +108,7 @@ A middleware pipeline is a sequence of middleware components that process HTTP r
 
 ### Pattern 4 — Research Keyword Steering
 
-**Inputs:** `keywords: ["research", "architecture"]`, no model.  
+**Inputs:** `keywords: ["research", "architecture"]`, no model.
 **Routing:** Majority-voting → `research` tier → broader reasoning model.
 
 ```json
@@ -130,7 +130,7 @@ A middleware pipeline is a sequence of middleware components that process HTTP r
 
 ### Pattern 5 — Explicit Model Pin (no keywords)
 
-**Inputs:** `model: "mistral-small-latest"` only.  
+**Inputs:** `model: "mistral-small-latest"` only.
 **Routing:** Bypasses classifier entirely — model pinned to Mistral Small.
 
 ```json
@@ -151,15 +151,15 @@ A middleware pipeline is a sequence of middleware components that process HTTP r
 | Response | `"4"` |
 | Latency | ~1 s |
 
-> **Bridge active**: Mistral returns `x-ratelimit-remaining-tokens-minute: 374970`.  
-> `LLMExecutor` writes `context.providerRemainingTokens = 374970`.  
+> **Bridge active**: Mistral returns `x-ratelimit-remaining-tokens-minute: 374970`.
+> `LLMExecutor` writes `context.providerRemainingTokens = 374970`.
 > `ContextManager.compress()` would use this as `effectiveTarget` (≈375k tokens), allowing full context.
 
 ---
 
 ### Pattern 6 — Keyword + Explicit Model (both set)
 
-**Inputs:** `keywords: ["coding", "debug", "error"]` + `model: "llama-3.3-70b-versatile"`.  
+**Inputs:** `keywords: ["coding", "debug", "error"]` + `model: "llama-3.3-70b-versatile"`.
 **Routing:** Model pinned; keywords enrich the system prompt with coding context.
 
 ```json
@@ -181,15 +181,15 @@ A middleware pipeline is a sequence of middleware components that process HTTP r
 | Response | 1-sentence explanation of undefined property access |
 | Latency | <1 s (Groq hardware) |
 
-> **Bridge active**: Groq returns `x-ratelimit-remaining-tokens: 10924`.  
-> `context.providerRemainingTokens = 10924` — tight budget.  
+> **Bridge active**: Groq returns `x-ratelimit-remaining-tokens: 10924`.
+> `context.providerRemainingTokens = 10924` — tight budget.
 > On a long follow-up, ContextManager would compress to 10924 tokens instead of Llama's full 128k static window.
 
 ---
 
 ### Pattern 7 — SQL Keyword Routing
 
-**Inputs:** `keywords: ["sql", "database"]`, no model.  
+**Inputs:** `keywords: ["sql", "database"]`, no model.
 **Routing:** `sql` and `database` both map to `coding` tier → code model selected.
 
 ```json
@@ -211,7 +211,7 @@ A middleware pipeline is a sequence of middleware components that process HTTP r
 
 ### Pattern 8 — Summarization Keyword + Explicit Gemini Model
 
-**Inputs:** `keywords: ["coding", "api", "python"]` + `model: "gemini-2.5-flash"`.  
+**Inputs:** `keywords: ["coding", "api", "python"]` + `model: "gemini-2.5-flash"`.
 **Routing:** Pinned to Gemini 2.5 Flash; keywords inject python/API context.
 
 ```json
@@ -232,7 +232,7 @@ A middleware pipeline is a sequence of middleware components that process HTTP r
 | Tokens used | prompt: 17, completion: 935, total: 2229 |
 | Latency | ~12 s (largest generation) |
 
-> **Bridge**: Gemini provides no `x-ratelimit-*` headers.  
+> **Bridge**: Gemini provides no `x-ratelimit-*` headers.
 > `providerRemainingTokens` stays `undefined`. ContextManager uses static window (1M tokens for Flash).
 
 **Exact Output**

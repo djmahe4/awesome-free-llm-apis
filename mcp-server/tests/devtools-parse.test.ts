@@ -38,23 +38,41 @@ describe('parseDevToolsResult', () => {
 });
 
 describe('evaluateStructured', () => {
-    it('returns typed data on success and never string-interpolates args into source', async () => {
-        const client = new FakeDevToolsClient((req) => {
-            // Simulate chrome-devtools-mcp executing the wrapped function.
+    it('returns typed data on success and never puts raw args into source', async () => {
+        const marker = 'user-supplied<script>';
+        const client = new FakeDevToolsClient(async (req) => {
+            // Simulate chrome-devtools-mcp: evaluate the function expression,
+            // call it, then JSON.stringify the result.
             expect(req.name).toBe('evaluate_script');
-            expect(req.arguments?.function).toContain('__bt');
-            return { content: [{ type: 'text', text: JSON.stringify({ __bt: 1, ok: true, data: { echoed: req.arguments?.args?.[0] } }) }] };
+            const src = req.arguments?.function as string;
+            expect(src).toContain('__bt');
+            expect(src).not.toContain(marker);
+            expect(req.arguments?.args).toBeUndefined();
+            const fn = await new Function(`return (${src})`)();
+            const result = await fn();
+            return { content: [{ type: 'text', text: JSON.stringify(result) }] };
         });
 
-        const res = await evaluateStructured(client, `(a) => a`, { value: 'user-supplied<script>' });
+        const res = await evaluateStructured(client, `(a) => a`, { value: marker });
         expect(res.ok).toBe(true);
-        expect(res.json).toEqual({ echoed: { value: 'user-supplied<script>' } });
+        expect(res.json).toEqual({ value: marker });
+    });
+
+    it('round-trips non-ASCII args through the base64 transport', async () => {
+        const client = new FakeDevToolsClient(async (req) => {
+            const fn = await new Function(`return (${req.arguments?.function})`)();
+            return { content: [{ type: 'text', text: JSON.stringify(await fn()) }] };
+        });
+        const res = await evaluateStructured(client, `(a) => a`, { text: 'héllo — ✓ 日本語' });
+        expect(res.ok).toBe(true);
+        expect(res.json).toEqual({ text: 'héllo — ✓ 日本語' });
     });
 
     it('surfaces an in-page throw as a typed error instead of an empty catch', async () => {
-        const client = new FakeDevToolsClient(() => ({
-            content: [{ type: 'text', text: JSON.stringify({ __bt: 1, ok: false, error: 'boom' }) }],
-        }));
+        const client = new FakeDevToolsClient(async (req) => {
+            const fn = await new Function(`return (${req.arguments?.function})`)();
+            return { content: [{ type: 'text', text: JSON.stringify(await fn()) }] };
+        });
         const res = await evaluateStructured(client, `() => { throw new Error('boom'); }`);
         expect(res.ok).toBe(false);
         expect(res.error).toBe('boom');

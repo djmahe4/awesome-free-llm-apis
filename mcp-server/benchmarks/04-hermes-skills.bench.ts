@@ -40,7 +40,7 @@ describe("04-hermes-skills benchmarks", () => {
   bench("Hermes Skill Source Detection", async () => {
     const hermesMatch = await findHermesSkill("systematic-debugging");
     const nonexistentMatch = await findHermesSkill("nonexistent-skill-name-123");
-    
+
     const dummyRaw = JSON.stringify({ hermesMatch, nonexistentMatch });
     countTokens(dummyRaw);
   });

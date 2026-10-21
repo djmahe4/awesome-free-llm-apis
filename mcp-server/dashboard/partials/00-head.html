@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚡ Free LLM APIs — Dashboard</title>
+  <meta name="description" content="Real-time monitoring and tool playground for the Free LLM APIs MCP Server. View provider quotas, memory state, and call any tool live.">
+  <!-- Noble crypto for the browser (wiki lease handshake). Must precede any
+       module script: resolves the bare specifiers inside wiki-lease-client.js
+       and the noble packages themselves. Served by /vendor/noble. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "@noble/post-quantum/": "/vendor/noble/post-quantum/",
+        "@noble/curves/": "/vendor/noble/curves/",
+        "@noble/hashes/": "/vendor/noble/hashes/"
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+    window.__mermaid = mermaid;
+  </script>
+</head>

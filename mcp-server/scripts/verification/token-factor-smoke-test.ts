@@ -14,7 +14,7 @@ async function testTokenFactor() {
     const executor = new LLMExecutor();
     const router = new IntelligentRouterMiddleware(executor);
     const registry = ProviderRegistry.getInstance();
-    
+
     // Identify providers for our target model
     const targetModel = 'awesome-shared-model';
     const groq = registry.getProvider('groq');
@@ -36,7 +36,7 @@ async function testTokenFactor() {
     const providers = [groq, hf, or];
 
     console.error('--- Initializing Provider States (Gradient) ---');
-    
+
     // 1. OpenRouter: Healthy (100k) -> Factor ~1.2
     console.error(`Setting ${or.id}: 100,000 remaining tokens (Expect Factor ~1.2)`);
     executor.updateProviderTokenState(or.id, {
@@ -70,7 +70,7 @@ async function testTokenFactor() {
     };
 
     console.error('\n--- Scenario: Choosing between High, Moderate, and Low Token Providers ---');
-    
+
     const next = async () => {
         console.error('\n[Test] Next called. Final Selection:', pipelineContext.providerId);
     };
@@ -89,10 +89,10 @@ async function testTokenFactor() {
             'x-ratelimit-remaining-tokens': '25000',
             'x-ratelimit-reset-tokens': '10'
         };
-        
+
         // Use a private-ish method via any to simulate what happens during tryProvider
         (executor as any).updateTokenTracking(groq.id, mockHeaders);
-        
+
         const state = executor.getTokenState()[groq.id];
         console.error(`New tracked state for groq: ${state.remainingTokens} tokens (Expect Factor ~0.5)`);
     }

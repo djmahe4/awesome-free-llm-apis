@@ -673,7 +673,7 @@ Output a valid JSON object. Do not include markdown codeblocks.`;
             if (mcpClient && input.deepScrapeLimit && input.deepScrapeLimit > 0) {
                 console.error(`\n🔗 [Deep Scraping Pass] Navigating into extracted href links (Limit: ${input.deepScrapeLimit})...`);
                 const newDeepRecords = await this.deepScrapeItemDetails(mcpClient, checkpoint.accumulatedRecords, domainContext, input.deepScrapeLimit);
-                
+
                 for (const dr of newDeepRecords) {
                     if (!checkpoint.deepRecords.some(existing => existing.itemLink === dr.itemLink)) {
                         checkpoint.deepRecords.push(dr);

@@ -10,7 +10,7 @@ Run npm install.
 ### Usage
 This is a long description of usage that should be filtered out to save tokens.
         `.trim();
-        
+
         const result = await extractMdContext(input);
         expect(result).toContain('# Project Alpha');
         expect(result).toContain('## Installation');
@@ -26,7 +26,7 @@ This is a long description of usage that should be filtered out to save tokens.
 - basic list item
 - author: Antigravity
         `.trim();
-        
+
         const result = await extractMdContext(input);
         expect(result).toContain('- version: 1.0.6');
         expect(result).toContain('- status = stable');
@@ -43,7 +43,7 @@ const b = 2;
 const c = 3;
 \`\`\`
         `.trim();
-        
+
         const result = await extractMdContext(input);
         expect(result).toContain('```typescript {1,3}');
         expect(result).toContain("import { x } from 'y';");
@@ -58,7 +58,7 @@ const c = 3;
 # Title
 <!-- NOTE: Re-indexing required -->
         `.trim();
-        
+
         const result = await extractMdContext(input);
         expect(result).toContain('[META: TODO: Add authentication]');
         expect(result).toContain('[META: NOTE: Re-indexing required]');

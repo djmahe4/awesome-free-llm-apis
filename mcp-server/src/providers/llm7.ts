@@ -12,5 +12,6 @@ export class LLM7Provider extends BaseProvider {
     { id: 'minimax-m2.7', name: 'MiniMax M2.7' },
     { id: 'codestral-latest', name: 'Codestral Latest' },
     { id: 'gpt-oss:20b', name: 'GPT-OSS 20B' },
+    { id: 'DeepSeek-V4-Flash-0731', name: 'DeepSeek V4 Flash' },
   ];
 }

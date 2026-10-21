@@ -96,19 +96,24 @@ describe('Memory System Integration', () => {
         expect(res2.results).not.toContain('WS1 Content');
     });
 
-    it('should verify the internal key format used stringified JSON _ws', async () => {
+    it('should key tool output by a short hash of input, not raw stringified JSON', async () => {
         const wsHash = await workspaceScanner.getWorkspaceHash(ws);
         await memoryManager.storeToolOutput('manual_memory', { _ws: wsHash, key: 'format_test' }, 'content');
 
         const allKeys = await memoryManager.longTerm.list();
 
-        // Find the key for our storage call
-        const storeKey = allKeys.find(k => k.startsWith('tool:manual_memory:') && k.includes('format_test'));
+        // Find the key for our storage call — scoped by the readable `_ws:<hash>:`
+        // prefix search()/clear() rely on, not by the (no longer embedded) raw
+        // input text, since that raw-JSON-as-key approach double-encoded any
+        // real newlines in a large input (e.g. injected file content) when the
+        // whole store was persisted — see buildToolKey's doc comment.
+        const storeKey = allKeys.find(k => k.startsWith('tool:manual_memory:') && k.includes(`_ws:${wsHash}:`));
         expect(storeKey).toBeDefined();
 
-        // Check that it contains the stringified workspace hash with double quotes
-        const expectedWsPart = '"_ws":';
-        expect(storeKey).toContain(expectedWsPart);
+        // The key must NOT contain the raw input text verbatim (that was the bug) —
+        // it should be a short, fixed-length hash instead.
+        expect(storeKey).not.toContain('format_test');
+        expect(storeKey).not.toContain('"_ws":');
     });
 
     it('should support synchronous retrieval immediately after storage', async () => {
@@ -117,7 +122,7 @@ describe('Memory System Integration', () => {
 
         const wsHash = await workspaceScanner.getWorkspaceHash(root);
         await memoryManager.clear(wsHash);
-        
+
         const key = 'sync_test';
         const content = 'This must be found immediately!';
 
@@ -142,7 +147,7 @@ describe('Memory System Integration', () => {
         const root = '/tmp/test_ws_skill';
         if (!existsSync(root)) mkdirSync(root, { recursive: true });
 
-        await storeWorkspaceSkill({
+        const skillInput = {
             name: 'test-skill',
             description: 'A test skill',
             what: ['It does things'],
@@ -150,13 +155,20 @@ describe('Memory System Integration', () => {
             script_instructions: {
                 'run.sh': 'Generate a script that echoes hello'
             }
-        });
+        };
+        // script_instructions now generates in the background — poll instead of
+        // asserting immediately after the initial (status:'running') return.
+        let genResult: any = await storeWorkspaceSkill(skillInput);
+        for (let i = 0; i < 100 && genResult.status === 'running'; i++) {
+            await new Promise(r => setTimeout(r, 20));
+            genResult = await storeWorkspaceSkill({ ...skillInput, pollAction: 'status' });
+        }
 
         // Verify the script was created
         const { promises: fs } = await import('fs');
         const path = await import('path');
         const scriptPath = path.join(root, '.free-llm-mcp', 'skills', 'test-skill', 'scripts', 'run.sh');
-        
+
         const exists = existsSync(scriptPath);
         expect(exists).toBe(true);
         if (exists) {
@@ -178,13 +190,13 @@ describe('Memory System Integration', () => {
         // Store some memories (include 'Decision:' or slashes to pass the high-signal filter in MemoryManager)
         await memoryManager.storeToolOutput('auto_memory', { _ws: wsHash, id: '1' }, "Decision: We deployed the frontend to Vercel using Next.js");
         await memoryManager.storeToolOutput('auto_memory', { _ws: wsHash, id: '2' }, "The backend uses PostgreSQL for relational data storage (db/postgres)");
-        
+
         // Wait a bit just in case, though it's awaited
         await new Promise(r => setTimeout(r, 100));
 
         // Semantic search (query shouldn't match any exact words to test semantics)
         const semanticRes = await memoryManager.search(wsHash, "react hosting platform");
-        
+
         // It should match the Vercel string
         expect(semanticRes).toBeDefined();
         const found = semanticRes.find((r: any) => JSON.stringify(r).includes('Vercel'));

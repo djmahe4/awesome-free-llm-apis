@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
 import { NetworkStateTracker } from '../utils/NetworkStateTracker.js';
 import { StdioDevToolsClient } from './DevToolsClient.js';
 import type { DevToolsClient } from './DevToolsClient.js';
@@ -80,9 +82,17 @@ export class BrowserSession {
 
     async call(name: string, args: Record<string, any> = {}, opts: { retries?: number } = {}): Promise<any> {
         this.touch();
-        return withRetry(() => this.client.callTool({ name, arguments: args }), {
+        const res = await withRetry(() => this.client.callTool({ name, arguments: args }), {
             attempts: opts.retries ?? 3,
         });
+        // chrome-devtools-mcp reports tool failures via `isError` without throwing —
+        // e.g. "Could not find Google Chrome executable". Without this check
+        // navigate_page failures look like successes to callers.
+        if (res && res.isError) {
+            const text = Array.isArray(res.content) ? res.content.map((c: any) => c?.text ?? '').join('\n') : '';
+            throw new Error(`${name} failed: ${text || 'unknown MCP error'}`);
+        }
+        return res;
     }
 
     async evaluate<T = any>(fnSource: string, args?: Record<string, any>) {
@@ -175,7 +185,59 @@ export class BrowserSession {
     }
 }
 
+export interface ProfileDirOptions {
+    /** Explicit exact profile dir — highest precedence; caller owns collision risk. */
+    userDataDir?: string;
+    /** Injected for tests; defaults to process.env. */
+    env?: NodeJS.ProcessEnv;
+    /** Injected for tests; defaults to os.tmpdir(). */
+    tmpdir?: string;
+}
+
+/** Windows forbids `<>:"/\|?*` and reserved device names in file names. */
+function sanitizeProfileSegment(sessionId: string): string {
+    const safe = (sessionId.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64)) || 'default';
+    return /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i.test(safe) ? `s_${safe}` : safe;
+}
+
+/** Expand `%NAME%` references (Windows-style) and strip stray surrounding quotes. */
+function expandEnvPath(value: string, env: NodeJS.ProcessEnv): string {
+    return value
+        .replace(/%([^%]+)%/g, (match, name: string) => env[name] ?? match)
+        .replace(/^"(.*)"$/, '$1');
+}
+
+/**
+ * Resolve the chrome profile dir for a session so zero CLI args still work:
+ *
+ *   1. explicit `userDataDir` option (exact dir — existing contract)
+ *   2. `WIKI_BROWSER_PROFILE_DIR` env var (base dir)
+ *   3. `CHROME_USER_DATA_DIR` env var (base dir)
+ *   4. `<tmpdir>/wiki-browser-profiles`
+ *
+ * Env vars name the BASE; every session still gets its own subdirectory
+ * because chrome-devtools-mcp refuses to share one profile between
+ * concurrent instances ("The browser is already running for <profile>").
+ * Paths are built with path.join so they are correct on Windows too.
+ */
+export function profileDirFor(sessionId: string, opts: ProfileDirOptions = {}): string {
+    if (opts.userDataDir) return opts.userDataDir;
+    const env = opts.env ?? process.env;
+    const base = env.WIKI_BROWSER_PROFILE_DIR
+        ? expandEnvPath(env.WIKI_BROWSER_PROFILE_DIR, env)
+        : env.CHROME_USER_DATA_DIR
+            ? expandEnvPath(env.CHROME_USER_DATA_DIR, env)
+            : path.join(opts.tmpdir ?? os.tmpdir(), 'wiki-browser-profiles');
+    return path.join(base, sanitizeProfileSegment(sessionId));
+}
+
 export async function createRealBrowserSession(sessionId: string, opts: { userDataDir?: string; connectTimeoutMs?: number } = {}): Promise<BrowserSession> {
-    const client = await StdioDevToolsClient.connect(opts);
+    // chrome-devtools-mcp's default profile is a single fixed path — a second
+    // session would fail with "The browser is already running for <profile>".
+    // Give each session its own profile dir ( --isolated conflicts with
+    // --executable-path, so we cannot use that instead ). The dir is
+    // env-configurable via profileDirFor() so Windows needs no CLI args.
+    const userDataDir = profileDirFor(sessionId, opts);
+    const client = await StdioDevToolsClient.connect({ ...opts, userDataDir });
     return new BrowserSession(sessionId, client);
 }

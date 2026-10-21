@@ -84,7 +84,7 @@ describe('Pipeline Orchestration', () => {
         const executor = new LLMExecutor();
         const provider1 = { id: 'p1', models: [{ id: 'm1', contextWindow: 8192 }] };
         const provider2 = { id: 'p2', models: [{ id: 'm1', contextWindow: 8192 }] };
-        
+
         const registry = ProviderRegistry.getInstance();
         vi.spyOn(registry, 'getAvailableProviders').mockReturnValue([provider1 as any, provider2 as any]);
         vi.spyOn(registry, 'getProviderForModel').mockReturnValue(provider1 as any);
@@ -119,7 +119,7 @@ describe('Pipeline Orchestration', () => {
 
     it('IntelligentRouterMiddleware prioritizes providers with higher scores (reputation/circuit breaker)', async () => {
         const executor = new LLMExecutor();
-        const provider1 = { id: 'p1', models: [{ id: 'm1', contextWindow: 8192 }] }; 
+        const provider1 = { id: 'p1', models: [{ id: 'm1', contextWindow: 8192 }] };
         const provider2 = { id: 'p2', models: [{ id: 'm1', contextWindow: 8192 }] };
 
         const registry = ProviderRegistry.getInstance();
@@ -173,8 +173,8 @@ describe('Pipeline Orchestration', () => {
 
         const router = new IntelligentRouterMiddleware(executor);
         const context: PipelineContext = {
-            request: { 
-                model: 'any', 
+            request: {
+                model: 'any',
                 messages: [{ role: 'user', content: 'heavy prompt' }]
             },
             estimatedTokens: 10000
@@ -188,7 +188,7 @@ describe('Pipeline Orchestration', () => {
 
     it('IntelligentRouterMiddleware explicit model-to-provider routing checks', async () => {
         const executor = new LLMExecutor();
-        const provider1 = { id: 'p1', models: [{ id: 'm1' }] }; 
+        const provider1 = { id: 'p1', models: [{ id: 'm1' }] };
         const provider2 = { id: 'p2', models: [{ id: 'm1' }] };
 
         const registry = ProviderRegistry.getInstance();

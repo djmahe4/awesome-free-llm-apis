@@ -9,6 +9,7 @@ describe('Encryption key persistence', () => {
     beforeEach(async () => {
         await fs.ensureDir(testHome);
         vi.stubEnv('MCP_SECRET_KEY', '');
+        vi.stubEnv('FREE_LLM_MCP_HOME', testHome);
         vi.spyOn(os, 'homedir').mockReturnValue(testHome);
         vi.resetModules();
     });

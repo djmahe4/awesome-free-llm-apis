@@ -10,7 +10,7 @@ const fileLocks = new Map<string, Promise<void>>();
  */
 export async function writeFileAtomic(filePath: string, content: string): Promise<void> {
     const absolutePath = path.resolve(filePath);
-    
+
     // Wait for any existing write on this file path to complete
     const existingLock = fileLocks.get(absolutePath);
     let resolveLock: (() => void) | undefined;
@@ -27,11 +27,11 @@ export async function writeFileAtomic(filePath: string, content: string): Promis
         const dir = path.dirname(absolutePath);
         // Ensure directory exists
         await fsp.mkdir(dir, { recursive: true });
-        
+
         const tempPath = `${absolutePath}.${Math.random().toString(36).substring(2, 8)}.tmp`;
         try {
             await fsp.writeFile(tempPath, content, 'utf-8');
-            
+
             let retries = 5;
             while (retries > 0) {
                 try {

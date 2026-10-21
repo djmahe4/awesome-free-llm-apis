@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { summarizeTextLocally } from '../src/tools/use-free-llm.js';
 
 describe('Summarization Effectiveness (v1.0.4)', () => {
-    
+
     it('should prioritize sentences with high-frequency "long" words', () => {
         const text = `
             This is a rare sentence with unique content.
@@ -13,9 +13,9 @@ describe('Summarization Effectiveness (v1.0.4)', () => {
         `;
         // "elephant" appears 5 times (elephant, elephant-themed, elephants, Elephants, elephants)
         // sentences with "elephant" should score higher.
-        
+
         const summary = summarizeTextLocally(text, 200);
-        
+
         expect(summary).toContain('elephant');
         expect(summary).toContain('Elephants are large');
         // It should rank the elephant sentences first because they have the most frequent word
@@ -25,7 +25,7 @@ describe('Summarization Effectiveness (v1.0.4)', () => {
         const text = 'Sentence one. Sentence two. Sentence three. Sentence four. Sentence five. '.repeat(100);
         const limit = 100;
         const summary = summarizeTextLocally(text, limit);
-        
+
         expect(summary.length).toBeLessThanOrEqual(limit + 25); // Accommodate the tag
         expect(summary).toContain('<!-- summarized -->');
     });
@@ -40,9 +40,9 @@ describe('Summarization Effectiveness (v1.0.4)', () => {
         `;
         // The first sentence has 100% density of the keyword.
         // The second has low density.
-        
+
         const summary = summarizeTextLocally(text, 150);
-        
+
         const lines = summary.split('\n');
         // The first sentence should definitely be in there
         expect(lines[1]).toContain('Keyword');
@@ -51,10 +51,10 @@ describe('Summarization Effectiveness (v1.0.4)', () => {
     it('should handle the "short file" cliff correctly (truncation vs scoring)', () => {
         const fourSentences = 'One two three four five six seven eight nine ten. '.repeat(4);
         const fiveSentences = 'One two three four five six seven eight nine ten. '.repeat(5);
-        
+
         const summary4 = summarizeTextLocally(fourSentences, 50);
         const summary5 = summarizeTextLocally(fiveSentences, 50);
-        
+
         // 4 sentences should use simple truncation
         expect(summary4).toContain('[truncated]');
         // 5 sentences should use TF scoring
@@ -64,7 +64,7 @@ describe('Summarization Effectiveness (v1.0.4)', () => {
     it('should handle text with no punctuation or newlines gracefully', () => {
         const text = 'word '.repeat(1000); // One giant sentence
         const summary = summarizeTextLocally(text, 100);
-        
+
         // Since there is only 1 "sentence" (no split), it should fall into the < 5 sentences case
         expect(summary).toContain('[truncated]');
     });
@@ -78,7 +78,7 @@ describe('Summarization Effectiveness (v1.0.4)', () => {
             Important information about the project.
         `;
         const summary = summarizeTextLocally(text, 200);
-        
+
         const occurrences = summary.split('Important').length - 1;
         expect(occurrences).toBeGreaterThan(1);
     });

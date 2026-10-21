@@ -6,6 +6,8 @@ import { DdgsMcpSearchProvider } from './providers/ddgs.js';
 import { JinaSearchProvider } from './providers/jina.js';
 import { SearxngSearchProvider } from './providers/searxng.js';
 
+import { persistence } from '../utils/PersistenceManager.js';
+
 /**
  * Fallback order: Parallel AI -> TinyFish -> Tavily -> DDGS (MCP) -> Jina -> SearXNG.
  * Parallel is keyless/highest-throughput so it goes first; SearXNG is the
@@ -14,6 +16,8 @@ import { SearxngSearchProvider } from './providers/searxng.js';
 export class SearchProviderRegistry {
   private static instance: SearchProviderRegistry;
   private providers: SearchProvider[];
+  private initPromise: Promise<void> | null = null;
+  private initialized = false;
 
   private constructor() {
     this.providers = [
@@ -29,12 +33,64 @@ export class SearchProviderRegistry {
   static getInstance(): SearchProviderRegistry {
     if (!SearchProviderRegistry.instance) {
       SearchProviderRegistry.instance = new SearchProviderRegistry();
+      SearchProviderRegistry.instance.initPromise = SearchProviderRegistry.instance.initFromPersistence();
     }
     return SearchProviderRegistry.instance;
   }
 
+  async initFromPersistence(): Promise<void> {
+    if (this.initialized) return;
+    try {
+      const data = await persistence.load();
+      if (data.searchProviders) {
+        for (const p of this.providers) {
+          const spData = data.searchProviders[p.id];
+          if (spData) {
+            if (typeof spData.consecutiveFailures === 'number') {
+              p.consecutiveFailures = spData.consecutiveFailures;
+            }
+            if (typeof spData.cooldownUntil === 'number') {
+              p.cooldownUntil = spData.cooldownUntil;
+            }
+            if (typeof spData.lastFailure === 'number') {
+              p.lastFailure = spData.lastFailure;
+            }
+          }
+        }
+      }
+      this.initialized = true;
+    } catch {
+      // Best-effort load
+    }
+  }
+
+  async persistState(): Promise<void> {
+    try {
+      if (this.initPromise) {
+        await this.initPromise;
+      }
+      const searchProviders: Record<string, { consecutiveFailures?: number; cooldownUntil?: number; lastFailure?: number }> = {};
+      for (const p of this.providers) {
+        searchProviders[p.id] = {
+          consecutiveFailures: p.consecutiveFailures,
+          cooldownUntil: p.cooldownUntil,
+          lastFailure: p.lastFailure || undefined,
+        };
+      }
+      await persistence.saveSearchProviders(searchProviders);
+    } catch {
+      // Best-effort persist
+    }
+  }
+
   static resetInstance(): void {
     (SearchProviderRegistry as any).instance = undefined;
+  }
+
+  async ensureInitialized(): Promise<void> {
+    if (this.initPromise) {
+      await this.initPromise;
+    }
   }
 
   getProviders(): SearchProvider[] {

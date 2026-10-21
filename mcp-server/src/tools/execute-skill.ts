@@ -8,6 +8,10 @@ import { memoryManager } from '../memory/index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
 import { findHermesSkill, loadHermesSkillContent } from '../hermes/loader.js';
 import { toMarkdownResponse } from '../utils/markdown.js';
+import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
+import { TaskType } from '../pipeline/middleware.js';
+import { logToolCall } from '../utils/ChatLogger.js';
+import { isInsideRoot, real } from '../utils/workspace-roots.js';
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
@@ -32,6 +36,8 @@ export interface ExecuteSkillInput {
   sessionId?: string;
   /** Force a specific skill source instead of auto-detecting Hermes first. */
   source?: 'agentic-awesome' | 'hermes';
+  /** Repo-relative directory (under workspace_root) holding prompt.md + skill.yaml. */
+  skillDir?: string;
 }
 
 export interface ExecuteSkillResult {
@@ -114,14 +120,69 @@ async function resolveReferences(
 }
 
 /**
- * Execute a prompt using a specific local skill's instructions and reference files.
+ * Thin logging wrapper around executeSkillInner — kept separate so the
+ * inner function's many early returns (security guard, Hermes lookup,
+ * download fallback, etc.) don't need restructuring into a single
+ * try/finally. Mirrors cyber-tool.ts's logToolCall wrapping (cyber-tool.ts,
+ * around its `try { ... } finally { await logToolCall(...) }` pattern),
+ * which execute_skill never had despite sessionId already threading
+ * through every call.
  */
 export async function executeSkill(input: ExecuteSkillInput): Promise<ExecuteSkillResult> {
-  const { skill, input: userPrompt, model, workspace_root, sessionId, source } = input;
+  const start = Date.now();
+  const sessionId = input.sessionId || 'skill_session';
+  let result: ExecuteSkillResult;
+  try {
+    result = await executeSkillInner(input);
+  } catch (err: any) {
+    result = { success: false, error: err?.message || 'Unknown error occurred during skill execution.' };
+    await logToolCall(sessionId, `execute_skill:${input.skill}`, input, result, Date.now() - start, true).catch(() => {});
+    throw err;
+  }
+  await logToolCall(sessionId, `execute_skill:${input.skill}`, input, result, Date.now() - start, !result.success).catch(() => {});
+  return result;
+}
+
+/**
+ * Execute a prompt using a specific local skill's instructions and reference files.
+ */
+async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkillResult> {
+  const { skill, input: userPrompt, model, workspace_root, sessionId, source, skillDir } = input;
 
   // 1. Path traversal security guard
   if (!skill || !/^[a-zA-Z0-9_\-\.]+$/.test(skill) || skill.includes('..')) {
     return { success: false, error: 'Security Exception: Invalid skill name.' };
+  }
+
+  if (workspace_root && source !== 'hermes') {
+    const wsRoot = path.resolve(workspace_root);
+    let repoDir: string | null = null;
+    if (skillDir) {
+      repoDir = path.resolve(wsRoot, skillDir);
+      if (!isInsideRoot(real(repoDir), real(wsRoot))) {
+        return { success: false, error: 'Security Exception: skillDir escapes the workspace root.' };
+      }
+    } else if (await fs.pathExists(wsRoot)) {
+      repoDir = path.join(wsRoot, 'skills', skill);
+    }
+    if (repoDir) {
+      const promptPath = path.join(repoDir, 'prompt.md');
+      if (await fs.pathExists(promptPath)) {
+        try {
+          const promptContent = await fs.readFile(promptPath, 'utf-8');
+          let systemMessage = `# Specialized Skill Core Instructions (prompt.md)\n${promptContent}\n`;
+          const yamlPath = path.join(repoDir, 'skill.yaml');
+          if (await fs.pathExists(yamlPath)) {
+            const yamlRaw = await fs.readFile(yamlPath, 'utf-8');
+            const descMatch = yamlRaw.match(/^\s*description:\s*(.+)$/m);
+            if (descMatch) systemMessage += `\n## Skill Description\n${descMatch[1].trim()}\n`;
+          }
+          return await executeWithSystemPrompt(systemMessage, userPrompt, model, workspace_root, sessionId, skill);
+        } catch (error: any) {
+          return { success: false, error: error?.message || 'Unknown error occurred during repo-style skill execution.' };
+        }
+      }
+    }
   }
 
   // 2. Hermes auto-detect: try the bundled Hermes skill set first (unless the
@@ -166,7 +227,7 @@ export async function executeSkill(input: ExecuteSkillInput): Promise<ExecuteSki
     let skillDir = path.join(configDir, 'skills', skill);
 
     let skillMdPath = path.join(skillDir, 'SKILL.md');
-    
+
     // 3. Fallback to download if SKILL.md is missing
     if (!await fs.pathExists(skillMdPath)) {
       console.error(`[execute-skill] Local skill "${skill}" not found. Attempting to download...`);
@@ -181,7 +242,7 @@ export async function executeSkill(input: ExecuteSkillInput): Promise<ExecuteSki
           error: `Skill "${skill}" could not be resolved or downloaded: ${loadResult.error}`
         };
       }
-      
+
       // Re-evaluate paths after load
       skillDir = path.join(configDir, 'skills', skill);
       skillMdPath = path.join(skillDir, 'SKILL.md');
@@ -201,7 +262,7 @@ export async function executeSkill(input: ExecuteSkillInput): Promise<ExecuteSki
 
     // 6. Build the structured system prompt context
     let systemMessage = '';
-    
+
     // Safety guard for missing referenced files to prevent LLM hallucinations
     if (missingRefs.length > 0) {
       systemMessage += `⚠️ NOTE: The following referenced resource files are NOT available in this environment: ${missingRefs.map(m => `\`${m}\``).join(', ')}. Do NOT try to read or refer to their contents, and do not make assumptions about what they contain.\n\n`;
@@ -259,6 +320,13 @@ async function executeWithSystemPrompt(
   sessionId: string | undefined,
   skillLabel: string
 ): Promise<ExecuteSkillResult> {
+  // Cyber-classified skill invocations get routed with taskType:'cyber' so
+  // the free-provider router's existing TaskType.Cyber-ranked model list
+  // (previously dead for skill calls — this was the only call site that
+  // never set taskType at all) actually applies to skill-driven prompts,
+  // not just cyber_tool's own direct coach path.
+  const isCyberTask = CYBER_TERMS_REGEX.test(skillLabel) || CYBER_TERMS_REGEX.test(userPrompt);
+
   const result = await useFreeLLM({
     model,
     messages: [
@@ -268,7 +336,8 @@ async function executeWithSystemPrompt(
     workspace_root,
     sessionId,
     agentic: false, // Disable auto-enrichment to prevent double-enrichment and token waste
-    isOnePass: true
+    isOnePass: true,
+    taskType: isCyberTask ? TaskType.Cyber : undefined
   });
 
   const responseText = result?.choices?.[0]?.message?.content;

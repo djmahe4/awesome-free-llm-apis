@@ -1,10 +1,17 @@
-import { cyberTool } from '../src/tools/cyber-tool.js';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+
+vi.mock('../src/tools/use-free-llm.js', () => ({
+    useFreeLLM: vi.fn(async () => ({
+        choices: [{ message: { content: '1. Install: apt install tool\n2. Usage: tool -h\n3. Use-case: security testing' } }]
+    }))
+}));
+
+import { cyberTool } from '../src/tools/cyber-tool.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,13 +72,15 @@ describe('cyber_tool dag_reverse mode', () => {
             action: 'coach',
             mode: 'dag_reverse',
             statusOnly: true,
+            // the default workspace is process.cwd() (the whole package); scanning it takes ~11s+
+            workspaceRoot: cybersecPath,
             sessionId
         });
 
         expect(result.success).toBe(true);
         expect(result.pctComplete).toBeDefined();
         expect(result.totalNodes).toBeGreaterThanOrEqual(18);
-    }, 10000);
+    }, 20000);
 
     it('coach in dag_reverse mode scans node and writes wiki', async () => {
         const result = await cyberTool({
@@ -79,6 +88,7 @@ describe('cyber_tool dag_reverse mode', () => {
             mode: 'dag_reverse',
             toolName: 'cybersec-toolkit',
             nodeId: 'cybersec-toolkit/networking',
+            workspaceRoot: cybersecPath,
             sessionId
         });
 

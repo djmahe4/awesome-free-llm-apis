@@ -80,12 +80,26 @@ describe('local_llm_patch', () => {
     expect(result.error).toContain('No models available');
   });
 
-  it('errors for a nonexistent file without calling the model', async () => {
+  it('errors for a nonexistent file when allowCreate is false', async () => {
     (listLocalModels as any).mockResolvedValue(['qwen2.5-coder:7b']);
-    const result = await localLlmPatch({ filePath: path.join(testDir, 'nope.ts'), instruction: 'x' });
+    const result = await localLlmPatch({ filePath: path.join(testDir, 'nope.ts'), instruction: 'x', allowCreate: false });
     expect(result.success).toBe(false);
     expect(result.error).toContain('File not found');
     expect(listLocalModels).not.toHaveBeenCalled();
+  });
+
+  it('creates content for a new file when file does not exist', async () => {
+    (listLocalModels as any).mockResolvedValue(['qwen2.5-coder:7b']);
+    (chatLocal as any).mockResolvedValue({
+      model: 'qwen2.5-coder:7b',
+      content: '```ts\nexport const created = true;\n```',
+      promptTokens: 10,
+      completionTokens: 15,
+    });
+    const result = await localLlmPatch({ filePath: path.join(testDir, 'brand_new.ts'), instruction: 'create module' });
+    expect(result.success).toBe(true);
+    expect(result.isNewFile).toBe(true);
+    expect(result.patch).toContain('export const created = true;');
   });
 
   it('picks a coding model, calls the local server, and extracts the fenced patch', async () => {

@@ -17,7 +17,7 @@ function spawnAsync(command: string, args: string[], cwd?: string): Promise<{ st
     const child = spawn(command, args, { shell: false, cwd });
     let stdout = '';
     let stderr = '';
-    
+
     const timeout = setTimeout(() => {
       child.kill();
       reject(new Error(`Command '${command}' timed out after 10000ms`));
@@ -44,18 +44,18 @@ export class DiffScanner {
   private static async acquireLock(lockPath: string, timeoutMs: number = 300000): Promise<boolean> {
     try {
       await fs.ensureDir(path.dirname(lockPath));
-      
+
       if (await fs.pathExists(lockPath)) {
         const content = await fs.readFile(lockPath, 'utf8');
         const [pidStr, timestampStr] = content.split(':');
         const timestamp = parseInt(timestampStr, 10);
-        
+
         // If lock is less than 5 minutes old, skip/return false (lock is active)
         if (Date.now() - timestamp < 300000) {
           return false;
         }
       }
-      
+
       // Write fresh lock
       await fs.writeFile(lockPath, `${process.pid}:${Date.now()}`, 'utf8');
       return true;
@@ -121,7 +121,7 @@ export class DiffScanner {
       if (!isRepo) {
         return result;
       }
-      
+
       // Test if git command works
       try {
         await spawnAsync('git', ['--version']);
@@ -140,7 +140,7 @@ export class DiffScanner {
       try {
         result.currentBranch = await this.getCurrentBranch(workspaceRoot);
         result.changedFiles = await this.getChangedFiles(workspaceRoot);
-        
+
         try {
           const { stdout } = await spawnAsync('git', ['rev-parse', 'HEAD'], workspaceRoot);
           result.lastCommitHash = stdout.trim();

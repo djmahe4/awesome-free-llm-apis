@@ -136,7 +136,7 @@ class PPTXSchemaValidator(BaseSchemaValidator):
                 with zipfile.ZipFile(self.original_file, "r") as zf:
                     safe_extract(zf, temp_path)
             except (zipfile.BadZipFile, ValueError, OSError):
-                return set()  
+                return set()
 
             for part in sorted(temp_path.rglob("*.xml")):
                 relative = part.relative_to(temp_path).as_posix()
@@ -181,7 +181,7 @@ class PPTXSchemaValidator(BaseSchemaValidator):
 
             for message in fatal_slide_errors(set(errors)):
                 if message in inherited:
-                    continue  
+                    continue
                 problems.append(f"{relative}: {message}")
 
         if broken:
@@ -219,7 +219,7 @@ class PPTXSchemaValidator(BaseSchemaValidator):
 
         children = list(root)
         if children.index(notes) < children.index(slides):
-            return xml_doc  
+            return xml_doc
 
         root.remove(notes)
         root.insert(list(root).index(slides), notes)
@@ -377,7 +377,7 @@ class PPTXSchemaValidator(BaseSchemaValidator):
         import lxml.etree
 
         errors = []
-        notes_slide_references = {}  
+        notes_slide_references = {}
 
         slide_rels_files = list(self.unpacked_dir.glob("ppt/slides/_rels/*.xml.rels"))
 
@@ -403,7 +403,7 @@ class PPTXSchemaValidator(BaseSchemaValidator):
                         if part:
                             slide_name = rels_file.stem.replace(
                                 ".xml", ""
-                            )  
+                            )
 
                             notes_slide_references.setdefault(part, []).append(
                                 (slide_name, rels_file)

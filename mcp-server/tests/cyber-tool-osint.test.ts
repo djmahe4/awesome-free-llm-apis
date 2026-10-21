@@ -87,15 +87,28 @@ describe('cyber_tool OSINT action', () => {
   });
 
   it('executes automated multi-step search reconnaissance when autoSearch is true', async () => {
+    const target = 'example.com';
+    const sessionId = 'test-auto-search-osint';
     const res: any = await cyberTool({
       action: 'osint' as any,
-      target: 'example.com',
+      target,
       autoSearch: true,
-      sessionId: 'test-auto-search-osint'
+      sessionId,
     });
 
     expect(res.success).toBe(true);
-    expect(res.searchResults).toBeDefined();
-    expect(Array.isArray(res.searchResults)).toBe(true);
-  });
+    // Search-provider dork lookups now run in the background (see cyber-tool.ts) —
+    // the initial osint call returns immediately with searchStatus:'running';
+    // poll osint_status for the final searchResults instead.
+    expect(res.searchStatus).toBe('running');
+
+    let status: any = res;
+    for (let i = 0; i < 200 && status.searchStatus === 'running'; i++) {
+      await new Promise(r => setTimeout(r, 100));
+      status = await cyberTool({ action: 'osint_status' as any, target, sessionId });
+    }
+    expect(status.searchStatus).toBe('done');
+    expect(status.searchResults).toBeDefined();
+    expect(Array.isArray(status.searchResults)).toBe(true);
+  }, 30000);
 });

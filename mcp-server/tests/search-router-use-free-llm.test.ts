@@ -6,7 +6,7 @@ import type { SearchProvider, UnifiedSearchResult } from '../src/search/types.js
 describe('SearchRouterMiddleware & use_free_llm Integration', () => {
   it('intercepts search requests and bypasses native google_search rate limits on gemini-3.1-flash-lite', async () => {
     const registry = SearchProviderRegistry.getInstance();
-    
+
     // Register mock search provider
     const mockSearchProvider: SearchProvider = {
       id: 'mock-search',

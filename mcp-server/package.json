@@ -1,6 +1,6 @@
 {
   "name": "free-llm-mcp-server",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "description": "MCP server for free LLM APIs",
   "bin": {
@@ -8,9 +8,10 @@
   },
   "main": "dist/server.js",
   "scripts": {
+    "smoke:registry": "tsx scripts/smoke/smoke_registry_sources.ts",
     "build": "tsc -p tsconfig.build.json",
     "postbuild": "node scripts/utils/postbuild.js",
-    "start": "node dist/src/server.js",
+    "start": "node dist/server.js",
     "dev": "tsx src/server.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -22,11 +23,16 @@
     "dashboard": "tsx --env-file=.env src/server.ts --sse",
     "report": "tsx --env-file=.env scripts/evaluation/model-report.ts",
     "fetch-hermes": "tsx scripts/fetch-hermes-skills.ts",
-    "fetch-cyber-tools": "node scripts/fetch-cyber-tools.js"
+    "fetch-cyber-tools": "node scripts/fetch-cyber-tools.js",
+    "smoke:media": "tsx --env-file=.env scripts/smoke/test_media_modalities_smoke.ts",
+    "verify:precommit": "tsx scripts/verification/verify-precommit.ts",
+    "assemble:index": "tsx scripts/assemble-index.ts"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.8.1",
+    "@gradio/client": "^2.7.0",
+    "@huggingface/transformers": "^4.3.1",
     "@modelcontextprotocol/sdk": "^1.24.3",
+    "@noble/post-quantum": "^0.7.1",
     "@types/multer": "^2.2.0",
     "cohere-ai": "^7.21.0",
     "cors": "^2.8.6",
@@ -55,9 +61,11 @@
     "esbuild": "^0.28.1",
     "fast-uri": "^3.1.6",
     "qs": "^6.16.0",
-    "yaml": "^2.8.3"
+    "yaml": "^2.8.3",
+    "@grpc/grpc-js": "^1.14.6"
   },
   "devDependencies": {
+    "@ast-grep/cli": "^0.45.3",
     "@emnapi/core": "1.9.1",
     "@emnapi/runtime": "1.9.1",
     "@types/cors": "^2.8.19",

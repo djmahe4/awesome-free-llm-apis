@@ -78,7 +78,7 @@ vi.mock('../src/providers/registry.js', () => {
     return {
         ProviderRegistry: {
             getInstance: vi.fn().mockReturnValue({
-                getAvailableProviders: vi.fn().mockReturnValue([{ 
+                getAvailableProviders: vi.fn().mockReturnValue([{
                     id: 'gemini',
                     models: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', contextWindow: 128000 }],
                     recordFailure: vi.fn(),
@@ -104,7 +104,7 @@ vi.mock('../src/pipeline/instances.js', () => {
             execute: async (context: any, next: any) => {
                 const userMsg = context.request.messages.find((m: any) => m.role === 'user')?.content || '';
                 const content = String(userMsg);
-                
+
                 if (content.includes('Analyze')) {
                     context.response = {
                         choices: [{
@@ -139,7 +139,7 @@ vi.mock('../src/pipeline/instances.js', () => {
 describe('Agentic Memory End-to-End', () => {
     const TEST_SESSION = 'e2e-test-session-' + Date.now();
     const TEST_WORKSPACE = path.join(os.tmpdir(), 'free-llm-mcp-e2e-test');
-    
+
     beforeAll(async () => {
         await fs.mkdir(TEST_WORKSPACE, { recursive: true });
         await fs.writeFile(path.join(TEST_WORKSPACE, 'README.md'), '# Test Project\nArchitecture overview.');
@@ -154,19 +154,19 @@ describe('Agentic Memory End-to-End', () => {
     it('should decompose tasks and harvest skills across multiple subtasks', async () => {
         const executor = new LLMExecutor();
         const pipeline = new PipelineExecutor();
-        
+
         pipeline.use(new StructuralMarkdownMiddleware());
         pipeline.use(new AgenticMiddleware());
-        
+
         const context: any = {
             sessionId: TEST_SESSION,
             agentic: true,
             wsHash: 'test-ws-hash',
             request: {
                 messages: [
-                    { 
-                        role: 'user', 
-                        content: '1. Analyze the current logic in src/logic.ts\n2. Implement optimization A\n3. Verify the changes' 
+                    {
+                        role: 'user',
+                        content: '1. Analyze the current logic in src/logic.ts\n2. Implement optimization A\n3. Verify the changes'
                     }
                 ]
             }
@@ -180,7 +180,7 @@ describe('Agentic Memory End-to-End', () => {
 
         // Verify decomposition: should have run multiple times
         // The AgenticMiddleware loop will call the sharedRouter (which we mock indirectly by mocking LLMExecutor)
-        
+
         // 1. Check if knowledge.md was harvested
         const projectDir = path.join(PROJECTS_DIR, TEST_SESSION);
         const knowledgePath = path.join(projectDir, 'knowledge.md');
@@ -196,7 +196,7 @@ describe('Agentic Memory End-to-End', () => {
         const statePath = path.join(projectDir, 'state.json');
         const stateContent = await fs.readFile(statePath, 'utf-8');
         const state = JSON.parse(stateContent);
-        
+
         // After completion of all tasks in the loop, nowQueue should be empty
         expect(state.nowQueue).toHaveLength(0);
     });
@@ -225,7 +225,7 @@ describe('Agentic Memory End-to-End', () => {
         expect(injectedContent).toContain('### SESSION DISTILLATION');
         expect(injectedContent).toContain('Already knows X');
         expect(injectedContent).toContain('New query');
-        
+
         // Cleanup
         await fs.rm(projectDir, { recursive: true, force: true });
     });

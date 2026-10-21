@@ -19,7 +19,8 @@ async function testModel(provider: OpenRouterProvider, id: string) {
         });
         const duration = Date.now() - start;
         console.error(`    Status: SUCCESS / FREE (${duration}ms)`);
-        console.error(`    Response: "${res.choices[0].message.content.trim()}"`);
+        const reply = res.choices?.[0]?.message?.content ?? (res.choices?.[0]?.message as any)?.reasoning ?? "";
+        console.error(`    Response: "${String(reply).trim()}"`);
         return { id, status: 'FREE' as const };
     } catch (error: any) {
         const errMsg = error.message || '';

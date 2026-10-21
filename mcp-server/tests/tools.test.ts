@@ -139,7 +139,7 @@ describe('use_free_llm input validation', () => {
 
     const content = result.choices[0].message.content || '';
     expect(content).toContain('Token-Efficient CLI Diagnostics');
-    
+
     // Since query has 'json' and 'error', it should contain JSON tips
     if (process.platform === 'win32') {
       expect(content).toContain('ConvertFrom-Json');

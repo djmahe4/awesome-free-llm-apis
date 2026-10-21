@@ -25,7 +25,7 @@ describe('WorkspaceIndexer Integration', () => {
     beforeEach(async () => {
         rmSync(testWs, { recursive: true, force: true });
         mkdirSync(testWs, { recursive: true });
-        
+
         // Clear memory for this workspace to ensure clean test state
         const scanner = new (await import('../src/cache/workspace.js')).WorkspaceScanner(testWs);
         const wsHash = await scanner.getWorkspaceHash(testWs);
@@ -42,7 +42,7 @@ describe('WorkspaceIndexer Integration', () => {
         writeFileSync(path.join(testWs, 'test2.md'), '# Documentation\nThis is a test file for the indexer.');
 
         const indexer = new WorkspaceIndexer(testWs);
-        
+
         // 2. Perform indexing
         const result = await indexer.indexWorkspace(testWs, true); // Force rebuild
 
@@ -54,7 +54,7 @@ describe('WorkspaceIndexer Integration', () => {
 
         // 3. Verify they can be searched
         const searchResults = await vectorStore.search(await indexer['workspaceScanner'].getWorkspaceHash(testWs), "documentation");
-        
+
         expect(searchResults.length).toBeGreaterThan(0);
         console.log('Search Results:', JSON.stringify(searchResults.map(r => ({ id: r.id, score: (r as any).score })), null, 2));
         const found = searchResults.some(r => r.content.includes('test file'));
@@ -66,7 +66,7 @@ describe('WorkspaceIndexer Integration', () => {
         writeFileSync(path.join(testWs, 'test2.md'), '# Documentation');
 
         const indexer = new WorkspaceIndexer(testWs);
-        
+
         // Initial indexing
         await indexer.indexWorkspace(testWs, true);
 
@@ -83,7 +83,7 @@ describe('WorkspaceIndexer Integration', () => {
         writeFileSync(path.join(testWs, 'test2.md'), '# Documentation');
 
         const indexer = new WorkspaceIndexer(testWs);
-        
+
         // Initial indexing
         await indexer.indexWorkspace(testWs, true);
 

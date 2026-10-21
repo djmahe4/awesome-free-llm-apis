@@ -38,7 +38,7 @@ async function reapIfStale(lockPath: string): Promise<void> {
 
     const age = Date.now() - stat.mtimeMs;
     const hasValidPid = Number.isFinite(holderPid) && holderPid > 0;
-    
+
     let shouldReap = false;
     if (hasValidPid) {
         shouldReap = !isPidAlive(holderPid);

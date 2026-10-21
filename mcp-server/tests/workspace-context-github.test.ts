@@ -55,7 +55,7 @@ describe('WorkspaceContextMiddleware Github Integration', () => {
             }
             function initiate() {}
         `;
-        
+
         const fetchRawSpy = vi.spyOn(GithubRepoScanner, 'fetchRawContent').mockResolvedValue(mockReadme);
 
         await middleware.execute(mockContext, async () => {});
@@ -78,7 +78,7 @@ describe('WorkspaceContextMiddleware Github Integration', () => {
 
     it('should NOT trigger repo scanning for GitHub URLs that are injected via middleware', async () => {
         const fetchRawSpy = vi.spyOn(GithubRepoScanner, 'fetchRawContent').mockResolvedValue('');
-        
+
         mockContext.request.messages[0].content = `
 Some user request here.
 ## 📋 TARGET PROJECT GUIDELINES

@@ -15,8 +15,11 @@ export interface SearchProvider {
   /** Env var holding the API key. Absent for keyless providers (Parallel AI, SearXNG). */
   envVar?: string;
   consecutiveFailures: number;
+  cooldownUntil?: number;
+  lastFailure?: number;
   isAvailable(): boolean;
   search(query: string, maxResults?: number): Promise<UnifiedSearchResult[]>;
   recordFailure(status: number): void;
+  recordSuccess(): boolean;
   getPenaltyScore(): number;
 }

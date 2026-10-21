@@ -42,13 +42,33 @@ function getFilename(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9_-]/g, '_') + '.md';
 }
 
+const FRONTMATTER_BLOCK_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
+
+/**
+ * Remove every leading `---` block from a page body. The first block is the
+ * wiki's own metadata (handled by parseFrontmatter); any further blocks are
+ * embedded pseudo-frontmatter from older writers (e.g. the journal template
+ * used to prepend `type: journal/period/date`) and must neither render as
+ * body text nor be mistaken for page metadata.
+ */
+function stripLeadingFrontmatter(text: string): { firstBlock: string | null, rest: string } {
+  let rest = text;
+  let firstBlock: string | null = null;
+  let m: RegExpMatchArray | null;
+  while ((m = rest.match(FRONTMATTER_BLOCK_RE))) {
+    if (firstBlock === null) firstBlock = m[1];
+    rest = rest.slice(m[0].length);
+  }
+  return { firstBlock, rest };
+}
+
 function parseFrontmatter(fileContent: string): { frontmatter: Record<string, any>, body: string } {
-  const match = fileContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
-  if (!match) {
+  const { firstBlock, rest } = stripLeadingFrontmatter(fileContent);
+  if (firstBlock === null) {
     return { frontmatter: {}, body: fileContent };
   }
-  const yamlLines = match[1].split('\n');
-  const body = match[2];
+  const yamlLines = firstBlock.split('\n');
+  const body = rest;
   const frontmatter: Record<string, any> = {};
   for (const line of yamlLines) {
     const parts = line.split(':');
@@ -124,12 +144,23 @@ export class WikiMemory {
   private wikiDir: string;
 
   constructor(workspaceHash: string, customBaseDir?: string) {
-    const base = customBaseDir || path.join(os.homedir(), '.free-llm-mcp', 'wiki');
+    const homeBase = process.env.FREE_LLM_MCP_HOME || os.homedir();
+    const base = customBaseDir || path.join(homeBase, '.free-llm-mcp', 'wiki');
     this.wikiDir = path.join(base, workspaceHash);
   }
 
   private async ensureDir(): Promise<void> {
-    await fs.mkdir(this.wikiDir, { recursive: true });
+    try {
+      await fs.mkdir(this.wikiDir, { recursive: true });
+    } catch (err: any) {
+      if (err.code === 'EPERM' || err.code === 'EACCES') {
+        const fallbackBase = path.join(process.cwd(), '.free-llm-mcp', 'wiki');
+        this.wikiDir = path.join(fallbackBase, path.basename(this.wikiDir));
+        await fs.mkdir(this.wikiDir, { recursive: true });
+      } else {
+        throw err;
+      }
+    }
   }
 
   // Keyed by title alone (not the full per-tags path) so every writer targeting the
@@ -149,6 +180,13 @@ export class WikiMemory {
     }
     if (lowerTags.includes('study')) {
       return path.join(this.wikiDir, 'study', filename);
+    }
+    // Routes here on write; getWikiFiles already excludes this dir from
+    // general wiki search/list (architecture-decision records shouldn't
+    // dilute general codebase-wiki search), so adr_write reads it back via
+    // its own dedicated action rather than wiki_search/wiki_list.
+    if (lowerTags.includes('adr')) {
+      return path.join(this.wikiDir, 'adr', filename);
     }
     return path.join(this.wikiDir, filename);
   }
@@ -180,7 +218,8 @@ export class WikiMemory {
     const paths = [
       path.join(this.wikiDir, filename),
       path.join(this.wikiDir, 'study', filename),
-      path.join(this.wikiDir, 'pdf', filename)
+      path.join(this.wikiDir, 'pdf', filename),
+      path.join(this.wikiDir, 'adr', filename)
     ];
 
     for (const p of paths) {
@@ -230,6 +269,36 @@ export class WikiMemory {
     return pages;
   }
 
+  /** ADRs live in their own subdir (excluded from list()/search() by design — see getWikiFiles). */
+  async listAdrs(): Promise<Array<Pick<WikiPage, 'title' | 'tier' | 'confidence' | 'tags' | 'updated' | 'links'>>> {
+    const adrDir = path.join(this.wikiDir, 'adr');
+    let filenames: string[] = [];
+    try {
+      filenames = (await fs.readdir(adrDir)).filter(f => f.endsWith('.md'));
+    } catch {
+      return [];
+    }
+    const pages: Array<Pick<WikiPage, 'title' | 'tier' | 'confidence' | 'tags' | 'updated' | 'links'>> = [];
+    for (const f of filenames) {
+      try {
+        const raw = await fs.readFile(path.join(adrDir, f), 'utf-8');
+        const { frontmatter } = parseFrontmatter(raw);
+        pages.push({
+          title: frontmatter.title || path.basename(f, '.md'),
+          tier: frontmatter.tier || 'episodic',
+          confidence: typeof frontmatter.confidence === 'number' ? frontmatter.confidence : 0.5,
+          tags: frontmatter.tags || [],
+          updated: frontmatter.updated || '',
+          links: (frontmatter.links || []).map((l: string) => l.replace(/^\[\[|\]\]$/g, ''))
+        });
+      } catch {
+        // ignore
+      }
+    }
+    pages.sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
+    return pages;
+  }
+
   private async writePage(
     title: string,
     content: string,
@@ -238,6 +307,10 @@ export class WikiMemory {
     confidence: number,
     adr_ref?: string
   ): Promise<WikiPage> {
+    // Strip any caller-embedded frontmatter so the written file always carries
+    // exactly one metadata block (heals legacy double-wrapped pages on save),
+    // and normalize whitespace so the returned page matches what read() gives.
+    content = stripLeadingFrontmatter(content).rest.trim();
     const existing = await this.read(title);
     const created = existing ? existing.created : new Date().toISOString();
     const updated = new Date().toISOString();
@@ -502,11 +575,11 @@ export class WikiMemory {
 
     const adrContent = `# ${adrId}: ${title}
 
-**Status**: Accepted  
-**Date**: ${new Date().toISOString().split('T')[0]}  
-**Context**: ${title} implementation details.  
-**Decision**: ${title} was chosen/implemented.  
-**Consequences**: Documented in [[${title}]].  
+**Status**: Accepted
+**Date**: ${new Date().toISOString().split('T')[0]}
+**Context**: ${title} implementation details.
+**Decision**: ${title} was chosen/implemented.
+**Consequences**: Documented in [[${title}]].
 
 ## Content
 ${content}
@@ -540,8 +613,8 @@ ${content}
 
     const adrContent = `# ${adrId}: ${decision}
 
-**Status**: Accepted  
-**Date**: ${new Date().toISOString().split('T')[0]}  
+**Status**: Accepted
+**Date**: ${new Date().toISOString().split('T')[0]}
 
 ## Context
 ${context}

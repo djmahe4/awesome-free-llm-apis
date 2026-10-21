@@ -1,8 +1,9 @@
 /**
  * @file _changed-models.ts
- * @description Model IDs added/removed per provider by the 2026-08-21 upstream
- * data.json merge (167013f). Used by the provider smoke-test scripts to verify
- * both the newly added models and confirm whether removed models are truly dead.
+ * @description Model IDs added/removed per provider by upstream data.json merges
+ * (including 2026-08-21 167013f and 2026-10-05 41197cb). Used by the provider
+ * smoke-test scripts to verify newly added models and confirm whether removed
+ * models are truly dead.
  * Gemini is excluded per user instruction.
  * Cerebras and GitHub Models are fully deprecated.
  */
@@ -20,8 +21,16 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
     removed: [],
   },
   groq: {
-    added: [],
-    removed: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+    added: [
+      'qwen/qwen3.8-27b',
+    ],
+    removed: [
+      'groq/compound',
+      'groq/compound-mini',
+      'qwen/qwen3.6-27b',
+      'llama-3.3-70b-versatile',
+      'llama-3.1-8b-instant',
+    ],
   },
   huggingface: {
     added: [],
@@ -39,6 +48,12 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
       'nvidia/nemotron-3-ultra-550b-a55b:free',
       'nvidia/nemotron-3-super-120b-a12b:free',
       'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+      'kilo-auto/free',
+      'inclusionai/ling-3.1-flash',
+      'inclusionai/ling-3.0-flash-sante:free',
+      'apodex/apodex-1.1-mini:free',
+      'qwen/qwen3.8-27b:free',
+      'dots-studio/dots-3-note-preview:free',
     ],
     removed: [
       'inclusionai/ling-3.0-flash:free',
@@ -58,6 +73,11 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
   nvidia: {
     added: [],
     removed: [
+      'nvidia/nemotron-3-nano-30b-a3b',
+      'meta/llama-3.3-70b-instruct',
+      'mistralai/mistral-nemotron',
+      'minimaxai/minimax-m3',
+      'openai/gpt-oss-120b',
       'deepseek-ai/deepseek-v4-flash',
       'mistralai/mistral-medium-3.5-128b',
       'deepseek-ai/deepseek-v4-pro',
@@ -69,12 +89,20 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
   },
   openrouter: {
     added: [
+      'apodex/apodex-1.1-mini:free',
+      'inclusionai/ling-3.0-flash-sante:free',
+      'qwen/qwen3.8-27b:free',
+      'dots-studio/dots-3-note-preview:free',
+      'liquid/lfm-2.5-2.6b:free',
+      'nvidia/nemotron-3.5-lightning:free',
+      'thinkingmachines/inkling:free',
       'nvidia/nemotron-3-ultra-550b-a55b:free',
       'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
       'nvidia/nemotron-3-super-120b-a12b:free',
-      'liquid/lfm-2.5-2.6b:free',
     ],
     removed: [
+      'openai/gpt-oss-20b:free',
+      'inclusionai/ling-3.0-flash:free',
       'nvidia/nemotron-3-nano-30b-a3b:free',
       'nvidia/nemotron-nano-12b-v2-vl:free',
       'nvidia/nemotron-nano-9b-v2:free',
@@ -82,6 +110,7 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
   },
   llm7: {
     added: [
+      'DeepSeek-V4-Flash-0731',
       'gpt-oss:20b',
       'mistral-Nemo-Instruct-2407',
       'minimax-m2.7',

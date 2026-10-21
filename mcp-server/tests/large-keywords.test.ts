@@ -64,7 +64,7 @@ describe('Large Keywords & Budget Hardening', () => {
         const prompt = await getIntelligentSystemPrompt({ context: 'Some context', keywords });
 
         expect(prompt.length).toBeLessThanOrEqual(PROMPT_CHAR_BUDGET_VAL); // Budget is now 12k
-        
+
         // Count sections included (marked by "## Section")
         const sectionCount = (prompt.match(/## Section/g) || []).length;
         expect(sectionCount).toBeLessThanOrEqual(7); // Should be capped at 7 sections

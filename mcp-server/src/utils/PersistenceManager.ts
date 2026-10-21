@@ -40,6 +40,11 @@ export interface PersistentUsage {
     cooldownUntil?: number;
     totalErrors?: number;
   }>;
+  searchProviders?: Record<string, {
+    consecutiveFailures?: number;
+    cooldownUntil?: number;
+    lastFailure?: number;
+  }>;
 }
 
 export class PersistenceManager {
@@ -116,7 +121,7 @@ export class PersistenceManager {
       return process.env.MCP_USAGE_PATH;
     }
 
-    const homeDir = os.homedir();
+    const homeDir = process.env.FREE_LLM_MCP_HOME || os.homedir();
     const globalDir = path.join(homeDir, '.free-llm-mcp');
     const globalPath = path.join(globalDir, 'usage-stats.json');
 
@@ -131,8 +136,17 @@ export class PersistenceManager {
       await fs.ensureDir(path.dirname(this.filePath));
       return true;
     } catch (e) {
-      console.error('Failed to ensure storage directory:', e);
-      return false;
+      try {
+        const localDir = path.join(process.cwd(), '.free-llm-mcp');
+        await fs.ensureDir(localDir);
+        this.filePath = path.join(localDir, 'usage-stats.json');
+        this.backupPath = `${this.filePath}.bak`;
+        this.lockPath = `${this.filePath}.lock`;
+        return true;
+      } catch {
+        console.error('Failed to ensure storage directory:', e);
+        return false;
+      }
     }
   }
 
@@ -259,6 +273,70 @@ export class PersistenceManager {
   }
 
   /**
+   * Persists search provider circuit-breaker states without altering LLM usage counters
+   * or corrupting the in-memory delta baseline (lastSavedState).
+   */
+  async saveSearchProviders(searchProviders: Record<string, { consecutiveFailures?: number; cooldownUntil?: number; lastFailure?: number }>): Promise<void> {
+    const releaseLock = await this.acquireLock();
+    try {
+      await this.ensureStorage();
+      const today = new Date().toISOString().split('T')[0];
+
+      let diskState: PersistentUsage;
+      try {
+        if (await fs.pathExists(this.filePath)) {
+          const raw = await fs.readFile(this.filePath, 'utf8');
+          const decrypted = await decrypt(raw);
+          diskState = JSON.parse(decrypted);
+        } else {
+          throw new Error('File does not exist');
+        }
+      } catch (e) {
+        diskState = {
+          lastResetDate: today,
+          dailyTotalRequests: 0,
+          dailyTotalTokens: 0,
+          lifetimeTotalRequests: 0,
+          lifetimeTotalTokens: 0,
+          providers: {}
+        };
+      }
+
+      // Update diskState searchProviders
+      diskState.searchProviders = {
+        ...(diskState.searchProviders || {}),
+        ...searchProviders
+      };
+
+      // Also update searchProviders on lastSavedState if present, keeping baseline counters untouched
+      if (this.lastSavedState) {
+        this.lastSavedState.searchProviders = {
+          ...(this.lastSavedState.searchProviders || {}),
+          ...searchProviders
+        };
+      }
+
+      const tmpPath = `${this.filePath}.tmp`;
+      const serialized = JSON.stringify(diskState);
+      const encrypted = await encrypt(serialized);
+      await fs.writeFile(tmpPath, encrypted, 'utf8');
+      await fs.rename(tmpPath, this.filePath);
+
+      try {
+        const backupTmpPath = `${this.backupPath}.tmp`;
+        await fs.writeFile(backupTmpPath, encrypted, 'utf8');
+        await fs.rename(backupTmpPath, this.backupPath);
+      } catch (backupErr) {
+        console.error('Failed to write usage stats backup:', backupErr);
+      }
+    } catch (e) {
+      console.error('Error saving search providers state:', e);
+    } finally {
+      await releaseLock();
+    }
+  }
+
+  /**
    * Zeroes the counter fields (but not identity/session fields) on the in-memory delta
    * baseline (lastSavedState), so the next save()'s merge() computes deltas relative to
    * zero instead of the pre-reset totals. Must be called immediately after a caller resets
@@ -285,7 +363,7 @@ export class PersistenceManager {
   private merge(disk: PersistentUsage, memory: PersistentUsage): PersistentUsage {
     const today = new Date().toISOString().split('T')[0];
     const base = disk.lastResetDate === today ? disk : this.handleDailyReset(disk);
-    
+
     // Calculate deltas from last saved state
     const prev = this.lastSavedState || {
       lastResetDate: today,
@@ -304,7 +382,7 @@ export class PersistenceManager {
     const deltaDailyTok = Math.max(0, memory.dailyTotalTokens - prevDailyTok);
     const deltaLifetimeReq = Math.max(0, memory.lifetimeTotalRequests - prev.lifetimeTotalRequests);
     const deltaLifetimeTok = Math.max(0, memory.lifetimeTotalTokens - prev.lifetimeTotalTokens);
-    
+
     const result: PersistentUsage = {
       lastResetDate: today,
       dailyTotalRequests: base.dailyTotalRequests + deltaDailyReq,
@@ -339,7 +417,7 @@ export class PersistenceManager {
     for (const [id, mProv] of Object.entries(memory.providers)) {
       const dProv = base.providers[id] || { lastSyncTime: 0, localTotalRequests: 0, localTotalTokens: 0 };
       const pProv = prev.providers[id] || { localTotalRequests: 0, localTotalTokens: 0 };
-      
+
       const deltaReq = Math.max(0, mProv.localTotalRequests - pProv.localTotalRequests);
       const deltaTok = Math.max(0, mProv.localTotalTokens - pProv.localTotalTokens);
 
@@ -355,6 +433,22 @@ export class PersistenceManager {
         cooldownUntil: mProv.cooldownUntil ?? dProv.cooldownUntil,
         totalErrors: mProv.totalErrors ?? dProv.totalErrors
       };
+    }
+
+    // Merge search providers
+    const baseSearch = base.searchProviders || {};
+    const memSearch = memory.searchProviders || {};
+    if (Object.keys(baseSearch).length > 0 || Object.keys(memSearch).length > 0) {
+      result.searchProviders = { ...baseSearch };
+      for (const [sId, mSProv] of Object.entries(memSearch)) {
+        const dSProv = baseSearch[sId] || {};
+        result.searchProviders[sId] = {
+          ...dSProv,
+          consecutiveFailures: mSProv.consecutiveFailures ?? dSProv.consecutiveFailures,
+          cooldownUntil: mSProv.cooldownUntil ?? dSProv.cooldownUntil,
+          lastFailure: mSProv.lastFailure ?? dSProv.lastFailure
+        };
+      }
     }
 
     return result;

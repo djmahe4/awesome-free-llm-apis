@@ -4,7 +4,7 @@ import { saveFixture } from './fixture-helper.js';
 export async function runAmbiguityResolutionTest(workspaceRoot: string, model: string): Promise<{ success: boolean; decomposed: boolean }> {
     console.log('\n[Case E] Running Confused User / Ambiguous Query Resolution via use_free_llm...');
 
-    const systemPrompt = `You are a Customer Support Specialist and Technical Troubleshooting Assistant. 
+    const systemPrompt = `You are a Customer Support Specialist and Technical Troubleshooting Assistant.
 When a user asks for a code modification or bug fix but fails to provide essential details (such as the database type, error message, exact files, or connection strings), your goal is to politely decline to guess and instead ask 3-4 highly specific clarifying questions.`;
 
     try {

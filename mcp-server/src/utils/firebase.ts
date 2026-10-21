@@ -124,7 +124,7 @@ export async function initFirebase(): Promise<string> {
                 cachedIdToken = refreshed.idToken;
                 idTokenExpiry = Date.now() + refreshed.expiresIn * 1000;
                 cachedRefreshToken = refreshed.refreshToken;
-                
+
                 // Background-probe Firestore before declaring isOffline = false
                 const firestoreOnline = await probeFirestore(refreshed.userId);
                 if (firestoreOnline) {
@@ -134,7 +134,7 @@ export async function initFirebase(): Promise<string> {
                     markOffline();
                     state.lastSyncFailedTime = Date.now();
                 }
-                
+
                 (state as any).firebaseRefreshToken = refreshed.refreshToken;
                 state.firebaseUid = refreshed.userId;
                 state.userId = refreshed.userId;
@@ -262,7 +262,7 @@ async function getValidIdToken(): Promise<string> {
             cachedIdToken = refreshed.idToken;
             idTokenExpiry = Date.now() + refreshed.expiresIn * 1000;
             cachedRefreshToken = refreshed.refreshToken;
-            
+
             const state = await persistence.load();
             (state as any).firebaseRefreshToken = refreshed.refreshToken;
             await persistence.save(state);
@@ -276,7 +276,7 @@ export async function syncStats(userId: string, data: any): Promise<boolean> {
     try {
         const token = await getValidIdToken();
         const todayStr = new Date().toISOString().split('T')[0];
-        
+
         const userDocData = {
             fields: {
                 username: { stringValue: data.username || `anonymous-${userId.substring(0, 6)}` },
@@ -336,12 +336,12 @@ function sanitizeText(text: string): string {
 function logFirebaseError(message: string, err: any) {
     if (isOffline) return;
     const errMsg = err?.message || String(err);
-    const isNetworkError = 
-        errMsg.includes('fetch failed') || 
-        errMsg.includes('timeout') || 
-        errMsg.includes('ConnectTimeoutError') || 
-        errMsg.includes('aborted') || 
-        err?.name === 'AbortError' || 
+    const isNetworkError =
+        errMsg.includes('fetch failed') ||
+        errMsg.includes('timeout') ||
+        errMsg.includes('ConnectTimeoutError') ||
+        errMsg.includes('aborted') ||
+        err?.name === 'AbortError' ||
         err?.code === 'UND_ERR_CONNECT_TIMEOUT';
     if (isNetworkError) {
         console.warn(`${message} (Network offline/timeout: ${errMsg})`);
@@ -361,7 +361,7 @@ export async function logErrorTelemetry(userId: string, errorMsg: string, stack:
         const token = await getValidIdToken();
         const errorId = crypto.randomUUID();
         const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/errors/${errorId}`;
-        
+
         const cleanPrompts = promptQueue.map(p => sanitizeText(p));
         const cleanComms = commsQueue.map(c => sanitizeText(c));
         const cleanError = sanitizeText(errorMsg);
@@ -652,7 +652,7 @@ export async function getLeaderboard(currentUserId?: string): Promise<any[]> {
     try {
         const token = await getValidIdToken();
         const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:runQuery`;
-        
+
         const queryBody = {
             structuredQuery: {
                 from: [{ collectionId: 'users' }],
@@ -688,11 +688,11 @@ export async function getLeaderboard(currentUserId?: string): Promise<any[]> {
             for (const item of data) {
                 const doc = item.document;
                 if (!doc) continue;
-                
+
                 const pathParts = doc.name.split('/');
                 const docId = pathParts[pathParts.length - 1];
                 const fields = doc.fields || {};
-                
+
                 const isCurrent = docId === currentUserId;
                 if (isCurrent) {
                     currentUserInTop10 = true;

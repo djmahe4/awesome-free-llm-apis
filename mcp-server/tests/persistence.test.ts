@@ -22,7 +22,7 @@ describe('Persistence Layer Hardening', () => {
     it('should initialize with empty state if file missing', async () => {
         const pm = new PersistenceManager(testFile);
         const state = await pm.load();
-        
+
         expect(state.dailyTotalRequests).toBe(0);
         expect(state.lifetimeTotalRequests).toBe(0);
         expect(state.providers).toEqual({});
@@ -30,7 +30,7 @@ describe('Persistence Layer Hardening', () => {
 
     it('should perform atomic Read-Merge-Write (JSON Update Test)', async () => {
         const pm = new PersistenceManager(testFile);
-        
+
         // 1. Initial save
         const initialState: PersistentUsage = {
             lastResetDate: new Date().toISOString().split('T')[0],
@@ -51,7 +51,7 @@ describe('Persistence Layer Hardening', () => {
         diskState.dailyTotalRequests = 10; // Modified by "another process"
         diskState.providers = diskState.providers || {};
         diskState.providers['p2'] = { lastSyncTime: Date.now(), localTotalRequests: 5, localTotalTokens: 500 };
-        
+
         const encryptedDisk = await encrypt(JSON.stringify(diskState));
         await fs.writeFile(testFile, encryptedDisk, 'utf8');
 
@@ -69,13 +69,13 @@ describe('Persistence Layer Hardening', () => {
         const finalRaw = await fs.readFile(testFile, 'utf8');
         const finalDecrypted = await decrypt(finalRaw);
         const finalState = JSON.parse(finalDecrypted);
-        
+
         // Global daily counts should be additive (atomic RMW merge using deltas)
         expect(finalState.dailyTotalRequests).toBe(11); // base(10) + delta(1) = 11
-        
+
         // p1 should be updated (latest sync wins)
         expect(finalState.providers['p1'].localTotalRequests).toBe(2);
-        
+
         // p2 should be preserved (merged from disk)
         expect(finalState.providers['p2']).toBeDefined();
         expect(finalState.providers['p2'].localTotalRequests).toBe(5);
@@ -83,7 +83,7 @@ describe('Persistence Layer Hardening', () => {
 
     it('should handle daily reset on loading stale data', async () => {
         const pm = new PersistenceManager(testFile);
-        
+
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = yesterday.toISOString().split('T')[0];
@@ -100,7 +100,7 @@ describe('Persistence Layer Hardening', () => {
         await fs.writeFile(testFile, encryptedStale, 'utf8');
 
         const loaded = await pm.load();
-        
+
         expect(loaded.lastResetDate).toBe(new Date().toISOString().split('T')[0]);
         expect(loaded.dailyTotalRequests).toBe(0); // Reset
         expect(loaded.lifetimeTotalRequests).toBe(1000); // Preserved

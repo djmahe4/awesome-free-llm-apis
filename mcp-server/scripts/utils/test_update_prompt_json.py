@@ -18,9 +18,9 @@ class TestUpdatePromptJson(unittest.TestCase):
         """
         title = "THE MISSION"
         content = "This is a mission about work and writing."
-        
+
         keywords = generate_keywords(title, content)
-        
+
         # Expected keywords based on the current implementation (words >= 4 chars)
         # 'the' (3) -> skip
         # 'mission' (7) -> keep
@@ -30,14 +30,14 @@ class TestUpdatePromptJson(unittest.TestCase):
         # 'work' (4) -> keep (noise)
         # 'and' (3) -> skip
         # 'writing' (7) -> keep
-        
+
         noise_words = {'this', 'about', 'work'}
-        
+
         found_noise = [word for word in keywords if word in noise_words]
-        
+
         print(f"\nGenerated keywords: {keywords}")
         print(f"Noise words found: {found_noise}")
-        
+
         # If we find noise, the test "succeeds" in demonstrating the bug.
         # In a real test, we'd want this to fail if we expect no noise.
         # For a reproduction script, we assert that noise IS present.

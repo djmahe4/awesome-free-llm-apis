@@ -51,7 +51,7 @@ import { validateProvider } from './tools/validate-provider.js';
 import { flushSystem, useFreeLLM } from './tools/use-free-llm.js';
 import { visionTool } from './tools/vision-tool.js';
 import { executeSkill } from './tools/execute-skill.js';
-import { manageMemory } from './tools/manage-memory.js';
+import { manageMemory, type ManageMemoryInput } from './tools/manage-memory.js';
 import { indexWorkspace } from './tools/index-workspace.js';
 import { cyberTool } from './tools/cyber-tool.js';
 import { getSharedRouter } from './pipeline/instances.js';
@@ -62,8 +62,10 @@ import { initFirebase, syncStats, getLeaderboard, getUserStats, getRecentSearchL
 import { SearchProviderRegistry } from './search/registry.js';
 import { withFileLock } from './utils/file-lock.js';
 import { writeFileAtomic } from './utils/FileUtils.js';
+import { resolvePathWithinRoots, pathParamWithinRoots, relativeSegmentError } from './utils/workspace-roots.js';
 import { WorkspaceScanner } from './cache/workspace.js';
 import { STATE_FILE } from './pipeline/middlewares/constants.js';
+import { createHandshake, renderLeaseModule, requireWikiLease, assertDashboardFetch, LeaseError } from './wiki-lease.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -78,7 +80,7 @@ async function validateSandboxDependencies() {
   let pythonPath: string | null = null;
   const projectRoot = path.resolve(__dirname, '..');
   const isWin = process.platform === 'win32';
-  
+
   const venvPaths = [
     path.join(projectRoot, '.venv', isWin ? 'Scripts/python.exe' : 'bin/python3'),
     path.join(projectRoot, 'venv', isWin ? 'Scripts/python.exe' : 'bin/python3'),
@@ -87,15 +89,15 @@ async function validateSandboxDependencies() {
     path.join(projectRoot, '.venv', isWin ? 'python.exe' : 'bin/python3'),
     path.join(projectRoot, 'venv', isWin ? 'python.exe' : 'bin/python3'),
   ];
-  
+
   for (const vp of venvPaths) {
     if (fs.existsSync(vp)) {
       pythonPath = vp;
       break;
     }
   }
-  
-  const pythonCommands = isWin 
+
+  const pythonCommands = isWin
     ? ['python', 'python3', 'py']
     : ['python3', 'python'];
 
@@ -121,7 +123,7 @@ async function initTelemetry(force = false) {
       state.lastSyncFailedTime = undefined;
       await persistence.save(state);
     }
-    
+
     // Ensure userId is established (authenticate anonymously) and aligned with the active Firebase session
     const uid = await initFirebase();
     if (state.userId !== uid) {
@@ -129,7 +131,7 @@ async function initTelemetry(force = false) {
       state.username = state.username || `anonymous-${uid.substring(0, 6)}`;
       await persistence.save(state);
     }
-    
+
     // Check if session has expired or is not set
     const now = Date.now();
     if (!state.sessionToken || !state.sessionExpiresAt || now >= state.sessionExpiresAt) {
@@ -137,7 +139,7 @@ async function initTelemetry(force = false) {
       state.sessionExpiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
       await persistence.save(state);
     }
-    
+
     // Sync if more than 24 hours have passed since lastSyncTime, and at least 1 hour since last failure
     const hoursSinceSync = (now - (state.lastSyncTime || 0)) / (1000 * 60 * 60);
     const msSinceFailure = now - (state.lastSyncFailedTime || 0);
@@ -181,7 +183,36 @@ export function createExpressApp(): express.Express {
     }
   }));
   app.use(cors());
-  app.use(express.json());
+  // Size-aware JSON parsing. The global express.json() default (100kb) runs
+  // before route-level parsers, which makes their `limit` options dead code —
+  // so limits are decided here from method+path instead.
+  const JSON_LIMIT_RULES: Array<{ method?: string; pattern: RegExp | string; limit: string }> = [
+    { method: 'patch', pattern: /^\/api\/sessions\/[^/]+$/, limit: '8kb' },
+    { pattern: '/api/chat-log/resolve', limit: '4kb' },
+    { pattern: /^\/api\/chat-log\/[^/]+$/, limit: '512kb' },
+    { pattern: '/api/sessions', limit: '16kb' },
+    { pattern: '/api/quantum_tool', limit: '2mb' },
+    { pattern: '/api/wiki/page', limit: '2mb' },
+    { pattern: '/api/steering_eval', limit: '1mb' },
+    { pattern: '/api/tool', limit: '10mb' },
+    { pattern: '/api/browser_tool', limit: '10mb' },
+    { pattern: '/api/cyber_tool', limit: '10mb' },
+    { pattern: '/api/movie_tool', limit: '10mb' },
+    { pattern: /^\/api\/movie(\/|$)/, limit: '10mb' },
+  ];
+  const jsonLimitFor = (method: string, url: string): string => {
+    const pathname = url.split('?')[0];
+    for (const rule of JSON_LIMIT_RULES) {
+      if (rule.method && rule.method !== method.toLowerCase()) continue;
+      const hit = typeof rule.pattern === 'string' ? rule.pattern === pathname : rule.pattern.test(pathname);
+      if (hit) return rule.limit;
+    }
+    return '100kb';
+  };
+  app.use((req, res, next) => {
+    if (req.method !== 'POST' && req.method !== 'PUT' && req.method !== 'PATCH') return next();
+    return express.json({ limit: jsonLimitFor(req.method, req.originalUrl) })(req, res, next);
+  });
 
   // API endpoints for dashboard
 
@@ -248,14 +279,14 @@ export function createExpressApp(): express.Express {
       app.post('/api/user-config', async (req, res) => {
         try {
           const { username, optOutTelemetry } = req.body;
-          
+
           if (username !== undefined) {
             if (typeof username !== 'string' || username.length < 3 || username.length > 20 || !/^[a-zA-Z0-9_-]+$/.test(username)) {
               res.status(400).json({ error: 'Username must be 3-20 alphanumeric characters, underscores or hyphens' });
               return;
             }
           }
-          
+
           const state = await persistence.load();
           if (username !== undefined) {
             state.username = username;
@@ -263,14 +294,14 @@ export function createExpressApp(): express.Express {
           if (optOutTelemetry !== undefined) {
             state.optOutTelemetry = !!optOutTelemetry;
           }
-          
+
           await persistence.save(state);
-          
+
           // Sync immediately to Firestore if telemetry is not opted out
           if (state.userId && !state.optOutTelemetry) {
             await syncStats(state.userId, state);
           }
-          
+
           res.json({ success: true, username: state.username, optOutTelemetry: state.optOutTelemetry });
         } catch (err) {
           res.status(500).json({ error: String(err) });
@@ -281,7 +312,7 @@ export function createExpressApp(): express.Express {
         try {
           const state = await persistence.load();
           const list = await getLeaderboard(state.userId);
-          
+
           // Local fallback: ensure the current user is always visible
           if (!list.some((u: any) => u.isCurrentUser)) {
             list.push({
@@ -293,7 +324,7 @@ export function createExpressApp(): express.Express {
             });
             list.sort((a: any, b: any) => b.lifetimeTokens - a.lifetimeTokens);
           }
-          
+
           res.json(list);
         } catch (err) {
           res.status(500).json({ error: String(err) });
@@ -344,7 +375,9 @@ export function createExpressApp(): express.Express {
       // Search-provider health for the dashboard's Providers tab Search section (v1.0.9).
       app.get('/api/search-provider-stats', async (req, res) => {
         try {
-          const providers = SearchProviderRegistry.getInstance().getProviders();
+          const registry = SearchProviderRegistry.getInstance();
+          await registry.ensureInitialized();
+          const providers = registry.getProviders();
           const stats = providers.map(p => ({
             id: p.id,
             name: p.name,
@@ -407,10 +440,23 @@ export function createExpressApp(): express.Express {
               result = await validateProvider(params.providerId);
               break;
             case 'use_free_llm': {
-              const messages = Array.isArray(params.messages)
+              // Sanitize messages: ensure each message content is a valid string or parts array,
+              // not a corrupted value (e.g. PowerShell "System.Collections.Hashtable" from
+              // ConvertTo-Json without -Depth 4, or any non-string non-array content).
+              const rawMessages = Array.isArray(params.messages)
                 ? params.messages
                 : [{ role: 'user', content: String(params.messages || params.prompt || '') }];
-              
+              const messages = rawMessages
+                .filter((m: any) => m && typeof m === 'object' && typeof m.role === 'string')
+                .map((m: any) => {
+                  const c = m.content;
+                  // Valid: string, or array of {type,text} parts
+                  if (typeof c === 'string') return m;
+                  if (Array.isArray(c)) return m;
+                  // Invalid (e.g. Hashtable stringified, null, undefined, object): coerce to string
+                  return { ...m, content: c == null ? '' : String(c) };
+                });
+
               // Resolve sessionId from workspace_root using the same algorithm as the real pipeline
               let sid = params.sessionId;
               if (!sid && params.workspace_root) {
@@ -422,18 +468,69 @@ export function createExpressApp(): express.Express {
                 }
               }
 
-              const r = await useFreeLLM({
-                messages,
-                model: params.model,
-                keywords: params.keywords,
-                agentic: !!params.agentic,
-                workspace_root: params.workspace_root,
-                sessionId: sid || '__no_ws__',
-                skipIndexing: !!params.skipIndexing,
-                action: params.action,
-                resume_input: params.resume_input,
-              });
-              result = { content: r?.choices?.[0]?.message?.content ?? '', model: r?.model, provider: r?._providerId };
+              // Wrap in a 120s timeout so the HTTP connection never hangs indefinitely
+              // (all providers exhausted → TextRouterMiddleware throws, but only after many attempts)
+              const TOOL_TIMEOUT_MS = 120_000;
+              const toolAbort = new AbortController();
+              const toolTimer = setTimeout(() => toolAbort.abort(), TOOL_TIMEOUT_MS);
+              const onClose = () => toolAbort.abort();
+              req.on('close', onClose);
+
+              if (params.stream) {
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+                if (typeof (res as any).flushHeaders === 'function') {
+                  (res as any).flushHeaders();
+                }
+                try {
+                  const r = await useFreeLLM({
+                    messages,
+                    model: params.model,
+                    keywords: params.keywords,
+                    agentic: !!params.agentic,
+                    workspace_root: params.workspace_root,
+                    sessionId: sid || '__no_ws__',
+                    skipIndexing: !!params.skipIndexing,
+                    action: params.action,
+                    resume_input: params.resume_input,
+                    signal: toolAbort.signal,
+                    stream: true,
+                    onChunk: (chunk: string) => {
+                      res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+                    }
+                  });
+                  res.write(`data: ${JSON.stringify({ done: true, model: r?.model, provider: r?._providerId, latencyMs: Date.now() - start })}\n\n`);
+                  res.write('data: [DONE]\n\n');
+                  res.end();
+                } catch (err: any) {
+                  res.write(`data: ${JSON.stringify({ error: err?.message || String(err) })}\n\n`);
+                  res.end();
+                } finally {
+                  clearTimeout(toolTimer);
+                  req.off('close', onClose);
+                }
+                return;
+              }
+
+              try {
+                const r = await useFreeLLM({
+                  messages,
+                  model: params.model,
+                  keywords: params.keywords,
+                  agentic: !!params.agentic,
+                  workspace_root: params.workspace_root,
+                  sessionId: sid || '__no_ws__',
+                  skipIndexing: !!params.skipIndexing,
+                  action: params.action,
+                  resume_input: params.resume_input,
+                  signal: toolAbort.signal,
+                });
+                result = { content: r?.choices?.[0]?.message?.content ?? '', model: r?.model, provider: r?._providerId };
+              } finally {
+                clearTimeout(toolTimer);
+                req.off('close', onClose);
+              }
               break;
             }
             case 'vision_tool': {
@@ -466,6 +563,25 @@ export function createExpressApp(): express.Express {
                 content: params.content,
                 tags: params.tags,
                 links: params.links,
+                persona: params.persona,
+                namespace: params.namespace,
+                node: params.node,
+                nodeId: params.nodeId,
+                from: params.from,
+                to: params.to,
+                relation: params.relation,
+                task: params.task,
+                urgent: params.urgent,
+                important: params.important,
+                quadrant: params.quadrant,
+                includeCompleted: params.includeCompleted,
+                taskId: params.taskId,
+                sessionRefId: params.sessionRefId,
+                label: params.label,
+                durationMinutes: params.durationMinutes,
+                aborted: params.aborted,
+                pomodoroLimit: params.pomodoroLimit,
+                autoClassify: params.autoClassify,
               });
               break;
             case 'index_workspace':
@@ -481,6 +597,9 @@ export function createExpressApp(): express.Express {
                 name: params.name,
                 keywords: params.keywords,
                 workspaceDir: params.workspaceDir,
+                source: params.source,
+                sessionId: params.sessionId,
+                pollAction: params.pollAction,
               });
               break;
             }
@@ -492,7 +611,11 @@ export function createExpressApp(): express.Express {
                 what: Array.isArray(params.what) ? params.what : [params.what],
                 why: params.why,
                 files: params.files,
+                example: params.example,
+                script_instructions: params.script_instructions,
                 workspace_root: params.workspace_root,
+                sessionId: params.sessionId,
+                pollAction: params.pollAction,
               });
               break;
             }
@@ -514,11 +637,37 @@ export function createExpressApp(): express.Express {
               result = await CodingAgentsHandler(params);
               break;
             }
+            case 'agent_harness': {
+              // Forwarded wholesale (not field-by-field) deliberately — a
+              // per-field whitelist here is exactly what silently dropped new
+              // manage_memory fields twice this session. New agent_harness
+              // params never need a matching edit in this route again.
+              const { agentHarness } = await import('./tools/agent-harness.js');
+              result = await agentHarness(params);
+              break;
+            }
+            case 'browser_tool': {
+              const { dispatchBrowserAction } = await import('./browser/dispatch.js');
+              result = await dispatchBrowserAction(params);
+              break;
+            }
+            case 'movie_tool': {
+              const paramGuard = pathParamWithinRoots(params.projectDir, 'projectDir')
+                ?? relativeSegmentError(params.projectId, 'projectId')
+                ?? pathParamWithinRoots(params.artifact_path, 'artifact_path');
+              if (paramGuard) {
+                res.status(400).json({ error: paramGuard });
+                return;
+              }
+              const { runMovieTool } = await import('./tools/movie-tool.js');
+              result = await runMovieTool(params);
+              break;
+            }
             default:
               res.status(400).json({ error: `Unknown tool: ${tool}` });
               return;
           }
-          const selfLoggingTools = new Set(['use_free_llm', 'coding_agents', 'local_llm_patch', 'quantum_tool', 'cyber_tool']);
+          const selfLoggingTools = new Set(['use_free_llm', 'coding_agents', 'local_llm_patch', 'quantum_tool', 'cyber_tool', 'movie_tool', 'browser_tool']);
           if (!selfLoggingTools.has(tool)) {
             const sid = params.sessionId || '__no_ws__';
             const { logToolCall } = await import('./utils/ChatLogger.js');
@@ -536,7 +685,7 @@ export function createExpressApp(): express.Express {
       app.post('/api/coding_agents', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
-          const { goal, workspaceRoot, dryRun, topKFiles, sessionId, verifyLspDiagnostics } = req.body || {};
+          const { goal, workspaceRoot, dryRun, topKFiles, sessionId, verifyLspDiagnostics, resolve } = req.body || {};
           if (!goal) {
             res.status(400).json({ error: 'goal is required' });
             return;
@@ -548,7 +697,8 @@ export function createExpressApp(): express.Express {
             dryRun: dryRun ?? true,
             topKFiles: topKFiles ?? 5,
             sessionId,
-            verifyLspDiagnostics: verifyLspDiagnostics ?? true
+            verifyLspDiagnostics: verifyLspDiagnostics ?? true,
+            resolve
           });
           res.json(result);
         } catch (err: any) {
@@ -608,7 +758,7 @@ export function createExpressApp(): express.Express {
           let relativePath: string | undefined;
           if (workspaceRoot) {
             const wsAbs = path.resolve(workspaceRoot);
-            
+
             // Path traversal safety gate: restrict allowed roots
             const normAbs = wsAbs.replace(/\\/g, '/');
             const allowedPrefixes = [
@@ -623,7 +773,7 @@ export function createExpressApp(): express.Express {
               const normPrefix = prefix.replace(/\/$/, '') + '/';
               return normAbs === prefix || normAbs.startsWith(normPrefix);
             });
-            
+
             if (!isSafe) {
               res.status(400).json({ error: 'workspace_root path traversal check failed (Security Gate)' });
               return;
@@ -768,7 +918,7 @@ export function createExpressApp(): express.Express {
 
           // Denylist: strictly exclude all test/benchmark/fixture/vitest/mock directories that pollute the dashboard
           const DENYLIST_PREFIXES = [
-            'test-', 'bench-', 'smoke-', 'stress-', 'full-stress-', 'e2e-', 
+            'test-', 'bench-', 'smoke-', 'stress-', 'full-stress-', 'e2e-',
             'simulation-', 'study-', 'vitest-', 'fixture-', 'mock-', 'tmp-'
           ];
 
@@ -958,6 +1108,161 @@ export function createExpressApp(): express.Express {
         }
       });
 
+      // ------------------------------------------------------------------
+      // /api/wiki/* — dedicated wiki endpoints for the dashboard (PR #64).
+      //
+      // Data routes are gated by the hybrid post-quantum lease issued from
+      // GET /api/wiki/lease.mjs (hard 401 {ok:false,error} without one).
+      // Envelope: { ok: true, result } / { ok: false, error }.
+      // ------------------------------------------------------------------
+      const wikiQuery = (value: unknown): string | undefined => {
+        const single = Array.isArray(value) ? value[0] : value;
+        return typeof single === 'string' && single.length ? single : undefined;
+      };
+
+      const wikiWorkspaceRoot = (req: express.Request): string | undefined =>
+        wikiQuery(req.query.workspace_root) ?? wikiQuery((req.body as Record<string, unknown> | undefined)?.workspace_root);
+
+      const wikiRequireString = (value: unknown, field: string): string => {
+        if (typeof value !== 'string' || !value.length) throw new LeaseError(`${field} is required`, 400);
+        return value;
+      };
+
+      const wikiOptionalStringList = (value: unknown, field: string): string[] | undefined => {
+        if (value === undefined || value === null) return undefined;
+        if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+          throw new LeaseError(`${field} must be an array of strings`, 400);
+        }
+        return value as string[];
+      };
+
+      const wikiFail = (res: express.Response, err: unknown): void => {
+        const message = err instanceof Error ? err.message : String(err);
+        const status = err instanceof LeaseError ? err.status
+          : /requires|does not exist|exceeds maximum size/i.test(message) ? 400
+          : 500;
+        res.status(status).json({ ok: false, error: message });
+      };
+
+      /** rate limit -> lease gate -> handler (handlers catch their own errors). */
+      const wikiData = (
+        method: 'get' | 'post',
+        route: string,
+        handler: (req: express.Request, res: express.Response) => Promise<void>
+      ): void => {
+        app[method](route, (req, res) => {
+          if (!checkRateLimit(req, res)) return;
+          requireWikiLease(req, res, () => {
+            handler(req, res).catch((err) => wikiFail(res, err));
+          });
+        });
+      };
+
+      // Lease issuance: dynamically rendered ESM module, dashboard (same-origin
+      // browser fetch) only. Returns `finish(clientSecrets)` for the caller.
+      app.get('/api/wiki/lease.mjs', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        if (!assertDashboardFetch(req, res)) return;
+        try {
+          const params = createHandshake({
+            kemPub: wikiQuery(req.query.kem) ?? '',
+            xPub: wikiQuery(req.query.x) ?? '',
+          });
+          res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          res.send(renderLeaseModule(params));
+        } catch (err) {
+          wikiFail(res, err);
+        }
+      });
+
+      // GET /api/wiki/pages?include=content — metadata list, or list + content
+      // in one round trip (replaces the dashboard's per-title read fan-out).
+      wikiData('get', '/api/wiki/pages', async (req, res) => {
+        const workspace_root = wikiWorkspaceRoot(req);
+        const list = (await manageMemory({ action: 'wiki_list', workspace_root })) as { pages?: any[] };
+        const pages: any[] = Array.isArray(list?.pages) ? list.pages : [];
+        if (wikiQuery(req.query.include) !== 'content') {
+          res.json({ ok: true, result: { pages } });
+          return;
+        }
+        const withContent = await Promise.all(pages.map(async (meta) => {
+          try {
+            const read = (await manageMemory({ action: 'wiki_read', title: meta.title, workspace_root })) as { page?: any };
+            return { ...meta, content: read?.page?.content ?? '' };
+          } catch {
+            return { ...meta, content: '' };
+          }
+        }));
+        res.json({ ok: true, result: { pages: withContent } });
+      });
+
+      // GET /api/wiki/page?title=
+      wikiData('get', '/api/wiki/page', async (req, res) => {
+        const title = wikiRequireString(wikiQuery(req.query.title), 'title');
+        const result = (await manageMemory({ action: 'wiki_read', title, workspace_root: wikiWorkspaceRoot(req) })) as { page?: any };
+        res.json({ ok: true, result: { page: result?.page ?? null } });
+      });
+
+      // POST /api/wiki/page — upsert { title, content, tags?, links? } (2mb limit)
+      wikiData('post', '/api/wiki/page', async (req, res) => {
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const title = wikiRequireString(body.title, 'title');
+        const content = wikiRequireString(body.content, 'content');
+        const tags = wikiOptionalStringList(body.tags, 'tags');
+        const links = wikiOptionalStringList(body.links, 'links');
+        const written = (await manageMemory({
+          action: 'wiki_write', title, content, tags, links,
+          workspace_root: wikiWorkspaceRoot(req),
+        })) as { page?: any };
+        res.json({ ok: true, result: { page: written?.page ?? null } });
+      });
+
+      // GET /api/wiki/search?query=&limit=&persona=
+      wikiData('get', '/api/wiki/search', async (req, res) => {
+        const query = wikiRequireString(wikiQuery(req.query.query) ?? wikiQuery(req.query.q), 'query');
+        const limit = Number(wikiQuery(req.query.limit)) || 10;
+        const searched = (await manageMemory({
+          action: 'wiki_search', query, limit, persona: wikiQuery(req.query.persona),
+          workspace_root: wikiWorkspaceRoot(req),
+        })) as { results?: any[] };
+        res.json({ ok: true, result: { results: searched?.results ?? [] } });
+      });
+
+      // GET /api/wiki/graph — full node/edge graph
+      wikiData('get', '/api/wiki/graph', async (req, res) => {
+        const graph = await manageMemory({ action: 'graph_query', workspace_root: wikiWorkspaceRoot(req) });
+        res.json({ ok: true, result: graph });
+      });
+
+      // POST /api/wiki/graph/node — { node }
+      wikiData('post', '/api/wiki/graph/node', async (req, res) => {
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const node = body.node;
+        if (typeof node !== 'object' || node === null || Array.isArray(node)) {
+          throw new LeaseError('node object is required', 400);
+        }
+        const created = await manageMemory({
+          action: 'node_add',
+          node: node as ManageMemoryInput['node'],
+          workspace_root: wikiWorkspaceRoot(req),
+        });
+        res.json({ ok: true, result: created });
+      });
+
+      // POST /api/wiki/graph/link — { from, to, relation }
+      wikiData('post', '/api/wiki/graph/link', async (req, res) => {
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const from = wikiRequireString(body.from, 'from');
+        const to = wikiRequireString(body.to, 'to');
+        const relation = wikiRequireString(body.relation, 'relation');
+        const linked = await manageMemory({
+          action: 'node_link', from, to, relation,
+          workspace_root: wikiWorkspaceRoot(req),
+        });
+        res.json({ ok: true, result: linked });
+      });
+
       // Helper to read and normalize chat log format (chat-logs.json or chat-log.json)
       async function readNormalizedChatLog(dirPath: string): Promise<any[]> {
         let raw = '';
@@ -1047,11 +1352,239 @@ export function createExpressApp(): express.Express {
         }
       });
 
+      // ─── Harness & Multi-Agent Telemetry API ─────────────────────────────────
+      app.get('/api/harness/runs', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const workspaceRoot = (req.query.workspace as string) || process.cwd();
+          const harnessDir = path.resolve(workspaceRoot, '.free-llm-mcp', 'harness');
+          const wikiDir = path.resolve(workspaceRoot, '.free-llm-mcp', 'wiki');
+
+          // Collect workspace wiki page metadata for knowledge nexus visualization
+          let wikiPages: Array<{ title: string; updatedAt: number; size: number; snippet?: string }> = [];
+          if (fs.existsSync(wikiDir)) {
+            try {
+              const files = await fsp.readdir(wikiDir);
+              wikiPages = await Promise.all(
+                files.filter(f => f.endsWith('.md')).slice(0, 50).map(async f => {
+                  const stat = await fsp.stat(path.join(wikiDir, f));
+                  let snippet = '';
+                  try {
+                    const content = await fsp.readFile(path.join(wikiDir, f), 'utf-8');
+                    snippet = content.replace(/^---[\s\S]*?---\s*/, '').slice(0, 140).trim();
+                  } catch {}
+                  return { title: f.replace(/\.md$/, ''), updatedAt: stat.mtimeMs, size: stat.size, snippet };
+                })
+              );
+            } catch {}
+          }
+
+          if (!fs.existsSync(harnessDir)) {
+            return res.json({ runs: [], activeScopes: [], reasoningScopes: [], wikiPages });
+          }
+
+          const entries = await fsp.readdir(harnessDir);
+          const runs: any[] = [];
+          for (const runId of entries) {
+            if (!/^[a-zA-Z0-9_\-\.]{1,128}$/.test(runId)) continue;
+            const runJsonPath = path.join(harnessDir, runId, 'run.json');
+            try {
+              if (fs.existsSync(runJsonPath)) {
+                const data = JSON.parse(await fsp.readFile(runJsonPath, 'utf-8'));
+                runs.push(data);
+              }
+            } catch {}
+          }
+
+          // Load active file and reasoning scopes
+          let activeScopes: any[] = [];
+          const scopeFile = path.join(harnessDir, 'scopes.json');
+          if (fs.existsSync(scopeFile)) {
+            try { activeScopes = JSON.parse(await fsp.readFile(scopeFile, 'utf-8')); } catch {}
+          }
+
+          let reasoningScopes: any[] = [];
+          const reasoningFile = path.join(harnessDir, 'reasoning_scopes.json');
+          if (fs.existsSync(reasoningFile)) {
+            try { reasoningScopes = JSON.parse(await fsp.readFile(reasoningFile, 'utf-8')); } catch {}
+          }
+
+          res.json({ runs, activeScopes, reasoningScopes, wikiPages });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      app.get('/api/harness/runs/:runId', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runId } = req.params;
+          const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit as string) || 250));
+          const workspaceRoot = (req.query.workspace as string) || process.cwd();
+          const { HarnessStore } = await import('./harness/store.js');
+          const store = new HarnessStore(runId, workspaceRoot);
+          const run = await store.loadRun();
+          if (!run) return res.status(404).json({ error: 'Run not found' });
+          const approvals = await store.listApprovals();
+          const trace = await store.readTrace(limit);
+          const rawTasks = await store.loadTasksMarkdown();
+          const { readSessionMemory } = await import('./harness/session-memory.js');
+          const sessionMemory = await readSessionMemory(store.runDirPath);
+          res.json({ run, approvals, trace, tasks: rawTasks, sessionMemory });
+        } catch (err) {
+          res.status(500).json({ error: String(err) });
+        }
+      });
+
+      // ─── Dedicated Movie Tool Endpoints ─────────────────────────────────────
+      app.post('/api/movie_tool', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const body = req.body || {};
+          const paramGuard = pathParamWithinRoots(body.projectDir, 'projectDir')
+            ?? relativeSegmentError(body.projectId, 'projectId')
+            ?? pathParamWithinRoots(body.artifact_path, 'artifact_path');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const result = await runMovieTool(body);
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      app.get('/api/movie_tool/timeline/:projectId', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { projectId } = req.params;
+          const paramGuard = relativeSegmentError(projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const result = await runMovieTool({ action: 'get_timeline', projectId });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      // ─── Dedicated Media Preview Endpoint ───────────────────────────────────
+      app.get('/api/media/preview', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const rawFile = (req.query.file as string || '').trim();
+          if (!rawFile || rawFile.includes('\0')) {
+            return res.status(400).json({ error: 'Valid file parameter required' });
+          }
+
+          const resolvedPath = resolvePathWithinRoots(rawFile);
+          if (!resolvedPath) {
+            return res.status(403).json({ error: 'File is outside the allowed roots (WORKSPACE_ROOTS)' });
+          }
+
+          // Disallow traversal outside allowed file extensions or root boundary if relative
+          const allowedExts = new Set(['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.flac', '.png', '.jpg', '.jpeg', '.webp', '.pdf']);
+          const ext = path.extname(resolvedPath).toLowerCase();
+          if (!allowedExts.has(ext)) {
+            return res.status(400).json({ error: `File type ${ext} not permitted for media preview` });
+          }
+
+          if (!fs.existsSync(resolvedPath)) {
+            return res.status(404).json({ error: 'File not found' });
+          }
+
+          return res.sendFile(resolvedPath);
+        } catch (err: any) {
+          res.status(500).json({ error: String(err?.message || err) });
+        }
+      });
+
+      // Convenience aliases matching plan specification (/api/movie/*)
+      app.get('/api/movie/timeline', async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const projectId = (req.query.projectId as string) || 'default';
+          const projectIdGuard = relativeSegmentError(projectId, 'projectId');
+          if (projectIdGuard) {
+            return res.status(400).json({ success: false, error: projectIdGuard });
+          }
+          let projectDir: string | undefined = undefined;
+          const rawWorkspace = req.query.workspace as string;
+          if (rawWorkspace && typeof rawWorkspace === 'string') {
+            const trimmed = rawWorkspace.trim();
+            if (trimmed) {
+              const candidate = resolvePathWithinRoots(trimmed);
+              if (!candidate) {
+                return res.status(400).json({ success: false, error: 'workspace is outside the allowed roots (WORKSPACE_ROOTS)' });
+              }
+              try {
+                if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+                  projectDir = candidate;
+                }
+              } catch {}
+            }
+          }
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const result = await runMovieTool({ action: 'get_timeline', projectId, projectDir });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      app.post('/api/movie/artifact', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const paramGuard = pathParamWithinRoots(req.body?.projectDir, 'projectDir') ?? relativeSegmentError(req.body?.projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
+          const result = await runMovieTool({ ...req.body, action: 'add_artifact' });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      app.post('/api/movie/effect', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const paramGuard = pathParamWithinRoots(req.body?.projectDir, 'projectDir') ?? relativeSegmentError(req.body?.projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
+          const result = await runMovieTool({ ...req.body, action: 'apply_effect' });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
+      app.post('/api/movie/approve', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const { runMovieTool } = await import('./tools/movie-tool.js');
+          const paramGuard = pathParamWithinRoots(req.body?.projectDir, 'projectDir') ?? relativeSegmentError(req.body?.projectId, 'projectId');
+          if (paramGuard) {
+            return res.status(400).json({ success: false, error: paramGuard });
+          }
+          const result = await runMovieTool({ ...req.body, action: 'approve_artifact' });
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
       // POST /api/steering_eval — Live System Prompt Steering & Ingestion Inspection Endpoint
       app.post('/api/steering_eval', express.json({ limit: '1mb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
-          const { query = '', keywords = [], agentic = false, workspaceRoot = process.cwd(), sessionId = 'steering-eval-session', subtask } = req.body || {};
+          const { query = '', keywords = [], agentic = false, sessionId = 'steering-eval-session', subtask } = req.body || {};
           let rawKeywordsList: string[] = [];
           if (Array.isArray(keywords)) {
             rawKeywordsList = keywords.map(k => String(k));
@@ -1063,13 +1596,15 @@ export function createExpressApp(): express.Express {
             .map(k => k.replace(/[\[\]"'`]/g, '').trim().toLowerCase())
             .filter(Boolean);
 
-          const effectiveKeywords = userKeywords.length > 0
-            ? userKeywords
-            : (query ? (query.toLowerCase().match(/\b[a-z]{3,}\b/g)?.filter((w: string) => !['the','and','for','with','from','that','this','have','are','was','were','lets','check','please','could','would','should'].includes(w)).slice(0, 8) || []) : []);
+          // An explicit `workspaceRoot` key (even empty/null) = faithful evaluation
+          // with no fallback to the server's own directory. Absent key = demo mode
+          // (default to the server's workspace, as the dashboard expects).
+          const hasWorkspaceRootKey = !!(req.body && Object.prototype.hasOwnProperty.call(req.body, 'workspaceRoot'));
+          const workspaceRootRaw = hasWorkspaceRootKey ? (req.body as any).workspaceRoot : undefined;
 
-          let resolvedWsRoot = process.cwd();
-          if (workspaceRoot && typeof workspaceRoot === 'string') {
-            const trimmed = workspaceRoot.trim();
+          let resolvedWsRoot: string | undefined;
+          if (typeof workspaceRootRaw === 'string') {
+            const trimmed = workspaceRootRaw.trim();
             if (trimmed && !trimmed.includes('\0')) {
               try {
                 const candidate = path.isAbsolute(trimmed) ? path.normalize(trimmed) : path.resolve(process.cwd(), trimmed);
@@ -1078,7 +1613,18 @@ export function createExpressApp(): express.Express {
                 }
               } catch {}
             }
+            // explicit empty/invalid string → stays undefined (true no-workspace eval)
+          } else if (!hasWorkspaceRootKey) {
+            resolvedWsRoot = process.cwd();
           }
+
+          // Auto-derived keywords belong to demo mode: a faithful no-workspace
+          // one-shot must not be steered into groundings the caller never asked for.
+          const effectiveKeywords = userKeywords.length > 0
+            ? userKeywords
+            : (resolvedWsRoot !== undefined && query
+                ? (query.toLowerCase().match(/\b[a-z]{3,}\b/g)?.filter((w: string) => !['the','and','for','with','from','that','this','have','are','was','were','lets','check','please','could','would','should'].includes(w)).slice(0, 8) || [])
+                : []);
 
           const { evaluatePromptSections, getIntelligentSystemPrompt } = await import('./pipeline/middlewares/prompts.js');
           const promptEval = await evaluatePromptSections({
@@ -1094,8 +1640,10 @@ export function createExpressApp(): express.Express {
           let planDetails: any = null;
           let subtaskObj: any = null;
 
-          if (agentic) {
-            const { decomposeGoal } = await import('./pipeline/middlewares/AgenticMiddleware.js');
+          // Local (LLM-free) decomposition — also used below for the savings estimate.
+          const { decomposeGoal } = await import('./pipeline/middlewares/AgenticMiddleware.js');
+
+          if (agentic && resolvedWsRoot !== undefined) {
             const { buildExecutionPlan } = await import('./pipeline/middlewares/task-classifier.js');
             const { tasks: steps } = decomposeGoal(query || 'Execute multi-step task');
             const plan = await buildExecutionPlan(steps, resolvedWsRoot);
@@ -1134,30 +1682,47 @@ export function createExpressApp(): express.Express {
 
           await middleware.execute(context, async () => {});
           const steeringTelemetry = context.telemetry?.steeringTelemetry || {};
-          steeringTelemetry.matchedSections = promptEval.matchedSections;
 
-          // Assemble the complete 5-layer system prompt (including L2 ADR/Memory, L3 Wiki, L4 Grep/Workspace, L5 Prompts)
-          let assembledPrompt = await getIntelligentSystemPrompt({
-            context: agentic ? (subtaskObj?.title || query) : query,
-            keywords: effectiveKeywords,
-            memory: context.telemetry?.memoryContext,
-            workspace: context.telemetry?.grepContext,
-            workspaceRoot: resolvedWsRoot,
-            isSubtask: agentic
-          });
+          // Prefer the prompt the middleware actually injected (markers + L2-L4
+          // layers + grounding gate) over a re-assembly that would miss them.
+          const injectedRaw = String(steeringTelemetry.fullAssembledSystemPrompt || '');
+          const hasRealInjection = !agentic && injectedRaw.includes('<!-- WORKSPACE_CONTEXT_START -->');
 
-          if (agentic && subtaskObj) {
-            const taskHeader = `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${subtaskObj.title}\n- **Subtask ID**: ${subtaskObj.id}\n\nStrictly focus on this subtask using the tools provided.`;
-            assembledPrompt = `${assembledPrompt}${taskHeader}`;
+          const buildTaskHeader = (id: string, title: string) =>
+            `\n\n## 📝 CURRENT SUBTASK\nYou are currently executing this subtask:\n- **Task**: ${title}\n- **Subtask ID**: ${id}\n\nStrictly focus on this subtask using the tools provided.`;
+
+          let assembledPrompt = '';
+          if (hasRealInjection) {
+            assembledPrompt = injectedRaw;
+          } else if (agentic) {
+            assembledPrompt = await getIntelligentSystemPrompt({
+              context: subtaskObj?.title || query,
+              keywords: effectiveKeywords,
+              memory: context.telemetry?.memoryContext,
+              workspace: context.telemetry?.grepContext,
+              workspaceRoot: resolvedWsRoot,
+              isSubtask: true
+            });
+            if (subtaskObj) assembledPrompt += buildTaskHeader(subtaskObj.id, subtaskObj.title);
           }
+          // else: non-agentic without a grounding signal — nothing was injected.
+
+          // Only report sections that are actually present in the reported prompt.
+          const matchedSections = assembledPrompt
+            ? promptEval.matchedSections.filter((s: any) => assembledPrompt.includes(s.title))
+            : [];
+          steeringTelemetry.matchedSections = matchedSections;
           steeringTelemetry.fullAssembledSystemPrompt = assembledPrompt;
           steeringTelemetry.planDetails = planDetails;
           steeringTelemetry.subtaskContext = subtaskObj;
 
+          const mem = steeringTelemetry.memoryLayers || (steeringTelemetry.memoryLayers = {});
           const sysTokens = Math.ceil(assembledPrompt.length / 3.8);
-          if (!steeringTelemetry.memoryLayers) steeringTelemetry.memoryLayers = {};
-          steeringTelemetry.memoryLayers.sysPromptTokens = sysTokens;
-          steeringTelemetry.memoryLayers.totalContextTokens = (steeringTelemetry.memoryLayers.shortTermTokens || 0) + (steeringTelemetry.memoryLayers.longTermTokens || 0) + (steeringTelemetry.memoryLayers.wikiTokens || 0) + (steeringTelemetry.memoryLayers.grepTokens || 0) + (steeringTelemetry.memoryLayers.groundingTokens || 0) + sysTokens;
+          mem.sysPromptTokens = sysTokens;
+          // Layers L2-L4 are already embedded in the reported system prompt. The
+          // grounding gate is embedded non-agentic, but AgenticMiddleware appends
+          // it separately to the first prompt (agentic only).
+          mem.totalContextTokens = (mem.shortTermTokens || 0) + sysTokens + (agentic ? (mem.groundingTokens || 0) : 0);
 
           // Structured 5-layer memory hierarchy with explicit priorities and sample extracted text
           const memoryHierarchy = [
@@ -1168,7 +1733,7 @@ export function createExpressApp(): express.Express {
               description: 'Recent conversation turns, immediate user instructions & live subtask execution state',
               tokens: steeringTelemetry.memoryLayers?.shortTermTokens || Math.ceil((query?.length || 10) / 3.8),
               active: true,
-              content: context.telemetry?.memoryContext || `Turn 1: User prompt -> "${query || 'Test query'}"`
+              content: `Turn 1: User prompt -> "${query || 'Test query'}"`
             },
             {
               level: 'L2',
@@ -1204,9 +1769,11 @@ export function createExpressApp(): express.Express {
               description: 'Keyword-targeted prompt.json sections, persona templates & dynamic skills',
               tokens: sysTokens,
               active: sysTokens > 0,
-              content: promptEval.matchedSections.length > 0
-                ? promptEval.matchedSections.map(s => `### ${s.title} (${s.id})\n${s.content || ''}`).join('\n\n')
-                : `### Baseline System Prompt (${sysTokens} tok)\n${assembledPrompt}`
+              content: matchedSections.length > 0
+                ? matchedSections.map(s => `### ${s.title} (${s.id})\n${s.content || ''}`).join('\n\n')
+                : (assembledPrompt
+                    ? `### Baseline System Prompt (${sysTokens} tok)\n${assembledPrompt}`
+                    : '(No system prompt injected — no grounding signal)')
             }
           ];
 
@@ -1215,6 +1782,55 @@ export function createExpressApp(): express.Express {
           steeringTelemetry.dirTree = context.telemetry?.dirTree || '';
           steeringTelemetry.keywords = effectiveKeywords;
           steeringTelemetry.chatHistory = [{ role: 'user', content: query || 'Test query' }];
+
+          // Measured single-pass payload vs estimated agentic run — local
+          // decomposition only (decomposeGoal is LLM-free), no extra model calls.
+          const shortTerm = mem.shortTermTokens || 0;
+          const groundingOnce = mem.groundingTokens || 0;
+          const { tasks: estTasks } = decomposeGoal(query || 'Execute multi-step task');
+          const subtaskCount = agentic
+            ? Math.max(1, planDetails?.phases?.length || estTasks.length)
+            : Math.max(1, estTasks.length);
+
+          const firstSubtaskText = agentic
+            ? assembledPrompt
+            : `${await getIntelligentSystemPrompt({
+                context: estTasks[0]?.task || query,
+                keywords: effectiveKeywords,
+                memory: context.telemetry?.memoryContext,
+                workspace: context.telemetry?.grepContext,
+                workspaceRoot: resolvedWsRoot,
+                isSubtask: true
+              })}${estTasks[0] ? buildTaskHeader(estTasks[0].id, estTasks[0].task) : ''}`;
+          const perSubtaskTokens = Math.ceil(firstSubtaskText.length / 3.8) + shortTerm;
+
+          let singlePassPayloadTokens: number;
+          if (agentic) {
+            const hasSignal = !!(resolvedWsRoot || context.telemetry?.memoryContext || context.telemetry?.grepContext || effectiveKeywords.length);
+            if (hasSignal) {
+              const singlePrompt = await getIntelligentSystemPrompt({
+                context: query,
+                keywords: effectiveKeywords,
+                memory: context.telemetry?.memoryContext,
+                workspace: context.telemetry?.grepContext,
+                workspaceRoot: resolvedWsRoot,
+                isSubtask: false
+              });
+              singlePassPayloadTokens = shortTerm + Math.ceil(singlePrompt.length / 3.8) + groundingOnce;
+            } else {
+              singlePassPayloadTokens = shortTerm;
+            }
+          } else {
+            // Non-agentic: the current payload IS the measured total.
+            singlePassPayloadTokens = mem.totalContextTokens ?? shortTerm;
+          }
+
+          steeringTelemetry.comparison = {
+            singlePassPayloadTokens,
+            agenticFirstSubtaskTokens: perSubtaskTokens + groundingOnce,
+            agenticRunTokens: subtaskCount * perSubtaskTokens + groundingOnce,
+            agenticSubtaskCount: subtaskCount
+          };
 
           res.json({
             success: true,
@@ -1338,9 +1954,45 @@ export function createExpressApp(): express.Express {
       app.get('/sse', handleMcpRequest);
       app.post('/messages', handleMcpRequest);
 
+      // Security headers for dashboard documents (static routes registered
+      // below; API routes above finish before this middleware runs).
+      // script-src hashes cover index.html's two inline <script> blocks
+      // (importmap + mermaid bootstrap) — update them if either block changes.
+      const dashboardCsp = [
+        "default-src 'self'",
+        "script-src 'self' 'sha256-tGpJa3pSXa3a8oU4LBTwCr6knpiQndrqJNGgkEtIEqc=' 'sha256-d+I2Atf7cxRtJBWcPkEbKNzrWQMef8kek1LEMsFvUvo=' https://cdn.jsdelivr.net",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob: https:",
+        "media-src 'self' blob:",
+        "font-src 'self' data:",
+        "connect-src 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+      ].join('; ');
+      app.use((_req, res, next) => {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('X-Frame-Options', 'DENY');
+        res.setHeader('Referrer-Policy', 'no-referrer');
+        res.setHeader('Content-Security-Policy', dashboardCsp);
+        next();
+      });
+
       // Serve dashboard static files
       const dashboardPath = path.join(__dirname, '../dashboard');
       app.use(express.static(dashboardPath));
+      // Noble crypto packages for the browser (import-map targets in index.html:
+      // /vendor/noble/post-quantum, /vendor/noble/curves, /vendor/noble/hashes).
+      app.use('/vendor/noble', express.static(path.join(__dirname, '../node_modules/@noble')));
+
+      // Global Error Handler (Express JSON parse errors and unhandled request exceptions)
+      app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+        const status = err.status || 500;
+        const message = err.message || 'Internal Server Error';
+        console.error(`[Server Error] ${status}: ${message}`);
+        res.status(status).json({ success: false, error: message });
+      });
 
       return app;
 }
@@ -1352,6 +2004,53 @@ async function main() {
 
     // Initialize telemetry / session manager
     await initTelemetry(true);
+
+    // Harness boot reconciliation (P4 plan's own self-review point, never
+    // wired until now): a run.json left 'running' by a prior crash/restart
+    // must never look identical to one still legitimately in progress —
+    // run.json persists to disk, so this is real work at boot. Best-effort,
+    // never blocks server startup. MonitorRegistry.markAllOrphaned() is
+    // deliberately NOT called here: its Map is in-memory only and starts
+    // empty every process start, so at true boot there is nothing in it to
+    // reconcile — calling it here would be a no-op dressed up as a fix. It
+    // stays available for callers that actually hold a stale reference
+    // across some other lifecycle event (tests, an admin action).
+    try {
+      const { reconcileRunsOnBoot } = await import('./harness/store.js');
+      const reconciled = await reconcileRunsOnBoot();
+      if (reconciled.length > 0) {
+        console.error(`[harness] Boot reconciliation: ${reconciled.length} orphaned run(s) marked failed.`);
+      }
+    } catch (err: any) {
+      console.error('[harness] Boot reconciliation failed (non-fatal):', err?.message || err);
+    }
+
+    // R2 — CAS disk persistence boot (same baseDir convention as
+    // reconcileRunsOnBoot above: process.cwd()): prune expired checkpoints
+    // (CAS_TTL_MS, default 24h) + GC orphan blobs, then hydrate the
+    // in-memory store so rollback/undo_file issued after a restart still
+    // resolve against on-disk state. Best-effort, never blocks startup;
+    // without a prior flushCasToDisk there is simply no index.json and
+    // this is a no-op.
+    try {
+      const { globalCasStore } = await import('./memory/ContentAddressableCheckpoint.js');
+      const pruned = await globalCasStore.pruneCasOnBoot();
+      if (pruned.removedManifests > 0 || pruned.removedBlobs > 0) {
+        console.error(
+          `[cas] Boot prune: ${pruned.removedManifests} expired checkpoint(s), ${pruned.removedBlobs} orphan blob(s) removed.`
+        );
+      }
+      globalCasStore.initCasPersistence(process.cwd());
+      const loaded = await globalCasStore.loadCasFromDisk();
+      if (loaded) {
+        const stats = globalCasStore.getStats();
+        console.error(
+          `[cas] Restored checkpoint store from disk (${stats.totalCheckpoints} manifest(s), ${stats.totalBlobs} blob(s)).`
+        );
+      }
+    } catch (err: any) {
+      console.error('[cas] Boot restore failed (non-fatal):', err?.message || err);
+    }
 
     // Periodically check/sync telemetry every hour (supports continuous server runs)
     const telemetryInterval = setInterval(async () => {

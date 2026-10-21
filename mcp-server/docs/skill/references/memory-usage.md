@@ -54,6 +54,8 @@ We decided to use Redis for session management instead of JWT tokens.
 The wiki manager automatically parses all incoming agent completions for decision keywords. If a match is found, it creates/updates an ADR entry in the wiki:
 - **Triggers**: `/decided to/i`, `/chose\s+.*\s+over\s+.*/i`, `/we\s+use\s+.*\s+because/i`, `/decision:/i`.
 
+This is passive/implicit — it fires on completion text matching those patterns, with no explicit tool call. For deliberately recording or retrieving a decision (not relying on keyword-match luck), use `manage_memory`'s `adr_write`/`adr_list` actions instead — see [manage_memory.md](manage_memory.md#architecture-decision-records-adrs). Both land in the same `adr`-tagged wiki subdirectory, excluded from general `wiki_search`/`wiki_list`.
+
 ---
 
 ## 📄 PDF Index Offset Caching [NEW]
@@ -101,6 +103,13 @@ Instead of raw strings, capture the full context of a completed feature or resea
   "workspace_root": "/project/root"
 }
 ```
+
+## 💾 Durable Usage & Health State Persistence (`PersistenceManager`)
+
+In addition to semantic wiki entries and vector memory, the server maintains encrypted state persistence in `usage-stats.json`:
+- **LLM Rate-Limit Tracking**: Durable per-provider request/token counters (`localTotalRequests`, `localTotalTokens`), remaining quota caps, and failure tracking.
+- **Search Provider State**: Preserves `searchProviders` circuit-breaker health (`consecutiveFailures`, `cooldownUntil`, `lastFailure`) across reboots.
+- **Graceful Lifecycle Flush**: Auto-persisted periodically via `LOCAL_PERSIST_INTERVAL_MS` (default 60s) and explicitly drained on server shutdown (`flushSystem()`).
 
 ---
 

@@ -143,9 +143,53 @@ export async function logChatTurn(sessionId: string, turn: Record<string, any>):
   }
 }
 
+function sanitizePayloadObj(val: any): any {
+  if (val == null) return val;
+  if (typeof val === 'string') {
+    if (val.startsWith('data:image/') && val.includes(';base64,')) {
+      return `[base64 image data (${val.length} chars)]`;
+    }
+    if (val.length > 2000 && !/\s/.test(val) && /^[A-Za-z0-9+/=]+$/.test(val)) {
+      return `[base64 payload (${val.length} chars)]`;
+    }
+    return val;
+  }
+  if (Array.isArray(val)) {
+    return val.map(sanitizePayloadObj);
+  }
+  if (typeof val === 'object') {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(val)) {
+      if (k === 'image' || k === 'imageData' || k === 'base64') {
+        if (typeof v === 'string' && v.length > 500) {
+          out[k] = `[base64 image payload (${v.length} chars)]`;
+          continue;
+        }
+      }
+      out[k] = sanitizePayloadObj(v);
+    }
+    return out;
+  }
+  return val;
+}
+
+function serializeToolPayload(payload: unknown, maxLimit: number): string {
+  if (payload == null) return 'null';
+  if (typeof payload === 'string') {
+    return truncate(payload, maxLimit);
+  }
+  try {
+    const sanitized = sanitizePayloadObj(payload);
+    const json = JSON.stringify(sanitized);
+    return truncate(json, maxLimit);
+  } catch {
+    return truncate(String(payload), maxLimit);
+  }
+}
+
 /**
  * Logs a single tool invocation (role: 'tool_call') into the session log.
- * args/result are truncated to 400 chars each to avoid dumping base64 payloads.
+ * args/result are kept comprehensive (up to 500k chars), while vision/base64 payloads are safely bounded.
  */
 export async function logToolCall(
   sessionId: string,
@@ -155,12 +199,23 @@ export async function logToolCall(
   latencyMs: number,
   isError = false
 ): Promise<void> {
-  const maxLimit = tool === 'vision_tool' ? 400 : 64000;
+  if (tool === 'vision_tool') {
+    await logChatTurn(sessionId, {
+      role: 'tool_call',
+      tool,
+      args: truncate(JSON.stringify(args ?? null), 400),
+      result: truncate(JSON.stringify(result ?? null), 400),
+      latencyMs,
+      isError,
+    });
+    return;
+  }
+
   await logChatTurn(sessionId, {
     role: 'tool_call',
     tool,
-    args: truncate(JSON.stringify(args ?? null), maxLimit),
-    result: truncate(JSON.stringify(result ?? null), maxLimit),
+    args: serializeToolPayload(args, 500_000),
+    result: serializeToolPayload(result, 500_000),
     latencyMs,
     isError,
   });

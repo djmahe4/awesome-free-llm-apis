@@ -20,9 +20,9 @@ async function verifyGithubScanAvst() {
         workspaceRoot: avstPath,
         request: {
             messages: [
-                { 
-                    role: 'user', 
-                    content: 'Check the repository https://github.com/nmap/nmap and run nmap scan and run pytest for local testing.' 
+                {
+                    role: 'user',
+                    content: 'Check the repository https://github.com/nmap/nmap and run nmap scan and run pytest for local testing.'
                 }
             ],
             model: 'gpt-4o',
@@ -57,12 +57,12 @@ async function verifyGithubScanAvst() {
     console.log('\n==================================================');
     console.log('INJECTED SYSTEM PROMPT EXTRACT:');
     console.log('==================================================');
-    
+
     const githubMatch = finalContent.match(/## 🌐 GITHUB REPOSITORY CONTEXT[\s\S]*?(?=## 🛠️ CODEBASE|$)/);
     if (githubMatch) {
         console.log(githubMatch[0].trim());
     }
-    
+
     const usagesMatch = finalContent.match(/## 🛠️ CODEBASE COMMAND USAGES[\s\S]*/);
     if (usagesMatch) {
         console.log('\n' + usagesMatch[0].trim());

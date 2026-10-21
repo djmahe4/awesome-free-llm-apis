@@ -21,14 +21,17 @@ import { WikiMemory } from '../src/memory/wiki.js';
 
 describe('cyber_tool educational coach + CTF decision graph + tool memory', () => {
     const sessionId = `test-session-${Date.now()}`;
+    const graphSessionId = `test-graph-session-${Date.now()}`;
     const toolName = `test-tool-${Date.now()}`;
-    const wikiDir = path.join(os.homedir(), '.free-llm-mcp', 'wiki', 'cyber-tools');
+    const homeBase = process.env.FREE_LLM_MCP_HOME || os.homedir();
+    const wikiDir = path.join(homeBase, '.free-llm-mcp', 'wiki', 'cyber-tools');
 
     afterEach(async () => {
         // Clean up any pages this test created in the real cyber-tools wiki namespace.
         const titles = [
             `progress_${sessionId}`,
             `ctf-graph_${sessionId}`,
+            `ctf-graph_${graphSessionId}`,
             `${toolName}_run_suggestions`
         ];
         for (const t of titles) {
@@ -87,18 +90,18 @@ describe('cyber_tool educational coach + CTF decision graph + tool memory', () =
     it('save_graph / load_graph round-trip a decision graph node', async () => {
         await cyberTool({
             action: 'save_graph',
-            sessionId,
+            sessionId: graphSessionId,
             graphNode: { id: 'root', label: 'find the flag', type: 'goal' }
         } as any);
         const withChild = await cyberTool({
             action: 'save_graph',
-            sessionId,
+            sessionId: graphSessionId,
             graphNode: { id: 'hyp-1', label: 'try SQLi on login form', type: 'hypothesis', from: 'root' }
         } as any);
         expect(withChild.totalNodes).toBe(2);
         expect(withChild.totalEdges).toBe(1);
 
-        const loaded = await cyberTool({ action: 'load_graph', sessionId } as any);
+        const loaded = await cyberTool({ action: 'load_graph', sessionId: graphSessionId } as any);
         expect(loaded.success).toBe(true);
         expect(loaded.nodes.map((n: any) => n.id)).toEqual(expect.arrayContaining(['root', 'hyp-1']));
         expect(loaded.edges[0]).toMatchObject({ source: 'root', target: 'hyp-1' });

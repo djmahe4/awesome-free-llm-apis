@@ -16,7 +16,7 @@ const SUB_BLOCK_MAX_TIMEOUT_MS = 35000;
 export function shouldUseVision(imageCoverageRatio: number, extractedText: string): boolean {
   if (imageCoverageRatio < IMAGE_COVERAGE_THRESHOLD) return false;
   const wordCount = extractedText.trim().split(/\s+/).filter(Boolean).length;
-  
+
   // 1. Sparse text: if page has very little text (< 250 words), always trigger vision.
   if (wordCount < SPARSE_TEXT_WORD_LIMIT) return true;
 

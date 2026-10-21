@@ -79,7 +79,7 @@ describe('Brainstormed Verification Scenarios (Phases 1-3)', () => {
         // The file must exist and be valid, parseable JSON
         const finalContent = await fsp.readFile(targetFile, 'utf-8');
         expect(() => JSON.parse(finalContent)).not.toThrow();
-        
+
         const parsed = JSON.parse(finalContent);
         expect(parsed.status).toBe('success');
         expect(parsed.writerId).toBeLessThan(numWriters);
@@ -146,7 +146,7 @@ describe('Brainstormed Verification Scenarios (Phases 1-3)', () => {
         // Running the image router should resolve the path, inline the image as base64, and route it without throwing
         await expect(imageRouter.execute(context, async () => {})).resolves.not.toThrow();
         expect(trySpy).toHaveBeenCalled();
-        
+
         // Verify it was converted to base64 inline
         const routedMsgContent = context.request.messages[0].content as any[];
         const imagePart = routedMsgContent.find(p => p.type === 'image_url');
@@ -157,8 +157,8 @@ describe('Brainstormed Verification Scenarios (Phases 1-3)', () => {
     // Scenario D: Middleware Pipeline Order and Singleton Resolution (Phase 4)
     // -------------------------------------------------------------------------
     it('Scenario D: Should resolve middlewares as singletons and execute them in correct order', async () => {
-        const { 
-            getStructuralMarkdownMiddleware, 
+        const {
+            getStructuralMarkdownMiddleware,
             getAgenticMiddleware,
             getSharedRouter
         } = await import('../src/pipeline/instances.js');

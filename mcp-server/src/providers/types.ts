@@ -10,11 +10,13 @@ export interface ChatRequest {
   max_tokens?: number;
   top_p?: number;
   stream?: boolean;
+  onChunk?: (chunk: string) => void;
   agentic?: boolean;
   response_format?: { type: 'json_object' | 'text' } | { type: 'json_schema', json_schema?: { name: string, strict?: boolean, schema: any } } | any;
   google_search?: boolean;
   timeoutMs?: number;
   abortSignal?: AbortSignal;
+  signal?: AbortSignal;
   sessionId?: string;
   allowRetries?: boolean;
   // When true, WorkspaceContextMiddleware skips its pre-emptive full-workspace

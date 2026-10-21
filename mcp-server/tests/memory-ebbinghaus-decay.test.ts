@@ -78,7 +78,7 @@ describe('Memory & Storage Architecture Hardening', () => {
             await fs.writeFile(path.join(testDir, '.free-llm-mcp', 'wiki_maintenance_meta.json'), '{meta: 1}');
 
             const files = await WorkspaceWalker.findRelevantFiles(testDir, ['app', 'cache', 'graph'], 100);
-            
+
             const normalizedFiles = files.map(f => f.replace(/\\/g, '/'));
             expect(normalizedFiles.some(f => f.includes('src/app.ts'))).toBe(true);
             expect(normalizedFiles.some(f => f.includes('.free-llm-mcp'))).toBe(false);

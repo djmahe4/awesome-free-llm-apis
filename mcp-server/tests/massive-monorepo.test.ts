@@ -43,7 +43,7 @@ describe('TDD Scenario A - The Massive Monorepo (Pre-emptive Indexing)', () => {
 
     it('should classify a coding task correctly in a massive monorepo without crashing', async () => {
         const router = new IntelligentRouterMiddleware();
-        
+
         const context: PipelineContext = {
             request: {
                 model: 'any',
@@ -74,7 +74,7 @@ describe('TDD Scenario A - The Massive Monorepo (Pre-emptive Indexing)', () => {
 
     it('should classify a general chat task correctly in a massive monorepo', async () => {
         const router = new IntelligentRouterMiddleware();
-        
+
         const context: PipelineContext = {
             request: {
                 model: 'any',

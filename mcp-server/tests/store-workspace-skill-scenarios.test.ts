@@ -33,9 +33,25 @@ vi.mock('../src/cache/workspace.js', () => ({
     })
 }));
 
+// script_instructions now generates scripts in the background (see
+// store-workspace-skill.ts) — the initial call returns status:'running'
+// immediately; poll pollAction:'status' for the final result instead of
+// asserting on the initial synchronous return. Without this, afterEach's
+// rmSync(root) can race the still-running background generation and delete
+// files out from under it (source of this file's earlier ENOENT chmod noise).
+async function storeAndWait(input: Parameters<typeof storeWorkspaceSkill>[0]) {
+    const started = await storeWorkspaceSkill(input);
+    let result: any = started;
+    for (let i = 0; i < 100 && result.status === 'running'; i++) {
+        await new Promise(r => setTimeout(r, 20));
+        result = await storeWorkspaceSkill({ ...input, pollAction: 'status' });
+    }
+    return result;
+}
+
 describe('storeWorkspaceSkill Scenarios', () => {
     const root = path.join(os.tmpdir(), 'test_ws_scenarios');
-    
+
     beforeEach(() => {
         if (!existsSync(root)) mkdirSync(root, { recursive: true });
         vi.clearAllMocks();
@@ -49,14 +65,14 @@ describe('storeWorkspaceSkill Scenarios', () => {
         // Setup mocks
         const mockMemory = ['- Memory snippet 1'];
         const mockGrep = ['Grep snippet 1'];
-        
+
         (memoryManager.search as any).mockResolvedValue([{ content: 'Memory snippet 1' }]);
         (ContextGatherer.gatherContext as any).mockResolvedValue(mockGrep);
         (useFreeLLM as any).mockResolvedValue({
             choices: [{ message: { content: '```bash\necho "grounded"\n```' } }]
         });
 
-        await storeWorkspaceSkill({
+        await storeAndWait({
             name: 'grounding-test',
             description: 'test',
             what: ['test'],
@@ -84,7 +100,7 @@ describe('storeWorkspaceSkill Scenarios', () => {
             choices: [{ message: { content: '```bash\necho "no-context"\n```' } }]
         });
 
-        await storeWorkspaceSkill({
+        await storeAndWait({
             name: 'empty-context',
             description: 'test',
             what: ['test'],
@@ -107,7 +123,7 @@ describe('storeWorkspaceSkill Scenarios', () => {
             choices: [{ message: { content: '```bash\necho "raw-code-output"\n```' } }]
         });
 
-        const result = await storeWorkspaceSkill({
+        const result = await storeAndWait({
             name: 'raw-extract',
             description: 'test',
             what: ['test'],
@@ -119,7 +135,7 @@ describe('storeWorkspaceSkill Scenarios', () => {
 
         if (!result.success) throw new Error(result.error);
         expect(result.success).toBe(true);
-        
+
         // Verify file content
         const scriptPath = path.join(root, '.free-llm-mcp', 'skills', 'raw-extract', 'scripts', 'raw.sh');
         const content = await fs.readFile(scriptPath, 'utf-8');
@@ -135,7 +151,7 @@ describe('storeWorkspaceSkill Scenarios', () => {
             choices: [{ message: { content: '```js\nconsole.log("large");\n```' } }]
         });
 
-        await storeWorkspaceSkill({
+        await storeAndWait({
             name: 'large-context',
             description: 'test',
             what: ['test'],
@@ -159,7 +175,7 @@ describe('storeWorkspaceSkill Scenarios', () => {
             choices: [{ message: { content: 'Here is your code: ```bash\necho "truncated"' } }]
         });
 
-        const result = await storeWorkspaceSkill({
+        const result = await storeAndWait({
             name: 'truncation-test',
             description: 'Test script truncation and extraction',
             what: ['generating a script'],
@@ -168,10 +184,10 @@ describe('storeWorkspaceSkill Scenarios', () => {
         });
 
         if (!result.success) throw new Error(result.error);
-        
+
         // Wait a small amount for FS sync on Windows
         await new Promise(resolve => setTimeout(resolve, 50));
-        
+
         const scriptPath = path.join(root, '.free-llm-mcp', 'skills', 'truncation-test', 'scripts', 'fix.sh');
         const content = await fs.readFile(scriptPath, 'utf-8');
         expect(result.success).toBe(true);

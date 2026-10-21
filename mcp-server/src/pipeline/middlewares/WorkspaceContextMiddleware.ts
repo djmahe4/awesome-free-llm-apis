@@ -60,11 +60,11 @@ function escapeRegExp(str: string): string {
 function extractUsageAndDocstrings(content: string, commands: string[]): string {
     const lines = content.split('\n');
     let output = '';
-    
+
     // 1. Identify and extract lines with specific options/examples
     const examples: string[] = [];
     const commandRegexes = commands.map(cmd => new RegExp(`\\b${escapeRegExp(cmd)}\\b.*?(?:-[a-zA-Z]|--[a-z])`, 'i'));
-    
+
     for (const line of lines) {
         if (/(license|copyright|copyrighted|download|mailing list|installing|contributing|build status)/i.test(line)) {
             continue;
@@ -76,7 +76,7 @@ function extractUsageAndDocstrings(content: string, commands: string[]): string 
             }
         }
     }
-    
+
     if (examples.length > 0) {
         output += `### Command Usage Examples:\n` + examples.slice(0, 10).map(e => `  - ${e}`).join('\n') + '\n';
     }
@@ -85,7 +85,7 @@ function extractUsageAndDocstrings(content: string, commands: string[]): string 
     let currentSection = '';
     let captureSection = false;
     let sectionLines: string[] = [];
-    
+
     for (const line of lines) {
         const isHeader = line.startsWith('#');
         if (isHeader) {
@@ -93,7 +93,7 @@ function extractUsageAndDocstrings(content: string, commands: string[]): string 
                 output += `\n### Section: ${currentSection}\n` + sectionLines.slice(0, 15).join('\n') + '\n';
             }
             currentSection = line.replace(/^#+\s*/, '').trim();
-            captureSection = /(usage|example|option|argument|parameter|flag|help|syntax)/i.test(currentSection) && 
+            captureSection = /(usage|example|option|argument|parameter|flag|help|syntax)/i.test(currentSection) &&
                              !/(license|download|installation|building|compil)/i.test(currentSection);
             sectionLines = [];
         } else if (captureSection) {
@@ -127,19 +127,19 @@ function extractProjectDescription(readme: string): string {
     const lines = readme.split('\n');
     let description = '';
     let foundTitle = false;
-    
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
         if (line.startsWith('#') || line.startsWith('===')) {
             foundTitle = true;
             continue;
         }
-        
+
         if (foundTitle && line.length > 5) {
             if (/badge\.svg|travis-ci|github\.com\/.*\/actions/i.test(line)) continue;
             if (/copyright|license|released under|compatible with GPL|free usage|commercial license/i.test(line)) continue;
             if (/install|download|mailing list|support/i.test(line)) continue;
-            
+
             description = line;
             let j = i + 1;
             while (j < lines.length && lines[j].trim().length > 0 && !lines[j].trim().startsWith('#')) {
@@ -149,14 +149,14 @@ function extractProjectDescription(readme: string): string {
             break;
         }
     }
-    
+
     return description.trim();
 }
 
 function extractCommandsFromPrompt(prompt: string, repo: string): string[] {
     const commands = new Set<string>();
     commands.add(repo.toLowerCase());
-    
+
     const knownCommands = ['nmap', 'sqlmap', 'hydra', 'gobuster', 'nikto', 'hashcat', 'john', 'pytest', 'git', 'curl', 'wget'];
     const promptLower = prompt.toLowerCase();
     for (const cmd of knownCommands) {
@@ -164,14 +164,14 @@ function extractCommandsFromPrompt(prompt: string, repo: string): string[] {
             commands.add(cmd);
         }
     }
-    
+
     const words = prompt.split(/\s+/);
     for (const word of words) {
         const clean = word.toLowerCase().replace(/[^a-z0-9_-]/g, '');
         if (clean.length > 2 && !['and', 'for', 'run', 'the', 'use', 'git', 'github'].includes(clean)) {
             if (/^[a-z0-9_-]+$/.test(clean)) {
-                if (promptLower.includes(`run ${clean}`) || 
-                    promptLower.includes(`${clean} scan`) || 
+                if (promptLower.includes(`run ${clean}`) ||
+                    promptLower.includes(`${clean} scan`) ||
                     promptLower.includes(`${clean} test`) ||
                     promptLower.includes(`${clean} command`)) {
                     commands.add(clean);
@@ -194,10 +194,10 @@ function getCleanUserPrompt(content: string): string {
 
 /**
  * WorkspaceContextMiddleware - Handles workspace-aware context injection.
- * 
+ *
  * This middleware resolves the workspace hash, searches for relevant memory,
  * gathers grep context, and injects the intelligent system prompt.
- * 
+ *
  * It runs regardless of the 'agentic' flag as long as a workspace or session is provided,
  * fulfilling the requirement that memory should be active even for non-agentic requests.
  */
@@ -212,7 +212,7 @@ export class WorkspaceContextMiddleware implements Middleware {
         const isAgentic = context.request.agentic === true;
 
         // Check if this is a vision/multimodal task (contains images or is routed as vision)
-        const isVision = context.taskType === 'vision' || context.request.messages.some(m => 
+        const isVision = context.taskType === 'vision' || context.request.messages.some(m =>
             Array.isArray(m.content) && m.content.some((item: any) => item && typeof item === 'object' && item.type === 'image_url')
         );
 
@@ -233,7 +233,7 @@ export class WorkspaceContextMiddleware implements Middleware {
                     const { owner, repo, branch } = GithubRepoScanner.parseUrl(url);
                     const readme = await GithubRepoScanner.fetchRawContent(owner, repo, 'README.md', branch);
                     const analysis = GithubRepoScanner.analyzeCode(readme);
-                    
+
                     const commands = extractCommandsFromPrompt(cleanPrompt, repo);
                     const usageDocs = extractUsageAndDocstrings(readme, commands.length > 0 ? commands : [repo]);
 
@@ -264,7 +264,7 @@ export class WorkspaceContextMiddleware implements Middleware {
                         githubContext += `\n### Scanned Files Analysis:\n`;
                         for (const sf of repoScan.scannedFiles) {
                             githubContext += `#### File: ${sf.path}\n`;
-                            
+
                             if (sf.flags && sf.flags.length > 0) {
                                 githubContext += `  - Flags: ${sf.flags.join(', ')}\n`;
                             }
@@ -449,15 +449,15 @@ export class WorkspaceContextMiddleware implements Middleware {
         const allowMemory = context.isOnePass ? !!context.workspaceRoot : true;
 
         if (allowMemory) {
-            const memoryNamespace = context.wsHash 
-                ? context.wsHash 
+            const memoryNamespace = context.wsHash
+                ? context.wsHash
                 : (!context.isOnePass ? context.sessionId : undefined);
 
             if (memoryNamespace) {
                 try {
                     const queryForMemory = userContent + (grepResults.length > 0 ? ' ' + grepResults.join(' ').slice(0, 500) : '');
                     const memoryResults = await memoryManager.search(memoryNamespace, queryForMemory);
-                
+
                 if (Array.isArray(memoryResults) && memoryResults.length > 0) {
                     // Priority function consistent with ContextGatherer
                     const getPriority = (filePath?: string): number => {
@@ -498,7 +498,10 @@ export class WorkspaceContextMiddleware implements Middleware {
         // 3b. Wiki Lookup - surface previously-learned, confidence-scored knowledge
         let wikiContext: string | undefined;
         let wikiPagesUsed: string[] = [];
-        if (userContent) {
+        // Wiki knowledge is workspace/session-keyed: workspace-agnostic one-shots
+        // must not be steered into external wiki content (mirrors allowMemory).
+        const allowWiki = context.isOnePass ? !!context.workspaceRoot : true;
+        if (userContent && allowWiki) {
             try {
                 const persona = taskTypeToPersona(context.taskType);
                 const wikiNamespace = context.wsHash || context.sessionId;
@@ -535,7 +538,7 @@ export class WorkspaceContextMiddleware implements Middleware {
         // Always store memory and grounding gate on context so AgenticMiddleware can consume them.
         (context as any).memoryContext = memoryContext;
         (context as any).groundingGate = groundingGate;
-        
+
         let workspaceContextStr = '';
         if (dirTree) workspaceContextStr += `\nProject Structure:\n${dirTree}\n`;
         if (grepResults.length > 0) {
@@ -563,7 +566,19 @@ export class WorkspaceContextMiddleware implements Middleware {
         // Only inject a system prompt when NOT in agentic mode.
         // In agentic mode, AgenticMiddleware owns the system prompt to prevent
         // double-injection which garbles model responses.
-        if (!isAgentic) {
+        //
+        // `!isAgentic` alone used to be the only gate — every plain one-shot
+        // chat got the full persona/role + grounding-gate + "HIGH-LEVEL STEPS"
+        // system prompt injected regardless of whether there was anything to
+        // ground it in. A bare "say hello" with no workspaceRoot, no keywords,
+        // and empty memory/grep context still got the whole block — pure
+        // token bloat with nothing to cite, plus unsolicited task-framing
+        // instructions on a request that named no task. Require actual signal
+        // to ground the injection before paying for it.
+        const hasGroundingSignal = !!(context.workspaceRoot || memoryContext || (context as any).grepContext
+            || (context.keywords && context.keywords.length > 0));
+
+        if (!isAgentic && hasGroundingSignal) {
             try {
                 const isSubtask = (context as any).isSubtask === true;
                 const dynamicPrompt = await getIntelligentSystemPrompt({
@@ -580,7 +595,7 @@ export class WorkspaceContextMiddleware implements Middleware {
                 const CONTEXT_START_MARKER = '<!-- WORKSPACE_CONTEXT_START -->';
                 const CONTEXT_END_MARKER = '<!-- WORKSPACE_CONTEXT_END -->';
                 fullSystemPrompt = `\n${CONTEXT_START_MARKER}\n${dynamicPrompt}${highLevelStepsSection}${groundingGate}\n${CONTEXT_END_MARKER}\n`;
-                
+
                 const messages = context.request.messages;
                 const sysMsgIdx = messages.findIndex(m => m.role === 'system');
 
@@ -630,11 +645,16 @@ export class WorkspaceContextMiddleware implements Middleware {
                 grepTokens,
                 groundingTokens,
                 sysPromptTokens,
-                totalContextTokens: shortTermTokens + longTermTokens + wikiTokens + grepTokens + groundingTokens + sysPromptTokens
+                // Non-agentic injection embeds memory + wiki + grep + grounding gate
+                // inside fullSystemPrompt — count those layers once (messages + prompt).
+                // Agentic/no-signal: prompt is not injected here, so layers stay separate.
+                totalContextTokens: sysPromptTokens > 0
+                    ? shortTermTokens + sysPromptTokens
+                    : shortTermTokens + longTermTokens + wikiTokens + grepTokens + groundingTokens
             },
             groundingGate: groundingGate || null,
             dirTree: dirTree || null,
-            fullAssembledSystemPrompt: fullSystemPrompt || '(Delegated to AgenticMiddleware)',
+            fullAssembledSystemPrompt: fullSystemPrompt || (isAgentic ? '(Delegated to AgenticMiddleware)' : '(No system prompt injected — no grounding signal)'),
             subtaskContext: (context as any).subtask || null,
             durationMs: Date.now() - startMs
         };
@@ -650,7 +670,7 @@ export class WorkspaceContextMiddleware implements Middleware {
         };
 
         console.error(`[WorkspaceContextMiddleware] ${Date.now() - startMs}ms context injected for session=${sessionId}`);
-        
+
         await next();
     }
 }

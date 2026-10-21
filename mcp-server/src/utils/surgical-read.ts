@@ -109,7 +109,7 @@ export async function surgicalRead(
       const winner = headings[winningIndex];
       winningHeadingTitle = winner.title;
       startLine = winner.lineIndex;
-      
+
       // Find where the section ends: next heading of equal or higher level
       endLine = lines.length;
       for (let i = winningIndex + 1; i < headings.length; i++) {
@@ -140,7 +140,7 @@ export async function surgicalRead(
         const targetHeading = headings[targetHeadingIndex];
         const nextHeadingIndex = targetHeadingIndex + 1 < headings.length ? headings[targetHeadingIndex + 1].lineIndex : lines.length;
         const targetSectionLines = lines.slice(targetHeading.lineIndex + 1, nextHeadingIndex);
-        
+
         // Extract 3-line snippet
         const nonHeaderLines = targetSectionLines
           .map(l => l.trim())

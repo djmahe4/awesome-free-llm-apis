@@ -1,6 +1,6 @@
 /**
  * UniversalTabularSchemaFlattener
- * 
+ *
  * 100% Dynamic, Domain-Agnostic JSON Flattener & Tabular Schema Generator.
  * Converts ANY arbitrary deeply nested JSON object or array of objects
  * into flat tabular key-value records for clean CSV export and relational storage.

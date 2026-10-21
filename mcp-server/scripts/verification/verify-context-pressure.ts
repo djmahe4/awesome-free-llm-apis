@@ -18,10 +18,10 @@ async function verify() {
 
     if (isSimulated) {
         console.error('🚀 RUNNING IN SIMULATION MODE (Mocked Providers)');
-        
+
         // 1. Clear real providers and inject mocks
         (registry as any).providers = new Map();
-        
+
         const mockModels = [
             { id: 'deepseek-ai/DeepSeek-R1', name: 'DS-R1', contextWindow: 64000 },
             { id: 'gemini-3.1-flash-lite', name: 'Gemini Flash', contextWindow: 1000000 }
@@ -98,12 +98,12 @@ async function verify() {
             process.exit(1);
         }
     }
-    
+
     const router = new IntelligentRouterMiddleware(executor);
 
     // Scenario: 16k chars, 30s budget
     const prompt = 'Repeat after me: Context test. ' + 'A'.repeat(16000);
-    
+
     const ctx: PipelineContext = {
         taskType: TaskType.Chat,
         request: {
@@ -116,11 +116,11 @@ async function verify() {
     try {
         const start = Date.now();
         console.error(`[Test] Starting with ${executor.calculateTokens(ctx.request.messages)} estimated tokens...`);
-        
-        await router.execute(ctx, async () => { 
-            console.error('   [Test] Next called (Task logic executed)'); 
+
+        await router.execute(ctx, async () => {
+            console.error('   [Test] Next called (Task logic executed)');
         });
-        
+
         const duration = Date.now() - start;
         console.error(`\n✅ VERIFICATION SUCCESS: ${duration}ms`);
         console.error(`📍 Provider: ${ctx.providerId}`);

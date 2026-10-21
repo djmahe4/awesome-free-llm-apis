@@ -44,7 +44,7 @@ describe('Skill Autosuggestion and Input Wrapping Tests', () => {
       prompt: 'Verify current project files',
       agentic: false,
     };
-    
+
     // We should be able to run useFreeLLM with prompt instead of messages
     const response = await useFreeLLM(input as any);
     expect(response).toBeDefined();

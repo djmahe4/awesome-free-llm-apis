@@ -88,7 +88,7 @@ body {
 }
 
 .hero-inner {
-  max-width: 1280px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 14px 24px;
   display: flex;
@@ -147,7 +147,7 @@ body {
 
 /* ─── Layout ────────────────────────────────────────────────── */
 .container {
-  max-width: 1280px;
+  max-width: 1600px;
   width: 100%;
   margin: 0 auto;
   padding: 0 24px;           /* horizontal padding only; panels add their own vertical */
@@ -156,6 +156,49 @@ body {
   flex-direction: column;
   overflow: hidden;
   min-height: 0;             /* allow flex shrink below content height → enables scroll */
+}
+
+/* ─── Domain Mode Switcher (Hick's Law / Chunking 7±2) ────────── */
+.domain-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 6px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  overflow-x: auto;
+}
+.domain-label {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+  user-select: none;
+}
+.domain-pill {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  font-family: 'Inter', sans-serif;
+  font-size: .75rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 99px;
+  cursor: pointer;
+  transition: all .2s ease;
+  white-space: nowrap;
+}
+.domain-pill:hover {
+  background: var(--glass-hover);
+  color: var(--text-primary);
+  border-color: rgba(255,255,255,0.18);
+}
+.domain-pill.active {
+  background: var(--accent-purple);
+  border-color: var(--accent-purple);
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(124,58,237,0.35);
 }
 
 /* ─── Tabs ──────────────────────────────────────────────────── */
@@ -199,6 +242,22 @@ body {
 }
 .tab-btn svg { width: 16px; height: 16px; }
 
+/* Group labels inside the tab bar (Start / Build / Knowledge / Control).
+   Kept as direct tabbar children — buttons stay valid ARIA tab children. */
+.tab-group-label {
+  align-self: center;
+  font-size: .6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding: 0 4px;
+  margin-left: 16px;
+  user-select: none;
+}
+.tab-group-label:first-child { margin-left: 0; }
+
 .tab-panel { display: none; animation: fadeUp .2s ease; }
 .tab-panel.active { display: block; }
 @keyframes fadeUp {
@@ -221,6 +280,34 @@ body {
 .card-body { padding: 20px; }
 .card-header { padding: 16px 20px; border-bottom: 1px solid var(--glass-border); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .card-title { font-size: .875rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .6px; }
+
+/* ─── Collapsible Card (Progressive Disclosure) ─────────────── */
+details.card > summary.card-header {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+details.card > summary.card-header::-webkit-details-marker { display: none; }
+details.card > summary.card-header:hover {
+  background: var(--glass-hover);
+}
+details.card > summary.card-header .collapse-toggle-icon {
+  font-size: .85rem;
+  color: var(--text-muted);
+  transition: transform .2s ease;
+  display: inline-block;
+  margin-left: 8px;
+}
+details.card[open] > summary.card-header .collapse-toggle-icon {
+  transform: rotate(180deg);
+}
+details.card:not([open]) {
+  border-color: rgba(255,255,255,0.06);
+}
+details.card:not([open]) .card-header {
+  border-bottom: none;
+}
 
 /* ─── Stat Cards ─────────────────────────────────────────────── */
 .stats-grid {
@@ -534,6 +621,35 @@ select option { background: var(--bg-elevated); }
 .qs-tool-card table.qs-table { margin: 0 16px 14px; width: calc(100% - 32px); }
 .qs-guide-body { margin: 0 16px 16px; font-size: .82rem; line-height: 1.6; color: var(--text-secondary); }
 
+/* "Start here" onboarding strip on the Quick Start tab */
+.qs-steps { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
+.qs-step {
+  display: flex; align-items: center; gap: 9px;
+  flex: 1 1 240px;
+  padding: 11px 14px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font-size: .8rem;
+  color: var(--text-secondary);
+}
+.qs-step-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent-purple);
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 700;
+}
+.qs-step code {
+  background: rgba(255,255,255,.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .85em;
+}
+
 /* ─── Section Titles ─────────────────────────────────────────── */
 .section-title {
   font-size: 1.05rem; font-weight: 700; margin-bottom: 6px; color: var(--text-primary);
@@ -735,6 +851,110 @@ select option { background: var(--bg-elevated); }
 }
 .wiki-link-chip:hover { background: rgba(255,255,255,.1); }
 .wiki-link { color: var(--accent-cyan); cursor: pointer; text-decoration: underline; }
+.wiki-typed-link {
+  border-bottom: 1px dotted rgba(34, 211, 238, 0.7);
+  text-decoration: none;
+}
+.wiki-link-image::before { content: '🖼 '; }
+.wiki-link-audio::before { content: '🎧 '; }
+.wiki-link-video::before { content: '🎬 '; }
+.wiki-link-pdf::before { content: '📄 '; }
+.wiki-link-quote::before { content: '❝ '; }
+.wiki-aux-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+.wiki-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.wiki-search-item {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,.03);
+}
+.wiki-search-title {
+  font-size: .78rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.wiki-search-meta {
+  font-size: .7rem;
+  color: var(--text-muted);
+}
+.wiki-search-line {
+  font-size: .74rem;
+  margin: 4px 0 8px;
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+}
+.wiki-ref-image {
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.wiki-ref-media {
+  width: 100%;
+}
+.wiki-ref-pdf-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.wiki-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+mark.wiki-line-hit {
+  background: rgba(250, 204, 21, 0.35);
+  color: inherit;
+  border-radius: 3px;
+}
+.journal-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.journal-check-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto auto auto;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  background: rgba(255,255,255,.02);
+}
+.journal-check-item:focus {
+  outline: 2px solid rgba(56, 189, 248, 0.65);
+}
+.journal-check-text.done {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+.journal-check-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .66rem;
+  color: var(--text-muted);
+}
+.wiki-template-block {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: rgba(255,255,255,.02);
+}
 
 /* ─── Chat Bubbles ─────────────────────────────────────────────── */
 .chat-msg {
@@ -1089,3 +1309,218 @@ select option { background: var(--bg-elevated); }
 .diff-viewer .diff-add { color: #4ade80; background: rgba(74, 222, 128, 0.1); display: inline-block; width: 100%; }
 .diff-viewer .diff-remove { color: #f87171; background: rgba(248, 113, 113, 0.1); display: inline-block; width: 100%; }
 .diff-viewer .diff-header { color: #38bdf8; display: inline-block; width: 100%; }
+
+/* DAG Memory Graph — SVG node-link view */
+.dagmem-svg-wrap { position: relative; width: 100%; min-height: 400px; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--glass-border); border-radius: var(--radius-sm); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.dagmem-svg-wrap svg { width: 100%; height: 400px; touch-action: none; cursor: grab; }
+.dagmem-svg-wrap svg.panning { cursor: grabbing; }
+.dagmem-svg-node { cursor: grab; transition: opacity 0.25s ease; }
+.dagmem-svg-node.dagmem-active { cursor: grabbing; }
+.dagmem-svg-node.dagmem-out { opacity: 0.08; pointer-events: none; }
+.dagmem-svg-node circle { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1.5px; cursor: pointer; transition: stroke 0.2s ease, stroke-width 0.2s ease, filter 0.2s ease; }
+.dagmem-svg-node:hover circle { stroke: var(--accent-cyan); stroke-width: 2.5px; filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.5)); }
+.dagmem-svg-node.dagmem-active circle { stroke: #fff; stroke-width: 2.5px; filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.7)); }
+.dagmem-svg-node text { font-size: 11px; fill: var(--text-secondary); pointer-events: none; user-select: none; font-family: 'JetBrains Mono', monospace; }
+.dagmem-svg-edge { stroke: var(--glass-border); stroke-width: 1.5px; marker-end: url(#dagmem-arrow); transition: stroke 0.2s ease, opacity 0.2s ease; }
+/* Edges recede while dragging so node movement stays readable */
+.dagmem-svg-wrap svg.dragging .dagmem-svg-edge { opacity: 0.2; }
+.dagmem-svg-node.dim circle { opacity: 0.2; }
+.dagmem-svg-node.dim text { opacity: 0.2; }
+.dagmem-detail-card { margin-top: 14px; padding: 12px 16px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--glass-border); border-radius: var(--radius-sm); font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary); }
+.dagmem-badge { display: inline-block; padding: 2px 7px; border-radius: 9999px; font-size: 0.68rem; font-weight: 600; text-transform: uppercase; margin-right: 6px; }
+
+#harness-relay-canvas-wrap { box-shadow: inset 0 0 40px rgba(0,0,0,0.6); border-radius: var(--radius-sm); }
+#harness-relay-canvas { user-select: none; touch-action: none; }
+
+/* ─── Movie Studio & Timeline Editor Styles ──────────────────────────── */
+.movie-timeline-wrapper {
+  user-select: none;
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 30px rgba(0,0,0,0.7);
+}
+
+.movie-ruler-container {
+  height: 28px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.ruler-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  padding-left: 4px;
+}
+
+.ruler-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+.timeline-track {
+  display: flex;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  min-height: 52px;
+}
+
+.track-header {
+  width: 170px;
+  flex-shrink: 0;
+  background: rgba(14, 14, 26, 0.85);
+  border-right: 1px solid var(--glass-border);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  z-index: 10;
+  position: sticky;
+  left: 0;
+}
+
+.track-lane-body {
+  position: relative;
+  flex: 1;
+  min-height: 52px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.track-lane-body.drag-over {
+  background: rgba(6, 182, 212, 0.12);
+  outline: 2px dashed var(--accent-cyan);
+}
+
+.timeline-block {
+  position: absolute;
+  top: 5px;
+  height: 42px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  will-change: transform, width, left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.timeline-block:active {
+  cursor: grabbing;
+}
+
+.timeline-block.status-pending {
+  border-style: dashed;
+  opacity: 0.8;
+}
+
+.timeline-block.status-approved {
+  background: rgba(16, 185, 129, 0.16);
+  border-style: solid;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+}
+
+.timeline-block.status-generating.candy-stripe {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(6, 182, 212, 0.15),
+    rgba(6, 182, 212, 0.15) 10px,
+    rgba(6, 182, 212, 0.28) 10px,
+    rgba(6, 182, 212, 0.28) 20px
+  );
+  animation: stripeMove 1.5s linear infinite;
+}
+
+@keyframes stripeMove {
+  0% { background-position: 0 0; }
+  100% { background-position: 40px 0; }
+}
+
+.block-trim-handle {
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  border-radius: 2px;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+}
+
+.block-trim-handle:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.block-content {
+  flex: 1;
+  padding: 0 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.block-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.block-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62rem;
+  color: var(--text-muted);
+}
+
+/* Action buttons overlay the block's right edge so short clips keep their
+   title/meta visible; revealed on hover/focus instead of always occupying
+   flex space (which squeezed narrow blocks to zero-width content). */
+.block-actions {
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 2px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: rgba(10, 10, 18, 0.92);
+  border: 1px solid var(--glass-border);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 3;
+}
+
+.timeline-block:hover .block-actions,
+.timeline-block:focus-within .block-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.timeline-block:hover .block-content,
+.timeline-block:focus-within .block-content {
+  padding-right: 80px;
+}
+
+.block-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: var(--text-secondary);
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 0.65rem;
+  cursor: pointer;
+}
+
+.block-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}

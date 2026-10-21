@@ -29,12 +29,12 @@ export class Sanitizer {
      */
     static sanitize(text: string): string {
         if (!text) return text;
-        
+
         // Dynamic bypass for image data URLs to prevent base64 payload corruption
         if (text.startsWith('data:image/')) {
             return text;
         }
-        
+
         let sanitized = text;
         for (const pattern of this.SENSITIVE_PATTERNS) {
             sanitized = sanitized.replace(pattern, (match, p1) => {
@@ -46,7 +46,7 @@ export class Sanitizer {
                 return '[REDACTED]';
             });
         }
-        
+
         return sanitized;
     }
 
@@ -67,14 +67,14 @@ export class Sanitizer {
         for (const [key, value] of Object.entries(obj)) {
             // Check if key itself looks sensitive
             const isSensitiveKey = /(?:key|token|secret|password|auth|private)/i.test(key);
-            
+
             if (isSensitiveKey && typeof value === 'string') {
                 sanitized[key] = '[REDACTED]';
             } else {
                 sanitized[key] = this.sanitizeObject(value);
             }
         }
-        
+
         return sanitized;
     }
 }

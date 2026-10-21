@@ -3,7 +3,7 @@ import { WorkspaceContextMiddleware } from '../../src/pipeline/middlewares/Works
 
 /**
  * 🤖 AGENTIC MECHANISM SIMULATION v3 (LIVE Grounded)
- * 
+ *
  * Demonstrates:
  * 1. Planning (Decomposition)
  * 2. LIVE Grounding (Actual WorkspaceContextMiddleware invocation)
@@ -32,7 +32,7 @@ async function runSimulation() {
 
     // --- PHASE 2: LIVE GROUNDING & DISTRIBUTION ---
     console.log('--- PHASE 2: LIVE GROUNDING & DISTRIBUTION ---');
-    
+
     for (const task of subtasks) {
         console.log(`\n[SUBTASK]: ${task}`);
 
