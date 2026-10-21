@@ -9,11 +9,14 @@ export function setBrowserUrlResolverForTesting(resolve: ((host: string) => Prom
 
 /**
  * Gate for every URL browser_tool is asked to open or replay: http(s) only, no credentials, and
- * no private/loopback/link-local/metadata targets unless BROWSER_ALLOW_PRIVATE=1 (local dev).
+ * no private/loopback/link-local targets unless listed in BROWSER_ALLOW_HOSTS (comma-separated
+ * `host` or `host:port`, e.g. `localhost:3111`) or BROWSER_ALLOW_PRIVATE=1 (everything private).
+ * Cloud metadata addresses are never allowed.
  */
 export function checkBrowserUrl(url: string): Promise<UrlCheck> {
     return checkPublicHttpUrl(url, {
         allowPrivate: process.env.BROWSER_ALLOW_PRIVATE === '1',
+        allowHosts: (process.env.BROWSER_ALLOW_HOSTS || '').split(',').map(h => h.trim()).filter(Boolean),
         resolve: resolverOverride ?? undefined,
     });
 }
