@@ -30,7 +30,7 @@ export interface DiagnosticResult {
   message: string;
   severity: 'error' | 'warning' | 'info';
   code?: number;
-  source?: 'omp-lsp' | 'ast-syntactic' | 'semantic' | 'subprocess' | 'json-syntax' | 'llm-patch';
+  source?: 'omp-lsp' | 'ast-syntactic' | 'semantic' | 'subprocess' | 'json-syntax' | 'llm-patch' | 'verify-command';
 }
 
 export interface LspActionRequest {
@@ -86,6 +86,12 @@ export interface CodingAgentsInput {
   lspAction?: LspActionRequest;
   astEditOps?: AstEditOp[];
   resolve?: ResolveAction;
+  /**
+   * Behavioural check run before and after an apply (e.g. `npx vitest run tests/a.test.ts`). A patch
+   * that makes a previously passing check fail is rolled back. Allowlisted runners only, no shell
+   * syntax; see tools/coding-agents/verify-command.ts.
+   */
+  verifyCommand?: string;
   action?: 'plan' | 'execute' | 'resume' | 'status' | 'abort';
   pauseOnTaskPlan?: boolean;
 }
@@ -104,6 +110,18 @@ export interface CodingAgentsResult {
   message?: string;
   checkpointId?: string;
   restoredFiles?: string[];
+  /** Outcome of verifyCommand around an apply (absent when none was given or nothing was applied). */
+  verification?: {
+    command: string;
+    /** The check passed after the edit. */
+    ok: boolean;
+    /** The check passed BEFORE the edit; when false the check is informational, not a gate. */
+    baselineOk: boolean;
+    exitCode: number | null;
+    timedOut: boolean;
+    outputTail: string;
+    durationMs: number;
+  };
   /** undo_file: whether the previous version was restored to disk. */
   restored?: boolean;
   /** undo_file: history entries left after this pop (0 = drained). */
@@ -199,4 +217,3 @@ export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
 
   return lines.join('\n');
 }
-

@@ -153,6 +153,7 @@ const TOOLS = [
       { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'coding-session-1' },
       { id: 'action', label: 'Action', type: 'select', options: ['', 'plan', 'execute', 'resume', 'status', 'abort'] },
       { id: 'pauseOnTaskPlan', label: 'Pause On Task Plan', type: 'toggle' },
+      { id: 'verifyCommand', label: 'Verify Command (rolls back on regression)', type: 'text', placeholder: 'npx vitest run tests/a.test.ts' },
       { id: 'targetFiles', label: 'Target Files (comma-separated)', type: 'text', placeholder: 'src/foo.ts, src/bar.ts' },
       { id: 'verifyLspDiagnostics', label: 'Verify LSP Diagnostics', type: 'toggle', default: true },
       { id: 'astEditOps', label: 'AST Edit Ops JSON (optional)', type: 'textarea', placeholder: '[{"pat":"old($$A)","out":"new($$A)"}]' },

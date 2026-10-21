@@ -1,3 +1,4 @@
+import { validateVerifyCommand, runVerifyCommand } from './verify-command.js';
 import path from 'node:path';
 import fs from 'fs-extra';
 import { VectorStore, DocumentNode } from '../../memory/VectorStore.js';
@@ -176,6 +177,14 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
   };
 
   try {
+    if (input.verifyCommand !== undefined) {
+      const v = validateVerifyCommand(input.verifyCommand);
+      if (!v.ok) {
+        // Rejected before anything runs or is written.
+        result.error = `verifyCommand rejected: ${v.reason}`;
+        return await finalizeResult();
+      }
+    }
     // ── Handle Rollback Action ───────────────────────────────────────────────
     if (input.resolve?.action === 'rollback') {
       const targetCheckpoint = input.resolve.checkpointId ||
@@ -735,10 +744,14 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     }
 
     // 4c. Atomic Multi-File Single Update with Zero-Waste Pre-Apply CAS Checkpointing
+    let verifyBaseline: Awaited<ReturnType<typeof runVerifyCommand>> | undefined;
     if (!dryRun && input.resolve?.action === 'apply' && patches.length > 0) {
       for (const patch of patches) {
         assertPatchPathAllowed(workspaceRoot, patch.filePath);
       }
+      // Does the check pass BEFORE the edit? If it already fails, a failure afterwards proves nothing
+      // about the patch, so it is reported but not used as a gate.
+      if (input.verifyCommand) verifyBaseline = await runVerifyCommand(input.verifyCommand, workspaceRoot);
       // Step 1: Snapshot original files into CAS before modifying
       const preApplyMap: Record<string, string> = {};
       const preHistoryMap: Record<string, string | null> = {};
@@ -835,6 +848,38 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     result.pipelineStage = 'completed';
     // applied = true only when patches were actually written to disk
     result.applied = !dryRun && input.resolve?.action === 'apply';
+
+    // Behavioural gate: re-run the check on the patched workspace. A regression (passed before,
+    // fails now) is an error diagnostic, which the post-apply gate below turns into an automatic
+    // rollback from the CAS checkpoint.
+    if (result.applied && input.verifyCommand && verifyBaseline) {
+      const after = await runVerifyCommand(input.verifyCommand, workspaceRoot);
+      result.verification = {
+        command: input.verifyCommand,
+        ok: after.ok,
+        baselineOk: verifyBaseline.ok,
+        exitCode: after.exitCode,
+        timedOut: after.timedOut,
+        outputTail: after.outputTail,
+        durationMs: after.durationMs,
+      };
+      if (!after.ok) {
+        const regression = verifyBaseline.ok;
+        const d: DiagnosticResult = {
+          filePath: '(verifyCommand)',
+          message: regression
+            ? `verifyCommand "${input.verifyCommand}" passed before the edit and fails after it${after.timedOut ? ' (timed out)' : ` (exit ${after.exitCode})`}; the edit is being rolled back. Output tail:
+${after.outputTail}`
+            : `verifyCommand "${input.verifyCommand}" was already failing before the edit, so it is not used as a gate. Output tail:
+${after.outputTail}`,
+          severity: regression ? 'error' : 'warning',
+          source: 'verify-command',
+        };
+        diagnosticsList.push(d);
+        result.diagnostics.push(d);
+        if (regression) taskHadFailure = true;
+      }
+    }
 
     // Post-apply verification gate: diagnostics above were computed AFTER the
     // write already landed (Step 5 runs after Step 4c) — without this, a
