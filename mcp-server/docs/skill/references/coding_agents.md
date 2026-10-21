@@ -10,6 +10,8 @@ interface CodingAgentsInput {
   targetFiles?: string[];                           // Explicit target files list (bypasses auto-scan and ts-morph for non-code)
   action?: 'plan' | 'execute' | 'resume' | 'status' | 'abort'; // Execution + DAG tasks.md + background-run control
   pauseOnTaskPlan?: boolean;                        // Same effect as action:'plan' — create tasks.md DAG and pause (default false)
+  verifyReport?: { exitCode: number; output: string; command?: string }; // output of a check YOU ran (after the agent changed tests it never runs, or a withheld edit); failure => result.verification.repairBrief
+  feedback?: string;                                // repairBrief from a failed attempt, appended to the goal for the retry
   verifyCommand?: string;                           // e.g. 'npx vitest run tests/a.test.ts'. Run before and after an apply; passed-before + fails-after => automatic rollback, failing output in result.verification.outputTail. Allowlisted runners, no shell syntax.
   dryRun?: boolean;                                 // If true, returns diff preview synchronously without mutating disk (default true)
   topKFiles?: number;                               // Max candidate files to rank via VectorStore RAG (default 5)

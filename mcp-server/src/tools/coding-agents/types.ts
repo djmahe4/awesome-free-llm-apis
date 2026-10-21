@@ -92,6 +92,13 @@ export interface CodingAgentsInput {
    * syntax; see tools/coding-agents/verify-command.ts.
    */
   verifyCommand?: string;
+  /**
+   * Output of a check the USER ran themselves (used when an edit was withheld because it touches tests,
+   * scripts or hooks). A failure comes back as a debugger brief; nothing on disk changes.
+   */
+  verifyReport?: { exitCode: number; output: string; command?: string };
+  /** Debugger brief from a previous failed attempt; appended to the goal for the retry. */
+  feedback?: string;
   action?: 'plan' | 'execute' | 'resume' | 'status' | 'abort';
   pauseOnTaskPlan?: boolean;
 }
@@ -113,6 +120,12 @@ export interface CodingAgentsResult {
   /** Outcome of verifyCommand around an apply (absent when none was given or nothing was applied). */
   verification?: {
     command: string;
+    /** passed | regressed (passed before, fails after: rolled back) | baseline_failing | needs_user (edit withheld) | user_passed | user_failed */
+    status?: 'passed' | 'regressed' | 'baseline_failing' | 'needs_user' | 'user_passed' | 'user_failed';
+    /** Why an edit was withheld (needs_user). */
+    reasons?: string[];
+    /** Debugger-persona brief built from the failing output, ready to pass back as `feedback`. */
+    repairBrief?: string;
     /** The check passed after the edit. */
     ok: boolean;
     /** The check passed BEFORE the edit; when false the check is informational, not a gate. */

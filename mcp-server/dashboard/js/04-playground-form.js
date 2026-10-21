@@ -154,6 +154,8 @@ const TOOLS = [
       { id: 'action', label: 'Action', type: 'select', options: ['', 'plan', 'execute', 'resume', 'status', 'abort'] },
       { id: 'pauseOnTaskPlan', label: 'Pause On Task Plan', type: 'toggle' },
       { id: 'verifyCommand', label: 'Verify Command (rolls back on regression)', type: 'text', placeholder: 'npx vitest run tests/a.test.ts' },
+      { id: 'feedback', label: 'Feedback / Repair Brief (retry)', type: 'textarea', placeholder: 'paste result.verification.repairBrief from the previous attempt' },
+      { id: 'verifyReport', label: 'Verify Report JSON (your own test run)', type: 'textarea', placeholder: '{"exitCode":1,"output":"..."}' },
       { id: 'targetFiles', label: 'Target Files (comma-separated)', type: 'text', placeholder: 'src/foo.ts, src/bar.ts' },
       { id: 'verifyLspDiagnostics', label: 'Verify LSP Diagnostics', type: 'toggle', default: true },
       { id: 'astEditOps', label: 'AST Edit Ops JSON (optional)', type: 'textarea', placeholder: '[{"pat":"old($$A)","out":"new($$A)"}]' },

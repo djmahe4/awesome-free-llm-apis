@@ -36,3 +36,12 @@ describe('normalizeCodingAgentsHttpInput', () => {
     expect(normalizeCodingAgentsHttpInput(null, '/ws')).toEqual({ error: 'goal is required' });
   });
 });
+
+describe('normalizeCodingAgentsHttpInput: verification inputs', () => {
+  it('forwards verifyCommand, verifyReport and feedback; a verifyReport needs no goal', () => {
+    const r = normalizeCodingAgentsHttpInput({ verifyReport: { exitCode: 1, output: 'FAIL' }, feedback: 'brief', verifyCommand: 'npm test' }, '/ws');
+    expect('error' in r).toBe(false);
+    if ('error' in r) return;
+    expect(r.input).toMatchObject({ verifyReport: { exitCode: 1, output: 'FAIL' }, feedback: 'brief', verifyCommand: 'npm test' });
+  });
+});

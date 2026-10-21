@@ -1,3 +1,4 @@
+import { jaccardSimilarity } from '../../utils/log-compaction.js';
 import { spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
@@ -468,25 +469,10 @@ export class ContextGatherer {
                         }
                         flushCurrentBlock();
 
-                        // Helper Jaccard similarity function with word-digit normalization
-                        const calculateJaccard = (s1: string, s2: string): number => {
-                            // Preserve markdown headers (#, ##, ###) and embedded code snippet fields
-                            if (s1.trim().startsWith('#') || s2.trim().startsWith('#')) {
-                                return 0;
-                            }
-                            if (containsEmbeddedCodeField(s1) || containsEmbeddedCodeField(s2)) {
-                                return 0;
-                            }
-                            const norm1 = s1.replace(/[a-zA-Z0-9]*\d+[a-zA-Z0-9]*/g, '#');
-                            const norm2 = s2.replace(/[a-zA-Z0-9]*\d+[a-zA-Z0-9]*/g, '#');
-                            const tokenize = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9_#]+/g) || []);
-                            const set1 = tokenize(norm1);
-                            const set2 = tokenize(norm2);
-                            if (set1.size === 0 && set2.size === 0) return 1;
-                            const intersection = new Set([...set1].filter(x => set2.has(x)));
-                            const union = new Set([...set1, ...set2]);
-                            return intersection.size / union.size;
-                        };
+                        // Similarity lives in utils/log-compaction.ts (shared with the coding_agents repair
+                        // brief); embedded code fields (jsCode, ...) are preserved, never collapsed.
+                        const calculateJaccard = (s1: string, s2: string): number =>
+                            jaccardSimilarity(s1, s2, containsEmbeddedCodeField);
 
                         // 2. Collapse middle blocks semantically
                         let i = 0;
