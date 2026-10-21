@@ -1,3 +1,4 @@
+import { checkBrowserUrl } from './urlGuard.js';
 import path from 'node:path';
 import { parseInput, type BrowserToolInput } from './actionSchemas.js';
 import { getBrowserSessionPool } from './BrowserSessionPool.js';
@@ -115,6 +116,18 @@ export async function dispatchBrowserAction(rawInput: unknown): Promise<BrowserA
     }
 
     const sessionId = sessionIdOf(input);
+
+    // Validate the target BEFORE a browser is launched or a session acquired: file:, javascript:,
+    // chrome:, private/loopback/metadata addresses and hosts that resolve to them are refused.
+    const targetUrl = input.action === 'navigate' ? ((input.params?.url as string | undefined) ?? input.url)
+        : input.action === 'scrape' ? input.url
+        : undefined;
+    if (targetUrl) {
+        const verdict = await checkBrowserUrl(targetUrl);
+        if (!verdict.ok) {
+            return failResult({ action: input.action, sessionId, errors: [{ stage: 'input', code: 'URL_BLOCKED', message: `${verdict.code}: ${verdict.message}`, recoverable: false }] });
+        }
+    }
 
     // checkpoint/list_checkpoints and site_memory don't need a live browser.
     if (input.action === 'checkpoint' && input.params?.op === 'list') {
@@ -432,6 +445,12 @@ async function handleApiReplay(session: BrowserSession, input: BrowserToolInput,
     let i = 0;
     for (const url of Array.from(replayUrls).slice(0, maxCalls)) {
         i++;
+        // Replayed URLs are derived from captured traffic and templates, so they are untrusted too.
+        const verdict = await checkBrowserUrl(url);
+        if (!verdict.ok) {
+            errors.push({ stage: 'api_replay', code: 'URL_BLOCKED', message: `${url}: ${verdict.code}: ${verdict.message}`, recoverable: true });
+            continue;
+        }
         const res = await session.evaluate<{ ok: boolean; status: number; body: string }>(`(args) => fetch(args.url, { credentials: 'include' }).then(async r => ({ ok: r.ok, status: r.status, body: await r.text() }))`, { url });
         if (!res.ok || !res.json?.ok) {
             errors.push({ stage: 'api_replay', code: 'REPLAY_FAILED', message: `${url}: ${res.error || res.json?.status}`, recoverable: true });
