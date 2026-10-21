@@ -30,6 +30,7 @@ import {
   parseSearchReplaceBlocksDetailed,
   applySearchReplaceBlocks,
   isAdditiveInstruction,
+  isNoopPatch,
   searchReplaceRegressesTsErrors,
   looksLikeHallucinatedReplacement,
   generateSearchReplacePatch,
@@ -328,6 +329,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     result.pipelineStage = 'anchor';
     const anchors: SnapshotAnchor[] = [];
     const patches: LineAnchoredPatch[] = [];
+    // Appended after the verification diagnostics so existing consumers still see those first.
+    const noopWarnings: DiagnosticResult[] = [];
+    let noopFiles = 0;
 
     // Hoist model resolution — avoid N×listLocalModels HTTP calls (one per file)
     let resolvedModel: string | null = null;
@@ -686,6 +690,21 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         replacementLines
       );
 
+      if (fileExists && isNoopPatch(lines, replacementLines)) {
+        // Nothing to propose. This used to be listed as a "proposed" patch holding only a
+        // trailing-newline artifact, which read as if the edit had been attempted and succeeded.
+        noopFiles++;
+        if (!dryRun) {
+          noopWarnings.push({
+            filePath: relPath,
+            message: 'No change was produced for this file (the model returned the original text or no edit applied).',
+            severity: 'warning',
+            source: 'llm-patch',
+          });
+          taskHadFailure = true;
+        }
+      }
+      // Still recorded (verification diagnostics run over every entry), now with the warning above.
       patches.push({
         filePath: relPath,
         anchorTag: hashTag,
@@ -797,7 +816,12 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       }
     }
 
-    result.diagnostics.push(...diagnosticsList);
+    result.diagnostics.push(...diagnosticsList, ...noopWarnings);
+    if (dryRun && noopFiles > 0 && noopFiles === patches.length) {
+      // dryRun:true never calls a model, so every entry is the unchanged file; say so instead of
+      // letting an empty diff read as "the agent proposed nothing useful".
+      result.message = 'dryRun:true only enumerates files; no model was run, so there is no proposal. Re-run with dryRun:false (then resolve:{action:"apply"}) to generate and apply an edit.';
+    }
     result.pipelineStage = 'completed';
     // applied = true only when patches were actually written to disk
     result.applied = !dryRun && input.resolve?.action === 'apply';

@@ -628,3 +628,19 @@ export async function generateCodePatchWithCloudLLM(
     return { patch: null, failureReason };
   }
 }
+
+/**
+ * True when a proposed file equals the original (ignoring CR and trailing blank lines). A model can
+ * return the original text unchanged, and dryRun:true never runs a model at all; neither should be
+ * presented as a proposed patch.
+ */
+export function isNoopPatch(before: string[], after: string[]): boolean {
+  const norm = (ls: string[]) => {
+    const out = ls.map(l => l.replace(/\r$/, ''));
+    while (out.length > 0 && out[out.length - 1] === '') out.pop();
+    return out;
+  };
+  const a = norm(before);
+  const b = norm(after);
+  return a.length === b.length && a.every((l, i) => l === b[i]);
+}

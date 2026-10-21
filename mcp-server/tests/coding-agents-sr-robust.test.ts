@@ -4,6 +4,7 @@ import {
   parseSearchReplaceBlocksDetailed,
   applySearchReplaceBlocks,
   isAdditiveInstruction,
+  isNoopPatch,
 } from '../src/tools/coding-agents/patch-gen.js';
 
 const block = (s: string, r: string) => `<<<<<<< SEARCH\n${s}\n=======\n${r}\n>>>>>>> REPLACE`;
@@ -86,5 +87,18 @@ describe('isAdditiveInstruction', () => {
     expect(isAdditiveInstruction('rename foo to bar')).toBe(false);
     expect(isAdditiveInstruction('remove the unused import')).toBe(false);
     expect(isAdditiveInstruction('add logging but replace the old logger')).toBe(false);
+  });
+});
+
+describe('isNoopPatch', () => {
+  it('is true when the proposal equals the original, ignoring CR and trailing blank lines', () => {
+    expect(isNoopPatch(['a', 'b', ''], ['a', 'b'])).toBe(true);
+    expect(isNoopPatch(['a\r', 'b\r'], ['a', 'b'])).toBe(true);
+    expect(isNoopPatch([], [])).toBe(true);
+  });
+  it('is false for any real difference, including whitespace inside a line', () => {
+    expect(isNoopPatch(['a', 'b'], ['a', 'b', 'c'])).toBe(false);
+    expect(isNoopPatch(['a', 'b'], ['a', ' b'])).toBe(false);
+    expect(isNoopPatch(['a'], ['A'])).toBe(false);
   });
 });
