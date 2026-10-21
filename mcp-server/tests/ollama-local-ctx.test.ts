@@ -45,3 +45,19 @@ describe('chatLocal', () => {
     expect(r.outputTruncated).toBe(false);
   });
 });
+
+describe('chatLocal: images and keep_alive (staged vision -> code pipelines)', () => {
+  it('forwards base64 images on a message and a keep_alive value', async () => {
+    fetchMock.mockResolvedValueOnce(jsonRes({ model: 'vl', message: { role: 'assistant', content: 'a login form' }, prompt_eval_count: 50, eval_count: 5, done_reason: 'stop' }));
+    await chatLocal('vl', [{ role: 'user', content: 'describe', images: ['AAAA'] }], { numCtx: 4096, keepAlive: 0 });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.messages[0].images).toEqual(['AAAA']);
+    expect(body.keep_alive).toBe(0);
+  });
+
+  it('omits keep_alive when not requested (Ollama default retention)', async () => {
+    fetchMock.mockResolvedValueOnce(jsonRes({ model: 'm', message: { role: 'assistant', content: 'x' }, prompt_eval_count: 1, eval_count: 1 }));
+    await chatLocal('m', [{ role: 'user', content: 'hi' }], { numCtx: 2048 });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty('keep_alive');
+  });
+});
