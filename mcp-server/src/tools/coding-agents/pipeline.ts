@@ -1,3 +1,5 @@
+import { validateVerifyCommand, runVerifyCommand } from './verify-command.js';
+import { assessPatchesForVerify, buildRepairBrief, withFeedback, type PatchFact } from './verify-guard.js';
 import path from 'node:path';
 import fs from 'fs-extra';
 import { VectorStore, DocumentNode } from '../../memory/VectorStore.js';
@@ -176,6 +178,31 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
   };
 
   try {
+    if (input.verifyCommand !== undefined) {
+      const v = validateVerifyCommand(input.verifyCommand);
+      if (!v.ok) {
+        // Rejected before anything runs or is written.
+        result.error = `verifyCommand rejected: ${v.reason}`;
+        return await finalizeResult();
+      }
+    }
+    // The user ran the check themselves (an edit was withheld, or they simply want recovery help):
+    // turn their output into a debugger brief for the next attempt. Nothing is executed or written.
+    if (input.verifyReport) {
+      const rep = input.verifyReport;
+      const passed = rep.exitCode === 0;
+      const command = rep.command ?? input.verifyCommand ?? '(run by user)';
+      result.pipelineStage = 'completed';
+      result.verification = {
+        command, status: passed ? 'user_passed' : 'user_failed', ok: passed, baselineOk: true,
+        exitCode: rep.exitCode, timedOut: false, outputTail: String(rep.output ?? '').slice(-4096), durationMs: 0,
+        ...(passed ? {} : { repairBrief: buildRepairBrief({ command, exitCode: rep.exitCode, outputTail: String(rep.output ?? ''), patchedFiles: input.targetFiles ?? [] }) }),
+      };
+      result.message = passed
+        ? 'Recorded: the check you ran passed.'
+        : 'Recorded: the check you ran failed. Pass result.verification.repairBrief back as `feedback` on the next attempt.';
+      return await finalizeResult();
+    }
     // ── Handle Rollback Action ───────────────────────────────────────────────
     if (input.resolve?.action === 'rollback') {
       const targetCheckpoint = input.resolve.checkpointId ||
@@ -247,7 +274,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       return result;
     }
 
-    let activeGoal = input.goal;
+    let activeGoal = withFeedback(input.goal, input.feedback);
     let loadedTasks: TaskItem[] | undefined;
     let nextPendingTask: TaskItem | undefined;
     let planGoal = input.goal;
@@ -329,6 +356,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     result.pipelineStage = 'anchor';
     const anchors: SnapshotAnchor[] = [];
     const patches: LineAnchoredPatch[] = [];
+    // What each changed file looked like before/after, for the verify trust-boundary check.
+    const patchFacts: PatchFact[] = [];
     // Appended after the verification diagnostics so existing consumers still see those first.
     const noopWarnings: DiagnosticResult[] = [];
     let noopFiles = 0;
@@ -714,6 +743,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           taskHadFailure = true;
         }
       }
+      if (!(fileExists && isNoopPatch(lines, replacementLines))) {
+        patchFacts.push({ filePath: relPath, before: fileExists ? originalContent : null, after: patchedContent, isNew: !fileExists });
+      }
       // Still recorded (verification diagnostics run over every entry), now with the warning above.
       patches.push({
         filePath: relPath,
@@ -735,10 +767,39 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     }
 
     // 4c. Atomic Multi-File Single Update with Zero-Waste Pre-Apply CAS Checkpointing
-    if (!dryRun && input.resolve?.action === 'apply' && patches.length > 0) {
+    let verifyBaseline: Awaited<ReturnType<typeof runVerifyCommand>> | undefined;
+    // Trust boundary: when the edit touches anything the check could execute (tests, scripts, hooks),
+    // creates a test, deletes a file or adds a destructive call, the check is NOT run automatically and
+    // the edit is withheld; the user runs the check and reports the output (verifyReport).
+    let verifyWithheld = false;
+    let verifyManual = false;
+    if (!dryRun && input.resolve?.action === 'apply' && input.verifyCommand && patches.length > 0) {
+      const assessment = assessPatchesForVerify(patchFacts, input.verifyCommand);
+      if (!assessment.suspicious && assessment.manualRun) {
+        // Tests were written or changed by the agent: apply the edit, but never execute them here.
+        verifyManual = true;
+        result.verification = {
+          command: input.verifyCommand, status: 'needs_user', ok: false, baselineOk: false,
+          exitCode: null, timedOut: false, outputTail: '', durationMs: 0, reasons: assessment.manualReasons,
+        };
+        result.message = `Applied. The agent changed tests, so it did not run them. Run "${input.verifyCommand}" yourself and send its exit code and output back as verifyReport (a failure comes back as a debugger brief for the next attempt).`;
+      }
+      if (assessment.suspicious) {
+        verifyWithheld = true;
+        result.verification = {
+          command: input.verifyCommand, status: 'needs_user', ok: false, baselineOk: false,
+          exitCode: null, timedOut: false, outputTail: '', durationMs: 0, reasons: assessment.reasons,
+        };
+        result.message = `Not applied: ${assessment.reasons.join('; ')}. Review the diff. To proceed, apply without verifyCommand, run \`${input.verifyCommand}\` yourself, and send its exit code and output back as verifyReport.`;
+      }
+    }
+    if (!dryRun && input.resolve?.action === 'apply' && patches.length > 0 && !verifyWithheld) {
       for (const patch of patches) {
         assertPatchPathAllowed(workspaceRoot, patch.filePath);
       }
+      // Does the check pass BEFORE the edit? If it already fails, a failure afterwards proves nothing
+      // about the patch, so it is reported but not used as a gate.
+      if (input.verifyCommand && !verifyManual) verifyBaseline = await runVerifyCommand(input.verifyCommand, workspaceRoot);
       // Step 1: Snapshot original files into CAS before modifying
       const preApplyMap: Record<string, string> = {};
       const preHistoryMap: Record<string, string | null> = {};
@@ -834,7 +895,43 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     }
     result.pipelineStage = 'completed';
     // applied = true only when patches were actually written to disk
-    result.applied = !dryRun && input.resolve?.action === 'apply';
+    result.applied = !dryRun && input.resolve?.action === 'apply' && !verifyWithheld;
+
+    // Behavioural gate: re-run the check on the patched workspace. A regression (passed before,
+    // fails now) is an error diagnostic, which the post-apply gate below turns into an automatic
+    // rollback from the CAS checkpoint.
+    if (result.applied && input.verifyCommand && verifyBaseline) {
+      const after = await runVerifyCommand(input.verifyCommand, workspaceRoot);
+      result.verification = {
+        command: input.verifyCommand,
+        status: after.ok ? 'passed' : (verifyBaseline.ok ? 'regressed' : 'baseline_failing'),
+        ok: after.ok,
+        baselineOk: verifyBaseline.ok,
+        exitCode: after.exitCode,
+        timedOut: after.timedOut,
+        outputTail: after.outputTail,
+        durationMs: after.durationMs,
+      };
+      if (!after.ok) {
+        const regression = verifyBaseline.ok;
+        const d: DiagnosticResult = {
+          filePath: '(verifyCommand)',
+          message: regression
+            ? `verifyCommand "${input.verifyCommand}" passed before the edit and fails after it${after.timedOut ? ' (timed out)' : ` (exit ${after.exitCode})`}; the edit is being rolled back. Output tail:
+${after.outputTail}`
+            : `verifyCommand "${input.verifyCommand}" was already failing before the edit, so it is not used as a gate. Output tail:
+${after.outputTail}`,
+          severity: regression ? 'error' : 'warning',
+          source: 'verify-command',
+        };
+        diagnosticsList.push(d);
+        result.diagnostics.push(d);
+        if (regression) {
+          taskHadFailure = true;
+          result.verification.repairBrief = buildRepairBrief({ command: input.verifyCommand, exitCode: after.exitCode, timedOut: after.timedOut, outputTail: after.outputTail, patchedFiles: patches.map(p => p.filePath) });
+        }
+      }
+    }
 
     // Post-apply verification gate: diagnostics above were computed AFTER the
     // write already landed (Step 5 runs after Step 4c) — without this, a

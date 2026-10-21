@@ -20,7 +20,7 @@ export function normalizeCodingAgentsHttpInput(
   if (action !== undefined && !(ACTIONS as readonly string[]).includes(action)) {
     return { error: `unknown action ${JSON.stringify(action)}; expected one of ${ACTIONS.join(', ')}` };
   }
-  if (!b.goal && !(action && SESSION_ACTIONS.has(action))) return { error: 'goal is required' };
+  if (!b.goal && !b.verifyReport && !(action && SESSION_ACTIONS.has(action))) return { error: 'goal is required' };
   return {
     input: {
       ...b,
