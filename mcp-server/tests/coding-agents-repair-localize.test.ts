@@ -32,6 +32,19 @@ const notGreen = (brief: string, failedCases: string[]): CodingAgentsResult => (
 });
 
 describe('repair loop localizes retries', () => {
+    it('with sampling, the first repair after the samples is already narrowed', async () => {
+        const input: CodingAgentsInput = { goal: 'x', dryRun: false, verifyCommand: 'node t.js', resolve: { action: 'apply' }, targetFiles: TARGETS, maxRepairAttempts: 2, samples: 3 };
+        const seen: Array<string[] | undefined> = [];
+        let n = 0;
+        await runWithRepairLoop(input, 's', undefined, async (i) => {
+            seen.push(i.targetFiles);
+            n++;
+            return { ...notGreen(`failure ${n}`, ['cart uses its currency everywhere']), patchPlan: [{ filePath: 'src/cart.js', fullPatchedContent: `v${n}` }] as any };
+        }, async () => [], async () => {});
+        expect(seen.slice(0, 3)).toEqual([TARGETS, TARGETS, TARGETS]); // independent samples cover the whole change
+        expect(seen[3]).toEqual(['src/cart.js']);
+    });
+
     it('a near-miss retry edits only the implicated file; a later all-green pass is unaffected', async () => {
         const input: CodingAgentsInput = { goal: 'x', dryRun: false, verifyCommand: 'node t.js', resolve: { action: 'apply' }, targetFiles: TARGETS, maxRepairAttempts: 2, samples: 1 };
         const seen: Array<string[] | undefined> = [];

@@ -99,11 +99,18 @@ export async function runWithRepairLoop(
   // The first apply's checkpoint is the ORIGINAL tree; files the agent created across attempts.
   let originalCheckpoint: string | undefined;
   // The closest attempt so far (fewest failing cases): later attempts repair THAT, not merely the latest.
-  let best: { failing: number; brief: string; files: Array<{ filePath: string; content: string }>; isOriginal?: boolean } | undefined;
+  let best: { failing: number; brief: string; files: Array<{ filePath: string; content: string }>; isOriginal?: boolean; cases?: string[] } | undefined;
   let latestIsBest = false;
   const createdFiles = new Set<string>();
   const deadline = Date.now() + (Number.isFinite(input.maxDurationMs) && (input.maxDurationMs as number) > 0 ? (input.maxDurationMs as number) : DEFAULT_MAX_DURATION_MS);
   let outcome: NonNullable<CodingAgentsResult['repair']>['outcome'] = 'converged';
+
+  // Narrow a patch-in-place retry to the files the failure implicates; the rest stay as reference.
+  const narrowTo = (cases: string[], brief: string): Partial<CodingAgentsInput> => {
+    if (!input.targetFiles || input.targetFiles.length < 2) return {};
+    const hit = filesImplicated(input.targetFiles, cases, brief);
+    return hit.length > 0 ? { targetFiles: hit, relatedFiles: input.targetFiles.filter(f => !hit.includes(f)) } : {};
+  };
 
   for (let n = 1; ; n++) {
     if (run?.controller.signal.aborted && n === 1) {
@@ -137,7 +144,7 @@ export async function runWithRepairLoop(
         .filter(p => typeof (p as any).fullPatchedContent === 'string')
         .map(p => ({ filePath: p.filePath, content: (p as any).fullPatchedContent as string }));
       latestIsBest = !best || failing < best.failing;
-      if (latestIsBest) best = { failing, brief, files };
+      if (latestIsBest) best = { failing, brief, files, cases: result.verification?.failedCases ?? [] };
       // The tree we started from is also a candidate: if it was closer to green than this attempt, the
       // next attempt repairs THAT (with the baseline's brief) instead of rewriting or building on a regression.
       const v = result.verification;
@@ -186,7 +193,7 @@ export async function runWithRepairLoop(
           await rollback!(originalCheckpoint, [...createdFiles]);
           if (!best.isOriginal && restoreFiles && best.files.length > 0) await restoreFiles(best.files);
         }
-        current = { ...input, feedback: best.brief, temperature: 0.3 };
+        current = { ...input, feedback: best.brief, temperature: 0.3, ...narrowTo(best.cases ?? [], best.brief) };
       }
       lastBrief = best.brief;
       continue;
@@ -219,13 +226,9 @@ export async function runWithRepairLoop(
     }
     // A patch-in-place retry edits only the files the failure points at: re-editing files that already pass
     // broke them in traced multi-file runs. A rewrite starts from the original tree, so it keeps all files.
-    const implicated = !rewrite && input.targetFiles && input.targetFiles.length > 1
-      ? filesImplicated(input.targetFiles, result.verification?.failedCases ?? [], nextBrief)
-      : [];
     current = {
       ...input, feedback: nextBrief, temperature: RETRY_TEMPERATURE(n - samples + 2),
-      ...(rewrite ? { rewrite: true } : {}),
-      ...(implicated.length > 0 ? { targetFiles: implicated, relatedFiles: input.targetFiles!.filter(f => !implicated.includes(f)) } : {}),
+      ...(rewrite ? { rewrite: true } : narrowTo(result.verification?.failedCases ?? [], nextBrief)),
     };
   }
 
