@@ -22,6 +22,7 @@ export type SessionFactory = (sessionId: string) => Promise<BrowserSession>;
  */
 export class BrowserSessionPool {
     private sessions = new Map<string, BrowserSession>();
+    private starting = new Map<string, Promise<{ session: BrowserSession | null; error?: string }>>();
     private lastFailureAt = new Map<string, number>();
     private lastFailureMsg = new Map<string, string>();
     private reaper: ReturnType<typeof setInterval> | null = null;
@@ -49,6 +50,16 @@ export class BrowserSessionPool {
             return { session: null, error: this.lastFailureMsg.get(sessionId) || 'Browser engine unavailable (cached failure)' };
         }
 
+        // One launch per session id: concurrent callers wait for the same one instead of starting a second
+        // Chrome on the same profile (the loser used to be orphaned).
+        const inFlight = this.starting.get(sessionId);
+        if (inFlight) return inFlight;
+        const launch = this.launch(sessionId).finally(() => this.starting.delete(sessionId));
+        this.starting.set(sessionId, launch);
+        return launch;
+    }
+
+    private async launch(sessionId: string): Promise<{ session: BrowserSession | null; error?: string }> {
         if (this.sessions.size >= MAX_SESSIONS) {
             await this.evictLru();
         }

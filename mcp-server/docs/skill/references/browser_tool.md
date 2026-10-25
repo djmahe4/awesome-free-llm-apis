@@ -60,3 +60,12 @@
 }
 ```
 
+
+## Limits and safety
+
+- **Timeouts:** every Chrome DevTools call (including `evaluate`) is bounded by `BROWSER_CALL_TIMEOUT_MS` (default 60 s). Only transport errors (reset, closed pipe, disconnect) are retried; a rejected argument or a timed-out call fails at once. `wait` `timeoutMs` is clamped to 0-300000 and `pollMs` to 50-5000.
+- **One launch per session:** simultaneous calls with the same `sessionId` share one Chrome launch.
+- **Shutdown:** the stdio server closes every Chrome it started on SIGINT, SIGTERM, or when the host closes stdin.
+- **Output paths:** `outputDir` must be inside the server's working directory or `WORKSPACE_ROOTS` (`OUTPUT_DIR_BLOCKED` otherwise, before a browser starts). `sessionId` is reduced to a plain name; a screenshot `filename` keeps only its last segment, plain characters and an image extension.
+- **`evaluate`:** runs the function you give it inside the page. On by default; `BROWSER_ALLOW_EVALUATE=0` turns it off (`EVALUATE_DISABLED`). The function is limited to 20,000 characters and the result to 100,000; a larger result comes back as `{ truncated: true, originalChars, preview }`.
+- **Options not implemented** are refused up front with `UNSUPPORTED_OPTION` (see `src/browser/unsupported.ts`).

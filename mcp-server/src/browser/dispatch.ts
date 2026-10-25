@@ -1,3 +1,5 @@
+import { replayConfidence, boundedMs, safeScreenshotName, safeSessionSegment, evaluateAllowed, MAX_EVALUATE_SOURCE_CHARS, MAX_EVALUATE_RESULT_CHARS } from './limits.js';
+import { pathParamWithinRoots } from '../utils/workspace-roots.js';
 import { checkBrowserUrl } from './urlGuard.js';
 import path from 'node:path';
 import { parseInput, type BrowserToolInput } from './actionSchemas.js';
@@ -44,7 +46,9 @@ function defaultOutputDir(input: BrowserToolInput): string {
 }
 
 function sessionIdOf(input: BrowserToolInput): string {
-    return input.sessionId || `session_${(input.url || 'browser').toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 40)}`;
+    // a session id becomes part of checkpoint and screenshot file names: keep it a plain name
+    if (input.sessionId) return safeSessionSegment(input.sessionId);
+    return `session_${(input.url || 'browser').toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 40)}`;
 }
 
 async function loadOrInitCheckpoint(outputDir: string, sessionId: string, url?: string): Promise<ScrapingSessionCheckpoint> {
@@ -117,6 +121,22 @@ export async function dispatchBrowserAction(rawInput: unknown): Promise<BrowserA
     }
 
     const sessionId = sessionIdOf(input);
+
+    // outputDir is where screenshots, exports and checkpoints are written: only inside the server's working
+    // directory or WORKSPACE_ROOTS, like every other path the dashboard accepts. Checked before a browser starts.
+    const outputDirError = pathParamWithinRoots(input.outputDir, 'outputDir');
+    if (outputDirError) {
+        return failResult({ action: input.action, sessionId, errors: [{ stage: 'input', code: 'OUTPUT_DIR_BLOCKED', message: outputDirError, recoverable: false }] });
+    }
+    if (input.action === 'evaluate') {
+        const fnSource = (input.params as any)?.function;
+        if (!evaluateAllowed()) {
+            return failResult({ action: 'evaluate', sessionId, errors: [{ stage: 'input', code: 'EVALUATE_DISABLED', message: 'evaluate is switched off (BROWSER_ALLOW_EVALUATE=0).', recoverable: false }] });
+        }
+        if (typeof fnSource === 'string' && fnSource.length > MAX_EVALUATE_SOURCE_CHARS) {
+            return failResult({ action: 'evaluate', sessionId, errors: [{ stage: 'input', code: 'INVALID_INPUT', message: `evaluate function is ${fnSource.length} characters; the limit is ${MAX_EVALUATE_SOURCE_CHARS}.`, recoverable: false }] });
+        }
+    }
 
     // Validate the target BEFORE a browser is launched or a session acquired: file:, javascript:,
     // chrome:, private/loopback/metadata addresses and hosts that resolve to them are refused.
@@ -192,7 +212,20 @@ async function handleNavigate(session: BrowserSession, input: BrowserToolInput, 
     }
     await session.navigate(url);
     session.status = 'SURFACE_EXPLORED';
-    return okResult({ action: 'navigate', sessionId, url, data: { navigated: true } });
+    // Navigation "succeeding" on a Cloudflare or captcha wall is a false success: look at the page it landed on.
+    // Detect and report only. A snapshot problem must not fail a navigation that worked.
+    try {
+        await session.snapshot(false);
+    } catch { /* the navigation itself succeeded */ }
+    const blocked = session.lastBlockCheck.blocked;
+    if (blocked) reportBlockIfDetected(session, 'navigate', sessionId);
+    return okResult({
+        action: 'navigate', sessionId, url,
+        data: blocked
+            ? { navigated: true, blocked: true, challenge: session.lastBlockCheck.type || 'unknown', evidence: session.lastBlockCheck.evidence }
+            : { navigated: true },
+        warnings: blocked ? [`BLOCKED_BY_${(session.lastBlockCheck.type || 'unknown').toUpperCase()}`] : [],
+    });
 }
 
 async function handleSnapshot(session: BrowserSession, input: BrowserToolInput, sessionId: string): Promise<BrowserActionResult> {
@@ -212,14 +245,28 @@ async function handleClick(session: BrowserSession, input: BrowserToolInput, ses
     const before = session.lastFingerprint;
     const beforeText = session.lastSnapshotText;
 
-    const res = await session.evaluate<{ matched: boolean; label?: string }>(`(args) => {
+    // By uid the DevTools click tool is used: the uid is the one printed in the snapshot (uid=1_5), which a
+    // list the code builds itself can never match (it clicked the wrong element and reported success).
+    let uidError: string | null = null;
+    if (by === 'uid') {
+        if (typeof value !== 'string' || !/^[A-Za-z0-9_.:-]{1,64}$/.test(value)) {
+            return failResult({ action: 'click', sessionId, errors: [{ stage: 'click', code: 'INVALID_INPUT', message: 'click by uid needs the uid printed in a snapshot, e.g. "1_5"', recoverable: true }] });
+        }
+        try {
+            await session.call('click', { uid: value }, { retries: 1 });
+        } catch (err: any) {
+            uidError = err?.message || String(err);
+        }
+    }
+
+    const res = by === 'uid'
+        ? { ok: uidError === null, json: { matched: uidError === null, label: `uid ${value}` }, error: uidError ? `No element clicked for uid ${value}: ${uidError}` : undefined }
+        : await session.evaluate<{ matched: boolean; label?: string }>(`(args) => {
         const nodes = Array.from(document.querySelectorAll('a, button, div[role="button"], div[role="tab"], div[onclick], [data-id]'));
         function labelOf(el) { return (el.innerText || el.textContent || '').trim(); }
         let target = null;
         if (args.by === 'selector') {
             target = document.querySelector(args.value);
-        } else if (args.by === 'uid') {
-            target = nodes[parseInt(args.value, 10) - 1] || null;
         } else if (args.by === 'role') {
             target = nodes.find(n => (n.getAttribute('role') || n.tagName.toLowerCase()) === args.value) || null;
         } else {
@@ -317,7 +364,10 @@ async function handleScroll(session: BrowserSession, input: BrowserToolInput, se
 }
 
 async function handleWait(session: BrowserSession, input: BrowserToolInput, sessionId: string): Promise<BrowserActionResult> {
-    const { until, value, timeoutMs = 8000, pollMs = 300 } = input.params as any;
+    const { until, value } = input.params as any;
+    // caller durations are bounded: an hour-long wait or a 0 ms poll must not tie up or spin the server
+    const timeoutMs = boundedMs((input.params as any).timeoutMs, 0, 300_000, 8000);
+    const pollMs = boundedMs((input.params as any).pollMs, 50, 5_000, 300);
     const deadline = Date.now() + timeoutMs;
 
     if (until === 'timeout') {
@@ -385,6 +435,11 @@ async function handleEvaluate(session: BrowserSession, input: BrowserToolInput, 
     const res = await evaluateStructured(session.client, fnSource, args);
     if (!res.ok) {
         return failResult({ action: 'evaluate', sessionId, errors: [{ stage: 'evaluate', code: 'PAGE_FUNCTION_THREW', message: res.error || 'unknown', recoverable: true }] });
+    }
+    // cap what a page function can send back: a 50 MB string would flood the model context and the transport
+    const text = JSON.stringify(res.json ?? null);
+    if (text.length > MAX_EVALUATE_RESULT_CHARS) {
+        return okResult({ action: 'evaluate', sessionId, data: { truncated: true, originalChars: text.length, preview: text.slice(0, MAX_EVALUATE_RESULT_CHARS) } });
     }
     return okResult({ action: 'evaluate', sessionId, data: res.json });
 }
@@ -490,7 +545,8 @@ async function handleApiReplay(session: BrowserSession, input: BrowserToolInput,
 
     return okResult({
         action: 'api_replay', sessionId, data: results.slice(0, 20), recordCount: results.length,
-        jsonPath, csvPath, warnings: errors.map(e => e.message), status: errors.length ? 'partial' : 'ok', confidence: 1,
+        jsonPath, csvPath, warnings: errors.map(e => e.message), status: errors.length ? 'partial' : 'ok',
+        confidence: replayConfidence(i, errors.length, results.length),
     });
 }
 
@@ -587,7 +643,7 @@ async function handleSession(session: BrowserSession, input: BrowserToolInput, s
 async function handleScreenshot(session: BrowserSession, input: BrowserToolInput, sessionId: string): Promise<BrowserActionResult> {
     const { fullPage = false, filename } = input.params as any;
     const outputDir = defaultOutputDir(input);
-    const fname = filename || `screenshot_${sessionId}_${Date.now()}.png`;
+    const fname = safeScreenshotName(filename, sessionId, Date.now());
     const filePath = path.join(outputDir, 'screenshots', fname);
     try {
         await session.call('take_screenshot', { fullPage, filePath });
@@ -604,6 +660,18 @@ async function handleDeepScrape(session: BrowserSession, input: BrowserToolInput
     const scraper = new IntelligentBrowserScraper();
 
     const deep = await scraper.deepScrapeItemDetails(session.client, checkpoint.accumulatedRecords, checkpoint.domainContext, limit);
+    if (deep.length === 0) {
+        const parents = checkpoint.accumulatedRecords.length;
+        return failResult({
+            action: 'deep_scrape', sessionId,
+            errors: [{
+                stage: 'deep_scrape', code: 'NO_DEEP_RECORDS', recoverable: true,
+                message: parents === 0
+                    ? 'Nothing to follow: this session has no extracted records yet. Run extract (or scrape) first, then deep_scrape.'
+                    : `None of the ${parents} extracted record(s) yielded a followable link or a detail page (limit ${limit}).`,
+            }],
+        });
+    }
     checkpoint.deepRecords.push(...deep);
     const checkpointPath = await ScrapingSessionCheckpointManager.saveCheckpoint(outputDir, checkpoint);
 

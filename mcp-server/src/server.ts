@@ -2128,8 +2128,9 @@ async function main() {
         }
         process.exit(0);
       };
-      process.on('SIGTERM', stdioShutdown);
-      process.on('SIGINT', stdioShutdown);
+      // SIGINT/SIGTERM, and the host closing stdin (how an MCP host normally ends a stdio server)
+      const { installShutdownHooks } = await import('./utils/shutdown-hooks.js');
+      installShutdownHooks(stdioShutdown);
     }
   } catch (err: any) {
     console.error(`[FATAL] Startup failed: ${err.message}`);
