@@ -21,6 +21,8 @@ const SAMPLES = Number(arg('samples', '3'));
 const WANT = (arg('tasks', 'counter,slug,tests,roman,duration,unique') as string).split(',');
 const MODEL = arg('model'); // pin an installed local model, e.g. a bigger one for cross-file tasks
 const DURATION_MS = Number(arg('duration-ms', '300000'));
+const THINK = arg('think') as 'auto' | 'on' | 'off' | undefined;
+const REPEAT = Number(arg('repeat', '1'));
 const BASE = `http://localhost:${PORT}`;
 
 type Task = {
@@ -163,7 +165,7 @@ async function runTask(t: Task) {
   const sessionId = `smoke-${t.id}-${Date.now()}`;
   const started = Date.now();
   const verifyCommand = `node --test ${t.test}`;
-  await post({ goal: t.goal, workspaceRoot: ws, dryRun: false, topKFiles: 1, targetFiles: t.targets ?? [t.target], sessionId, resolve: { action: 'apply' }, verifyCommand, maxRepairAttempts: ATTEMPTS, samples: SAMPLES, maxDurationMs: DURATION_MS, ...(MODEL ? { model: MODEL } : {}) });
+  await post({ goal: t.goal, workspaceRoot: ws, dryRun: false, topKFiles: 1, targetFiles: t.targets ?? [t.target], sessionId, resolve: { action: 'apply' }, verifyCommand, maxRepairAttempts: ATTEMPTS, samples: SAMPLES, maxDurationMs: DURATION_MS, ...(MODEL ? { model: MODEL } : {}), ...(THINK ? { think: THINK } : {}) });
   let res: any;
   for (let i = 0; i < Math.ceil(DURATION_MS / 5000) + 24; i++) {
     res = await post({ action: 'status', workspaceRoot: ws, sessionId });
@@ -181,14 +183,16 @@ async function runTask(t: Task) {
     console.log(['--- brief ---', String(res.verification?.repairBrief ?? '').slice(0, 1200)].join('\n'));
   }
   if (!ok && res.error) console.log(`        error: ${String(res.error).slice(0, 300)}`);
-  return { id: t.id, ok, attempts: res.repair?.attemptCount ?? 1, outcome: res.repair?.outcome, repoGreen: truth.green, ws };
+  return { id: t.id, ok, seconds: Math.round((Date.now() - started) / 1000), attempts: res.repair?.attemptCount ?? 1, outcome: res.repair?.outcome, repoGreen: truth.green, ws };
 }
 
 async function main() {
   console.log(`dashboard ${BASE}, repair budget ${ATTEMPTS}\n`);
   const results = [];
-  console.log(`model ${MODEL ?? 'auto'}, samples ${SAMPLES}, time budget ${DURATION_MS / 1000}s`);
-  for (const t of [...TASKS, ...loadFixtureTasks()].filter(x => WANT.includes(x.id))) results.push(await runTask(t));
+  console.log(`model ${MODEL ?? 'auto'}, think ${THINK ?? 'default'}, samples ${SAMPLES}, time budget ${DURATION_MS / 1000}s, repeat ${REPEAT}`);
+  for (let rep = 0; rep < REPEAT; rep++) {
+    for (const t of [...TASKS, ...loadFixtureTasks()].filter(x => WANT.includes(x.id))) results.push(await runTask(t));
+  }
   const out = path.join(process.cwd(), 'scratch'); fs.mkdirSync(out, { recursive: true });
   fs.writeFileSync(path.join(out, `smoke-coding-agents-${Date.now()}.json`), JSON.stringify(results, null, 2));
   console.log(`\n${results.filter(r => r.ok).length}/${results.length} tasks as expected`);

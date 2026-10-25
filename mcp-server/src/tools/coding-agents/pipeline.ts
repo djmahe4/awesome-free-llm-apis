@@ -1,3 +1,4 @@
+import { crossFileContext } from './cross-file.js';
 import { caTrace } from './trace.js';
 import { validateVerifyCommand, runVerifyCommand } from './verify-command.js';
 import { assessPatchesForVerify, buildRepairBrief, buildSyntaxBrief, withFeedback, isTestFile, readVerifyTestContext, type PatchFact } from './verify-guard.js';
@@ -440,6 +441,16 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     // for another resume attempt.
     let taskHadFailure = false;
 
+    // Multi-file runs: every file's prompt sees the others' API surface, edited ones in their new form.
+    const runContents = new Map<string, string>();
+    const editedInRun = new Set<string>();
+    if (result.relevantFiles.length > 1) {
+      for (const f of result.relevantFiles) {
+        const abs = path.resolve(workspaceRoot, f);
+        if (await fs.pathExists(abs)) runContents.set(f, await fs.readFile(abs, 'utf-8'));
+      }
+    }
+
     for (const relPath of result.relevantFiles) {
       if (run?.controller.signal.aborted) break;
       if (run) RunRegistry.progress(`coding_agents:${sessionId}`, relPath, run.completedCount, run.totalCount);
@@ -474,9 +485,11 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
             loadedTasks.map(t => `- [${t.status === 'completed' ? 'x' : (t.status === 'in_progress' ? '~' : ' ')}] ${t.task}`).join('\n')
           : undefined;
 
+        const crossContext = result.relevantFiles.length > 1 ? crossFileContext(relPath, result.relevantFiles, runContents, editedInRun) : '';
+        const goalForFile = crossContext ? `${activeGoal}\n\n${crossContext}` : activeGoal;
         const baseInstruction = tasksContext
-          ? `${activeGoal}\n\n[DAG Context]\n${tasksContext}`
-          : activeGoal;
+          ? `${goalForFile}\n\n[DAG Context]\n${tasksContext}`
+          : goalForFile;
         // The tests the verifyCommand runs are the specification: show them (read-only).
         const testContext = input.verifyCommand ? await readVerifyTestContext(input.verifyCommand, workspaceRoot) : '';
         const augmentedInstruction = testContext ? `${baseInstruction}\n\n${testContext}` : baseInstruction;
@@ -810,6 +823,10 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         isNewFile: !fileExists,
       });
 
+      if (patchedContent && patchedContent !== runContents.get(relPath)) {
+        runContents.set(relPath, patchedContent);
+        editedInRun.add(relPath);
+      }
       result.astRewritesCount = (result.astRewritesCount || 0) + rewrites;
       if (run) {
         run.completedCount++;
