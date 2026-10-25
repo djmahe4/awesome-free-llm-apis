@@ -212,7 +212,20 @@ async function handleNavigate(session: BrowserSession, input: BrowserToolInput, 
     }
     await session.navigate(url);
     session.status = 'SURFACE_EXPLORED';
-    return okResult({ action: 'navigate', sessionId, url, data: { navigated: true } });
+    // Navigation "succeeding" on a Cloudflare or captcha wall is a false success: look at the page it landed on.
+    // Detect and report only. A snapshot problem must not fail a navigation that worked.
+    try {
+        await session.snapshot(false);
+    } catch { /* the navigation itself succeeded */ }
+    const blocked = session.lastBlockCheck.blocked;
+    if (blocked) reportBlockIfDetected(session, 'navigate', sessionId);
+    return okResult({
+        action: 'navigate', sessionId, url,
+        data: blocked
+            ? { navigated: true, blocked: true, challenge: session.lastBlockCheck.type || 'unknown', evidence: session.lastBlockCheck.evidence }
+            : { navigated: true },
+        warnings: blocked ? [`BLOCKED_BY_${(session.lastBlockCheck.type || 'unknown').toUpperCase()}`] : [],
+    });
 }
 
 async function handleSnapshot(session: BrowserSession, input: BrowserToolInput, sessionId: string): Promise<BrowserActionResult> {
@@ -232,14 +245,28 @@ async function handleClick(session: BrowserSession, input: BrowserToolInput, ses
     const before = session.lastFingerprint;
     const beforeText = session.lastSnapshotText;
 
-    const res = await session.evaluate<{ matched: boolean; label?: string }>(`(args) => {
+    // By uid the DevTools click tool is used: the uid is the one printed in the snapshot (uid=1_5), which a
+    // list the code builds itself can never match (it clicked the wrong element and reported success).
+    let uidError: string | null = null;
+    if (by === 'uid') {
+        if (typeof value !== 'string' || !/^[A-Za-z0-9_.:-]{1,64}$/.test(value)) {
+            return failResult({ action: 'click', sessionId, errors: [{ stage: 'click', code: 'INVALID_INPUT', message: 'click by uid needs the uid printed in a snapshot, e.g. "1_5"', recoverable: true }] });
+        }
+        try {
+            await session.call('click', { uid: value }, { retries: 1 });
+        } catch (err: any) {
+            uidError = err?.message || String(err);
+        }
+    }
+
+    const res = by === 'uid'
+        ? { ok: uidError === null, json: { matched: uidError === null, label: `uid ${value}` }, error: uidError ? `No element clicked for uid ${value}: ${uidError}` : undefined }
+        : await session.evaluate<{ matched: boolean; label?: string }>(`(args) => {
         const nodes = Array.from(document.querySelectorAll('a, button, div[role="button"], div[role="tab"], div[onclick], [data-id]'));
         function labelOf(el) { return (el.innerText || el.textContent || '').trim(); }
         let target = null;
         if (args.by === 'selector') {
             target = document.querySelector(args.value);
-        } else if (args.by === 'uid') {
-            target = nodes[parseInt(args.value, 10) - 1] || null;
         } else if (args.by === 'role') {
             target = nodes.find(n => (n.getAttribute('role') || n.tagName.toLowerCase()) === args.value) || null;
         } else {
