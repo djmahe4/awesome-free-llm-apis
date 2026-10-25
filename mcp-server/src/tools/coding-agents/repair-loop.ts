@@ -15,6 +15,8 @@ import { detectSpecialCasing } from './verify-guard.js';
 
 export const MAX_REPAIR_ATTEMPTS = 5;
 const DEFAULT_REPAIR_ATTEMPTS = 4;
+/** A local 7B run is ~1 min per attempt; without a cap one goal ran 20+ minutes. */
+const DEFAULT_MAX_DURATION_MS = 5 * 60_000;
 /** Greedy decoding returns the same answer for the same prompt, so each retry samples a little hotter. */
 const RETRY_TEMPERATURE = (attempt: number) => Math.min(0.9, Math.round(3 * (attempt - 1)) / 10);
 
@@ -81,9 +83,17 @@ export async function runWithRepairLoop(
   let best: { failing: number; brief: string; files: Array<{ filePath: string; content: string }>; isOriginal?: boolean } | undefined;
   let latestIsBest = false;
   const createdFiles = new Set<string>();
+  const deadline = Date.now() + (Number.isFinite(input.maxDurationMs) && (input.maxDurationMs as number) > 0 ? (input.maxDurationMs as number) : DEFAULT_MAX_DURATION_MS);
   let outcome: NonNullable<CodingAgentsResult['repair']>['outcome'] = 'converged';
 
   for (let n = 1; ; n++) {
+    if (run?.controller.signal.aborted && n === 1) {
+      result = { sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: [], anchors: [], patchPlan: [], patchSummary: '', diagnostics: [], applied: false };
+      outcome = 'aborted';
+      break;
+    }
+    // The pipeline counts files per run; without this reset the status poll reads "2/1 file(s)" on attempt 2.
+    if (run) run.completedCount = 0;
     result = await runner(current, sessionId, run);
     if (!originalCheckpoint && result.checkpointId && result.applied) originalCheckpoint = result.checkpointId;
     for (const p of result.patchPlan ?? []) if ((p as any).isNewFile) createdFiles.add(p.filePath);
@@ -125,6 +135,8 @@ export async function runWithRepairLoop(
     if (result.error) { outcome = 'error'; break; }
     if (result.verification?.status === 'needs_user') { outcome = 'needs_user'; break; }
     if (!brief) { outcome = 'converged'; break; }
+    if (run?.controller.signal.aborted) { outcome = 'aborted'; break; }
+    if (Date.now() >= deadline) { outcome = 'timed_out'; break; }
     if (n > budget) { outcome = 'not_converged'; break; }
 
     // ── sampling phase: independent candidates from the original ─────────────────────────
@@ -188,10 +200,18 @@ export async function runWithRepairLoop(
 
   // Test-first work keeps a still-red attempt applied so the next one can build on it. If it never went
   // green, do not leave the user's tree changed by an unverified attempt: restore the original.
-  if ((outcome === 'not_converged' || outcome === 'stuck') && result.verification?.status === 'not_green' && result.applied && originalCheckpoint && rollback) {
+  if ((outcome === 'not_converged' || outcome === 'stuck' || outcome === 'aborted' || outcome === 'timed_out') && result.verification?.status === 'not_green' && result.applied && originalCheckpoint && rollback) {
     result.restoredFiles = await rollback(originalCheckpoint, [...createdFiles]);
     result.applied = false;
-    result.message = `The check never went green after ${attempts.length} attempt(s), so the original files were restored. The last proposal is in patchSummary; result.verification.repairBrief says what was still failing.`;
+    result.message = outcome === 'aborted'
+      ? `Aborted after ${attempts.length} attempt(s); the original files were restored.`
+      : outcome === 'timed_out'
+        ? `The time budget ran out after ${attempts.length} attempt(s) and the check was still red, so the original files were restored. Raise maxDurationMs or narrow the goal.`
+        : `The check never went green after ${attempts.length} attempt(s), so the original files were restored. The last proposal is in patchSummary; result.verification.repairBrief says what was still failing.`;
+  } else if (outcome === 'aborted') {
+    result.message = `Aborted after ${attempts.length} attempt(s).`;
+  } else if (outcome === 'timed_out') {
+    result.message = `The time budget ran out after ${attempts.length} attempt(s).`;
   }
 
   // Only attach the record when the loop mattered (a check or a review took part).
