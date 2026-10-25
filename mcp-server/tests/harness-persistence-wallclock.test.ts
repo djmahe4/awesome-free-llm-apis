@@ -43,7 +43,8 @@ beforeEach(async () => {
   useFreeLLMMock.mockReset();
   currentDecl = decl(10);
 });
-afterEach(async () => { vi.restoreAllMocks(); await fs.remove(tmpDir); });
+// Background run work can still be writing when a test ends (Windows CI hit ENOTEMPTY), so retry the cleanup.
+afterEach(async () => { vi.restoreAllMocks(); await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 describe('H8: wall-clock budget counts active time', () => {
   it('time spent waiting for an approval does not count', async () => {
@@ -104,6 +105,7 @@ describe('H9: run.json is kept current and disk errors are not silent', () => {
       expect(trace.some((e: any) => e.type === 'run_end')).toBe(true);
       expect(trace.some((e: any) => e.type === 'error' && /run\.json could not be written.*ENOSPC/.test(String(e.data?.message)))).toBe(true);
     }, { timeout: 15000 });
+    await new Promise(res => setTimeout(res, 200)); // the run's last background writes
   });
 });
 
@@ -131,5 +133,8 @@ describe('H11: one run id, one run', () => {
     ]);
     expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter(r => r.status === 'rejected')).toHaveLength(1);
+    // let the winning run finish before the test ends and its directory is removed
+    const { HarnessStore } = await import('../src/harness/store.js');
+    expect((await waitForSettled(new HarnessStore('h11-2', tmpDir))).status).toBe('complete');
   });
 });
