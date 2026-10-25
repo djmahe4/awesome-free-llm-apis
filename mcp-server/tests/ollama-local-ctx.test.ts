@@ -61,3 +61,13 @@ describe('chatLocal: images and keep_alive (staged vision -> code pipelines)', (
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty('keep_alive');
   });
 });
+
+describe('chatLocal think option', () => {
+  it('sends think:false when asked (a thinking model then answers instead of reasoning), and omits it otherwise', async () => {
+    fetchMock.mockResolvedValue(jsonRes({ model: 'm', message: { role: 'assistant', content: 'ok' }, prompt_eval_count: 1, eval_count: 1 }));
+    await chatLocal('m', [{ role: 'user', content: 'x' }], { numCtx: 2048, think: false });
+    await chatLocal('m', [{ role: 'user', content: 'x' }], { numCtx: 2048 });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).think).toBe(false);
+    expect('think' in JSON.parse(fetchMock.mock.calls[1][1].body)).toBe(false);
+  });
+});

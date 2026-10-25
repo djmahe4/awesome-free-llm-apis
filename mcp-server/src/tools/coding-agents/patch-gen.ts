@@ -525,7 +525,15 @@ export function applySearchReplaceBlocks(
       const replaceLines = (usedLineNumberStrip ? replace.replace(new RegExp(LINE_NUMBER_PREFIX_RE.source, 'gm'), '') : replace).split(/\r?\n/);
       if (options.additive) {
         const kept = new Set(replaceLines.map(l => l.trim()).filter(Boolean));
-        const dropped = searchLines.map(l => l.trim()).filter(l => l && !kept.has(l));
+        // A line that reappears changed (same start, e.g. a new parameter) was modified, not dropped:
+        // "Add currency support" legitimately turns formatPrice(cents) into formatPrice(cents, currency).
+        const modified = (l: string) => replaceLines.some(r => {
+          const t = r.trim();
+          let k = 0;
+          while (k < l.length && k < t.length && l[k] === t[k]) k++;
+          return k >= Math.max(12, Math.floor(l.length * 0.6));
+        });
+        const dropped = searchLines.map(l => l.trim()).filter(l => l && !kept.has(l) && !modified(l));
         if (dropped.length > 0) {
           failures.push(`anchor not retained: REPLACE dropped existing line(s) ${JSON.stringify(dropped[0].slice(0, 60))}${dropped.length > 1 ? ` (+${dropped.length - 1} more)` : ''} but the instruction only adds code; repeat the SEARCH lines in REPLACE and add the new lines after them`);
           continue;

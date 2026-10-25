@@ -151,7 +151,22 @@ export function rankCandidateModels(availableModels: string[]): string[] {
   return [...preferred, ...rest];
 }
 
-export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number; numCtx?: number; keepAlive?: string | number }): Promise<OllamaLocalChatResult> {
+const thinkingSupport = new Map<string, boolean>();
+
+/** Whether a local model reports the 'thinking' capability (Ollama /api/show); cached, false when unknown. */
+export async function modelSupportsThinking(model: string): Promise<boolean> {
+  const known = thinkingSupport.get(model);
+  if (known !== undefined) return known;
+  let yes = false;
+  try {
+    const res = await fetch(`${getBaseUrl()}/api/show`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+    if (res.ok) yes = ((await res.json() as { capabilities?: string[] }).capabilities ?? []).includes('thinking');
+  } catch { /* unknown: treat as not thinking */ }
+  thinkingSupport.set(model, yes);
+  return yes;
+}
+
+export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number; numCtx?: number; keepAlive?: string | number; think?: boolean }): Promise<OllamaLocalChatResult> {
   const url = `${getBaseUrl()}/api/chat`;
   const timeoutMs = computeChatTimeoutMs(messages);
   const controller = new AbortController();
@@ -171,6 +186,8 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
         // 0 unloads the model right after the reply, so a staged pipeline (vision model, then code
         // model) never has both resident in VRAM at once.
         ...(options?.keepAlive !== undefined ? { keep_alive: options.keepAlive } : {}),
+        // false switches a thinking model's hidden reasoning off; other models ignore it.
+        ...(options?.think !== undefined ? { think: options.think } : {}),
         options: {
           temperature: options?.temperature,
           num_predict: options?.maxTokens,

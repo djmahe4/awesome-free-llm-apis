@@ -511,6 +511,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
               sessionId,
               temperature: input.temperature,
               ...(input.model && resolvedModel ? { model: resolvedModel } : {}),
+              ...(input.think ? { think: input.think } : {}),
               outputFormat: 'search-replace',
               contentOverride: windowInfo ? windowInfo.window : patchedContent,
               excerptRange: windowInfo
@@ -608,6 +609,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
               sessionId,
               temperature: input.temperature,
               ...(input.model && resolvedModel ? { model: resolvedModel } : {}),
+              ...(input.think ? { think: input.think } : {}),
               contentOverride: windowInfo ? windowInfo.window : undefined,
               excerptRange: windowInfo
                 ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }

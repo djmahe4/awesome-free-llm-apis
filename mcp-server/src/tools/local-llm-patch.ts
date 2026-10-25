@@ -4,7 +4,7 @@ import { isInsideRoot, real } from '../utils/workspace-roots.js';
 import fs from 'fs-extra';
 import path from 'node:path';
 import { rankNamesForNeed } from '../services/model-router.js';
-import { listLocalModels, chatLocal, parseJsonlContent, type OllamaLocalChatResult } from '../providers/ollama-local.js';
+import { listLocalModels, chatLocal, modelSupportsThinking, parseJsonlContent, type OllamaLocalChatResult } from '../providers/ollama-local.js';
 import { ContextGatherer } from '../pipeline/middlewares/context-gatherer.js';
 import { logToolCall } from '../utils/ChatLogger.js';
 
@@ -64,6 +64,17 @@ export function codeEditCandidates(availableModels: string[], pinned?: string): 
   return pin ? [pin, ...ranked.filter(m => m !== pin)] : ranked;
 }
 
+/**
+ * Reply token cap, sized by what the reply can contain (not by model size: a 7B and a 9B need the same
+ * tokens for the same text; size only changes the speed). SEARCH/REPLACE blocks are short. A rewritten
+ * excerpt or file is about as long as the input (~3 chars per token for code) plus room for the edit;
+ * a fixed 8192 let a looping model run for minutes on a 100-line excerpt.
+ */
+export function replyBudget(isSearchReplace: boolean, content: string): number {
+  if (isSearchReplace) return 2048;
+  return Math.min(8192, Math.max(1024, Math.ceil((content.length / 3) * 1.3) + 512));
+}
+
 export interface LocalLlmPatchInput {
   filePath: string;
   instruction: string;
@@ -90,7 +101,12 @@ export interface LocalLlmPatchInput {
   outputFormat?: 'full' | 'search-replace';
   /** Installed Ollama model to try first (e.g. a bigger one for a hard edit); the ranked rest are fallbacks. */
   model?: string;
+  /** Reasoning for thinking models: auto (default: on, with budget headroom, retried without if it eats the budget), on, off. */
+  think?: 'auto' | 'on' | 'off';
 }
+
+/** Extra reply tokens for a thinking model's reasoning on top of the edit's own budget. */
+export const THINKING_HEADROOM = 3072;
 
 export interface LocalLlmPatchResult {
   success: boolean;
@@ -287,21 +303,33 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
     for (let i = 0; i < candidateModels.length; i++) {
       const candidate = candidateModels[i];
       try {
-        chatResult = await chatLocal(candidate, [
+        const messages = [
           {
-            role: 'system',
+            role: 'system' as const,
             content: isSearchReplace
               ? 'You are a precise code-editing assistant. Reply with ONLY the requested SEARCH/REPLACE blocks.'
               : input.excerptRange
                 ? 'You are a precise code-editing assistant. Return ONLY the updated excerpt lines inside one code fence. Do NOT return the rest of the file.'
                 : 'You are a precise code-editing assistant. Return only the complete new file content in a single code fence.',
           },
-          { role: 'user', content: prompt },
-        ], {
+          { role: 'user' as const, content: prompt },
+        ];
+        // Thinking stays on for models that support it (it can help a hard edit), with room for the reasoning
+        // in the reply budget: traced, Qwythos spent a bare 2048-token budget reasoning and returned nothing.
+        const thinkMode = input.think ?? 'auto';
+        const canThink = thinkMode !== 'off' && await modelSupportsThinking(candidate);
+        const base = replyBudget(isSearchReplace, fileContent);
+        chatResult = await chatLocal(candidate, messages, {
           // Deterministic edits; explicit reply budget so num_ctx is sized for it.
           temperature: input.temperature ?? 0,
-          maxTokens: isSearchReplace ? 2048 : 8192,
+          maxTokens: canThink ? base + THINKING_HEADROOM : base,
+          ...(thinkMode === 'off' ? { think: false } : thinkMode === 'on' && canThink ? { think: true } : {}),
         });
+        // Reasoning still used the whole budget and nothing was answered: one retry with thinking off.
+        if (canThink && thinkMode === 'auto' && !chatResult.content.trim() && chatResult.outputTruncated) {
+          caTrace('thinking used the whole reply budget; retrying without thinking', candidate);
+          chatResult = await chatLocal(candidate, messages, { temperature: input.temperature ?? 0, maxTokens: base, think: false });
+        }
         // A small model often answers a SEARCH/REPLACE request with the edited excerpt instead; recover
         // the edit from it (SEARCH text taken from the original) rather than discarding a right answer.
         if (isSearchReplace && !chatResult.promptTruncated && !chatResult.outputTruncated

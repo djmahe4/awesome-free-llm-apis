@@ -107,6 +107,8 @@ export interface CodingAgentsInput {
   temperature?: number;
   /** Installed local model to use (e.g. a bigger one for a cross-file change). Overrides the automatic choice and the VRAM budget. */
   model?: string;
+  /** Reasoning for thinking models: auto (default), on, off. See local_llm_patch. */
+  think?: 'auto' | 'on' | 'off';
   /** Wall-clock budget for the whole repair loop in ms (default 5 minutes). */
   maxDurationMs?: number;
   /** Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry). */

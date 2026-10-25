@@ -19,6 +19,8 @@ const PORT = arg('port', '3111');
 const ATTEMPTS = Number(arg('attempts', '4'));
 const SAMPLES = Number(arg('samples', '3'));
 const WANT = (arg('tasks', 'counter,slug,tests,roman,duration,unique') as string).split(',');
+const MODEL = arg('model'); // pin an installed local model, e.g. a bigger one for cross-file tasks
+const DURATION_MS = Number(arg('duration-ms', '300000'));
 const BASE = `http://localhost:${PORT}`;
 
 type Task = {
@@ -26,9 +28,33 @@ type Task = {
   goal: string;
   files: Record<string, string>;
   target: string;
+  /** Cross-file tasks: every file the change must touch (default: [target]). */
+  targets?: string[];
   test: string; // test file the agent's verifyCommand runs
   expect: 'green' | 'needs_user';
 };
+
+/** Tasks kept as real files under coding-agents-tasks/<id>/ (task.json + the repo), no string escaping. */
+function loadFixtureTasks(): Task[] {
+  const root = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), 'coding-agents-tasks');
+  if (!fs.existsSync(root)) return [];
+  const tasks: Task[] = [];
+  for (const id of fs.readdirSync(root)) {
+    const dir = path.join(root, id);
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, 'task.json'), 'utf8'));
+    const files: Record<string, string> = {};
+    const walk = (d: string) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (e.name !== 'task.json') files[path.relative(dir, p).replace(/\\/g, '/')] = fs.readFileSync(p, 'utf8');
+      }
+    };
+    walk(dir);
+    tasks.push({ id: meta.id ?? id, goal: meta.goal, files, target: meta.targets[0], targets: meta.targets, test: meta.test, expect: meta.expect ?? 'green' });
+  }
+  return tasks;
+}
 
 const IP_TEST = `
 const test = require('node:test'); const assert = require('node:assert');
@@ -137,9 +163,9 @@ async function runTask(t: Task) {
   const sessionId = `smoke-${t.id}-${Date.now()}`;
   const started = Date.now();
   const verifyCommand = `node --test ${t.test}`;
-  await post({ goal: t.goal, workspaceRoot: ws, dryRun: false, topKFiles: 1, targetFiles: [t.target], sessionId, resolve: { action: 'apply' }, verifyCommand, maxRepairAttempts: ATTEMPTS, samples: SAMPLES });
+  await post({ goal: t.goal, workspaceRoot: ws, dryRun: false, topKFiles: 1, targetFiles: t.targets ?? [t.target], sessionId, resolve: { action: 'apply' }, verifyCommand, maxRepairAttempts: ATTEMPTS, samples: SAMPLES, maxDurationMs: DURATION_MS, ...(MODEL ? { model: MODEL } : {}) });
   let res: any;
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < Math.ceil(DURATION_MS / 5000) + 24; i++) {
     res = await post({ action: 'status', workspaceRoot: ws, sessionId });
     if (res.status !== 'running') break;
     await new Promise(r => setTimeout(r, 5000));
@@ -161,7 +187,8 @@ async function runTask(t: Task) {
 async function main() {
   console.log(`dashboard ${BASE}, repair budget ${ATTEMPTS}\n`);
   const results = [];
-  for (const t of TASKS.filter(x => WANT.includes(x.id))) results.push(await runTask(t));
+  console.log(`model ${MODEL ?? 'auto'}, samples ${SAMPLES}, time budget ${DURATION_MS / 1000}s`);
+  for (const t of [...TASKS, ...loadFixtureTasks()].filter(x => WANT.includes(x.id))) results.push(await runTask(t));
   const out = path.join(process.cwd(), 'scratch'); fs.mkdirSync(out, { recursive: true });
   fs.writeFileSync(path.join(out, `smoke-coding-agents-${Date.now()}.json`), JSON.stringify(results, null, 2));
   console.log(`\n${results.filter(r => r.ok).length}/${results.length} tasks as expected`);
