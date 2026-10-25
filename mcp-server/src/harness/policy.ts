@@ -80,6 +80,14 @@ export function stripCycleSuffix(id: string): string {
  * Everything else needs an explicit approval — this function never grants one itself,
  * it only decides whether a call may proceed WITHOUT one.
  */
+function isReadOnlyCodingCall(tool: string, action: string | undefined, args: any): boolean {
+  if (tool !== 'coding_agents') return false;
+  const a = action ?? args?.action;
+  if (a === 'status' || a === 'abort') return true;
+  // dryRun defaults to true in coding_agents; resolve (apply / rollback) writes regardless of it.
+  return args?.dryRun !== false && !args?.resolve;
+}
+
 export function evaluate(
   decl: HarnessDeclaration,
   role: string,
@@ -105,14 +113,20 @@ export function evaluate(
   // when exactly one bridge is listed.
   if (tool === 'cyber_tool' && action === 'run_action') {
     const listed = decl.cyberTools ?? [];
-    const requested = typeof args?.bridge === 'string' && args.bridge
-      ? args.bridge
-      : (listed.length === 1 ? listed[0] : undefined);
+    // The bridge must be named: bridges.json is project-controlled, so auto-selecting "the only one" at
+    // runtime could pick a different bridge than the one checked here.
+    const requested = typeof args?.bridge === 'string' && args.bridge ? args.bridge : undefined;
     if (!requested || !listed.includes(requested)) {
       return requested
         ? { kind: 'needs_approval', reason: `Bridge '${requested}' is not in this declaration's cyberTools allowlist` }
         : { kind: 'needs_approval', reason: `cyber_tool run_action requires a bridge from this declaration's cyberTools list (fail-closed)` };
     }
+  }
+
+  // Code-editing tools are always gated, whatever the role allowlist or standing `writes` say (the MCP
+  // description promises this). Only read-only calls fall through to the normal rules.
+  if ((tool === 'coding_agents' || tool === 'local_llm_patch') && !isReadOnlyCodingCall(tool, action, args)) {
+    return { kind: 'needs_approval', reason: `'${tool}' edits code and is always gated behind explicit approval` };
   }
 
   for (const rule of roleDef.tools ?? []) {

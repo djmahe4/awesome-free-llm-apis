@@ -75,6 +75,13 @@ function taskOutcomeFor(status: HarnessRun['status']): TaskItem['status'] {
   return status === 'complete' ? 'completed' : status === 'failed' ? 'failed' : 'pending';
 }
 
+/** A caller may lower the declared token budget, never raise it; anything non-integer or non-positive falls back to the declaration. */
+export function clampRunTokens(requested: unknown, declared: number): number {
+  if (typeof requested !== 'number' || !Number.isFinite(requested)) return declared;
+  const n = Math.floor(requested);
+  return n > 0 ? Math.min(n, declared) : declared;
+}
+
 export interface DeployInput {
   runId: string;
   harness?: string;
@@ -1243,7 +1250,7 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
     workspaceRoot: input.workspaceRoot,
     status: 'running',
     budget: {
-      maxTokens: input.maxTokens ?? decl.harness.budget.maxTokens,
+      maxTokens: clampRunTokens(input.maxTokens, decl.harness.budget.maxTokens),
       used: 0,
       reserved: 0,
       toolCalls: 0,
@@ -1488,8 +1495,13 @@ export async function reorchestrateRole(input: ReorchestrateRoleInput): Promise<
   const store = new HarnessStore(input.runId, input.workspaceRoot);
   const run = await store.loadRun();
   if (!run) throw new Error(`No run found for runId '${input.runId}'`);
+  // A live run must not be restarted underneath itself (two loops writing one run); only finished or paused runs.
+  if (run.status === 'running') throw new Error(`Run '${input.runId}' is still running; abort it or wait before re-orchestrating a role.`);
 
   const decl = await loadHarnessDeclaration(run.declarationName, input.workspaceRoot);
+  if (!Object.prototype.hasOwnProperty.call(decl.roles, input.role.replace(/#.*$/, ''))) {
+    throw new Error(`Unknown role '${input.role}' for harness '${decl.harness.name}'.`);
+  }
   assertWorkspaceRootAllowed(decl, input.workspaceRoot);
   await verifyDeclarationIntegrity(run, store);
 
