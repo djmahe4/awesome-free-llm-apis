@@ -386,8 +386,8 @@ async function handleEvaluate(session: BrowserSession, input: BrowserToolInput, 
 async function handleNetwork(session: BrowserSession, input: BrowserToolInput, sessionId: string): Promise<BrowserActionResult> {
     const { op, limit = browserBudget.endpointCandidates } = input.params as any;
     if (op === 'clear') {
-        session.netLogCursor = session.netLogCursor; // no-op marker; ring buffer clears naturally on next navigate
-        return okResult({ action: 'network', sessionId, data: { cleared: true } });
+        const dropped = await session.drainInterceptedRequests();
+        return okResult({ action: 'network', sessionId, data: { cleared: dropped.length } });
     }
     if (op === 'drain' || op === 'list') {
         const entries = await session.drainInterceptedRequests();
