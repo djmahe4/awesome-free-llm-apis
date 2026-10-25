@@ -1,7 +1,7 @@
 /**
  * @file _changed-models.ts
  * @description Model IDs added/removed per provider by upstream data.json merges
- * (including 2026-08-21 167013f and 2026-10-05 41197cb). Used by the provider
+ * (including 2026-08-21 167013f, 2026-10-05 41197cb and 2026-10-23 upstream/main). Used by the provider
  * smoke-test scripts to verify newly added models and confirm whether removed
  * models are truly dead.
  * Gemini is excluded per user instruction.
@@ -44,19 +44,23 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
       'cohere/north-mini-code:free',
       'poolside/laguna-s-2.1:free',
       'poolside/laguna-xs-2.1:free',
-      'stepfun/step-3.7-flash:free',
       'nvidia/nemotron-3-ultra-550b-a55b:free',
       'nvidia/nemotron-3-super-120b-a12b:free',
       'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
       'kilo-auto/free',
       'inclusionai/ling-3.1-flash',
-      'inclusionai/ling-3.0-flash-sante:free',
       'apodex/apodex-1.1-mini:free',
-      'qwen/qwen3.8-27b:free',
       'dots-studio/dots-3-note-preview:free',
+      'recursive/flint-v1.0:free',
+      'xingchen-agi/xing4.0-29b-a4b:free',
+      'nvidia/nemotron-3.5-super-vl:free',
+      'reflection/beam-free',
     ],
     removed: [
       'inclusionai/ling-3.0-flash:free',
+      'inclusionai/ling-3.0-flash-sante:free',
+      'stepfun/step-3.7-flash:free',
+      'qwen/qwen3.8-27b:free',
     ],
   },
   mistral: {
@@ -99,6 +103,9 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
       'nvidia/nemotron-3-ultra-550b-a55b:free',
       'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
       'nvidia/nemotron-3-super-120b-a12b:free',
+      'recursive/flint-v1.0:free',
+      'xingchen-agi/xing4.0-29b-a4b:free',
+      'nvidia/nemotron-3.5-super-vl:free',
     ],
     removed: [
       'openai/gpt-oss-20b:free',
@@ -110,12 +117,14 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
   },
   llm7: {
     added: [
-      'DeepSeek-V4-Flash-0731',
       'gpt-oss:20b',
       'mistral-Nemo-Instruct-2407',
       'minimax-m2.7',
+      'nemotron-3-nano:30b',
+      'codestral-latest',
     ],
     removed: [
+      'DeepSeek-V4-Flash-0731',
       'deepseek-r1-0528',
       'deepseek-v3-0324',
       'gemini-2.5-flash-lite',
@@ -126,10 +135,12 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
   },
   siliconflow: {
     added: [
-      'Qwen/Qwen3-8B',
+      'tencent/Hunyuan-MT-7B',
+      'XingChenAGI/Xing4.0-29B',
     ],
     removed: [
       'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B',
+      'Qwen/Qwen3-8B',
     ],
   },
   modelscope: {
@@ -149,6 +160,8 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
       '@cf/zhipuai/glm-4.7-flash',
     ],
   },
+  // gonka-broker: new upstream provider (2026-10-23) - MiniMaxAI/MiniMax-M2.7, deepseek-ai/DeepSeek-V4-Flash-0731,
+  // zai-org/GLM-5.3-Flash, BAAI/bge-m3 (embeddings); no local provider adapter yet.
   zhipu: {
     added: [],
     removed: [],
