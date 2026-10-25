@@ -45,6 +45,26 @@ describe('cyber_tool OSINT action', () => {
     }
   });
 
+  it('also rejects the spellings the old string check missed (decimal/hex IPs, ports, CGNAT, other IPv6 ranges)', async () => {
+    for (const target of ['2130706433', '0x7f.1', '127.0.0.1:80', '100.64.0.1', 'fdab::1', 'fe90::1', 'localhost.', 'foo.localhost', '::ffff:7f00:1']) {
+      await expect(
+        cyberTool({ action: 'osint' as any, target, sessionId: 'test-ssrf-guard' }),
+        target
+      ).rejects.toThrow(/invalid or private target/i);
+    }
+  });
+
+  it('refuses cloud metadata addresses even with allowPrivateIps', async () => {
+    await expect(
+      cyberTool({ action: 'osint' as any, target: '169.254.169.254', allowPrivateIps: true, sessionId: 'test-meta' })
+    ).rejects.toThrow(/invalid or private target/i);
+  });
+
+  it('a username target is not treated as a host', async () => {
+    const res: any = await cyberTool({ action: 'osint' as any, target: 'localhost', osintType: 'username', sessionId: 'test-username' });
+    expect(res.success).toBe(true);
+  });
+
   it('allows private target if allowPrivateIps is true', async () => {
     const res: any = await cyberTool({
       action: 'osint' as any,

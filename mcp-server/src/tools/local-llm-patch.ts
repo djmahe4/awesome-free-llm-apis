@@ -1,3 +1,4 @@
+import { isInsideRoot, real } from '../utils/workspace-roots.js';
 import fs from 'fs-extra';
 import path from 'node:path';
 import { rankNamesForNeed } from '../services/model-router.js';
@@ -131,7 +132,16 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
     if (!input.filePath) throw new Error('filePath is required');
     if (!input.instruction) throw new Error('instruction is required');
 
-    const absPath = path.resolve(input.filePath);
+    // With a workspace_root the target must live inside it (a relative path resolves against it): the file's
+    // content is sent to a model, so a path that climbs out would exfiltrate an arbitrary local file.
+    const absPath = input.workspace_root ? path.resolve(input.workspace_root, input.filePath) : path.resolve(input.filePath);
+    if (input.workspace_root) {
+      const rootReal = real(path.resolve(input.workspace_root));
+      if (!isInsideRoot(absPath, rootReal) && !isInsideRoot(absPath, path.resolve(input.workspace_root))) {
+        throw new Error(`filePath is outside workspace_root: ${absPath}`);
+      }
+      if (!isInsideRoot(real(absPath), rootReal)) throw new Error(`filePath is outside workspace_root (via a link): ${absPath}`);
+    }
     const fileExists = await fs.pathExists(absPath);
     if (!fileExists && input.allowCreate === false) {
       throw new Error(`File not found: ${absPath}`);

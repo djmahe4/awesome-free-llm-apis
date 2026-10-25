@@ -791,44 +791,15 @@ export async function cyberTool(input: CyberToolInput) {
             if (!target) throw new Error('target is required and cannot be empty for osint action');
             const osintType = input.osintType || 'all';
 
-            // SSRF & Target Scope Guard: Validate target is not private loopback / metadata / internal subnet unless explicitly allowed
-            const isPrivateOrLoopback = (host: string): boolean => {
-                let lower = host.toLowerCase().trim();
-                // Strip bracketed IPv6 e.g. [::1]:80 or [::1] or [::ffff:127.0.0.1]:3000
-                if (lower.startsWith('[')) {
-                    const closeBracket = lower.indexOf(']');
-                    if (closeBracket !== -1) {
-                        lower = lower.substring(1, closeBracket);
-                    }
-                } else if (lower.includes(':') && !lower.includes('::') && lower.split(':').length === 2 && !lower.includes('.')) {
-                    // Standard IPv4 with port e.g. 127.0.0.1:8080 or localhost:3000
-                    lower = lower.split(':')[0];
+            // SSRF & target scope guard (shared with browser_tool): decimal/hex/octal IPs, CGNAT, every IPv6 private
+            // range, ports, internal names and hostnames that RESOLVE to private addresses are refused. Cloud
+            // metadata addresses are refused even with allowPrivateIps. A username target is not a host.
+            if (osintType !== 'username') {
+                const { checkHostTarget } = await import('../utils/ssrf-guard.js');
+                const verdict = await checkHostTarget(target, { allowPrivate: !!input.allowPrivateIps });
+                if (!verdict.ok) {
+                    throw new Error(`Security error: invalid or private target rejected to prevent SSRF: ${target} (${verdict.code})`);
                 }
-
-                if (lower === 'localhost') return true;
-
-                // Handle IPv4-mapped IPv6 addresses e.g. ::ffff:127.0.0.1, ::ffff:10.0.0.1, or full form 0000:0000:0000:0000:0000:ffff:127.0.0.1
-                if (lower.includes('ffff:') && lower.includes('.')) {
-                    const mappedIpv4 = lower.split(':').pop() || '';
-                    if (mappedIpv4 === '127.0.0.1' || mappedIpv4 === '0.0.0.0' || mappedIpv4 === '169.254.169.254') return true;
-                    if (/^(0|10|127|169\.254|172\.(1[6-9]|2[0-9]|3[0-1])|192\.168)\./.test(mappedIpv4)) return true;
-                }
-
-                // Check standard IPv4 private / loopback / link-local / broadcast ranges
-                if (lower === '127.0.0.1' || lower === '0.0.0.0' || lower === '169.254.169.254') return true;
-                if (/^(0|10|127|169\.254|172\.(1[6-9]|2[0-9]|3[0-1])|192\.168)\./.test(lower)) return true;
-
-                // Check IPv6 loopback, unspecified, link-local, and unique local addresses
-                if (lower === '::1' || lower === '::') return true;
-                if (/^(0*:)*0*1$/.test(lower)) return true; // Matches full/expanded IPv6 loopbacks like 0:0:0:0:0:0:0:1 or 0000:...:0001
-                if (/^(0*:)+0*$/.test(lower)) return true; // Matches full/expanded IPv6 unspecified like 0:0:0:0:0:0:0:0
-                if (lower.startsWith('fe80:') || lower.startsWith('fc00:') || lower.startsWith('fd00:')) return true;
-
-                return false;
-            };
-
-            if (!input.allowPrivateIps && isPrivateOrLoopback(target)) {
-                throw new Error(`Security error: invalid or private target rejected to prevent SSRF: ${target}`);
             }
 
             const dns = await import('node:dns/promises');
