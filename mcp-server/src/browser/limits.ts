@@ -56,3 +56,9 @@ export function safeSessionSegment(id: unknown): string {
 export const evaluateAllowed = (): boolean => process.env.BROWSER_ALLOW_EVALUATE !== '0';
 export const MAX_EVALUATE_SOURCE_CHARS = 20_000;
 export const MAX_EVALUATE_RESULT_CHARS = 100_000;
+
+/** api_replay: the share of replayed endpoints that answered; 0 when no rows came back. (It used to say 1 whatever happened.) */
+export function replayConfidence(attempted: number, failures: number, rows: number): number {
+    if (attempted <= 0 || rows <= 0) return 0;
+    return Math.round(((attempted - failures) / attempted) * 100) / 100;
+}

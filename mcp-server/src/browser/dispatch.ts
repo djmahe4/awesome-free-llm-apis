@@ -1,4 +1,4 @@
-import { boundedMs, safeScreenshotName, safeSessionSegment, evaluateAllowed, MAX_EVALUATE_SOURCE_CHARS, MAX_EVALUATE_RESULT_CHARS } from './limits.js';
+import { replayConfidence, boundedMs, safeScreenshotName, safeSessionSegment, evaluateAllowed, MAX_EVALUATE_SOURCE_CHARS, MAX_EVALUATE_RESULT_CHARS } from './limits.js';
 import { pathParamWithinRoots } from '../utils/workspace-roots.js';
 import { checkBrowserUrl } from './urlGuard.js';
 import path from 'node:path';
@@ -545,7 +545,8 @@ async function handleApiReplay(session: BrowserSession, input: BrowserToolInput,
 
     return okResult({
         action: 'api_replay', sessionId, data: results.slice(0, 20), recordCount: results.length,
-        jsonPath, csvPath, warnings: errors.map(e => e.message), status: errors.length ? 'partial' : 'ok', confidence: 1,
+        jsonPath, csvPath, warnings: errors.map(e => e.message), status: errors.length ? 'partial' : 'ok',
+        confidence: replayConfidence(i, errors.length, results.length),
     });
 }
 
@@ -659,6 +660,18 @@ async function handleDeepScrape(session: BrowserSession, input: BrowserToolInput
     const scraper = new IntelligentBrowserScraper();
 
     const deep = await scraper.deepScrapeItemDetails(session.client, checkpoint.accumulatedRecords, checkpoint.domainContext, limit);
+    if (deep.length === 0) {
+        const parents = checkpoint.accumulatedRecords.length;
+        return failResult({
+            action: 'deep_scrape', sessionId,
+            errors: [{
+                stage: 'deep_scrape', code: 'NO_DEEP_RECORDS', recoverable: true,
+                message: parents === 0
+                    ? 'Nothing to follow: this session has no extracted records yet. Run extract (or scrape) first, then deep_scrape.'
+                    : `None of the ${parents} extracted record(s) yielded a followable link or a detail page (limit ${limit}).`,
+            }],
+        });
+    }
     checkpoint.deepRecords.push(...deep);
     const checkpointPath = await ScrapingSessionCheckpointManager.saveCheckpoint(outputDir, checkpoint);
 

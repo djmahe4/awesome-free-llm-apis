@@ -140,13 +140,34 @@ const topLevelSchema = z.object({
     params: z.record(z.string(), z.any()).optional(),
 });
 
+/** One readable line per problem ("params.by: ...") instead of zod's JSON dump. */
+function readable(err: unknown): Error {
+    const issues = (err as { issues?: Array<{ path: Array<string | number>; message: string }> })?.issues;
+    if (!Array.isArray(issues)) return err instanceof Error ? err : new Error(String(err));
+    return new Error(issues.map(i => `${i.path.length ? i.path.join('.') : 'input'}: ${i.message}`).join('; '));
+}
+
 export function parseInput(raw: unknown): BrowserToolInput {
-    const top = topLevelSchema.parse(raw);
+    let top: z.infer<typeof topLevelSchema>;
+    try { top = topLevelSchema.parse(raw); } catch (err) { throw readable(err); }
     const actionDef = BrowserActions[top.action];
     // navigate accepts the url top-level or in params; params.url wins when both are present.
     const rawParams = top.action === 'navigate' && top.url && !(top.params && 'url' in top.params)
         ? { ...(top.params ?? {}), url: top.url }
         : (top.params ?? {});
-    const params = actionDef.params.parse(rawParams);
+    // zod drops keys it does not know, so a misspelled option used to vanish silently (the scrape macro is
+    // a passthrough and keeps everything)
+    const shape = (actionDef.params as unknown as { shape?: Record<string, unknown> }).shape;
+    if (shape && top.action !== 'scrape') {
+        const unknown = Object.keys(rawParams).filter(k => !(k in shape));
+        if (unknown.length > 0) {
+            throw new Error(`Unknown option(s) for ${top.action}: ${unknown.join(', ')}. Allowed: ${Object.keys(shape).join(', ')}.`);
+        }
+    }
+    let params;
+    try { params = actionDef.params.parse(rawParams); } catch (err) {
+        // issue paths here are relative to params, so say so: 'params.by: ...'
+        throw new Error(readable(err).message.split('; ').map(m => `params.${m}`).join('; '));
+    }
     return { ...top, params };
 }
