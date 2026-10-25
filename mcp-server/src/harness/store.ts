@@ -85,6 +85,17 @@ export class HarnessStore {
     });
   }
 
+  /** First write of a run: fails when the run id is already taken, so two deploys cannot clobber each other. */
+  async createRun(run: HarnessRun): Promise<void> {
+    await ensureDir(this.dir);
+    try {
+      await fs.writeFile(this.runPath, JSON.stringify(run, null, 2), { encoding: 'utf-8', flag: 'wx' });
+    } catch (err: any) {
+      if (err?.code === 'EEXIST') throw new Error(`Run '${run.runId}' already exists; use a new runId, or resume/abort the existing run.`);
+      throw err;
+    }
+  }
+
   async loadRun(): Promise<HarnessRun | null> {
     try {
       return JSON.parse(await fs.readFile(this.runPath, 'utf-8')) as HarnessRun;

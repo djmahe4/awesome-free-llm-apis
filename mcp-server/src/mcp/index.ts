@@ -881,6 +881,7 @@ export async function createMCPServer(): Promise<Server> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            maxWallMinutes: { type: 'number', description: 'resume: raises the wall-clock cap (minutes, 1-1440) of a run that paused on its budget. Time spent waiting for approvals does not count against the cap.' },
             action: { type: 'string', enum: ['deploy', 'resume', 'rerun', 'reorchestrate', 'status', 'approvals', 'approve', 'reject', 'trace', 'tasks', 'abort'] },
             runId: { type: 'string', description: 'Run identifier. Required for every action except deploy (which generates one if omitted).' },
             harness: { type: 'string', description: 'Declaration name (default "research-analysis"); resolved from <workspace_root>/.free-llm-mcp/harness/<name>.yaml first, then <workspace_root>/harness/<name>.yaml, built-in dir last. A .yaml path is also accepted.' },
