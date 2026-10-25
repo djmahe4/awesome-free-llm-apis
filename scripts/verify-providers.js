@@ -61,6 +61,7 @@ const KEY = {
   MODELSCOPE:  env.MODELSCOPE_API_KEY  || process.env.MODELSCOPE_API_KEY,
   KILO:        env.KILO_API_KEY        || process.env.KILO_API_KEY,
   OVH:         env.OVH_API_KEY         || process.env.OVH_API_KEY,
+  GONKA:       env.GONKA_API_KEY       || process.env.GONKA_API_KEY,
 };
 
 // ---------------------------------------------------------------------------
@@ -295,6 +296,7 @@ function getProviderConfig(providerName, baseUrl) {
   if (name.includes('modelscope')) return { key: KEY.MODELSCOPE, type: 'standard' };
   if (name.includes('kilo')) return { key: KEY.KILO, type: 'standard' };
   if (name.includes('ovhcloud') || name.includes('ovh')) return { key: KEY.OVH, type: 'standard' };
+  if (name.includes('gonka')) return { key: KEY.GONKA, type: 'standard' };
   if (name.includes('llm7')) return { key: null, type: 'standard', keyless: true };
   return { key: null, type: 'standard' };
 }
@@ -491,7 +493,7 @@ async function run() {
   // Write report
   if (outFile) {
     fs.mkdirSync(path.dirname(path.resolve(outFile)), { recursive: true });
-    const report = { modelResults: results, baseUrlChecks };
+    const report = { generatedAt: new Date().toISOString(), modelResults: results, baseUrlChecks };
     fs.writeFileSync(outFile, JSON.stringify(report, null, 2));
     console.log(`\nReport written to ${outFile}`);
   }

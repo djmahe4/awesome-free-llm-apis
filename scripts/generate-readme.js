@@ -7,6 +7,8 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const data = JSON.parse(fs.readFileSync(path.join(ROOT, 'data.json'), 'utf8'));
 
+const OKAPI_URL = 'https://okapi.bot';
+
 const HEADER = `<h1 align="center">
 \t<a href="https://github.com/mnfst/awesome-free-llm-apis">
 \t\t<img src="media/awesome-free-llm-apis.png" width="500" alt="Awesome Free LLM APIs">
@@ -23,18 +25,22 @@ const HEADER = `<h1 align="center">
 
 <p align="center"><sub>All endpoints are OpenAI SDK-compatible unless noted. Each link points to the provider's API key page.</sub></p>
 
+<p align="center"><sub>All of those free LLM APIs are available at <a href="https://manifest.build">manifest.build</a> - make reliable agents.</sub></p>
+
 <hr>
 
+<h3 align="center">Sponsors</h3>
+
 <p align="center">
-\t<a href="https://manifest.build">
+\t<a href="${OKAPI_URL}">
 \t\t<picture>
-\t\t\t<source media="(prefers-color-scheme: dark)" srcset="media/manifest-logo-dark.png">
-\t\t\t<img src="media/manifest-logo-light.png" width="240" alt="Manifest">
+\t\t\t<source media="(prefers-color-scheme: dark)" srcset="media/okapi-logo-dark.svg">
+\t\t\t<img src="media/okapi-logo-light.svg" width="180" alt="Okapi">
 \t\t</picture>
 \t</a>
 </p>
 
-<p align="center"><em>All of those free LLM APIs are available at <a href="https://manifest.build">manifest.build</a> - make reliable agents.</em></p>`;
+<hr>`;
 
 function alignTable(header, rows) {
 	const widths = header.map((cell, i) => {

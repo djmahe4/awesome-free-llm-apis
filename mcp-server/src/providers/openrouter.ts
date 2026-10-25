@@ -9,11 +9,13 @@ export class OpenRouterProvider extends BaseProvider {
   rateLimits: RateLimits = { rpm: 20, rpd: 50 };
   models: ProviderModel[] = [
     { id: 'openrouter/free', name: 'OpenRouter Free Router' },
+    { id: 'recursive/flint-v1.0:free', name: 'Recursive Flint 1.0 (Free)' },
+    { id: 'nvidia/nemotron-3.5-super-vl:free', name: 'Nemotron 3.5 Super VL (Free)' },
+    { id: 'xingchen-agi/xing4.0-29b-a4b:free', name: 'Xing 4.0 29B A4B (Free)' },
     { id: 'dots-studio/dots-3-note-preview:free', name: 'Dots 3 Note Preview (Free)' },
     { id: 'nvidia/nemotron-3.5-lightning:free', name: 'Nemotron 3.5 Lightning (Free)' },
     { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', name: 'Nemotron 3 Ultra 550B (Free)' },
     { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', name: 'Nemotron 3 Nano Omni Reasoning (Free)' },
-    { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'Nemotron 3 Super 120B (Free)' },
     { id: 'google/gemma-4-31b-it:free', name: 'Gemma 4 31B (Free)' },
     { id: 'google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B (Free)' },
     { id: 'arcee-ai/trinity-large-preview:free', name: 'Trinity Large Preview (Free)' },
