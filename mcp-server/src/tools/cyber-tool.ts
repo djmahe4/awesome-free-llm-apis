@@ -16,6 +16,18 @@ import { runProjectBridge } from './project-bridge.js';
 // using the same sessionId+target, mirroring use_free_llm's run/continue/status pattern.
 const osintResultsCache = new Map<string, any[]>();
 
+/** A tool name that is safe to use as a registry key and wiki page segment. */
+export function isValidToolName(name: unknown): boolean {
+    return typeof name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(name);
+}
+
+/** sliceSize must be an integer in 1..50: 0 used to loop forever and a negative slice from the end. */
+export function clampSliceSize(value: unknown): number {
+    const n = typeof value === 'string' ? Number(value) : value;
+    if (typeof n !== 'number' || !Number.isFinite(n)) return 50;
+    return Math.min(50, Math.max(1, Math.floor(n)));
+}
+
 export interface CyberToolInput {
     action: 'list_tools' | 'get_tool' | 'register_tool' | 'wiki_lookup'
     | 'learn' | 'coach' | 'save_graph' | 'load_graph' | 'tool_memory' | 'osint' | 'osint_status'
@@ -223,6 +235,10 @@ export async function cyberTool(input: CyberToolInput) {
     let isError = false;
 
     try {
+        // toolName becomes a wiki page segment and frontmatter tag: reject anything that is not a plain name.
+        if (input.toolName !== undefined && action !== 'resolve_tool' && !isValidToolName(input.toolName)) {
+            throw new Error('toolName must be 1-64 letters, digits, . _ + - and start with a letter or digit.');
+        }
         if (action === 'list_tools') {
             const tools = await CyberToolsRegistry.loadRegistry();
             result = {
@@ -292,7 +308,7 @@ export async function cyberTool(input: CyberToolInput) {
                 if (!input.repoPath) throw new Error('repoPath required for learn action in dag_reverse mode');
                 if (!input.toolName) throw new Error('toolName required for learn action in dag_reverse mode');
 
-                const SLICE_SIZE = Math.min(input.sliceSize ?? 50, 50);
+                const SLICE_SIZE = clampSliceSize(input.sliceSize);
                 const nodes: DagNode[] = [];
 
                 if (input.toolName === 'cybersec-toolkit') {
