@@ -124,7 +124,18 @@ export interface RepairBriefInput {
  * (`x(`) or class field (`x =`), or calls (`this.x(`). Traced: the 7B passed `this.currency` everywhere
  * but never stored it, so every price silently fell back to the default for the whole repair budget.
  */
-export function unassignedMembers(content: string): string[] {
+export function unassignedMembers(content: string, filePath?: string): string[] {
+  // Python uses self.x (assigned with self.x = / +=, methods are def x(...)); JS/TS, Java and C# use this.x.
+  if (/\.py$/i.test(filePath ?? '')) {
+    const reads = new Set<string>();
+    for (const m of content.matchAll(/\bself\.([A-Za-z_]\w*)\b(?!\s*\()/g)) reads.add(m[1]);
+    const defined = new Set<string>();
+    for (const m of content.matchAll(/\bself\.([A-Za-z_]\w*)\s*(?:[-+*/%&|^@]|\/\/|\*\*|>>|<<)?=(?!=)/g)) defined.add(m[1]);
+    for (const m of content.matchAll(/^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)/gm)) defined.add(m[1]);
+    for (const m of content.matchAll(/^\s+([A-Za-z_]\w*)\s*(?::[^=\n]+)?=(?!=)/gm)) defined.add(m[1]); // class attributes
+    for (const m of content.matchAll(/^\s*@property\s*\n\s*def\s+([A-Za-z_]\w*)/gm)) defined.add(m[1]);
+    return [...reads].filter(r => !defined.has(r));
+  }
   const reads = new Set<string>();
   for (const m of content.matchAll(/\bthis\.([A-Za-z_$][\w$]*)\b(?!\s*\()/g)) reads.add(m[1]);
   const defined = new Set<string>();
@@ -193,9 +204,10 @@ export function buildRepairBrief(i: RepairBriefInput): string {
     parts.push('A number is wrong: re-check what the functions you call return (an array, its length and a cursor/index are different things) and read their definitions before changing arithmetic.');
   }
   for (const [file, content] of Object.entries(i.fileContents ?? {})) {
-    const missing = unassignedMembers(content);
+    const missing = unassignedMembers(content, file);
     if (missing.length > 0) {
-      parts.push(`${file} reads ${missing.map(m => `this.${m}`).join(', ')} but never assigns ${missing.length > 1 ? 'them' : 'it'}, so ${missing.length > 1 ? 'they are' : 'it is'} always undefined: store the value (for example in the constructor) before using it.`);
+      const py = /\.py$/i.test(file);
+      parts.push(`${file} reads ${missing.map(m => `${py ? 'self' : 'this'}.${m}`).join(', ')} but never assigns ${missing.length > 1 ? 'them' : 'it'}, so ${missing.length > 1 ? 'they are' : 'it is'} never set: store the value (for example in ${py ? '__init__' : 'the constructor'}) before using it.`);
     }
   }
   if (cases.length > 3) parts.push('Several cases fail: rewrite the whole function from the requirements instead of patching single lines.');

@@ -45,7 +45,8 @@ export function filesImplicated(targets: string[], failedCases: string[], brief:
   const hit = targets.filter(t => {
     const rel = norm(t);
     const base = rel.split('/').pop()!.replace(/\.[^.]+$/, '');
-    if (text.includes(`/${rel}:`) || text.includes(`${rel}:`)) return true;
+    // Frames: "src/cart.js:12" (JS, Go, Rust, most tools) and Python's 'File ".../src/cart.py", line 12'.
+    if (text.includes(`/${rel}:`) || text.includes(`${rel}:`) || text.includes(`/${rel}", line`) || text.includes(`"${rel}", line`)) return true;
     const word = new RegExp(`\\b${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
     return failedCases.length > 0 && base.length >= 3 && failedCases.every(c => word.test(c));
   });

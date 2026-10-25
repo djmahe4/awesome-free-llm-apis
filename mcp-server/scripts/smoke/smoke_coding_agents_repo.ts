@@ -33,6 +33,8 @@ type Task = {
   /** Cross-file tasks: every file the change must touch (default: [target]). */
   targets?: string[];
   test: string; // test file the agent's verifyCommand runs
+  /** Check command (default `node --test <test>`), e.g. pytest for a Python task. */
+  verify?: string;
   expect: 'green' | 'needs_user';
 };
 
@@ -53,7 +55,7 @@ function loadFixtureTasks(): Task[] {
       }
     };
     walk(dir);
-    tasks.push({ id: meta.id ?? id, goal: meta.goal, files, target: meta.targets[0], targets: meta.targets, test: meta.test, expect: meta.expect ?? 'green' });
+    tasks.push({ id: meta.id ?? id, goal: meta.goal, files, target: meta.targets[0], targets: meta.targets, test: meta.test, verify: meta.verify, expect: meta.expect ?? 'green' });
   }
   return tasks;
 }
@@ -148,9 +150,11 @@ async function post(body: unknown): Promise<any> {
   return r.json();
 }
 
-function runTests(ws: string, test: string) {
-  const r = spawnSync('node', ['--test', test], { cwd: ws, encoding: 'utf8' });
-  return { green: r.status === 0, tail: ((r.stdout || '') + (r.stderr || '')).split('\n').filter(l => /fail|not ok|expected|actual|✖/i.test(l)).slice(0, 6).join(' | ') };
+/** Runs the task's check itself (the ground truth), whatever the agent claims. */
+function runTests(ws: string, command: string) {
+  const [exe, ...args] = command.split(/\s+/);
+  const r = spawnSync(exe, args, { cwd: ws, encoding: 'utf8', shell: process.platform === 'win32' });
+  return { green: r.status === 0, tail: ((r.stdout || '') + (r.stderr || '')).split('\n').filter(l => /fail|not ok|expected|actual|assert|✖/i.test(l)).slice(0, 6).join(' | ') };
 }
 
 async function runTask(t: Task) {
@@ -164,7 +168,7 @@ async function runTask(t: Task) {
 
   const sessionId = `smoke-${t.id}-${Date.now()}`;
   const started = Date.now();
-  const verifyCommand = `node --test ${t.test}`;
+  const verifyCommand = t.verify ?? `node --test ${t.test}`;
   await post({ goal: t.goal, workspaceRoot: ws, dryRun: false, topKFiles: 1, targetFiles: t.targets ?? [t.target], sessionId, resolve: { action: 'apply' }, verifyCommand, maxRepairAttempts: ATTEMPTS, samples: SAMPLES, maxDurationMs: DURATION_MS, ...(MODEL ? { model: MODEL } : {}), ...(THINK ? { think: THINK } : {}) });
   let res: any;
   for (let i = 0; i < Math.ceil(DURATION_MS / 5000) + 24; i++) {
@@ -172,7 +176,7 @@ async function runTask(t: Task) {
     if (res.status !== 'running') break;
     await new Promise(r => setTimeout(r, 5000));
   }
-  const truth = runTests(ws, t.test);
+  const truth = runTests(ws, verifyCommand);
   const attempts = (res.repair?.attempts ?? []).map((a: any) => `${a.attempt}:${a.outcome}${a.failing !== undefined ? `(${a.failing} failing${a.rewrite ? ',rewrite' : ''})` : ''}`).join(' ');
   const ok = t.expect === 'green' ? truth.green : res.verification?.status === 'needs_user' && res.applied === true;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${t.id.padEnd(8)} ${Math.round((Date.now() - started) / 1000)}s  applied=${res.applied} repair=${res.repair?.outcome ?? '-'} [${attempts}] review=${res.review?.verdict ?? '-'} verify=${res.verification?.status ?? '-'} repoGreen=${truth.green}${truth.green ? '' : '  ' + truth.tail}`);
