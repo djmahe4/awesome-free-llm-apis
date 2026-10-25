@@ -1,3 +1,4 @@
+import { callTimeoutMs, BrowserCallTimeout } from './limits.js';
 import type { DevToolsClient } from './DevToolsClient.js';
 
 /**
@@ -93,10 +94,14 @@ export async function evaluateStructured<T = any>(
         }
     }`;
 
-    const raw = await client.callTool({
-        name: 'evaluate_script',
-        arguments: { function: wrapped },
-    });
+    // bounded like every other DevTools call: a page function that never returns must not hang the caller
+    const ms = callTimeoutMs();
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new BrowserCallTimeout('evaluate_script', ms)), ms); });
+    const raw = await Promise.race([
+        client.callTool({ name: 'evaluate_script', arguments: { function: wrapped } }),
+        timeout,
+    ]).finally(() => clearTimeout(timer));
 
     return parseDevToolsResult(raw);
 }

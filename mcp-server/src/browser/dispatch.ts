@@ -1,4 +1,5 @@
-import { boundedMs } from './limits.js';
+import { boundedMs, safeScreenshotName, safeSessionSegment, evaluateAllowed, MAX_EVALUATE_SOURCE_CHARS, MAX_EVALUATE_RESULT_CHARS } from './limits.js';
+import { pathParamWithinRoots } from '../utils/workspace-roots.js';
 import { checkBrowserUrl } from './urlGuard.js';
 import path from 'node:path';
 import { parseInput, type BrowserToolInput } from './actionSchemas.js';
@@ -45,7 +46,9 @@ function defaultOutputDir(input: BrowserToolInput): string {
 }
 
 function sessionIdOf(input: BrowserToolInput): string {
-    return input.sessionId || `session_${(input.url || 'browser').toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 40)}`;
+    // a session id becomes part of checkpoint and screenshot file names: keep it a plain name
+    if (input.sessionId) return safeSessionSegment(input.sessionId);
+    return `session_${(input.url || 'browser').toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 40)}`;
 }
 
 async function loadOrInitCheckpoint(outputDir: string, sessionId: string, url?: string): Promise<ScrapingSessionCheckpoint> {
@@ -118,6 +121,22 @@ export async function dispatchBrowserAction(rawInput: unknown): Promise<BrowserA
     }
 
     const sessionId = sessionIdOf(input);
+
+    // outputDir is where screenshots, exports and checkpoints are written: only inside the server's working
+    // directory or WORKSPACE_ROOTS, like every other path the dashboard accepts. Checked before a browser starts.
+    const outputDirError = pathParamWithinRoots(input.outputDir, 'outputDir');
+    if (outputDirError) {
+        return failResult({ action: input.action, sessionId, errors: [{ stage: 'input', code: 'OUTPUT_DIR_BLOCKED', message: outputDirError, recoverable: false }] });
+    }
+    if (input.action === 'evaluate') {
+        const fnSource = (input.params as any)?.function;
+        if (!evaluateAllowed()) {
+            return failResult({ action: 'evaluate', sessionId, errors: [{ stage: 'input', code: 'EVALUATE_DISABLED', message: 'evaluate is switched off (BROWSER_ALLOW_EVALUATE=0).', recoverable: false }] });
+        }
+        if (typeof fnSource === 'string' && fnSource.length > MAX_EVALUATE_SOURCE_CHARS) {
+            return failResult({ action: 'evaluate', sessionId, errors: [{ stage: 'input', code: 'INVALID_INPUT', message: `evaluate function is ${fnSource.length} characters; the limit is ${MAX_EVALUATE_SOURCE_CHARS}.`, recoverable: false }] });
+        }
+    }
 
     // Validate the target BEFORE a browser is launched or a session acquired: file:, javascript:,
     // chrome:, private/loopback/metadata addresses and hosts that resolve to them are refused.
@@ -390,6 +409,11 @@ async function handleEvaluate(session: BrowserSession, input: BrowserToolInput, 
     if (!res.ok) {
         return failResult({ action: 'evaluate', sessionId, errors: [{ stage: 'evaluate', code: 'PAGE_FUNCTION_THREW', message: res.error || 'unknown', recoverable: true }] });
     }
+    // cap what a page function can send back: a 50 MB string would flood the model context and the transport
+    const text = JSON.stringify(res.json ?? null);
+    if (text.length > MAX_EVALUATE_RESULT_CHARS) {
+        return okResult({ action: 'evaluate', sessionId, data: { truncated: true, originalChars: text.length, preview: text.slice(0, MAX_EVALUATE_RESULT_CHARS) } });
+    }
     return okResult({ action: 'evaluate', sessionId, data: res.json });
 }
 
@@ -591,7 +615,7 @@ async function handleSession(session: BrowserSession, input: BrowserToolInput, s
 async function handleScreenshot(session: BrowserSession, input: BrowserToolInput, sessionId: string): Promise<BrowserActionResult> {
     const { fullPage = false, filename } = input.params as any;
     const outputDir = defaultOutputDir(input);
-    const fname = filename || `screenshot_${sessionId}_${Date.now()}.png`;
+    const fname = safeScreenshotName(filename, sessionId, Date.now());
     const filePath = path.join(outputDir, 'screenshots', fname);
     try {
         await session.call('take_screenshot', { fullPage, filePath });
