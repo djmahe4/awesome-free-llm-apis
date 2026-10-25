@@ -1,3 +1,4 @@
+import { BoundedMap } from '../../utils/bounded-map.js';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import fs from 'fs-extra';
@@ -101,16 +102,7 @@ export async function scanCodeFiles(dir: string, maxFiles = 100): Promise<string
 // use_free_llm's run/continue/status/abort pattern (RunRegistry.ts). dry_run
 // previews, plan creation, and rollback stay synchronous — they're fast and
 // callers expect an immediate result.
-/** A Map that keeps only the `limit` most recently set entries (setting a key refreshes it). */
-export class BoundedMap<K, V> extends Map<K, V> {
-  constructor(readonly limit: number) { super(); }
-  override set(key: K, value: V): this {
-    if (this.has(key)) this.delete(key);
-    super.set(key, value);
-    while (this.size > this.limit) this.delete(this.keys().next().value as K);
-    return this;
-  }
-}
+export { BoundedMap } from '../../utils/bounded-map.js';
 
 // Bounded: each result holds the full patched content of every file in the run, and a long-running
 // dashboard used to keep all of them for its lifetime.

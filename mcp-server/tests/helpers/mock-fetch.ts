@@ -15,16 +15,20 @@ export interface MockRoute {
 export interface MockFetch {
   fetchImpl: FetchLike;
   calls: string[];
+  /** Every request with the headers it carried. */
+  requests: Array<{ url: string; headers: Record<string, string> }>;
   callsMatching(re: string | RegExp): string[];
 }
 
 /** Route-table fetch double. Any URL with no matching route answers 404 so unexpected calls are visible, not silent. */
 export function mockFetch(routes: MockRoute[]): MockFetch {
   const calls: string[] = [];
+  const requests: Array<{ url: string; headers: Record<string, string> }> = [];
   const counters = new Map<MockRoute, number>();
 
-  const fetchImpl: FetchLike = async (url) => {
+  const fetchImpl: FetchLike = async (url, init) => {
     calls.push(url);
+    requests.push({ url, headers: { ...(init?.headers ?? {}) } });
     const route = routes.find(r => (typeof r.match === 'string' ? url.includes(r.match) : r.match.test(url)));
     if (!route) return respond(404, { message: `mock: no route for ${url}` }, {});
     let spec: Omit<MockRoute, 'match' | 'sequence'> = route;
@@ -45,6 +49,7 @@ export function mockFetch(routes: MockRoute[]): MockFetch {
   return {
     fetchImpl,
     calls,
+    requests,
     callsMatching: re => calls.filter(u => (typeof re === 'string' ? u.includes(re) : re.test(u))),
   };
 }

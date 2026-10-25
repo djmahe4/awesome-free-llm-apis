@@ -26,9 +26,18 @@ export function notFound(reason: NotFoundReason, detail: string, url?: string, r
   return { found: false, reason, detail, url, retryAfterMs, ...(hints?.length ? { hints } : {}) };
 }
 
+/** GitHub answers an exhausted quota or a secondary limit with 403 (and a message), not 429. */
+export function isRateLimited(res: HttpResult): boolean {
+  if (res.status === 429) return true;
+  if (res.status !== 403) return false;
+  const message = String((res.json as { message?: unknown } | undefined)?.message ?? res.textSnippet ?? '');
+  return res.rateLimit?.remaining === 0 || /rate limit/i.test(message);
+}
+
 /** Maps a non-success HTTP result to the honest Lookup failure for it. */
 export function failFromHttp(res: HttpResult, what: string): Lookup<never> {
   if (res.status === 404) return notFound('not_found', `${what}: not found`, res.url);
+  if (res.status === 403 && isRateLimited(res)) return notFound('rate_limited', `${what}: rate limited${res.retryAfterMs !== undefined ? ` (retry in ${Math.ceil(res.retryAfterMs / 1000)}s)` : ''}`, res.url, res.retryAfterMs);
   if (res.status === 429) return notFound('rate_limited', `${what}: rate limited${res.retryAfterMs !== undefined ? ` (retry in ${Math.ceil(res.retryAfterMs / 1000)}s)` : ''}`, res.url, res.retryAfterMs);
   if (res.status === 0) return notFound('network_error', `${what}: ${res.error ?? 'network error'}`, res.url);
   return notFound('unexpected_response', `${what}: HTTP ${res.status}${res.textSnippet ? ` — ${res.textSnippet.slice(0, 80)}` : ''}`, res.url);

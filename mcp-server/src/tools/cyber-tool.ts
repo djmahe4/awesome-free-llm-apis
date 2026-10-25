@@ -1,3 +1,5 @@
+import { BoundedMap } from '../utils/bounded-map.js';
+import { lookupDnsRecords } from '../utils/dns-report.js';
 import { CyberToolsRegistry, type CyberToolsRegistryCategory } from '../utils/CyberToolsRegistry.js';
 import { GlobalWikiManager } from '../utils/GlobalWikiManager.js';
 import { WikiMemory } from '../memory/wiki.js';
@@ -14,7 +16,8 @@ import { runProjectBridge } from './project-bridge.js';
 // so the dork loop executes off the request/response path (see 'osint' action
 // below) instead of blocking the tool call — callers poll with action:'osint_status'
 // using the same sessionId+target, mirroring use_free_llm's run/continue/status pattern.
-const osintResultsCache = new Map<string, any[]>();
+// Bounded: every autoSearch run kept its full results for the life of the server.
+export const osintResultsCache = new BoundedMap<string, any[]>(100);
 
 /** A tool name that is safe to use as a registry key and wiki page segment. */
 export function isValidToolName(name: unknown): boolean {
@@ -241,6 +244,24 @@ function trimToByteBudget(content: string, maxBytes: number): string {
         joined = joined.slice(-maxBytes);
     }
     return joined;
+}
+
+/**
+ * run_action values end up in a bridge subprocess's argv/stdin: bound them before they get there. The
+ * action name is the bridge's own vocabulary (plain identifier), the target a single line of reasonable length.
+ */
+export function runActionInputProblem(input: Pick<CyberToolInput, 'actionName' | 'target' | 'authorization'>): string | null {
+    const { actionName, target, authorization } = input;
+    if (actionName !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(actionName)) {
+        return "actionName must be 1-64 characters: letters, digits, . _ : - (the bridge's own action name).";
+    }
+    if (target !== undefined && (target.length > 2048 || /[\u0000-\u001f\u007f]/.test(target))) {
+        return 'target must be a single line of at most 2048 characters.';
+    }
+    if (authorization !== undefined && authorization.length > 2000) {
+        return 'authorization must be at most 2000 characters.';
+    }
+    return null;
 }
 
 export async function cyberTool(input: CyberToolInput) {
@@ -852,38 +873,11 @@ export async function cyberTool(input: CyberToolInput) {
 
             const shouldQueryDns = osintType === 'domain' || osintType === 'ip' || osintType === 'all';
 
-            // Helper to wrap DNS promise with timeout guard (default 3000ms)
-            const withDnsTimeout = <T>(p: Promise<T>, ms = 3000): Promise<T> =>
-                Promise.race([
-                    p,
-                    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('DNS Timeout')), ms))
-                ]);
-
             if (shouldQueryDns) {
-                try {
-                    const a = await withDnsTimeout(dns.resolve4(target)).catch(() => []);
-                    if (a.length) { dnsReport.A = a; resolvedIps.push(...a); }
-                } catch { }
-
-                try {
-                    const aaaa = await withDnsTimeout(dns.resolve6(target)).catch(() => []);
-                    if (aaaa.length) { dnsReport.AAAA = aaaa; resolvedIps.push(...aaaa); }
-                } catch { }
-
-                try {
-                    const mx = await withDnsTimeout(dns.resolveMx(target)).catch(() => []);
-                    if (mx.length) dnsReport.MX = mx;
-                } catch { }
-
-                try {
-                    const txt = await withDnsTimeout(dns.resolveTxt(target)).catch(() => []);
-                    if (txt.length) dnsReport.TXT = txt;
-                } catch { }
-
-                try {
-                    const ns = await withDnsTimeout(dns.resolveNs(target)).catch(() => []);
-                    if (ns.length) dnsReport.NS = ns;
-                } catch { }
+                // parallel, each bounded by its own (cleared) timer
+                const looked = await lookupDnsRecords(target, dns as any, 3000);
+                Object.assign(dnsReport, looked.report);
+                resolvedIps.push(...looked.resolvedIps);
             }
 
             const recommendedDorks: string[] = [];
@@ -1024,21 +1018,23 @@ export async function cyberTool(input: CyberToolInput) {
             }
         } else if (action === 'resolve_tool') {
             const { resolveTool } = await import('./resolve-tool.js');
-            result = await resolveTool({ prompt: input.prompt, toolName: input.toolName, source: input.source, choice: input.choice, sessionId });
+            // the raw sessionId: without one, resolve_tool gives the caller a private session instead of the shared default
+            result = await resolveTool({ prompt: input.prompt, toolName: input.toolName, source: input.source, choice: input.choice, sessionId: input.sessionId });
         } else if (action === 'run_action') {
             // T8 — dispatch through a project-declared bridge subprocess
             // (general mechanism: any project's `.free-llm-mcp/bridges.json`,
             // any server, multiple project roots per MCP server). Every
             // failure below returns success:false instead of throwing so the
             // caller always gets a structured result.
+            // A failure answers success:false AND is logged as an error (it used to be logged as a normal call).
+            const rejectRunAction = (error: string) => { isError = true; result = { success: false, action, error }; };
+            const inputProblem = runActionInputProblem(input);
             if (!input.authorization) {
-                result = {
-                    success: false,
-                    action,
-                    error: 'run_action requires authorization framing — only pass targets you are explicitly authorized to test',
-                };
+                rejectRunAction('run_action requires authorization framing — only pass targets you are explicitly authorized to test');
             } else if (!input.actionName || !input.target) {
-                result = { success: false, action, error: 'run_action requires actionName and target' };
+                rejectRunAction('run_action requires actionName and target');
+            } else if (inputProblem) {
+                rejectRunAction(inputProblem);
             } else {
                 try {
                     const { bridge, finding } = await runProjectBridge({
@@ -1058,7 +1054,7 @@ export async function cyberTool(input: CyberToolInput) {
                         finding,
                     };
                 } catch (err: any) {
-                    result = { success: false, action, error: String(err?.message || err) };
+                    rejectRunAction(String(err?.message || err));
                 }
             }
         } else {
