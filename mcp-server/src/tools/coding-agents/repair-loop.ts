@@ -34,6 +34,24 @@ const SAMPLE_TEMPERATURES = [0.4, 0.6, 0.8, 0.8];
 /** Attempts at or under this many failing cases are patched in place; above it the file is rewritten. */
 const NEAR_MISS = 3;
 
+/**
+ * Which target files a failure points at: a stack frame inside the file, or a failing test named after it
+ * ("cart uses its currency" -> src/cart.js). Empty when nothing specific (or every file) is implicated,
+ * which means: do not narrow.
+ */
+export function filesImplicated(targets: string[], failedCases: string[], brief: string): string[] {
+  const norm = (s: string) => s.replace(/\\/g, '/').toLowerCase();
+  const text = norm(brief);
+  const hit = targets.filter(t => {
+    const rel = norm(t);
+    const base = rel.split('/').pop()!.replace(/\.[^.]+$/, '');
+    if (text.includes(`/${rel}:`) || text.includes(`${rel}:`)) return true;
+    const word = new RegExp(`\\b${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    return failedCases.length > 0 && base.length >= 3 && failedCases.every(c => word.test(c));
+  });
+  return hit.length > 0 && hit.length < targets.length ? hit : [];
+}
+
 function attemptOutcome(r: CodingAgentsResult): string {
   if (r.rollbackBrief) return 'rolled_back_syntax';
   if (r.verification?.status) return r.verification.status;
@@ -199,7 +217,16 @@ export async function runWithRepairLoop(
       await rollback!(originalCheckpoint!, [...createdFiles]);
       nextBrief = best?.brief ?? brief;
     }
-    current = { ...input, feedback: nextBrief, temperature: RETRY_TEMPERATURE(n - samples + 2), ...(rewrite ? { rewrite: true } : {}) };
+    // A patch-in-place retry edits only the files the failure points at: re-editing files that already pass
+    // broke them in traced multi-file runs. A rewrite starts from the original tree, so it keeps all files.
+    const implicated = !rewrite && input.targetFiles && input.targetFiles.length > 1
+      ? filesImplicated(input.targetFiles, result.verification?.failedCases ?? [], nextBrief)
+      : [];
+    current = {
+      ...input, feedback: nextBrief, temperature: RETRY_TEMPERATURE(n - samples + 2),
+      ...(rewrite ? { rewrite: true } : {}),
+      ...(implicated.length > 0 ? { targetFiles: implicated, relatedFiles: input.targetFiles!.filter(f => !implicated.includes(f)) } : {}),
+    };
   }
 
   // Test-first work keeps a still-red attempt applied so the next one can build on it. If it never went

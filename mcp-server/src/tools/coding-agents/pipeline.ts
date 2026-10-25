@@ -442,10 +442,12 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     let taskHadFailure = false;
 
     // Multi-file runs: every file's prompt sees the others' API surface, edited ones in their new form.
+    // relatedFiles: part of the change, not edited in this call (a narrowed repair); shown in their current form.
+    const changeFiles = [...new Set([...result.relevantFiles, ...(input.relatedFiles ?? [])])];
     const runContents = new Map<string, string>();
-    const editedInRun = new Set<string>();
-    if (result.relevantFiles.length > 1) {
-      for (const f of result.relevantFiles) {
+    const editedInRun = new Set<string>(input.relatedFiles ?? []);
+    if (changeFiles.length > 1) {
+      for (const f of changeFiles) {
         const abs = path.resolve(workspaceRoot, f);
         if (await fs.pathExists(abs)) runContents.set(f, await fs.readFile(abs, 'utf-8'));
       }
@@ -485,7 +487,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
             loadedTasks.map(t => `- [${t.status === 'completed' ? 'x' : (t.status === 'in_progress' ? '~' : ' ')}] ${t.task}`).join('\n')
           : undefined;
 
-        const crossContext = result.relevantFiles.length > 1 ? crossFileContext(relPath, result.relevantFiles, runContents, editedInRun) : '';
+        const crossContext = changeFiles.length > 1 ? crossFileContext(relPath, changeFiles, runContents, editedInRun) : '';
         const goalForFile = crossContext ? `${activeGoal}\n\n${crossContext}` : activeGoal;
         const baseInstruction = tasksContext
           ? `${goalForFile}\n\n[DAG Context]\n${tasksContext}`
