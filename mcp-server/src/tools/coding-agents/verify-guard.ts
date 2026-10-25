@@ -146,7 +146,121 @@ export function unassignedMembers(content: string, filePath?: string): string[] 
   return [...reads].filter(r => !defined.has(r));
 }
 
-const KEY_LINE_RE = /\b(FAIL(ED)?|ERROR|AssertionError|Assertion failed|Traceback|panic:|expected|received|actual|TypeError|ReferenceError|SyntaxError|✗|×|not ok)\b|^\s*[✗×]|^\s*E\s{2,}/i;
+const NOT_CALLS = new Set([
+  'if', 'for', 'while', 'switch', 'catch', 'return', 'function', 'typeof', 'await', 'async', 'elif', 'except', 'with', 'assert', 'not', 'and', 'or', 'in', 'is', 'lambda', 'yield', 'del', 'raise',
+  // builtins that legitimately take a varying number of arguments
+  'print', 'super', 'range', 'min', 'max', 'round', 'format', 'str', 'int', 'float', 'list', 'dict', 'set', 'tuple', 'open', 'getattr', 'setattr', 'require', 'import',
+]);
+
+/** Number of top-level arguments of the call whose "(" is at `open`, or null when it never closes. */
+function countArgs(src: string, open: number): number | null {
+  let depth = 0;
+  let args = 0;
+  let sawToken = false;
+  for (let i = open; i < src.length; i++) {
+    const c = src[i];
+    if (c === '"' || c === "'" || c === '`') {
+      const quote = c;
+      for (i++; i < src.length && src[i] !== quote; i++) if (src[i] === '\\') i++;
+      sawToken = true;
+      continue;
+    }
+    if (c === '(' || c === '[' || c === '{') { if (depth > 0) sawToken = true; depth++; continue; }
+    if (c === ')' || c === ']' || c === '}') {
+      depth--;
+      if (depth === 0) return sawToken ? args + 1 : 0;
+      continue;
+    }
+    if (depth === 1) {
+      if (c === ',') { args++; sawToken = true; continue; }
+      if (!/\s/.test(c)) sawToken = true;
+    }
+  }
+  return null;
+}
+
+/**
+ * Functions called with different numbers of arguments in one file. Traced: the 7B added the new
+ * `currency` argument to some calls of formatPrice and missed one. Method calls (`obj.m(`), declarations
+ * (`function f(`, `def f(`, `name(...) {`) and a few variadic builtins are ignored; a function whose calls
+ * simply use optional arguments can still show up, so callers phrase this as a hint.
+ */
+/**
+ * Blanks out comments and the text of string literals (keeping newlines, so line numbers hold), but keeps
+ * code inside template-literal `${...}` expressions: calls there are real, prose like "line(s)" is not.
+ */
+export function maskNonCode(src: string): string {
+  const out: string[] = [];
+  const templateDepths: number[] = []; // brace depth at which each open ${ started
+  let braceDepth = 0;
+  let i = 0;
+  const blank = (c: string) => (c === '\n' ? '\n' : ' ');
+  // stack of contexts: 'code' | 'template'
+  const ctx: Array<'code' | 'template'> = ['code'];
+  while (i < src.length) {
+    const c = src[i];
+    const top = ctx[ctx.length - 1];
+    if (top === 'template') {
+      if (c === '\\') { out.push(' ', blank(src[i + 1] ?? ' ')); i += 2; continue; }
+      if (c === '`') { out.push(' '); ctx.pop(); i++; continue; }
+      if (c === '$' && src[i + 1] === '{') { out.push(' ', ' '); ctx.push('code'); templateDepths.push(braceDepth); braceDepth++; i += 2; continue; }
+      out.push(blank(c)); i++; continue;
+    }
+    if (c === '/' && src[i + 1] === '/') { while (i < src.length && src[i] !== '\n') { out.push(' '); i++; } continue; }
+    if (c === '/' && src[i + 1] === '*') {
+      const end = src.indexOf('*/', i + 2);
+      const stop = end < 0 ? src.length : end + 2;
+      for (; i < stop; i++) out.push(blank(src[i]));
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      out.push(c); i++;
+      while (i < src.length && src[i] !== c && src[i] !== '\n') { if (src[i] === '\\') { out.push(' '); i++; } out.push(blank(src[i] ?? ' ')); i++; }
+      if (i < src.length && src[i] === c) { out.push(c); i++; }
+      continue;
+    }
+    if (c === '`') { out.push(' '); ctx.push('template'); i++; continue; }
+    if (c === '{') braceDepth++;
+    if (c === '}') {
+      braceDepth--;
+      if (templateDepths.length > 0 && templateDepths[templateDepths.length - 1] === braceDepth) {
+        templateDepths.pop(); ctx.pop(); out.push(' '); i++; continue; // back into the template text
+      }
+    }
+    out.push(c); i++;
+  }
+  return out.join('');
+}
+
+export function inconsistentCalls(rawSrc: string): Array<{ name: string; counts: Array<{ args: number; lines: number[] }> }> {
+  const src = maskNonCode(rawSrc);
+  const byName = new Map<string, Map<number, number[]>>();
+  const lineOf = (index: number) => src.slice(0, index).split('\n').length;
+  for (const m of src.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*\(/g)) {
+    const name = m[1];
+    if (NOT_CALLS.has(name)) continue;
+    const before = src.slice(Math.max(0, m.index! - 12), m.index!);
+    if (/\b(function|def|class|fn|func|new)\s+$/.test(before) && !/\bnew\s+$/.test(before)) continue;
+    const open = m.index! + m[0].length - 1;
+    const n = countArgs(src, open);
+    if (n === null) continue;
+    // "name(args) {" is a method declaration
+    let close = open, depth = 0;
+    for (; close < src.length; close++) {
+      if (src[close] === '(') depth++;
+      else if (src[close] === ')' && --depth === 0) break;
+    }
+    if (/^\s*\{/.test(src.slice(close + 1, close + 40))) continue;
+    const counts = byName.get(name) ?? new Map<number, number[]>();
+    counts.set(n, [...(counts.get(n) ?? []), lineOf(m.index!)]);
+    byName.set(name, counts);
+  }
+  return [...byName.entries()]
+    .filter(([, c]) => c.size > 1)
+    .map(([name, c]) => ({ name, counts: [...c.entries()].sort((a, b) => a[0] - b[0]).map(([args, lines]) => ({ args, lines })) }));
+}
+
+const KEY_LINE_RE =/\b(FAIL(ED)?|ERROR|AssertionError|Assertion failed|Traceback|panic:|expected|received|actual|TypeError|ReferenceError|SyntaxError|✗|×|not ok)\b|^\s*[✗×]|^\s*E\s{2,}/i;
 const FRAME_RE = /[\w./\\-]+\.[a-z]{1,4}:\d+(:\d+)?/i;
 const BRIEF_CAP = 2000;
 
@@ -208,6 +322,12 @@ export function buildRepairBrief(i: RepairBriefInput): string {
     if (missing.length > 0) {
       const py = /\.py$/i.test(file);
       parts.push(`${file} reads ${missing.map(m => `${py ? 'self' : 'this'}.${m}`).join(', ')} but never assigns ${missing.length > 1 ? 'them' : 'it'}, so ${missing.length > 1 ? 'they are' : 'it is'} never set: store the value (for example in ${py ? '__init__' : 'the constructor'}) before using it.`);
+    }
+  }
+  for (const [file, content] of Object.entries(i.fileContents ?? {})) {
+    for (const call of inconsistentCalls(content).slice(0, 2)) {
+      const describe = (c: { args: number; lines: number[] }) => `${c.args} argument${c.args === 1 ? '' : 's'} on line${c.lines.length > 1 ? 's' : ''} ${c.lines.join(', ')}`;
+      parts.push(`${file} calls ${call.name} with ${call.counts.map(describe).join(' but ')}: if the edit added or renamed a parameter, update every call of ${call.name} the same way.`);
     }
   }
   if (cases.length > 3) parts.push('Several cases fail: rewrite the whole function from the requirements instead of patching single lines.');
