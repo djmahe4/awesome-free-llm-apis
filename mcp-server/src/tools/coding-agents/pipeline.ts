@@ -1,3 +1,4 @@
+import { newImportProblems } from './import-check.js';
 import { crossFileContext } from './cross-file.js';
 import { caTrace } from './trace.js';
 import { validateVerifyCommand, runVerifyCommand } from './verify-command.js';
@@ -544,7 +545,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
                 const { content, appliedCount, failures } = applySearchReplaceBlocks(patchedContent, blocks, { additive: isAdditiveInstruction(activeGoal) });
                 if (incomplete > 0) failures.push(`${incomplete} block(s) were cut off before the REPLACE marker and were not applied`);
                 const regressed = appliedCount > 0 && await searchReplaceRegressesTsErrors(relPath, patchedContent, content);
-                if (appliedCount > 0 && !regressed) {
+                // New imports must resolve in the REAL workspace (the in-memory TS gate ignores unresolved modules).
+                const importProblems = appliedCount > 0 && !regressed ? await newImportProblems(relPath, patchedContent, content, workspaceRoot) : [];
+                if (appliedCount > 0 && !regressed && importProblems.length === 0) {
                   patchedContent = content;
                   result.modelUsed = resolvedModel;
                   result.usedFallbackModel = false;
@@ -557,6 +560,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
                       source: 'llm-patch',
                     });
                   }
+                } else if (importProblems.length > 0) {
+                  lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: the edit adds an import that does not resolve: ${importProblems.join('; ')}`;
                 } else if (regressed) {
                   lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: ${appliedCount} block(s) matched, but applying them increases the file's compiler error count — rejected atomically (partial async/signature migrations are worse than no change)`;
                 } else {

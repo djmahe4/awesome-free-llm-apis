@@ -61,7 +61,8 @@ describe('runVerifyCommand', () => {
   it('recognises pytest, vitest and TAP failure lines', async () => {
     ws = await makeWs({ 'mix.js': 'console.log("FAILED tests/test_a.py::test_x - AssertionError: assert 3 == 2");\nconsole.log(" FAIL  tests/ssrf.test.ts > isPrivate > 100.64.0.1");\nconsole.log("not ok 3 - parses octets");\nconsole.log("ok 4 - fine");\nprocess.exit(1);' });
     const r = await runVerifyCommand('node mix.js', ws);
-    expect(r.failedCases).toEqual(['tests/test_a.py::test_x - AssertionError: assert 3 == 2', 'tests/ssrf.test.ts > isPrivate > 100.64.0.1', 'parses octets']);
+    // pytest names are the test id only; the assertion text reaches the brief through the failure lines
+    expect(r.failedCases).toEqual(['tests/test_a.py::test_x', 'tests/ssrf.test.ts > isPrivate > 100.64.0.1', 'parses octets']);
   });
   it('caps captured output', async () => {
     ws = await makeWs({ 'loud.js': 'for (let i = 0; i < 200000; i++) console.log("line " + i);' });
