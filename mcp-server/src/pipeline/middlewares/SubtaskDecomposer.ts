@@ -1,3 +1,4 @@
+import { getMcpDir, sanitizeSessionId } from '../../utils/mcp-home.js';
 import os from 'os';
 import { LRUCache } from 'lru-cache';
 import { promises as fs } from 'fs';
@@ -75,7 +76,7 @@ export class SubtaskDecomposer {
                 ...(projectDir ? [path.join(projectDir, STATE_FILE)] : []),
                 path.join(PROJECTS_DIR, sessionId, STATE_FILE),
                 path.join(process.cwd(), '.free-llm-mcp', 'projects', sessionId, STATE_FILE),
-                path.join(os.homedir(), '.free-llm-mcp', 'projects', sessionId, STATE_FILE),
+                path.join(getMcpDir(), 'projects', sanitizeSessionId(sessionId), STATE_FILE),
             ];
             for (const sp of candidatePaths) {
                 try {

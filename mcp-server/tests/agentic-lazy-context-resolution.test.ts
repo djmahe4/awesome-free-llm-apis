@@ -1,3 +1,4 @@
+import { getMcpDir } from '../src/utils/mcp-home.js';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import os from 'os';
 import path from 'path';
@@ -8,7 +9,7 @@ import type { PipelineContext } from '../src/pipeline/middleware.js';
 
 describe('AgenticMiddleware - lazy PDF/file context resolution (Phase 2)', () => {
     const sessionId = `test-lazy-ctx-${Date.now()}`;
-    const projectDir = path.join(os.homedir(), '.free-llm-mcp', 'projects', sessionId);
+    const projectDir = path.join(getMcpDir(), 'projects', sessionId);
 
     afterEach(async () => {
         vi.restoreAllMocks();
@@ -67,7 +68,7 @@ UNIQUE_MARKER_TEXT_FOR_LAZY_RESOLUTION_TEST_12345
 
 describe('AgenticMiddleware - resume mutation on QueueTask objects', () => {
     const sessionId = `test-resume-mutation-${Date.now()}`;
-    const projectDir = path.join(os.homedir(), '.free-llm-mcp', 'projects', sessionId);
+    const projectDir = path.join(getMcpDir(), 'projects', sessionId);
 
     afterEach(async () => {
         vi.restoreAllMocks();

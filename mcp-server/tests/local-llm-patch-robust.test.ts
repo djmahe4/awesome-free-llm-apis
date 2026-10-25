@@ -16,6 +16,41 @@ import { localLlmPatch } from '../src/tools/local-llm-patch.js';
 const SR = '<<<<<<< SEARCH\nexport function add(a: number, b: number) { return a + b; }\n=======\nexport function add(a: number, b: number) { return a + b; }\nexport const two = 2;\n>>>>>>> REPLACE';
 const reply = (content: string, extra: any = {}) => ({ model: 'm', content, promptTokens: 100, completionTokens: 10, numCtx: 4096, promptTruncated: false, outputTruncated: false, ...extra });
 
+describe('local_llm_patch workspace boundary', () => {
+  const root = path.join(os.tmpdir(), 'llp-boundary-' + Date.now());
+  const inside = path.join(root, 'ws', 'a.ts');
+  const outside = path.join(root, 'secret.ts');
+  beforeEach(async () => {
+    await fs.ensureDir(path.join(root, 'ws'));
+    await fs.writeFile(inside, 'export const a = 1;\n');
+    await fs.writeFile(outside, 'export const SECRET = "do-not-send";\n');
+    (listLocalModels as any).mockReset(); (chatLocal as any).mockReset();
+    (listLocalModels as any).mockResolvedValue(['qwen2.5-coder:7b']);
+    (chatLocal as any).mockResolvedValue(reply(SR));
+  });
+
+  it('a file outside workspace_root is refused before it is read or sent to any model', async () => {
+    for (const filePath of [outside, path.join('..', 'secret.ts'), path.join(root, 'ws', '..', 'secret.ts')]) {
+      const r = await localLlmPatch({ filePath, instruction: 'x', workspace_root: path.join(root, 'ws') } as any);
+      expect(r.success).toBe(false);
+      expect(r.error).toMatch(/outside/i);
+    }
+    expect(chatLocal).not.toHaveBeenCalled();
+  });
+
+  it('a relative path resolves against workspace_root, and files inside still work', async () => {
+    await fs.writeFile(inside, 'export function add(a: number, b: number) { return a + b; }\n');
+    const r = await localLlmPatch({ filePath: 'a.ts', instruction: 'add const two', workspace_root: path.join(root, 'ws'), outputFormat: 'search-replace' } as any);
+    expect(r.error).toBeUndefined();
+    expect(chatLocal).toHaveBeenCalled();
+  });
+
+  it('without workspace_root nothing changes (no boundary can be enforced)', async () => {
+    const r = await localLlmPatch({ filePath: outside, instruction: 'x' } as any);
+    expect(r.error ?? '').not.toMatch(/outside/i);
+  });
+});
+
 describe('local_llm_patch robustness', () => {
   const dir = path.join(os.tmpdir(), 'llp-robust-' + Date.now());
   const file = path.join(dir, 'a.ts');

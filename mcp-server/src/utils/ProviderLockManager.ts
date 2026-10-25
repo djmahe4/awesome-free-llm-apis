@@ -1,3 +1,4 @@
+import { getMcpDir } from './mcp-home.js';
 import fs from 'fs-extra';
 import path from 'path';
 import os from 'os';
@@ -56,7 +57,7 @@ export class ProviderLockManager {
     if (process.env.MCP_PROVIDER_LOCKS_PATH) {
       return process.env.MCP_PROVIDER_LOCKS_PATH;
     }
-    return path.join(os.homedir(), '.free-llm-mcp', 'provider-locks.json');
+    return path.join(getMcpDir(), 'provider-locks.json');
   }
 
   /** Serializes the read-modify-write of the shared lock table across processes. */

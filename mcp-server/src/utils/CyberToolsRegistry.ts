@@ -6,6 +6,51 @@ export type CyberToolsRegistryCategory = 'security' | 'testing' | 'other';
 
 export type CyberToolsURLType = 'github' | 'apt' | 'docker' | 'generic';
 
+export const REGISTRY_CATEGORIES: readonly CyberToolsRegistryCategory[] = ['security', 'testing', 'other'];
+export const REGISTRY_URL_TYPES: readonly CyberToolsURLType[] = ['github', 'apt', 'docker', 'generic'];
+
+const TOOL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
+const GITHUB_REPO_RE = /^https:\/\/(www\.)?github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(\.git)?\/?([#?].*)?$/;
+/** apt package / docker image reference without a scheme, e.g. `nmap` or `ghcr.io/owner/image:tag`. */
+const BARE_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._/:@+-]{0,254}$/;
+
+export type RegistrationCheck = { ok: true } | { ok: false; error: string };
+
+/**
+ * A registration comes from a tool call and is stored in a JSON file other tools read, so every field is
+ * checked: the name becomes a registry key and wiki page name; the URL is later fetched or shown, so only
+ * http(s) URLs (or a bare apt/docker reference) are accepted, never javascript:, file:, data: and so on.
+ */
+export function validateRegistration(name: unknown, url: unknown, urlType: unknown, category: unknown): RegistrationCheck {
+    if (typeof name !== 'string' || !TOOL_NAME_RE.test(name)) {
+        return { ok: false, error: 'Invalid tool name: use 1-64 letters, digits, . _ + - and start with a letter or digit.' };
+    }
+    if (typeof urlType !== 'string' || !(REGISTRY_URL_TYPES as readonly string[]).includes(urlType)) {
+        return { ok: false, error: `Invalid urlType: expected one of ${REGISTRY_URL_TYPES.join(', ')}.` };
+    }
+    if (typeof category !== 'string' || !(REGISTRY_CATEGORIES as readonly string[]).includes(category)) {
+        return { ok: false, error: `Invalid category: expected one of ${REGISTRY_CATEGORIES.join(', ')}.` };
+    }
+    if (typeof url !== 'string' || url.length === 0 || url.length > 2048 || /[\s\u0000-\u001f]/.test(url)) {
+        return { ok: false, error: 'Invalid url: expected a non-empty URL up to 2048 characters with no spaces or control characters.' };
+    }
+    if (/^https?:\/\//i.test(url)) {
+        try {
+            if (!new URL(url).hostname) throw new Error('no host');
+        } catch {
+            return { ok: false, error: 'Invalid url: not a valid http(s) URL.' };
+        }
+    } else if (/^(javascript|file|data|ftp|vbscript|blob|chrome|about):/i.test(url)) {
+        return { ok: false, error: 'Invalid url: that scheme is not allowed.' };
+    } else if (!BARE_REF_RE.test(url)) {
+        return { ok: false, error: 'Invalid url: not an http(s) URL or a bare package/image reference.' };
+    }
+    if (urlType === 'github' && !GITHUB_REPO_RE.test(url)) {
+        return { ok: false, error: 'Invalid url: a github registration must be https://github.com/<owner>/<repo>.' };
+    }
+    return { ok: true };
+}
+
 export interface CyberToolsRegistryMap {
     [toolName: string]: { url: string; urlType: CyberToolsURLType; category: CyberToolsRegistryCategory };
 }
@@ -89,7 +134,7 @@ private static DEFAULT_REGISTRY: CyberToolsRegistryMap = {
     /**
      * Executes an operation wrapped inside a process-safe file lock (.lock)
      */
-    private static async withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
+    private static async withFileLock<T>(filePath: string, fn: () => Promise<T>, opts: { required?: boolean } = {}): Promise<T> {
         const lockPath = `${filePath}.lock`;
         const maxRetries = 10;
         const retryDelayMs = 100;
@@ -119,6 +164,11 @@ private static DEFAULT_REGISTRY: CyberToolsRegistryMap = {
             }
         }
 
+        // A reader may proceed without the lock (it only reads), but a WRITER running unlocked can lose another
+        // writer's update, so it fails loudly instead.
+        if (!acquired && opts.required) {
+            throw new Error(`Could not acquire the registry lock (${lockPath}) after ${maxRetries} attempts; another process may be writing. Try again.`);
+        }
         try {
             return await fn();
         } finally {
@@ -184,6 +234,8 @@ private static DEFAULT_REGISTRY: CyberToolsRegistryMap = {
      * Adds or updates a cyber tool URL in the registry using file-lock synchronization.
      */
     public static async registerTool(toolName: string, url: string, urlType: CyberToolsURLType = 'generic', category: CyberToolsRegistryCategory = 'other'): Promise<CyberToolsRegistryMap> {
+        const check = validateRegistration(toolName, url, urlType, category);
+        if (!check.ok) throw new Error(check.error);
         const filePath = this.getRegistryFilePath();
         const configDir = path.dirname(filePath);
 
@@ -208,9 +260,12 @@ private static DEFAULT_REGISTRY: CyberToolsRegistryMap = {
             }
 
             current[lowerName] = { url, urlType, category };
-            await fs.writeFile(filePath, JSON.stringify(current, null, 2), 'utf-8');
+            // temp file + rename: a crash mid-write leaves the old registry, never a truncated one
+            const tmpPath = `${filePath}.tmp-${process.pid}`;
+            await fs.writeFile(tmpPath, JSON.stringify(current, null, 2), 'utf-8');
+            await fs.rename(tmpPath, filePath);
             return current;
-        });
+        }, { required: true });
     }
 
 /**

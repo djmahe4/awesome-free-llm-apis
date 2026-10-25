@@ -127,9 +127,41 @@ function isAllowListed(url: URL, host: string, allow?: string[]): boolean {
 
 const PRIVATE_NAME_RE = /(^|\.)(localhost|local|internal|localdomain|home\.arpa)$/i;
 
+/** Every address of a host; bounded so a hung resolver cannot stall the caller. */
 async function defaultResolve(host: string): Promise<string[]> {
-  const found = await dns.promises.lookup(host, { all: true, verbatim: true });
+  const lookup = dns.promises.lookup(host, { all: true, verbatim: true });
+  const timeout = new Promise<never>((_, reject) => {
+    const t = setTimeout(() => reject(Object.assign(new Error('DNS lookup timed out'), { code: 'ETIMEOUT' })), 5000);
+    t.unref?.();
+  });
+  const found = await Promise.race([lookup, timeout]);
   return found.map(f => f.address);
+}
+
+/**
+ * Guard for a bare target that is not a URL: `host`, `ip`, `host:port`, `[v6]`, `[v6]:port`, a decimal/hex/octal
+ * IPv4 spelling, or an unbracketed IPv6 address. The target is normalized by the WHATWG URL parser (so every
+ * IPv4 spelling collapses to dotted form), private/loopback/link-local/metadata addresses and internal names are
+ * refused, and a hostname must not resolve to any private address. A name that does not resolve is allowed: it is
+ * not a private target (OSINT legitimately investigates unregistered domains).
+ */
+export async function checkHostTarget(raw: string, opts: UrlCheckOptions = {}): Promise<UrlCheck> {
+  const target = String(raw ?? '').trim();
+  if (!target || target.length > 253 + 8) {
+    return { ok: false, code: 'BAD_URL', message: 'Target is empty or too long' };
+  }
+  // An unbracketed IPv6 literal ("::1") is not valid in a URL authority; wrap it.
+  const authority = net.isIPv6(target) ? `[${target}]` : target;
+  let url: URL;
+  try {
+    url = new URL(`http://${authority}/`);
+  } catch {
+    // Not a host at all (for instance a username): nothing network-addressed to protect against.
+    return { ok: true, url: new URL('http://invalid.invalid/') };
+  }
+  const verdict = await checkPublicHttpUrl(url.toString(), opts);
+  if (!verdict.ok && verdict.code === 'DNS_FAILED') return { ok: true, url };
+  return verdict;
 }
 
 export async function checkPublicHttpUrl(raw: string, opts: UrlCheckOptions = {}): Promise<UrlCheck> {

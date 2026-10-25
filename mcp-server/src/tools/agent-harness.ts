@@ -61,6 +61,7 @@ export async function agentHarness(input: AgentHarnessInput) {
     case 'approvals': {
       if (!input.runId) throw new Error('approvals requires `runId`.');
       const store = new HarnessStore(input.runId, input.workspace_root);
+      if (!(await store.loadRun())) return { success: false, error: `No run found for runId '${input.runId}'` };
       // Use the run's own declared timeout rather than a hardcoded stand-in —
       // a declaration with a longer timeout was having its approvals expired
       // early just from listing them.
@@ -74,14 +75,20 @@ export async function agentHarness(input: AgentHarnessInput) {
       if (!input.runId) throw new Error(`${input.action} requires \`runId\`.`);
       if (!input.approvalId) throw new Error(`${input.action} requires \`approvalId\`.`);
       const store = new HarnessStore(input.runId, input.workspace_root);
+      if (!(await store.loadRun())) return { success: false, error: `No run found for runId '${input.runId}'` };
       const decided = await store.decideApproval(input.approvalId, input.action === 'approve', 'user', input.note);
       if (!decided) return { success: false, error: `No approval found with id '${input.approvalId}'` };
+      if (decided.status !== (input.action === 'approve' ? 'approved' : 'rejected')) {
+        return { success: false, error: `Approval '${input.approvalId}' is already ${decided.status}; it cannot be ${input.action === 'approve' ? 'approved' : 'rejected'}.`, approval: decided };
+      }
       return { success: true, approval: decided };
     }
     case 'trace': {
       if (!input.runId) throw new Error('trace requires `runId`.');
       const store = new HarnessStore(input.runId, input.workspace_root);
-      return { events: await store.readTrace(input.limit ?? 200) };
+      if (!(await store.loadRun())) return { success: false, error: `No run found for runId '${input.runId}'` };
+      const limit = Number.isFinite(input.limit) ? Math.min(1000, Math.max(1, Math.floor(input.limit as number))) : 200;
+      return { events: await store.readTrace(limit) };
     }
     case 'tasks': {
       if (!input.runId) throw new Error('tasks requires `runId`.');

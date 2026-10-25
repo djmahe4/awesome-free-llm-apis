@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isPrivateAddress, checkPublicHttpUrl } from '../src/utils/ssrf-guard.js';
+import { isPrivateAddress, checkPublicHttpUrl, checkHostTarget } from '../src/utils/ssrf-guard.js';
 
 describe('isPrivateAddress', () => {
   it.each([
@@ -114,5 +114,46 @@ describe('allowHosts (explicit local-testing allowlist)', () => {
 
   it('the scheme is still enforced for allowlisted hosts', async () => {
     expect(await checkPublicHttpUrl('file://localhost/etc/passwd', { resolve: pub, allowHosts: ['localhost'] })).toMatchObject({ ok: false, code: 'BAD_SCHEME' });
+  });
+});
+
+describe('checkHostTarget (bare host / ip / host:port targets, e.g. OSINT)', () => {
+  const resolve = async (h: string) => {
+    if (h === 'example.com') return ['93.184.216.34'];
+    if (h === 'rebind.test') return ['10.0.0.9'];
+    throw Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' });
+  };
+
+  it.each([
+    '127.0.0.1', '127.0.0.1:80', '127.0.0.1:8080', 'localhost', 'localhost:3000', 'LOCALHOST.', 'foo.localhost',
+    '[::1]', '[::1]:80', '::1', '::', '0.0.0.0', '10.1.2.3', '192.168.1.1:22', '100.64.0.1', '172.20.0.1',
+    '2130706433', '0x7f.1', '017700000001', 'fdab::1', 'fe90::1', 'fc00::1', '::ffff:127.0.0.1', '[::ffff:10.0.0.1]:3000',
+    'metadata.google.internal', 'printer.local', 'rebind.test',
+  ])('refuses %s', async (t) => {
+    const r = await checkHostTarget(t, { resolve });
+    expect(r.ok, t).toBe(false);
+  });
+
+  it('metadata addresses are refused even with allowPrivate', async () => {
+    for (const t of ['169.254.169.254', '169.254.1.1', '[fd00:ec2::254]', '::ffff:169.254.169.254']) {
+      expect((await checkHostTarget(t, { resolve, allowPrivate: true })).ok, t).toBe(false);
+    }
+  });
+
+  it('allowPrivate permits ordinary private targets', async () => {
+    for (const t of ['127.0.0.1', 'localhost:3000', '10.0.0.5', '192.168.1.1']) {
+      expect((await checkHostTarget(t, { resolve, allowPrivate: true })).ok, t).toBe(true);
+    }
+  });
+
+  it('public hosts and addresses pass; a name that does not resolve is not a private target', async () => {
+    for (const t of ['example.com', '8.8.8.8', '2606:4700:4700::1111', 'no-such-host.invalid', 'user_name_not_a_host']) {
+      expect((await checkHostTarget(t, { resolve })).ok, t).toBe(true);
+    }
+  });
+
+  it('empty or absurd input is refused', async () => {
+    expect((await checkHostTarget('', { resolve })).ok).toBe(false);
+    expect((await checkHostTarget('x'.repeat(400), { resolve })).ok).toBe(false);
   });
 });
