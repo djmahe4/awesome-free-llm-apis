@@ -495,6 +495,10 @@ export function looksLikeHallucinatedReplacement(originalContent: string, patche
   // which this failure mode can otherwise still clear on a large file.
   const countEllipsis = (s: string) => (s.match(/(?<!\.)\.{3}(?!\.)/g) || []).length;
   if (countEllipsis(patchedContent) > countEllipsis(originalContent)) return true;
+  // A full-file reply that keeps a landmark or two but is a fraction of the original has dropped real code
+  // (observed live: 711 lines replaced by 102). Targeted edits go through SEARCH/REPLACE, never this path.
+  const lineCount = (s: string) => s.split(/\r?\n/).length;
+  if (lineCount(originalContent) >= 100 && lineCount(patchedContent) < lineCount(originalContent) * 0.4) return true;
   // `export` is only legal at module top level in TS/JS — never inside a
   // function or class method body — so requiring it (rather than making it
   // optional) restricts anchors to real public symbols and excludes generic

@@ -105,6 +105,8 @@ export interface CodingAgentsInput {
   rewrite?: boolean;
   /** Sampling temperature for generation (default 0). The repair loop raises it on retries so a repeat is not identical. */
   temperature?: number;
+  /** Wall-clock budget for the whole repair loop in ms (default 5 minutes). */
+  maxDurationMs?: number;
   /** Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry). */
   maxRepairAttempts?: number;
   /** Independent review of the proposed diff before apply (default on; false disables it). */
@@ -150,7 +152,7 @@ export interface CodingAgentsResult {
   };
   /** How the automatic repair loop ended (present when a check or review took part). */
   repair?: {
-    outcome: 'converged' | 'not_converged' | 'stuck' | 'needs_user' | 'error';
+    outcome: 'converged' | 'not_converged' | 'stuck' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
     attemptCount: number;
     attempts: RepairAttempt[];
   };
