@@ -1,3 +1,4 @@
+import { boundedMs } from './limits.js';
 import { checkBrowserUrl } from './urlGuard.js';
 import path from 'node:path';
 import { parseInput, type BrowserToolInput } from './actionSchemas.js';
@@ -317,7 +318,10 @@ async function handleScroll(session: BrowserSession, input: BrowserToolInput, se
 }
 
 async function handleWait(session: BrowserSession, input: BrowserToolInput, sessionId: string): Promise<BrowserActionResult> {
-    const { until, value, timeoutMs = 8000, pollMs = 300 } = input.params as any;
+    const { until, value } = input.params as any;
+    // caller durations are bounded: an hour-long wait or a 0 ms poll must not tie up or spin the server
+    const timeoutMs = boundedMs((input.params as any).timeoutMs, 0, 300_000, 8000);
+    const pollMs = boundedMs((input.params as any).pollMs, 50, 5_000, 300);
     const deadline = Date.now() + timeoutMs;
 
     if (until === 'timeout') {
