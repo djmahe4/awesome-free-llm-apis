@@ -356,13 +356,13 @@ preferred persona: coder
 >
 > nvidia       (13 models)
 > pollinations (9 models)
-> openrouter   (8 models)
-> kilocode     (6 models)
+> openrouter   (9 models)
+> kilocode     (8 models)
 > cloudflare   (4 models)
 > huggingface  (4 models)
 > modelscope   (3 models)
+> siliconflow  (1 model)
 > cohere       (1 model)
 > gemini       (1 model)
 > groq         (1 model)
-> llm7         (1 model)
 > ```

@@ -135,7 +135,6 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
   },
   siliconflow: {
     added: [
-      'tencent/Hunyuan-MT-7B',
       'XingChenAGI/Xing4.0-29B',
     ],
     removed: [
