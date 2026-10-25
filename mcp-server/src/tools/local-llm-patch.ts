@@ -56,8 +56,12 @@ const VISION_MODEL_NAME = [/vision/i, /llava/i, /vl[:\-]/i, /\bvl\b/i];
  * tool never sends images, and a VL model never produced a usable edit in traced runs (it only added a
  * model swap and ~7 s per call). Embedding-only models fail the chat call and are skipped by it.
  */
-export function codeEditCandidates(availableModels: string[]): string[] {
-  return rankNamesForNeed(availableModels, 'code').filter(m => !VISION_MODEL_NAME.some(p => p.test(m)));
+export function codeEditCandidates(availableModels: string[], pinned?: string): string[] {
+  const ranked = rankNamesForNeed(availableModels, 'code').filter(m => !VISION_MODEL_NAME.some(p => p.test(m)));
+  // A caller-pinned model goes first (its own choice overrides ranking and the VRAM budget); the rest stay
+  // as fallbacks. Only an installed model can be pinned: "qwen2.5-coder" matches "qwen2.5-coder:7b".
+  const pin = pinned ? availableModels.find(m => m === pinned || m.startsWith(`${pinned}:`)) : undefined;
+  return pin ? [pin, ...ranked.filter(m => m !== pin)] : ranked;
 }
 
 export interface LocalLlmPatchInput {
@@ -84,6 +88,8 @@ export interface LocalLlmPatchInput {
   // can't collapse/duplicate/truncate it. `patch` on success is the model's
   // raw response text (the blocks), not file content.
   outputFormat?: 'full' | 'search-replace';
+  /** Installed Ollama model to try first (e.g. a bigger one for a hard edit); the ranked rest are fallbacks. */
+  model?: string;
 }
 
 export interface LocalLlmPatchResult {
@@ -173,7 +179,7 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
 
     // Capability-aware order (real /api/show capabilities when the router has seen the models,
     // else name heuristics): code-specialised first, vision/embedding models last, over-budget last.
-    const candidateModels = codeEditCandidates(availableModels);
+    const candidateModels = codeEditCandidates(availableModels, input.model);
     if (candidateModels.length === 0) {
       throw new Error(`No local text model can edit code (found only: ${availableModels.join(', ')}). Pull one, e.g. \`ollama pull qwen2.5-coder\`.`);
     }

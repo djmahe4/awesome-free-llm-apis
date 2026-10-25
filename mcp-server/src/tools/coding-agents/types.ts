@@ -105,6 +105,8 @@ export interface CodingAgentsInput {
   rewrite?: boolean;
   /** Sampling temperature for generation (default 0). The repair loop raises it on retries so a repeat is not identical. */
   temperature?: number;
+  /** Installed local model to use (e.g. a bigger one for a cross-file change). Overrides the automatic choice and the VRAM budget. */
+  model?: string;
   /** Wall-clock budget for the whole repair loop in ms (default 5 minutes). */
   maxDurationMs?: number;
   /** Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry). */

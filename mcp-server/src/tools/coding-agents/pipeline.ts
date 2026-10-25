@@ -385,9 +385,16 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       try {
         const { listLocalModels, rankCandidateModels } = await import('../../providers/ollama-local.js');
         const models = await listLocalModels();
+        // A caller-pinned model wins over llmfit and the router (it may exceed the VRAM budget on purpose).
+        if (input.model) {
+          resolvedModel = models.find(m => m === input.model || m.startsWith(`${input.model}:`)) ?? null;
+          if (!resolvedModel) {
+            result.diagnostics.push({ filePath: '', message: `model '${input.model}' is not installed locally (have: ${models.join(', ')}); using the automatic choice instead.`, severity: 'warning', source: 'llm-patch' });
+          }
+        }
 
         // Check llmfit hardware recommendations to find the optimal coding model
-        try {
+        if (!resolvedModel) try {
           const { recommendModels } = await import('../../services/llmfit.js');
           const fitResult = await recommendModels({ useCase: 'coding', limit: 5, workspaceRoot });
           const recommendedOllamaNames = (fitResult.models || [])
@@ -503,6 +510,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
               workspace_root: workspaceRoot,
               sessionId,
               temperature: input.temperature,
+              ...(input.model && resolvedModel ? { model: resolvedModel } : {}),
               outputFormat: 'search-replace',
               contentOverride: windowInfo ? windowInfo.window : patchedContent,
               excerptRange: windowInfo
@@ -599,6 +607,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
               workspace_root: workspaceRoot,
               sessionId,
               temperature: input.temperature,
+              ...(input.model && resolvedModel ? { model: resolvedModel } : {}),
               contentOverride: windowInfo ? windowInfo.window : undefined,
               excerptRange: windowInfo
                 ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }
