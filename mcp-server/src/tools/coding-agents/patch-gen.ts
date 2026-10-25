@@ -360,6 +360,30 @@ export function isAdditiveInstruction(instruction: string): boolean {
   return ADD_WORDS.test(instruction) && !CHANGE_WORDS.test(instruction);
 }
 
+/**
+ * The matcher tolerates indentation differences, so a block the model copied 4 spaces too deep still
+ * matches; without this its REPLACE would land 4 spaces too deep too. Shift REPLACE by the same delta,
+ * but only for a uniform, spaces-only delta; anything else is left as written.
+ */
+export function reindentReplace(searchLines: string[], fileLines: string[], replaceLines: string[]): string[] {
+  const lead = (l: string) => l.match(/^[ 	]*/)![0];
+  let delta: number | null = null;
+  for (let i = 0; i < searchLines.length; i++) {
+    const s = searchLines[i], f = fileLines[i] ?? '';
+    if (!s.trim()) continue;
+    const ls = lead(s), lf = lead(f);
+    if (ls.includes('	') || lf.includes('	')) return replaceLines;
+    const d = lf.length - ls.length;
+    if (delta === null) delta = d;
+    else if (d !== delta) return replaceLines;
+  }
+  if (!delta) return replaceLines;
+  if (delta > 0) return replaceLines.map(l => (l.trim() ? ' '.repeat(delta!) + l : l));
+  const cut = -delta;
+  if (replaceLines.some(l => l.trim() && !l.startsWith(' '.repeat(cut)))) return replaceLines;
+  return replaceLines.map(l => (l.trim() ? l.slice(cut) : l));
+}
+
 export function applySearchReplaceBlocks(
   content: string,
   blocks: SearchReplaceBlock[],
@@ -415,9 +439,10 @@ export function applySearchReplaceBlocks(
           continue;
         }
       }
+      const placed = reindentReplace(searchLines, workingLines.slice(index, index + searchLines.length), replaceLines);
       workingLines = [
         ...workingLines.slice(0, index),
-        ...replaceLines,
+        ...placed,
         ...workingLines.slice(index + searchLines.length),
       ];
       appliedCount++;

@@ -171,6 +171,9 @@ export function buildRepairBrief(i: RepairBriefInput): string {
   if (/Missing expected exception|did not throw|expected .* to throw/i.test(i.outputTail)) {
     parts.push('A call that should have thrown returned normally: the current logic ACCEPTS that input. Find the part that accepts it (a regex or condition that is too permissive) and tighten that. Do not add a special case for the input.');
   }
+  if (/expected -?[\d.]+ to (be|equal) [+-]?[\d.]+/i.test(i.outputTail)) {
+    parts.push('A number is wrong: re-check what the functions you call return (an array, its length and a cursor/index are different things) and read their definitions before changing arithmetic.');
+  }
   if (cases.length > 3) parts.push('Several cases fail: rewrite the whole function from the requirements instead of patching single lines.');
   if (i.timedOut) parts.push('The check timed out: the edit probably introduced a hang or an infinite loop.');
   if (key.length) parts.push('Failures:\n' + dedupe(key).slice(0, 12).join('\n'));
