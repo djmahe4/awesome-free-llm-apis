@@ -350,6 +350,7 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
             chatResult = { ...chatResult, content: recovered.map(b => `<<<<<<< SEARCH\n${b.search}\n=======\n${b.replace}\n>>>>>>> REPLACE`).join('\n\n') };
           }
         }
+        caTraceDump(`reply-${candidate}-${path.basename(absPath)}`, chatResult.content);
         const rejection = rejectReply(chatResult, isSearchReplace);
         if (rejection) {
           caTraceDump(`rejected-${candidate}`, chatResult.content);

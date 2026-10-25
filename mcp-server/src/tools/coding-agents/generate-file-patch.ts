@@ -1,3 +1,4 @@
+import { newDuplicateDefinitions } from './duplicate-defs.js';
 import { localLlmPatch } from '../local-llm-patch.js';
 import { caTrace } from './trace.js';
 import { crossFileContext } from './cross-file.js';
@@ -116,7 +117,9 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
             const regressed = appliedCount > 0 && await searchReplaceRegressesTsErrors(relPath, patchedContent, content);
             // New imports must resolve in the REAL workspace (the in-memory TS gate ignores unresolved modules).
             const importProblems = appliedCount > 0 && !regressed ? await newImportProblems(relPath, patchedContent, content, workspaceRoot) : [];
-            if (appliedCount > 0 && !regressed && importProblems.length === 0) {
+            // A second definition of an existing name (the later one wins) is never what the edit meant.
+            const duplicateDefs = appliedCount > 0 && !regressed ? newDuplicateDefinitions(relPath, patchedContent, content) : [];
+            if (appliedCount > 0 && !regressed && importProblems.length === 0 && duplicateDefs.length === 0) {
               patchedContent = content;
               result.modelUsed = resolvedModel;
               result.usedFallbackModel = false;
@@ -129,6 +132,8 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
                   source: 'llm-patch',
                 });
               }
+            } else if (duplicateDefs.length > 0) {
+              lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: ${duplicateDefs.join('; ')}`;
             } else if (importProblems.length > 0) {
               lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: the edit adds an import that does not resolve: ${importProblems.join('; ')}`;
             } else if (regressed) {
