@@ -115,6 +115,24 @@ export interface RepairBriefInput {
   timedOut?: boolean;
   outputTail: string;
   patchedFiles: string[];
+  /** Current content of the edited files, for cheap static hints (e.g. a member read but never assigned). */
+  fileContents?: Record<string, string>;
+}
+
+/**
+ * Members a file reads as `this.x` but never assigns (`this.x =`, `+=`, ...), defines as a method
+ * (`x(`) or class field (`x =`), or calls (`this.x(`). Traced: the 7B passed `this.currency` everywhere
+ * but never stored it, so every price silently fell back to the default for the whole repair budget.
+ */
+export function unassignedMembers(content: string): string[] {
+  const reads = new Set<string>();
+  for (const m of content.matchAll(/\bthis\.([A-Za-z_$][\w$]*)\b(?!\s*\()/g)) reads.add(m[1]);
+  const defined = new Set<string>();
+  for (const m of content.matchAll(/\bthis\.([A-Za-z_$][\w$]*)\s*(?:[-+*/%&|^]|\?\?|\|\||&&)?=(?!=)/g)) defined.add(m[1]);
+  for (const m of content.matchAll(/^\s*(?:static\s+|async\s+|get\s+|set\s+|#)*([A-Za-z_$][\w$]*)\s*(?:\(|=(?!=)|;)/gm)) defined.add(m[1]);
+  for (const m of content.matchAll(/[{;]\s*([A-Za-z_$][\w$]*)\s*=(?!=)/g)) defined.add(m[1]); // inline class fields
+  for (const m of content.matchAll(/\{\s*([^}]*)\}\s*=\s*this\b/g)) for (const n of m[1].split(',')) defined.add(n.trim().split(/\s|:/)[0]);
+  return [...reads].filter(r => !defined.has(r));
 }
 
 const KEY_LINE_RE = /\b(FAIL(ED)?|ERROR|AssertionError|Assertion failed|Traceback|panic:|expected|received|actual|TypeError|ReferenceError|SyntaxError|✗|×|not ok)\b|^\s*[✗×]|^\s*E\s{2,}/i;
@@ -173,6 +191,12 @@ export function buildRepairBrief(i: RepairBriefInput): string {
   }
   if (/expected -?[\d.]+ to (be|equal) [+-]?[\d.]+/i.test(i.outputTail)) {
     parts.push('A number is wrong: re-check what the functions you call return (an array, its length and a cursor/index are different things) and read their definitions before changing arithmetic.');
+  }
+  for (const [file, content] of Object.entries(i.fileContents ?? {})) {
+    const missing = unassignedMembers(content);
+    if (missing.length > 0) {
+      parts.push(`${file} reads ${missing.map(m => `this.${m}`).join(', ')} but never assigns ${missing.length > 1 ? 'them' : 'it'}, so ${missing.length > 1 ? 'they are' : 'it is'} always undefined: store the value (for example in the constructor) before using it.`);
+    }
   }
   if (cases.length > 3) parts.push('Several cases fail: rewrite the whole function from the requirements instead of patching single lines.');
   if (i.timedOut) parts.push('The check timed out: the edit probably introduced a hang or an infinite loop.');

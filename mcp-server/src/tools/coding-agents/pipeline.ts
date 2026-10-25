@@ -1036,7 +1036,11 @@ ${after.outputTail}`,
         // on it; either way the failing output becomes a debugger brief for the next attempt.
         taskHadFailure = true;
         {
-          result.verification.repairBrief = buildRepairBrief({ command: input.verifyCommand, exitCode: after.exitCode, timedOut: after.timedOut, outputTail: after.outputTail, failedCases: after.failedCases, patchedFiles: patches.map(p => p.filePath) });
+          result.verification.repairBrief = buildRepairBrief({
+            command: input.verifyCommand, exitCode: after.exitCode, timedOut: after.timedOut, outputTail: after.outputTail, failedCases: after.failedCases,
+            patchedFiles: patches.map(p => p.filePath),
+            fileContents: Object.fromEntries(patches.filter(p => typeof p.fullPatchedContent === 'string').map(p => [p.filePath, p.fullPatchedContent as string])),
+          });
         }
       }
     }
