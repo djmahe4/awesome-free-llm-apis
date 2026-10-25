@@ -38,7 +38,9 @@ export class DomStateFingerprinter {
         const normalized = snapshotText
             .split('\n')
             .map(l => l.trim())
-            .filter(l => !l.includes('timestamp') && !l.includes('ms'))
+            // volatile lines only: a timestamp or a duration like "120ms" / "1.5 ms" (the substring "ms" alone also
+            // matched items, forms, terms and programs, so changes in those lines went unseen)
+            .filter(l => !/timestamp/i.test(l) && !/\b\d+(\.\d+)?\s?ms\b/i.test(l))
             .join('\n');
         return crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 16);
     }

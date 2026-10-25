@@ -17,15 +17,21 @@ export interface BlockingChallengeResult {
     evidence?: string;
 }
 
-const CLOUDFLARE_MARKERS = [
+/**
+ * A wall is a page that is (almost) nothing but the challenge. Markers split by how much they prove:
+ *  - strong: only a real Cloudflare challenge contains them, whatever the page length;
+ *  - wall-sized: generic words ("captcha", "just a moment...", "verify you are human") that a normal page
+ *    can also use (a footer notice, a loading hint), so they count only on a small page;
+ *  - "ray id:" counts only together with the word cloudflare (error footers have both; a blog or a support
+ *    ticket may have just one).
+ */
+const STRONG_CLOUDFLARE_MARKERS = [
     'checking your browser before accessing',
     'attention required! | cloudflare',
-    'just a moment...',
     'cf-turnstile',
     'cf_chl_',
-    'ray id:',
-    'verify you are human',
 ];
+const WALL_SIZED_CLOUDFLARE_MARKERS = ['just a moment...', 'verify you are human'];
 
 const CAPTCHA_MARKERS = [
     'g-recaptcha',
@@ -36,6 +42,9 @@ const CAPTCHA_MARKERS = [
     'please complete the security check',
     'captcha',
 ];
+
+/** Non-empty lines at or under which a page can be a challenge wall rather than a page with a widget. */
+const WALL_MAX_LINES = 40;
 
 /**
  * Scans page text/HTML-ish content for known challenge markers. Case-insensitive.
@@ -50,15 +59,18 @@ const CAPTCHA_MARKERS = [
 export function detectBlockingChallenge(text: string, structuralSignal = false): BlockingChallengeResult {
     if (!text) return structuralSignal ? { blocked: true, type: 'unknown', evidence: 'structural-interstitial' } : { blocked: false };
     const lower = text.toLowerCase();
+    const smallPage = lower.split(/\r?\n/).filter(l => l.trim()).length <= WALL_MAX_LINES;
 
-    for (const marker of CLOUDFLARE_MARKERS) {
-        if (lower.includes(marker)) {
-            return { blocked: true, type: 'cloudflare', evidence: marker };
-        }
+    for (const marker of STRONG_CLOUDFLARE_MARKERS) {
+        if (lower.includes(marker)) return { blocked: true, type: 'cloudflare', evidence: marker };
     }
-    for (const marker of CAPTCHA_MARKERS) {
-        if (lower.includes(marker)) {
-            return { blocked: true, type: 'captcha', evidence: marker };
+    if (smallPage) {
+        for (const marker of WALL_SIZED_CLOUDFLARE_MARKERS) {
+            if (lower.includes(marker)) return { blocked: true, type: 'cloudflare', evidence: marker };
+        }
+        if (lower.includes('ray id:') && lower.includes('cloudflare')) return { blocked: true, type: 'cloudflare', evidence: 'ray id: + cloudflare' };
+        for (const marker of CAPTCHA_MARKERS) {
+            if (lower.includes(marker)) return { blocked: true, type: 'captcha', evidence: marker };
         }
     }
     if (structuralSignal) {
