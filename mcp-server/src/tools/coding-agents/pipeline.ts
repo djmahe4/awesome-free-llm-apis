@@ -1,3 +1,4 @@
+import { caTrace } from './trace.js';
 import { validateVerifyCommand, runVerifyCommand } from './verify-command.js';
 import { assessPatchesForVerify, buildRepairBrief, buildSyntaxBrief, withFeedback, isTestFile, readVerifyTestContext, type PatchFact } from './verify-guard.js';
 import { reviewPatch } from './reviewer.js';
@@ -325,6 +326,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     const codeFiles: string[] = await scanCodeFiles(workspaceRoot, 100);
 
     // ── Step 2: Locate (VectorStore RAG) ────────────────────────────────────
+    caTrace('locate');
     result.pipelineStage = 'locate';
     const store = new VectorStore();
     const docNodes: DocumentNode[] = [];
@@ -367,6 +369,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     }
 
     // ── Step 3: Anchor [PATH#SHA8] ───────────────────────────────────────────
+    caTrace('anchor', `files=${result.relevantFiles.length}`);
     result.pipelineStage = 'anchor';
     const anchors: SnapshotAnchor[] = [];
     const patches: LineAnchoredPatch[] = [];
@@ -488,9 +491,15 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
             // including the same test/mock seam.
             const lineCount = patchedContent.split(/\r?\n/).length;
             const windowInfo = lineCount > 150 ? extractWindowForInstruction(patchedContent, augmentedInstruction, 150) : null;
+            // One informed retry: a SEARCH/REPLACE call costs ~5 s; the fallback below regenerates the
+            // file (~125 s for 600 lines on a 7B, traced live) and is riskier. Tell the model why its
+            // first reply could not be used and ask again in the same format.
+            for (let srTry = 0; srTry < 2 && !appliedPatch; srTry++) {
+            caTrace('local search-replace', `${relPath}${srTry ? ' (retry)' : ''}`);
+            const srInstruction = srTry === 0 ? augmentedInstruction : `${augmentedInstruction}\n\nYour previous SEARCH/REPLACE reply could not be used: ${lastFailureReason}. Reply again with corrected SEARCH/REPLACE blocks: copy every SEARCH line exactly from the excerpt, and put new imports with the other imports at the top of the file.`;
             const srLlmResult = await localLlmPatch({
               filePath: fullPath,
-              instruction: augmentedInstruction,
+              instruction: srInstruction,
               workspace_root: workspaceRoot,
               sessionId,
               temperature: input.temperature,
@@ -533,6 +542,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
             } else if (srLlmResult.error) {
               lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: ${srLlmResult.error}`;
             }
+            }
           } catch (srErr: any) {
             lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE failed: ${srErr.message}`;
           }
@@ -550,7 +560,12 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         // appliedPatch=true and permanently starve cloud fallback of ever
         // being tried, forcing identical failures on every manual resume
         // retry instead of auto-escalating within one call.
-        if (resolvedModel && !appliedPatch) {
+        // A large module is not regenerated whole after SEARCH/REPLACE failed twice: that is the slowest
+        // path (minutes on a 7B) and the one that drops or renames code. The repair loop retries instead.
+        const skipWholeFileRegen = !!resolvedModel && !rewriteSmallFile && !appliedPatch
+          && patchedContent.split(/\r?\n/).length > 300 && /^\s*export\s+/m.test(patchedContent);
+        if (skipWholeFileRegen) caTrace('whole-file regeneration skipped (large module)', relPath);
+        if (resolvedModel && !appliedPatch && !skipWholeFileRegen) {
           // Visible record that SEARCH/REPLACE failed and the pipeline is
           // dropping to a strategy that can't structurally prevent scope
           // drift — observed live: SR failed here (a vision-language model
@@ -564,6 +579,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           // fallback also fails, matching this function's existing
           // localReason-chaining style instead of adding a second entry.
           const srFailureNote = lastFailureReason;
+          caTrace('search-replace not used', String(srFailureNote ?? '').slice(0, 400));
           lastFailureReason = undefined;
           try {
             // Same sliding-window fix already used for the cloud fallback below:
@@ -576,6 +592,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
             // full content — matching the cloud path's guard timing exactly.
             const hasExports = /^\s*export\s+/m.test(patchedContent);
             const windowInfo = !hasExports ? extractWindowForInstruction(patchedContent, activeGoal) : null;
+            caTrace('local full/window patch', relPath);
             const llmResult = await localLlmPatch({
               filePath: fullPath,
               instruction: augmentedInstruction,
@@ -633,6 +650,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           // (unchanged content never passed through the model).
           try {
             const { useFreeLLM } = await import('../use-free-llm.js');
+            caTrace('cloud search-replace fallback', relPath);
             const srResult = await generateSearchReplacePatch(
               patchedContent,
               activeGoal,
@@ -679,6 +697,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
 
         if (!appliedPatch) {
           const localReason = lastFailureReason;
+          caTrace('cloud full-file fallback', relPath);
           const { patch: cloudPatch, failureReason } = await generateCodePatchWithCloudLLM(
             fullPath,
             activeGoal,
@@ -849,7 +868,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       }
       // Does the check pass BEFORE the edit? If it already fails, a failure afterwards proves nothing
       // about the patch, so it is reported but not used as a gate.
+      caTrace('edit done; baseline check');
       if (input.verifyCommand && !verifyManual) verifyBaseline = await runVerifyCommand(input.verifyCommand, workspaceRoot);
+      caTrace('baseline check done');
       // Step 1: Snapshot original files into CAS before modifying
       const preApplyMap: Record<string, string> = {};
       const preHistoryMap: Record<string, string | null> = {};
@@ -951,7 +972,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     // fails now) is an error diagnostic, which the post-apply gate below turns into an automatic
     // rollback from the CAS checkpoint.
     if (result.applied && input.verifyCommand && verifyBaseline) {
+      caTrace('check after apply');
       const after = await runVerifyCommand(input.verifyCommand, workspaceRoot);
+      caTrace('check done', `ok=${after.ok}`);
       result.verification = {
         command: input.verifyCommand,
         status: after.ok ? 'passed' : (verifyBaseline.ok ? 'regressed' : 'not_green'),

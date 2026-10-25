@@ -157,7 +157,9 @@ export function parseSearchReplaceBlocksDetailed(text: string): { blocks: Search
 
   const isSearchMarker = (l: string) => /^<{5,}\s*SEARCH\s*$/i.test(l.trim());
   const isDividerMarker = (l: string) => /^={5,}\s*$/i.test(l.trim());
-  const isReplaceMarker = (l: string) => /^>{5,}\s*REPLACE\s*$/i.test(l.trim());
+  // A bare ">>>>>>>" closes a block too, and so does a second "=======": qwen2.5-coder:7b writes the
+  // latter, and rejecting that reply cost a 126 s whole-file regeneration per attempt (traced live).
+  const isReplaceMarker = (l: string) => /^>{5,}\s*(REPLACE)?\s*$/i.test(l.trim()) || isDividerMarker(l);
 
   for (const line of lines) {
     if (state === 'OUTSIDE') {
@@ -464,13 +466,21 @@ export function applySearchReplaceBlocks(
  * Non-TS/JS files skip this (no ts-morph checker available) and rely solely
  * on the guards above.
  */
+/** TS diagnostics caused only by the in-memory check's missing environment: unresolved modules (2307, 2792),
+ *  missing declaration files (7016) and node globals without @types/node (2580, 2591, 2584). */
+const ENVIRONMENT_ONLY_TS_CODES = new Set([2307, 2792, 7016, 2580, 2591, 2584]);
+
 export async function searchReplaceRegressesTsErrors(
   filePath: string,
   beforeContent: string,
   afterContent: string
 ): Promise<boolean> {
   if (!/\.(ts|tsx|js|jsx|mjs|cjs)$/i.test(filePath)) return false;
-  const countErrors = (diags: DiagnosticResult[]) => diags.filter(d => d.severity === 'error').length;
+  // The in-memory project has no node_modules, no @types/node and no sibling files, so every import and
+  // every node global is an error there. Counting those made any edit that adds an import look like a
+  // regression and threw correct edits away. Only errors in the code itself count.
+  const countErrors = (diags: DiagnosticResult[]) =>
+    diags.filter(d => d.severity === 'error' && !ENVIRONMENT_ONLY_TS_CODES.has(d.code ?? -1)).length;
   const [before, after] = await Promise.all([
     runTsMorphCheck(filePath, beforeContent),
     runTsMorphCheck(filePath, afterContent),

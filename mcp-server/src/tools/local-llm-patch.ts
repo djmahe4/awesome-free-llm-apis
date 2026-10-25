@@ -1,3 +1,5 @@
+import { parseSearchReplaceBlocksDetailed } from './coding-agents/patch-gen.js';
+import { caTrace } from './coding-agents/trace.js';
 import { isInsideRoot, real } from '../utils/workspace-roots.js';
 import fs from 'fs-extra';
 import path from 'node:path';
@@ -37,7 +39,8 @@ export function rejectReply(r: OllamaLocalChatResult, isSearchReplace: boolean):
     return `prompt truncated: ${r.promptTokens} tokens filled num_ctx ${r.numCtx}; the model did not see the whole input (send a smaller excerpt)`;
   }
   if (!isSearchReplace) return r.outputTruncated ? 'output truncated at the reply token limit' : null;
-  const complete = (r.content.match(/^>{7} REPLACE\s*$/gm) || []).length;
+  // Same block grammar as the applier, so a reply the applier can use is never thrown away here.
+  const complete = parseSearchReplaceBlocksDetailed(r.content).blocks.length;
   if (complete === 0) {
     return r.outputTruncated
       ? 'output truncated before any complete SEARCH/REPLACE block'
@@ -281,6 +284,7 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
         });
         const rejection = rejectReply(chatResult, isSearchReplace);
         if (rejection) {
+          caTrace('reply rejected', `${candidate}: ${rejection} | reply starts: ${JSON.stringify(chatResult.content.slice(0, 300))} | ends: ${JSON.stringify(chatResult.content.slice(-200))}`);
           attemptErrors.push(`${candidate}: ${rejection}`);
           chatResult = null;
           continue;

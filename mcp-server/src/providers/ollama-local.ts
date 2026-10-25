@@ -1,3 +1,4 @@
+import { caTrace } from '../tools/coding-agents/trace.js';
 import fetch from 'node-fetch';
 import { getModelInfo } from '../services/llmfit.js';
 
@@ -196,7 +197,13 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
     prompt_eval_count?: number;
     eval_count?: number;
     done_reason?: string;
+    total_duration?: number;
+    load_duration?: number;
+    prompt_eval_duration?: number;
+    eval_duration?: number;
   };
+  const ns = (v?: number) => ((v ?? 0) / 1e9).toFixed(1);
+  caTrace('ollama', `model=${model} ctx=${numCtx} total=${ns(data.total_duration)}s load=${ns(data.load_duration)}s prompt=${data.prompt_eval_count ?? 0}tok/${ns(data.prompt_eval_duration)}s gen=${data.eval_count ?? 0}tok/${ns(data.eval_duration)}s`);
   const promptTokens = data.prompt_eval_count ?? 0;
   return {
     model: data.model,

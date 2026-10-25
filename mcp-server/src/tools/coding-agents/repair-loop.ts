@@ -1,3 +1,4 @@
+import { caTrace, caTraceReset } from './trace.js';
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
 import type { CodingAgentsInput, CodingAgentsResult, RepairAttempt } from './types.js';
 import { detectSpecialCasing } from './verify-guard.js';
@@ -94,7 +95,10 @@ export async function runWithRepairLoop(
     }
     // The pipeline counts files per run; without this reset the status poll reads "2/1 file(s)" on attempt 2.
     if (run) run.completedCount = 0;
+    if (n === 1) caTraceReset(sessionId);
+    caTrace(`attempt ${n} start`, `temp=${current.temperature ?? 0}${current.rewrite ? ' rewrite' : ''}`);
     result = await runner(current, sessionId, run);
+    caTrace(`attempt ${n} end`, String(result.verification?.status ?? (result.applied ? 'applied' : 'proposed')));
     if (!originalCheckpoint && result.checkpointId && result.applied) originalCheckpoint = result.checkpointId;
     for (const p of result.patchPlan ?? []) if ((p as any).isNewFile) createdFiles.add(p.filePath);
     let brief = briefOf(result, input);
