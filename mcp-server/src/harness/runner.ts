@@ -800,6 +800,8 @@ async function runSteps(
   }
 
   for (let i = startIndex; i < roles.length; i++) {
+    // persist progress at every step boundary, so run.json shows the work done so far, not only the end state
+    if (i > startIndex) await persistRun(store, run);
     // abort() flips the registry controller at any time; a boolean read once at launch never saw it.
     if (isAborted()) {
       run.status = 'aborted';
@@ -1089,10 +1091,13 @@ function trackTopLevelTokens(run: HarnessRun, tokens: number): void {
  * "declaring nothing keeps old behavior" posture as the other P4e/P4f
  * additions.
  */
-function wallBudgetExceeded(run: HarnessRun, decl: HarnessDeclaration): boolean {
-  const maxWallMinutes = decl.harness.budget.maxWallMinutes;
+export function wallBudgetExceeded(run: HarnessRun, decl: HarnessDeclaration): boolean {
+  const maxWallMinutes = run.maxWallMinutes ?? decl.harness.budget.maxWallMinutes;
   if (!maxWallMinutes) return false;
-  return (Date.now() - run.createdAt) / 60000 > maxWallMinutes;
+  // Active time: waiting for a human (an approval, a budget pause) is not the run's time.
+  const now = Date.now();
+  const paused = (run.pausedMs ?? 0) + (run.pausedAt ? now - run.pausedAt : 0);
+  return (now - run.createdAt - paused) / 60000 > maxWallMinutes;
 }
 
 /**
@@ -1157,6 +1162,19 @@ function applyResearchResult(run: HarnessRun, role: string, callResult: GatedRes
 }
 
 /**
+ * Writes run.json. A disk error must not kill the run, but it must not vanish either: it is recorded in the
+ * trace so a run that stays 'running' on disk can be explained.
+ */
+async function persistRun(store: HarnessStore, run: HarnessRun): Promise<void> {
+  run.updatedAt = Date.now();
+  try {
+    await store.saveRun(run);
+  } catch (err: any) {
+    await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'error', data: { message: `run.json could not be written: ${err?.message || err}` } }).catch(() => {});
+  }
+}
+
+/**
  * No longer synthesizes a handoff here — runSteps already appended a real,
  * schema-validated one (or more, chained) per step as it ran. The old
  * version fabricated exactly one handoff at the very end with a hardcoded
@@ -1166,7 +1184,8 @@ function applyResearchResult(run: HarnessRun, role: string, callResult: GatedRes
  */
 async function finalizeRun(store: HarnessStore, run: HarnessRun, registryKey: string): Promise<void> {
   run.updatedAt = Date.now();
-  await store.saveRun(run).catch(() => {});
+  if ((run.status === 'paused_approval' || run.status === 'paused_budget') && !run.pausedAt) run.pausedAt = Date.now();
+  await persistRun(store, run);
   await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'run_end', data: { status: run.status } }).catch(() => {});
   // Report the actual terminal state, not just failed/not-failed — a
   // paused/aborted run previously reported as "finished successfully" to
@@ -1258,7 +1277,7 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
-  await store.saveRun(run);
+  await store.createRun(run); // exclusive: a second deploy of this runId fails instead of overwriting it
   await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'run_start', data: { goal: input.goal, roles } });
   await initAllTasks(store, input.goal, roles);
 
@@ -1419,16 +1438,20 @@ async function resumeMonitoredRun(store: HarnessStore, run: HarnessRun): Promise
  * a request previously had no effect because nothing ever re-invoked the
  * gated call afterward.
  */
-export async function resumeHarness(runId: string, workspaceRoot?: string): Promise<HarnessRun> {
+export async function resumeHarness(runId: string, workspaceRoot?: string, opts: { maxWallMinutes?: number } = {}): Promise<HarnessRun> {
+  if (opts.maxWallMinutes !== undefined && !(Number.isFinite(opts.maxWallMinutes) && opts.maxWallMinutes > 0 && opts.maxWallMinutes <= 1440)) {
+    throw new Error('maxWallMinutes must be a number of minutes between 0 (exclusive) and 1440.');
+  }
   const store = new HarnessStore(runId, workspaceRoot);
   const run = await store.loadRun();
   if (!run) throw new Error(`No run found for runId '${runId}'`);
   if (run.status === 'monitoring') {
     return resumeMonitoredRun(store, run);
   }
-  if (run.status !== 'paused_approval') {
-    throw new Error(`Run '${runId}' is not paused for approval (status: '${run.status}')`);
+  if (run.status !== 'paused_approval' && run.status !== 'paused_budget') {
+    throw new Error(`Run '${runId}' is not paused (status: '${run.status}')`);
   }
+  if (opts.maxWallMinutes !== undefined) run.maxWallMinutes = opts.maxWallMinutes;
 
   const decl = await loadHarnessDeclaration(run.declarationName, run.workspaceRoot);
   // Re-validated on resume too — a declaration edited between deploy and
@@ -1454,6 +1477,17 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
   if (startIndex === -1) startIndex = Math.max(0, roles.length - 1); // everything already completed — re-attempt the last step defensively rather than no-op
 
   const priorHandoff = await lastHandoff(store);
+
+  // Time spent paused is not the run's time: fold it in before judging the wall-clock budget.
+  if (run.pausedAt) {
+    run.pausedMs = (run.pausedMs ?? 0) + (Date.now() - run.pausedAt);
+    run.pausedAt = undefined;
+  }
+  // Only a run that PAUSED on its budget is refused here (resuming it unchanged would just pause again);
+  // an approval-paused run over budget resumes and pauses at the next step boundary, with a trace event.
+  if (run.status === 'paused_budget' && wallBudgetExceeded(run, decl)) {
+    throw new Error(`Run '${runId}' is still over its wall-clock budget (${run.maxWallMinutes ?? decl.harness.budget.maxWallMinutes} min). Resume with a larger maxWallMinutes to raise the cap.`);
+  }
 
   run.status = 'running';
   run.error = undefined;

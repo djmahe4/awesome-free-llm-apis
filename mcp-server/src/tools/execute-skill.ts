@@ -141,6 +141,26 @@ export async function resolveReferences(
 }
 
 /**
+ * Downloads a skill that is not on disk. load_skill_prompt runs the download in the background and answers
+ * { status: 'running' } at once; execute_skill used to look for SKILL.md right then, so the first run of any
+ * not-yet-downloaded skill failed. Poll the same run until it finishes (bounded), then report the outcome.
+ */
+async function downloadSkill(skill: string, workspaceDir?: string): Promise<{ success: boolean; error?: string }> {
+  const pollMs = Number(process.env.EXECUTE_SKILL_DOWNLOAD_POLL_MS) || 1000;
+  const timeoutMs = Number(process.env.EXECUTE_SKILL_DOWNLOAD_TIMEOUT_MS) || 120_000;
+  let res = await loadSkillPrompt({ type: 'load', name: skill, workspaceDir });
+  const deadline = Date.now() + timeoutMs;
+  while (res.success && res.status === 'running') {
+    if (Date.now() >= deadline) {
+      return { success: false, error: `Skill "${skill}" is still downloading after ${Math.round(timeoutMs / 1000)}s (${res.message ?? 'no progress info'}). The download keeps running in the background; try again in a moment.` };
+    }
+    await new Promise(r => setTimeout(r, pollMs));
+    res = await loadSkillPrompt({ type: 'load', name: skill, workspaceDir, pollAction: 'status' });
+  }
+  return res;
+}
+
+/**
  * Thin logging wrapper around executeSkillInner — kept separate so the
  * inner function's many early returns (security guard, Hermes lookup,
  * download fallback, etc.) don't need restructuring into a single
@@ -156,9 +176,10 @@ export async function executeSkill(input: ExecuteSkillInput): Promise<ExecuteSki
   try {
     result = await executeSkillInner(input);
   } catch (err: any) {
+    // The contract is "never throws, always returns an ExecuteSkillResult": report it, do not rethrow.
     result = { success: false, error: err?.message || 'Unknown error occurred during skill execution.' };
-    await logToolCall(sessionId, `execute_skill:${input.skill}`, input, result, Date.now() - start, true).catch(() => {});
-    throw err;
+    await logToolCall(sessionId, `execute_skill:${String(input?.skill)}`, input, result, Date.now() - start, true).catch(() => {});
+    return result;
   }
   await logToolCall(sessionId, `execute_skill:${input.skill}`, input, result, Date.now() - start, !result.success).catch(() => {});
   return result;
@@ -252,11 +273,7 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
     // 3. Fallback to download if SKILL.md is missing
     if (!await fs.pathExists(skillMdPath)) {
       console.error(`[execute-skill] Local skill "${skill}" not found. Attempting to download...`);
-      const loadResult = await loadSkillPrompt({
-        type: 'load',
-        name: skill,
-        workspaceDir: workspace_root
-      });
+      const loadResult = await downloadSkill(skill, workspace_root);
       if (!loadResult.success) {
         return {
           success: false,

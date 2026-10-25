@@ -143,6 +143,12 @@ export interface HarnessRun {
   error?: string;
   createdAt: number;
   updatedAt: number;
+  /** Milliseconds spent paused (waiting for an approval or on a budget pause); not counted against maxWallMinutes. */
+  pausedMs?: number;
+  /** Set while the run is paused; folded into pausedMs when it resumes. */
+  pausedAt?: number;
+  /** Raised wall-clock cap (minutes) set when a budget-paused run was resumed; overrides the declaration's. */
+  maxWallMinutes?: number;
   /**
    * P5 — set while `status === 'monitoring'`: a step attached to a detached
    * process (gatedDetach) instead of completing synchronously. The step

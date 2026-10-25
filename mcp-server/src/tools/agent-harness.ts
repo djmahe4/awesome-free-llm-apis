@@ -11,6 +11,7 @@ export interface AgentHarnessInput {
   goal?: string;                // required for deploy
   workspace_root?: string;
   maxTokens?: number;
+  maxWallMinutes?: number;     // resume only: raises the wall-clock cap of a run that paused on its budget (1-1440 minutes)
   approvalId?: string;         // required for approve/reject
   note?: string;
   limit?: number;              // for trace
@@ -34,7 +35,7 @@ export async function agentHarness(input: AgentHarnessInput) {
     }
     case 'resume': {
       if (!input.runId) throw new Error('resume requires `runId`.');
-      const run = await resumeHarness(input.runId, input.workspace_root);
+      const run = await resumeHarness(input.runId, input.workspace_root, { maxWallMinutes: input.maxWallMinutes });
       return { success: true, run };
     }
     case 'rerun':
