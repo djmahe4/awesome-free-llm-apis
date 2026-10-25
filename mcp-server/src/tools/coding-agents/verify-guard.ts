@@ -146,6 +146,25 @@ export function unassignedMembers(content: string, filePath?: string): string[] 
   return [...reads].filter(r => !defined.has(r));
 }
 
+/**
+ * A call with the wrong number of arguments is the usual half-finished signature change. The runtime
+ * message already says so, but a small model does not act on it, so the brief spells out the fix.
+ * Python messages only (JS silently ignores extra arguments, so there is no runtime error to read).
+ */
+export function arityErrorHint(output: string): string | null {
+  const tooMany = output.match(/([A-Za-z_][\w.]*)\(\) takes (?:from )?(\d+(?: to \d+)?) positional arguments? but (\d+) (?:was|were) given/);
+  if (tooMany) {
+    const [, fn, accepts, given] = tooMany;
+    return `${fn} is called with ${given} arguments but its definition accepts ${accepts}: add the missing parameter to the definition of ${fn} (in the production code, not the test), then pass it through wherever it is used.`;
+  }
+  const keyword = output.match(/([A-Za-z_][\w.]*)\(\) got an unexpected keyword argument '(\w+)'/);
+  if (keyword) {
+    const [, fn, name] = keyword;
+    return `${fn} is called with the keyword argument ${name} but does not accept it: add a parameter named ${name} to the definition of ${fn}.`;
+  }
+  return null;
+}
+
 const NOT_CALLS = new Set([
   'if', 'for', 'while', 'switch', 'catch', 'return', 'function', 'typeof', 'await', 'async', 'elif', 'except', 'with', 'assert', 'not', 'and', 'or', 'in', 'is', 'lambda', 'yield', 'del', 'raise',
   // builtins that legitimately take a varying number of arguments
@@ -324,6 +343,8 @@ export function buildRepairBrief(i: RepairBriefInput): string {
       parts.push(`${file} reads ${missing.map(m => `${py ? 'self' : 'this'}.${m}`).join(', ')} but never assigns ${missing.length > 1 ? 'them' : 'it'}, so ${missing.length > 1 ? 'they are' : 'it is'} never set: store the value (for example in ${py ? '__init__' : 'the constructor'}) before using it.`);
     }
   }
+  const arity = arityErrorHint(i.outputTail || '');
+  if (arity) parts.push(arity);
   for (const [file, content] of Object.entries(i.fileContents ?? {})) {
     for (const call of inconsistentCalls(content).slice(0, 2)) {
       const describe = (c: { args: number; lines: number[] }) => `${c.args} argument${c.args === 1 ? '' : 's'} on line${c.lines.length > 1 ? 's' : ''} ${c.lines.join(', ')}`;
