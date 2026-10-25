@@ -89,9 +89,13 @@ export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput): Prom
     if (!skillSlug) {
         return { success: false, error: `name ${JSON.stringify(name.slice(0, 40))} has no letters or digits to build a folder name from.` };
     }
-    if (typeof description !== 'string' || description.trim() === '') {
-        return { success: false, error: 'description is required (a non-empty string).' };
+    if (description !== undefined && description !== null && typeof description !== 'string') {
+        return { success: false, error: 'description must be a string.' };
     }
+    // Callers have always been able to omit it; fall back to the first summary item, then the name.
+    const effectiveDescription = (typeof description === 'string' && description.trim())
+        || (Array.isArray(what) ? what.find((w): w is string => typeof w === 'string' && w.trim() !== '') : undefined)
+        || name;
     const runKey = `store_workspace_skill:${input.sessionId || skillSlug}`;
     const pollAction = input.pollAction || 'run';
 
@@ -132,7 +136,7 @@ export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput): Prom
 
     // No scripts to generate — cheap, synchronous path unchanged (SKILL.md only, no LLM calls).
     if (!script_instructions || Object.keys(script_instructions).length === 0) {
-        return await writeSkillMdAndFinish(skillDir, skillSlug, name, description, why, files, example, what, {});
+        return await writeSkillMdAndFinish(skillDir, skillSlug, name, effectiveDescription, why, files, example, what, {});
     }
 
     // Scripts requested — this can chain several sequential useFreeLLM calls, so it
@@ -231,7 +235,7 @@ No explanation.`;
                 RunRegistry.progress(runKey, filename, completed, run.totalCount);
             }
 
-            const final = await writeSkillMdAndFinish(skillDir, skillSlug, name, description, why, files, example, what, generatedScripts);
+            const final = await writeSkillMdAndFinish(skillDir, skillSlug, name, effectiveDescription, why, files, example, what, generatedScripts);
             skillGenResultsCache.set(runKey, final);
             RunRegistry.finish(runKey);
         } catch (err: any) {

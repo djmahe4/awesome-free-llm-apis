@@ -1,3 +1,4 @@
+import { getMcpDir } from '../utils/mcp-home.js';
 import fs from 'fs-extra';
 import path from 'node:path';
 import os from 'node:os';
@@ -243,7 +244,7 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
 
   try {
     // 2. Resolve skill directory using resolveConfigDir
-    const configDir = workspace_root ? resolveConfigDir(workspace_root) : path.join(os.homedir(), '.free-llm-mcp');
+    const configDir = workspace_root ? resolveConfigDir(workspace_root) : getMcpDir();
     let skillDir = path.join(configDir, 'skills', skill);
 
     let skillMdPath = path.join(skillDir, 'SKILL.md');

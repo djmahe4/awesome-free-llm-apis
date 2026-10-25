@@ -37,9 +37,14 @@ describe('store_workspace_skill input validation', () => {
   it('rejects a missing or non-string name/description instead of throwing a TypeError', async () => {
     const a: any = await storeWorkspaceSkill({ name: undefined as any, description: 'd', what: ['x'], workspace_root: ws });
     expect(a.success).toBe(false);
-    const b: any = await storeWorkspaceSkill({ name: 'ok', description: undefined as any, what: ['x'], workspace_root: ws });
+    const b: any = await storeWorkspaceSkill({ name: 'ok', description: 42 as any, what: ['x'], workspace_root: ws });
     expect(b.success).toBe(false);
     expect(b.error).toMatch(/description/i);
+    // existing callers omit it: that falls back to the first summary item instead of failing
+    const c: any = await storeWorkspaceSkill({ name: 'ok-two', description: undefined as any, what: ['first item'], workspace_root: ws });
+    expect(c.success).toBe(true);
+    const md = await fs.readFile((await findSkillMd(ws))!, 'utf-8');
+    expect(md).toContain('description:');
   });
 
   it('a description containing newlines or a front-matter delimiter cannot add or end front matter keys', async () => {

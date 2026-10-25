@@ -1,3 +1,4 @@
+import { getMcpDir } from '../../utils/mcp-home.js';
 import { spawn } from 'child_process';
 import fs from 'fs-extra';
 import path from 'path';
@@ -104,7 +105,7 @@ export class DiffScanner {
     // standalone hash here previously created a second, disconnected directory.
     const hash = await new WorkspaceScanner(workspaceRoot).getWorkspaceHash(workspaceRoot);
     const wsHash = `ws-${hash.substring(0, 16)}`;
-    const projectDir = path.join(os.homedir(), '.free-llm-mcp', 'projects', wsHash);
+    const projectDir = path.join(getMcpDir(), 'projects', wsHash);
     const lockPath = path.join(projectDir, 'scan.lock');
 
     const result: DiffScanResult = {

@@ -1,3 +1,4 @@
+import { getMcpDir } from '../utils/mcp-home.js';
 import os from 'os';
 import { promises as fs } from 'fs';
 import { existsSync, readdirSync, realpathSync, statSync } from 'fs';
@@ -200,7 +201,7 @@ export async function initWorkspace(workspaceRoot: string): Promise<boolean> {
   } catch (err) {
     // Fallback to ~/.free-llm-mcp/agents-config.json when workspace is read-only
     try {
-      const fallbackDir = path.join(os.homedir(), '.free-llm-mcp');
+      const fallbackDir = getMcpDir();
       await fs.mkdir(fallbackDir, { recursive: true });
       const fallbackPath = path.join(fallbackDir, 'agents-config.json');
 

@@ -1,3 +1,4 @@
+import { getMcpDir } from '../utils/mcp-home.js';
 import { resolveWithin } from '../utils/workspace-roots.js';
 import fetch from 'node-fetch';
 import fs from 'node:fs/promises';
@@ -100,7 +101,7 @@ async function getBaseDir(workspaceDir?: string): Promise<string> {
   if (workspaceDir) {
     return resolveConfigDir(workspaceDir);
   }
-  return path.join(os.homedir(), '.free-llm-mcp');
+  return getMcpDir();
 }
 
 async function getLocalSkillsIndex(configDir: string): Promise<SkillIndexEntry[]> {
