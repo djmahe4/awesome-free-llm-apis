@@ -201,6 +201,96 @@ export function parseSearchReplaceBlocksDetailed(text: string): { blocks: Search
   return { blocks, incomplete: state === 'OUTSIDE' ? 0 : 1 };
 }
 
+/** "// Add this import", "// Insert this line": the model annotating its own edit, never wanted in the file. */
+const EDIT_ECHO_COMMENT = /\s+\/\/\s*(add|added|insert|inserted|new|change|changed|update|updated)\s+(this|here|the)\b.*$/i;
+/** Edits closer than this many unchanged lines are merged into one block, so their contexts never overlap. */
+const MERGE_GAP = 4;
+
+/**
+ * Asked for SEARCH/REPLACE, a small model often returns the whole edited excerpt in a code fence instead
+ * (traced live with qwen2.5-coder:7b). The edit inside is frequently right, so recover it: diff the
+ * excerpt against the original and emit one block per changed hunk. SEARCH comes from the ORIGINAL with
+ * a little context, so lines the model copied wrongly outside a hunk can never reach the file.
+ * Deletion-only hunks at the very start or end are the model dropping the excerpt's edge lines and are
+ * ignored. A copy that shares under 60% of the original's lines is a rewrite, not an edit: nothing.
+ */
+export function editsFromRewrittenExcerpt(original: string, reply: string): { blocks: SearchReplaceBlock[] } {
+  const none = { blocks: [] as SearchReplaceBlock[] };
+  if (/^<{5,}\s*SEARCH/m.test(reply)) return none;
+  const fenced = reply.match(/```[\w+-]*\r?\n([\s\S]*?)\r?\n```/);
+  if (!fenced) return none;
+  const a = original.split(/\r?\n/);
+  const b = fenced[1].split(/\r?\n/).map(l => l.replace(EDIT_ECHO_COMMENT, ''));
+  const n = a.length, m = b.length;
+  if (n === 0 || m === 0 || n * m > 4_000_000) return none;
+
+  // Longest common subsequence over lines (excerpts are ~150 lines, so the table is small).
+  const w = m + 1;
+  const dp = new Uint32Array((n + 1) * w);
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i * w + j] = a[i] === b[j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+    }
+  }
+  if (dp[0] < n * 0.6) return none;
+
+  type Hunk = { start: number; end: number; ins: string[] }; // replaces a[start, end) with ins
+  const hunks: Hunk[] = [];
+  let i = 0, j = 0, cur: Hunk | null = null;
+  const flush = () => { if (cur) { hunks.push(cur); cur = null; } };
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) { flush(); i++; j++; continue; }
+    if (!cur) cur = { start: i, end: i, ins: [] };
+    if (j < m && (i >= n || dp[i * w + j + 1] >= dp[(i + 1) * w + j])) { cur.ins.push(b[j]); j++; }
+    else { i++; cur.end = i; }
+  }
+  flush();
+
+  // Lines missing at the excerpt's edges were dropped by the copy, not deleted on purpose: keep them,
+  // also when the dropped edge shares a hunk with a real change next to it.
+  for (const h of hunks) {
+    // Only the excess: a hunk that replaces k lines with fewer has dropped the rest at the edge.
+    if (h.end === n) while (h.end - h.start > h.ins.length) h.end--;
+    if (h.start === 0) while (h.end - h.start > h.ins.length) h.start++;
+  }
+  const kept = hunks.filter(h => !(h.ins.length === 0 && h.start === h.end));
+  // Merge hunks separated by only a few unchanged lines.
+  const merged: Hunk[] = [];
+  for (const h of kept) {
+    const prev = merged[merged.length - 1];
+    if (prev && h.start - prev.end < MERGE_GAP) {
+      prev.ins = [...prev.ins, ...a.slice(prev.end, h.start), ...h.ins];
+      prev.end = h.end;
+    } else merged.push({ ...h, ins: [...h.ins] });
+  }
+
+  const occurrences = (needle: string[]) => {
+    let count = 0;
+    for (let s = 0; s + needle.length <= n; s++) {
+      let ok = true;
+      for (let t = 0; t < needle.length; t++) if (a[s + t] !== needle[t]) { ok = false; break; }
+      if (ok && ++count > 1) break;
+    }
+    return count;
+  };
+
+  const blocks: SearchReplaceBlock[] = [];
+  for (const h of merged) {
+    // Grow context until the SEARCH text is unique in the original (and never empty).
+    for (let ctx = 1; ctx <= 6; ctx++) {
+      const before = a.slice(Math.max(0, h.start - ctx), h.start);
+      const after = a.slice(h.end, Math.min(n, h.end + ctx));
+      const search = [...before, ...a.slice(h.start, h.end), ...after];
+      if (search.join('').trim() === '') continue;
+      if (occurrences(search) === 1 || ctx === 6) {
+        blocks.push({ search: search.join('\n'), replace: [...before, ...h.ins, ...after].join('\n') });
+        break;
+      }
+    }
+  }
+  return { blocks };
+}
+
 /**
  * Applies blocks via exact substring match — each SEARCH text must occur
  * exactly once in the current content (0 matches = anchor drifted/model

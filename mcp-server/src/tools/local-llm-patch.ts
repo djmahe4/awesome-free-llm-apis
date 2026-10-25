@@ -1,5 +1,5 @@
-import { parseSearchReplaceBlocksDetailed } from './coding-agents/patch-gen.js';
-import { caTrace } from './coding-agents/trace.js';
+import { parseSearchReplaceBlocksDetailed, editsFromRewrittenExcerpt } from './coding-agents/patch-gen.js';
+import { caTrace, caTraceDump } from './coding-agents/trace.js';
 import { isInsideRoot, real } from '../utils/workspace-roots.js';
 import fs from 'fs-extra';
 import path from 'node:path';
@@ -47,6 +47,17 @@ export function rejectReply(r: OllamaLocalChatResult, isSearchReplace: boolean):
       : 'reply contained no SEARCH/REPLACE block';
   }
   return null;
+}
+
+const VISION_MODEL_NAME = [/vision/i, /llava/i, /vl[:\-]/i, /\bvl\b/i];
+
+/**
+ * Local models to try for a code edit, best first. Vision-language models are left out entirely: this
+ * tool never sends images, and a VL model never produced a usable edit in traced runs (it only added a
+ * model swap and ~7 s per call). Embedding-only models fail the chat call and are skipped by it.
+ */
+export function codeEditCandidates(availableModels: string[]): string[] {
+  return rankNamesForNeed(availableModels, 'code').filter(m => !VISION_MODEL_NAME.some(p => p.test(m)));
 }
 
 export interface LocalLlmPatchInput {
@@ -162,7 +173,10 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
 
     // Capability-aware order (real /api/show capabilities when the router has seen the models,
     // else name heuristics): code-specialised first, vision/embedding models last, over-budget last.
-    const candidateModels = rankNamesForNeed(availableModels, 'code');
+    const candidateModels = codeEditCandidates(availableModels);
+    if (candidateModels.length === 0) {
+      throw new Error(`No local text model can edit code (found only: ${availableModels.join(', ')}). Pull one, e.g. \`ollama pull qwen2.5-coder\`.`);
+    }
 
     // A windowed excerpt (see excerptRange) stands in for reading the real
     // file — the caller has already located the relevant region and is
@@ -282,9 +296,20 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
           temperature: input.temperature ?? 0,
           maxTokens: isSearchReplace ? 2048 : 8192,
         });
+        // A small model often answers a SEARCH/REPLACE request with the edited excerpt instead; recover
+        // the edit from it (SEARCH text taken from the original) rather than discarding a right answer.
+        if (isSearchReplace && !chatResult.promptTruncated && !chatResult.outputTruncated
+          && parseSearchReplaceBlocksDetailed(chatResult.content).blocks.length === 0) {
+          const recovered = editsFromRewrittenExcerpt(fileContent, chatResult.content).blocks;
+          if (recovered.length > 0) {
+            caTrace('excerpt reply converted to SEARCH/REPLACE', `${candidate}: ${recovered.length} block(s)`);
+            chatResult = { ...chatResult, content: recovered.map(b => `<<<<<<< SEARCH\n${b.search}\n=======\n${b.replace}\n>>>>>>> REPLACE`).join('\n\n') };
+          }
+        }
         const rejection = rejectReply(chatResult, isSearchReplace);
         if (rejection) {
-          caTrace('reply rejected', `${candidate}: ${rejection} | reply starts: ${JSON.stringify(chatResult.content.slice(0, 300))} | ends: ${JSON.stringify(chatResult.content.slice(-200))}`);
+          caTraceDump(`rejected-${candidate}`, chatResult.content);
+          caTrace('reply rejected',`${candidate}: ${rejection} | reply starts: ${JSON.stringify(chatResult.content.slice(0, 300))} | ends: ${JSON.stringify(chatResult.content.slice(-200))}`);
           attemptErrors.push(`${candidate}: ${rejection}`);
           chatResult = null;
           continue;
