@@ -90,7 +90,9 @@ export interface LocalLlmPatchInput {
   // unchanged lines verbatim is what causes full-file truncation/hallucination
   // on large files — sending only the excerpt removes that failure mode
   // entirely, since the model never sees (and can't corrupt) the rest.
+  /** @internal coding_agents passes a located excerpt. */
   contentOverride?: string;
+  /** @internal coding_agents passes a located excerpt. */
   excerptRange?: { startLine: number; endLine: number; totalLines: number };
   // 'search-replace' asks the model for <<<<<<< SEARCH/=======/>>>>>>> REPLACE
   // blocks instead of full file/excerpt content — the caller (coding_agents)
@@ -98,6 +100,7 @@ export interface LocalLlmPatchInput {
   // 'full', the model never has to reproduce unchanged text at all, so it
   // can't collapse/duplicate/truncate it. `patch` on success is the model's
   // raw response text (the blocks), not file content.
+  /** @internal chosen by coding_agents. */
   outputFormat?: 'full' | 'search-replace';
   /** Installed Ollama model to try first (e.g. a bigger one for a hard edit); the ranked rest are fallbacks. */
   model?: string;

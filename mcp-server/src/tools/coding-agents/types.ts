@@ -102,10 +102,12 @@ export interface CodingAgentsInput {
   /** Independent candidate attempts drawn from the original file before repairing the closest one (default 3 when a verifyCommand is given; 1 disables; max 5). */
   samples?: number;
   /** Regenerate the (small) file from the requirements instead of patching it; set by the repair loop when many cases fail. */
+  /** @internal set by the repair loop. */
   rewrite?: boolean;
   /** Sampling temperature for generation (default 0). The repair loop raises it on retries so a repeat is not identical. */
   temperature?: number;
   /** Files that belong to this change but are not edited in this call; their API surface is shown as reference. Set by the repair loop when it narrows a retry. */
+  /** @internal set by the repair loop. */
   relatedFiles?: string[];
   /** Installed local model to use (e.g. a bigger one for a cross-file change). Overrides the automatic choice and the VRAM budget. */
   model?: string;

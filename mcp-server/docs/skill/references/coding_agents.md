@@ -22,8 +22,30 @@ interface CodingAgentsInput {
     action: 'apply' | 'rollback';                   // Transactional commit or rollback action
     checkpointId?: string;                          // Target checkpoint for rollback
   };
+  // ── repair loop and generation (all optional) ──
+  maxRepairAttempts?: number;                       // retries after a failed check or blocking review (default 4, max 5; AST edits never retry)
+  samples?: number;                                 // independent first-round candidates from the original file, judged by verifyCommand (default 3 with a verifyCommand, max 5, 1 disables)
+  maxDurationMs?: number;                           // wall-clock budget for the whole repair loop (default 300000 = 5 min); ends with outcome 'timed_out'
+  review?: boolean;                                 // independent review of the diff before apply (default on; never runs when a verifyCommand exists)
+  temperature?: number;                             // sampling temperature (default 0); the repair loop raises it on retries
+  rewrite?: boolean;                                // regenerate a small file instead of patching it (set by the repair loop when many cases fail)
+  model?: string;                                   // pin an installed local model, e.g. 'hf.co/empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF:Q4_K_M'; overrides llmfit, the router and the VRAM budget
+  think?: 'off' | 'auto' | 'on';                    // reasoning for thinking models (default 'off'; 'auto' keeps it with reply-budget headroom)
+  relatedFiles?: string[];                          // part of the change but not edited in this call (shown as API surface); set by the repair loop when it narrows a retry
 }
 ```
+
+**Workspace settings — `<workspaceRoot>/.free-llm-mcp/coding-agents.json`** (optional; agent patches can never write this file):
+```jsonc
+{
+  // failing tests that do not count when judging a check: exact name, substring, or "/regex/flags".
+  // A check whose only failures are listed is green; result.verification lists what was skipped.
+  "skipFailingTests": ["flaky network call", "/^legacy snapshot \\d+$/", "test_needs_gpu"]
+}
+```
+Use it for known pre-failing, flaky or environment-dependent tests, so they don't keep every check red and send the repair loop chasing them.
+
+**Tracing (environment):** `CODING_AGENTS_TRACE=1` prints one stderr line per stage with elapsed time and Ollama's load / prompt / generation split; `CODING_AGENTS_TRACE_DIR=<dir>` also saves every rejected model reply there.
 
 **Execution model — synchronous vs. background:**
 `dryRun:true` (the default), `action:'plan'`/`pauseOnTaskPlan:true`, and `resolve.action:'rollback'` are all **synchronous** — you get a full result on that call.
@@ -64,8 +86,34 @@ interface CodingAgentsResult {
   modelUsed?: string;
   usedFallbackModel?: boolean;
   error?: string;
+  verification?: {               // present when a verifyCommand or verifyReport took part
+    command: string;
+    status: 'passed' | 'regressed' | 'not_green' | 'needs_user' | 'user_passed' | 'user_failed';
+    ok: boolean; baselineOk: boolean; exitCode: number | null; timedOut: boolean;
+    outputTail: string;
+    failedCases?: string[];      // failing test names (node:test, vitest/jest, pytest, TAP)
+    repairBrief?: string;        // debugger brief for the next attempt
+    skippedFailures?: string[];  // failures ignored via skipFailingTests
+  };
+  repair?: {                     // how the automatic repair loop ended
+    outcome: 'converged' | 'not_converged' | 'stuck' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
+    attemptCount: number;
+    attempts: Array<{ attempt: number; outcome: string; failing?: number; rewrite?: boolean; brief?: string }>;
+  };
+  review?: { verdict: 'ok' | 'concerns' | 'blocked' | 'skipped'; findings: Array<{ blocking: boolean; text: string }> };
+  rollbackBrief?: string;        // compiler messages of an edit that was rolled back for a syntax error
 }
 ```
+
+**Repair loop** (`src/tools/coding-agents/repair-loop.ts`, needs a `verifyCommand`):
+- The tests named in `verifyCommand` are shown to the model read-only as the specification; the agent never edits or runs a test it wrote (such edits are withheld and you run them, reporting back with `verifyReport`).
+- First round: `samples` independent candidates from the original file; the closest one (fewest failing cases) is repaired next. The original tree counts as a candidate too.
+- Each retry gets a debugger brief: failing case names, assertion lines, stack frames in the edited files, plus targeted hints (a hard-coded test input, a numeric mismatch that suggests checking what a call returns, or a member read but never assigned such as `this.currency` / `self.currency`).
+- **Localized retries:** a patch-in-place retry edits only the files the failure points at (a failing test named after the file, or a stack frame inside it); the other files stay as reference. A rewrite (many failing cases) starts again from the original and covers every file.
+- Ends with `converged`, `not_converged` (budget spent), `stuck` (same failure even at the hottest temperature), `needs_user`, `error`, `aborted` or `timed_out`. If it never went green, the original files are restored.
+- `abort` stops the loop after the attempt in flight and restores the original tree.
+
+**Multi-file changes:** each file is edited in its own call; every prompt names the one file to edit and shows the other files' API surface (declaration/export lines), edited ones in their new form. Surfaces are language-aware: JS/TS, Python (`def`/`class`), Go (`func`/`type`), Rust (`fn`/`struct`/`impl`).
 
 **Blackboard task shape (`tasks.md`):**
 ```typescript
@@ -109,13 +157,14 @@ interface TaskItem {
    Every strategy below can independently fail and falls through to the next; the first that produces a guard-passing result wins. Injects active task, its planner `context` (if resumed from a DAG task), and the DAG checklist into prompt context throughout. Strictly intercepts canned refusals (e.g. `I'm sorry, but I can't assist with that request.`) at every stage, preserves the full failure message without slicing, logs an error diagnostic, and guides the user to resume with `action: "resume"` or `astEditOps`.
 
    1. **SEARCH/REPLACE (local model)** — tried first. The model is shown the file (or a ~120-line window for large non-module files, via `extractWindowForInstruction`) as read-only context and asked to emit only `<<<<<<< SEARCH` / `=======` / `>>>>>>> REPLACE` blocks — never full content. Unchanged text never passes through the model, so it structurally can't be collapsed, duplicated, or hallucinated the way full-content strategies can. Blocks are matched against the **full current file** by content (not the shown window) via `applySearchReplaceBlocks`, with three tiers of matching leniency (exact line match, then whitespace-trimmed line match) before a block is rejected as ambiguous or not-found. A block whose own SEARCH/REPLACE text contains a stray `<<<<<<<`/`=======`/`>>>>>>>` marker line (a tangled/malformed model response) is rejected outright rather than spliced into the file. For TS/JS files, an **error-delta gate** (`searchReplaceRegressesTsErrors`) runs the in-memory `ts-morph` checker before and after the whole batch and rejects it atomically if applying it would *increase* the real compiler error count — a batch of individually-plausible blocks can still combine into a worse-than-before file (observed live: fixing one method's signature without simultaneously updating its call sites turned 8 errors into 18), so acceptance is all-or-nothing per batch, not per block.
+      The parser accepts what small models actually write: a block closed by a second `=======` or a bare `>>>>>>>`. If the model returns the whole edited excerpt instead of blocks (common for qwen2.5-coder:7b), the edit is recovered by diffing the excerpt against the original; SEARCH text always comes from the original, and lines dropped at the excerpt's edges are ignored. A REPLACE copied with the wrong indentation is shifted to the matched block's indentation. For an additive goal, a line that comes back changed (a new parameter) counts as modified, not dropped. The TS error-delta gate ignores errors caused only by the in-memory checker's missing environment (unresolved modules, node globals); instead, every import the edit **adds** is resolved against the real workspace (relative JS/TS files, installed packages, local Python modules), and a wrong one becomes the retry reason with the closest real file. If a reply cannot be used, SEARCH/REPLACE is retried once with the reason, before any slower strategy.
    2. **SEARCH/REPLACE (cloud fallback)** — same mechanism as above via `useFreeLLM`, tried if the local attempt produces no usable blocks.
-   3. **Full-content / windowed-splice (local model)** — the older strategy, kept as a second attempt for models that won't follow the SEARCH/REPLACE format. Full file for small files; a ~120-line window (same `extractWindowForInstruction`) spliced back for large non-module files. Two extra guards here that SEARCH/REPLACE doesn't need: **window content-fidelity** (`windowReplyIsSuspicious`, multiset line-overlap comparison — catches a reply that collapses or duplicates the excerpt while keeping a plausible-looking total line count, which a naive line-count check misses) and the **hallucination guard** below.
+   3. **Full-content / windowed-splice (local model)** — the older strategy, kept as a second attempt for models that won't follow the SEARCH/REPLACE format. Full file for small files; a ~120-line window (same `extractWindowForInstruction`) spliced back for large non-module files. **Skipped for modules over 300 lines**: regenerating them is the slowest path (minutes on a 7B) and the one that drops or renames code; the repair loop retries instead. The reply budget is sized from the excerpt (1024–8192 tokens), not a fixed cap. Two extra guards here that SEARCH/REPLACE doesn't need: **window content-fidelity** (`windowReplyIsSuspicious`, multiset line-overlap comparison — catches a reply that collapses or duplicates the excerpt while keeping a plausible-looking total line count, which a naive line-count check misses) and the **hallucination guard** below.
    4. **Full-content / windowed-splice (cloud fallback)** — same as (3) via `useFreeLLM`, tried last.
 
    **Hallucination guard** (strategies 3–4, existing files only): if the LLM's "successful" output shares none of the original file's declared top-level symbols (or, for symbol-free files like CSS/HTML/classic scripts, less than half its original lines), the result is treated as an unrelated replacement — reverted to the original content, not applied, and logged the same way as a generation failure. Also rejects a stray leading `` ``` `` fence marker, and any *increase* in literal ASCII `...` occurrences vs. the original (real source in this repo only ever uses the single Unicode `…` character for genuine ellipsis text — a model eliding unchanged content with a literal three-dot placeholder is a reliable truncation signal independent of overall line-overlap).
 
-   **Model candidate ranking** (`rankCandidateModels`, `src/providers/ollama-local.ts`): coding-pattern models (`qwen*-coder`, `deepseek-coder`, `codellama`, `devstral`) are ranked first; vision-language models (`vision`, `llava`, `*vl:*` naming) are excluded from the candidate pool entirely, not just deprioritized — this pipeline never sends image content, and a vision model entering the fallback pool for a strict text-format request has been observed to degenerate into a repetition loop instead of producing usable output.
+   **Model candidate ranking** (`codeEditCandidates`, `src/tools/local-llm-patch.ts`): capability-aware order from the model router (code-specialised first); a pinned `model` goes first. Vision-language models (`vision`, `llava`, `*vl:*` naming) are excluded from the candidate pool entirely, not just deprioritized — this pipeline never sends image content, and in traced runs a VL fallback never produced a usable edit, only an extra model swap. Thinking models get `think:false` by default (in a 3-run cross-file comparison thinking had the same pass rate and was 4–7× slower); with `think:'auto'` they keep reasoning, get +3072 reply tokens of headroom, and a reply whose reasoning used the whole budget is retried once without thinking.
 
    When a SEARCH/REPLACE or full-content result is falling back to the next strategy, the reason is folded into the eventual diagnostic message (chained, not a separate diagnostic entry) so the escalation path is visible without needing to inspect logs.
 7. **Polyglot Compiler Diagnostics & Verification**:
