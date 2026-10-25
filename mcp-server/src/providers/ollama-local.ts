@@ -166,11 +166,16 @@ export async function modelSupportsThinking(model: string): Promise<boolean> {
   return yes;
 }
 
-export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number; numCtx?: number; keepAlive?: string | number; think?: boolean }): Promise<OllamaLocalChatResult> {
+export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number; numCtx?: number; keepAlive?: string | number; think?: boolean; signal?: AbortSignal }): Promise<OllamaLocalChatResult> {
   const url = `${getBaseUrl()}/api/chat`;
   const timeoutMs = computeChatTimeoutMs(messages);
+  // The caller's signal (e.g. a coding_agents abort) cancels the request in flight; before this an abort
+  // waited for the whole generation (up to minutes on a 7B).
+  if (options?.signal?.aborted) throw new Error(`Ollama local request for '${model}' was aborted by the caller.`);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onCallerAbort = () => controller.abort();
+  options?.signal?.addEventListener('abort', onCallerAbort, { once: true });
 
   const numCtx = options?.numCtx || await resolveNumCtx(model, messages, options?.maxTokens);
 
@@ -198,11 +203,13 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
     });
   } catch (err: any) {
     if (err.name === 'AbortError') {
+      if (options?.signal?.aborted) throw new Error(`Ollama local request for '${model}' was aborted by the caller.`);
       throw new Error(`Ollama local model '${model}' did not respond within ${timeoutMs}ms (scaled to prompt size).`);
     }
     throw err;
   } finally {
     clearTimeout(timer);
+    options?.signal?.removeEventListener('abort', onCallerAbort);
   }
   if (!response.ok) {
     const text = await response.text().catch(() => '');

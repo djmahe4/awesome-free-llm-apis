@@ -1,3 +1,4 @@
+import { loadCodingAgentsSettings, SETTINGS_FILE } from './settings.js';
 import { newImportProblems } from './import-check.js';
 import { crossFileContext } from './cross-file.js';
 import { caTrace } from './trace.js';
@@ -135,7 +136,12 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       // With a check, draw 3 independent candidates first (the tests pick among them) unless told otherwise.
       const result = await runWithRepairLoop({ ...input, samples: input.samples ?? 3 }, sessionId, run, runCodingAgentsPipeline, async (checkpointId, newFiles) => {
         const { files } = await globalCasStore.restoreCheckpointToDisk(checkpointId, path.resolve(input.workspaceRoot || process.cwd()));
-        for (const f of newFiles) await fs.remove(path.resolve(input.workspaceRoot || process.cwd(), f)).catch(() => {});
+        const root = path.resolve(input.workspaceRoot || process.cwd());
+        for (const f of newFiles) {
+          const abs = path.resolve(root, f);
+          assertSafe(abs, root); // never delete outside the workspace, whatever ended up in the list
+          await fs.remove(abs).catch(() => {});
+        }
         return [...files, ...newFiles];
       }, async (files) => {
         const root = path.resolve(input.workspaceRoot || process.cwd());
@@ -429,7 +435,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           resolvedModel = ranked[0] ?? null;
         }
       } catch {
-        console.warn('[coding-agents] Ollama unreachable — will route to cloud model fallback');
+        console.warn('[coding-agents] Ollama unreachable — only a cloud fallback (allowCloudFallback) can edit now');
       }
     }
 
@@ -528,6 +534,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
               temperature: input.temperature,
               ...(input.model && resolvedModel ? { model: resolvedModel } : {}),
               ...(input.think ? { think: input.think } : {}),
+              ...(run ? { signal: run.controller.signal } : {}),
               outputFormat: 'search-replace',
               contentOverride: windowInfo ? windowInfo.window : patchedContent,
               excerptRange: windowInfo
@@ -630,6 +637,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
               temperature: input.temperature,
               ...(input.model && resolvedModel ? { model: resolvedModel } : {}),
               ...(input.think ? { think: input.think } : {}),
+              ...(run ? { signal: run.controller.signal } : {}),
               contentOverride: windowInfo ? windowInfo.window : undefined,
               excerptRange: windowInfo
                 ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }
@@ -669,9 +677,16 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           }
         }
 
+        // Cloud fallback sends this file and the goal to a third-party provider, so it is opt-in
+        // (allowCloudFallback on the call, or in .free-llm-mcp/coding-agents.json). Off: say so and stop.
+        const cloudAllowed = input.allowCloudFallback ?? loadCodingAgentsSettings(workspaceRoot).allowCloudFallback;
+        if (!appliedPatch && !cloudAllowed) {
+          lastFailureReason = `${lastFailureReason ?? 'The local model produced no usable edit'} (cloud fallback is off, so nothing was sent to a cloud model; set allowCloudFallback: true on the call or in ${SETTINGS_FILE} to allow it)`;
+        }
+
         // If local model was unavailable, errored, or produced a hallucinated
         // result, fall back to cloud model — same guard applied to its output.
-        if (!appliedPatch) {
+        if (!appliedPatch && cloudAllowed) {
           const localReason = lastFailureReason;
 
           // Same SEARCH/REPLACE attempt as the local model above, tried
@@ -726,7 +741,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           }
         }
 
-        if (!appliedPatch) {
+        if (!appliedPatch && cloudAllowed) {
           const localReason = lastFailureReason;
           caTrace('cloud full-file fallback', relPath);
           const { patch: cloudPatch, failureReason } = await generateCodePatchWithCloudLLM(

@@ -109,6 +109,8 @@ export interface CodingAgentsInput {
   /** Files that belong to this change but are not edited in this call; their API surface is shown as reference. Set by the repair loop when it narrows a retry. */
   /** @internal set by the repair loop. */
   relatedFiles?: string[];
+  /** Let a failed local edit fall back to free cloud models, which sends the file and goal to a third-party provider (default false; also settable in .free-llm-mcp/coding-agents.json). */
+  allowCloudFallback?: boolean;
   /** Installed local model to use (e.g. a bigger one for a cross-file change). Overrides the automatic choice and the VRAM budget. */
   model?: string;
   /** Reasoning for thinking models: off (default), auto, on. See local_llm_patch. */

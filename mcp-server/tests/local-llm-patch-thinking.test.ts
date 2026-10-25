@@ -75,3 +75,19 @@ describe('local_llm_patch with a model that cannot think', () => {
     expect(opts(0).maxTokens).toBe(replyBudget(true, 'export const a = 1;\n'));
   });
 });
+
+describe('local_llm_patch abort', () => {
+  it('passes the signal to the model call and does not try another model once aborted', async () => {
+    (listLocalModels as any).mockResolvedValue(['thinker:9b', 'qwen2.5-coder:7b']);
+    (modelSupportsThinking as any).mockResolvedValue(false);
+    const ctrl = new AbortController();
+    (chatLocal as any).mockImplementation(async (_m: string, _msgs: any, o: any) => {
+      expect(o.signal).toBe(ctrl.signal);
+      ctrl.abort();
+      throw new Error("Ollama local request for 'thinker:9b' was aborted by the caller.");
+    });
+    const r: any = await localLlmPatch({ filePath: file, instruction: 'set a to 2', workspace_root: root, outputFormat: 'search-replace', signal: ctrl.signal } as any);
+    expect(r.success).toBe(false);
+    expect((chatLocal as any).mock.calls.length).toBe(1);
+  });
+});

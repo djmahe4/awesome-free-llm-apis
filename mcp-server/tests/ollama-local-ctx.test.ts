@@ -71,3 +71,24 @@ describe('chatLocal think option', () => {
     expect('think' in JSON.parse(fetchMock.mock.calls[1][1].body)).toBe(false);
   });
 });
+
+describe('chatLocal abort signal', () => {
+  it('an abort cancels the request in flight instead of waiting for the model', async () => {
+    fetchMock.mockImplementation((_url: string, init: any) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+    }));
+    const ctrl = new AbortController();
+    const started = Date.now();
+    const p = chatLocal('m', [{ role: 'user', content: 'x' }], { numCtx: 2048, signal: ctrl.signal });
+    setTimeout(() => ctrl.abort(), 20);
+    await expect(p).rejects.toThrow(/aborted by the caller/i);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('an already-aborted signal never sends the request', async () => {
+    const ctrl = new AbortController();
+    ctrl.abort();
+    await expect(chatLocal('m', [{ role: 'user', content: 'x' }], { numCtx: 2048, signal: ctrl.signal })).rejects.toThrow(/aborted by the caller/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

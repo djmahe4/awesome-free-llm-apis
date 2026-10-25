@@ -764,6 +764,7 @@ export async function createMCPServer(): Promise<Server> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            allowCloudFallback: { type: 'boolean', description: 'Let a failed local edit fall back to free cloud models. This sends the file and goal to a third-party provider, so it is off by default (also settable in <workspace>/.free-llm-mcp/coding-agents.json).' },
             samples: { type: 'number', description: 'Independent first-round candidates from the original file, judged by verifyCommand (default 3 with a verifyCommand, max 5, 1 disables).' },
             maxRepairAttempts: { type: 'number', description: 'Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry).' },
             maxDurationMs: { type: 'number', description: 'Wall-clock budget for the whole repair loop in ms (default 300000). Ends with repair.outcome timed_out and restores the original files if the check is still red.' },

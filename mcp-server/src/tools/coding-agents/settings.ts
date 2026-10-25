@@ -15,15 +15,20 @@ export const SETTINGS_FILE = '.free-llm-mcp/coding-agents.json';
 
 export interface CodingAgentsSettings {
   skipFailingTests: string[];
+  /** Let a failed local edit fall back to free cloud models (sends the file and goal off this machine). Default false. */
+  allowCloudFallback: boolean;
 }
 
 export function loadCodingAgentsSettings(workspaceRoot: string): CodingAgentsSettings {
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(workspaceRoot, SETTINGS_FILE), 'utf8'));
     const list = Array.isArray(raw?.skipFailingTests) ? raw.skipFailingTests : [];
-    return { skipFailingTests: list.filter((p: unknown): p is string => typeof p === 'string' && p.trim() !== '') };
+    return {
+      skipFailingTests: list.filter((p: unknown): p is string => typeof p === 'string' && p.trim() !== ''),
+      allowCloudFallback: raw?.allowCloudFallback === true,
+    };
   } catch {
-    return { skipFailingTests: [] };
+    return { skipFailingTests: [], allowCloudFallback: false };
   }
 }
 

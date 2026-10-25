@@ -106,6 +106,8 @@ export interface LocalLlmPatchInput {
   model?: string;
   /** Reasoning for thinking models: off (default; fastest at the same pass rate when measured), auto (on with budget headroom, retried without if it eats the budget), on. */
   think?: 'auto' | 'on' | 'off';
+  /** @internal cancels the model call in flight (coding_agents passes its run's abort signal). */
+  signal?: AbortSignal;
 }
 
 /** Extra reply tokens for a thinking model's reasoning on top of the edit's own budget. */
@@ -330,12 +332,13 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
           // Deterministic edits; explicit reply budget so num_ctx is sized for it.
           temperature: input.temperature ?? 0,
           maxTokens: canThink ? base + THINKING_HEADROOM : base,
+          signal: input.signal,
           ...(thinkFlag !== undefined ? { think: thinkFlag } : {}),
         });
         // Reasoning still used the whole budget and nothing was answered: one retry with thinking off.
         if (canThink && thinkMode === 'auto' && !chatResult.content.trim() && chatResult.outputTruncated) {
           caTrace('thinking used the whole reply budget; retrying without thinking', candidate);
-          chatResult = await chatLocal(candidate, messages, { temperature: input.temperature ?? 0, maxTokens: base, think: false });
+          chatResult = await chatLocal(candidate, messages, { temperature: input.temperature ?? 0, maxTokens: base, think: false, signal: input.signal });
         }
         // A small model often answers a SEARCH/REPLACE request with the edited excerpt instead; recover
         // the edit from it (SEARCH text taken from the original) rather than discarding a right answer.
@@ -360,6 +363,8 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
         break;
       } catch (err: any) {
         attemptErrors.push(`${candidate}: ${err.message}`);
+        // aborted by the caller: do not move on to the next candidate model
+        if (input.signal?.aborted) break;
       }
     }
 
