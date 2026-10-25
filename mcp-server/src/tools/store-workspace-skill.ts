@@ -80,8 +80,22 @@ export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput): Prom
         workspace_root
     } = input;
 
-    // Sanitize name for filesystem
-    const skillSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50);
+    // Validate before anything is derived from the input: a missing name used to throw a TypeError, and a
+    // name like "!!!" or "" produced the slug "-" or "", i.e. the skills ROOT folder.
+    if (typeof name !== 'string' || name.trim() === '') {
+        return { success: false, error: 'name is required (a non-empty string).' };
+    }
+    const skillSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50).replace(/-+$/g, '');
+    if (!skillSlug) {
+        return { success: false, error: `name ${JSON.stringify(name.slice(0, 40))} has no letters or digits to build a folder name from.` };
+    }
+    if (description !== undefined && description !== null && typeof description !== 'string') {
+        return { success: false, error: 'description must be a string.' };
+    }
+    // Callers have always been able to omit it; fall back to the first summary item, then the name.
+    const effectiveDescription = (typeof description === 'string' && description.trim())
+        || (Array.isArray(what) ? what.find((w): w is string => typeof w === 'string' && w.trim() !== '') : undefined)
+        || name;
     const runKey = `store_workspace_skill:${input.sessionId || skillSlug}`;
     const pollAction = input.pollAction || 'run';
 
@@ -122,7 +136,7 @@ export async function storeWorkspaceSkill(input: StoreWorkspaceSkillInput): Prom
 
     // No scripts to generate — cheap, synchronous path unchanged (SKILL.md only, no LLM calls).
     if (!script_instructions || Object.keys(script_instructions).length === 0) {
-        return await writeSkillMdAndFinish(skillDir, skillSlug, name, description, why, files, example, what, {});
+        return await writeSkillMdAndFinish(skillDir, skillSlug, name, effectiveDescription, why, files, example, what, {});
     }
 
     // Scripts requested — this can chain several sequential useFreeLLM calls, so it
@@ -221,7 +235,7 @@ No explanation.`;
                 RunRegistry.progress(runKey, filename, completed, run.totalCount);
             }
 
-            const final = await writeSkillMdAndFinish(skillDir, skillSlug, name, description, why, files, example, what, generatedScripts);
+            const final = await writeSkillMdAndFinish(skillDir, skillSlug, name, effectiveDescription, why, files, example, what, generatedScripts);
             skillGenResultsCache.set(runKey, final);
             RunRegistry.finish(runKey);
         } catch (err: any) {
@@ -257,7 +271,9 @@ async function writeSkillMdAndFinish(
         const skillMd = [
             `---`,
             `name: ${skillSlug}`,
-            `description: ${description}`,
+            // JSON string = valid YAML double-quoted scalar on ONE line: a newline or "---" in the text cannot
+            // add keys or end the front matter.
+            `description: ${JSON.stringify(description.replace(/\s+/g, ' ').trim())}`,
             `risk: local`,
             `source: agent-led-harvesting`,
             `---`,
@@ -265,7 +281,7 @@ async function writeSkillMdAndFinish(
             `# ${name}`,
             ``,
             `## Summary`,
-            what.map(item => `- ${item}`).join('\n'),
+            (Array.isArray(what) ? what : []).filter((item): item is string => typeof item === 'string' && item.trim() !== '').map(item => `- ${item}`).join('\n'),
             ``,
             why ? `## Rationale\n${why}\n` : '',
             files && files.length > 0 ? `## Files Involved\n${files.map(f => `- \`${f}\``).join('\n')}\n` : '',

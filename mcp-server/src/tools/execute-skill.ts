@@ -1,3 +1,4 @@
+import { getMcpDir } from '../utils/mcp-home.js';
 import fs from 'fs-extra';
 import path from 'node:path';
 import os from 'node:os';
@@ -11,7 +12,7 @@ import { toMarkdownResponse } from '../utils/markdown.js';
 import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
 import { TaskType } from '../pipeline/middleware.js';
 import { logToolCall } from '../utils/ChatLogger.js';
-import { isInsideRoot, real } from '../utils/workspace-roots.js';
+import { isInsideRoot, real, resolveWithin } from '../utils/workspace-roots.js';
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
 
@@ -52,7 +53,7 @@ export interface ExecuteSkillResult {
  * Extracts relative file paths mentioned in SKILL.md content.
  * Matches `path/to/file` or [text](path/to/file)
  */
-function extractReferencedFiles(content: string): string[] {
+export function extractReferencedFiles(content: string): string[] {
   const matches = new Set<string>();
   const regex = /`([^`\s]+)`|\[[^\]]+\]\(([^)]+)\)/g;
   let match;
@@ -73,22 +74,41 @@ function extractReferencedFiles(content: string): string[] {
 /**
  * Resolves referenced files, handling wildcards like references/examples/*.md
  */
-async function resolveReferences(
+/** Reads a skill reference file only if it really lives inside the skill folder (symlinks included). */
+export async function readReferenceFile(skillDir: string, ref: string): Promise<string | null> {
+  const full = resolveWithin(skillDir, ref);
+  if (!full) return null;
+  try {
+    return await fs.readFile(full, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Refs come from SKILL.md text, which may be from a downloaded (untrusted) skill, and what they point at is
+ * read and injected into an LLM prompt. Anything that resolves outside the skill folder (`..`, absolute paths,
+ * drive letters, NUL, symlinks that leave the folder) is blocked, not treated as merely missing.
+ */
+export async function resolveReferences(
   skillDir: string,
   referencedPaths: string[]
-): Promise<{ availableRefs: string[]; missingRefs: string[] }> {
+): Promise<{ availableRefs: string[]; missingRefs: string[]; blockedRefs: string[] }> {
   const availableRefs: string[] = [];
   const missingRefs: string[] = [];
+  const blockedRefs: string[] = [];
 
   for (const ref of referencedPaths) {
     if (ref.includes('*')) {
       const parts = ref.split('*');
-      const dirPart = path.join(skillDir, parts[0]);
+      const dirPart = resolveWithin(skillDir, parts[0] || '.');
+      if (!dirPart) { blockedRefs.push(ref); continue; }
       const extPart = parts[1] || '';
       try {
         if (await fs.pathExists(dirPart)) {
           const files = await fs.readdir(dirPart);
-          const matchedFiles = files.filter(f => f.endsWith(extPart));
+          // each match is re-checked: a symlink in the folder may point elsewhere
+          const matchedFiles = files.filter(f => f.endsWith(extPart) && resolveWithin(skillDir, path.join(parts[0], f)) !== null);
           if (matchedFiles.length > 0) {
             matchedFiles.forEach(f => {
               availableRefs.push(path.join(parts[0], f).replace(/\\/g, '/'));
@@ -103,7 +123,8 @@ async function resolveReferences(
         missingRefs.push(ref);
       }
     } else {
-      const fullPath = path.join(skillDir, ref);
+      const fullPath = resolveWithin(skillDir, ref);
+      if (!fullPath) { blockedRefs.push(ref); continue; }
       try {
         if (await fs.pathExists(fullPath) && (await fs.stat(fullPath)).isFile()) {
           availableRefs.push(ref);
@@ -116,7 +137,7 @@ async function resolveReferences(
     }
   }
 
-  return { availableRefs, missingRefs };
+  return { availableRefs, missingRefs, blockedRefs };
 }
 
 /**
@@ -223,7 +244,7 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
 
   try {
     // 2. Resolve skill directory using resolveConfigDir
-    const configDir = workspace_root ? resolveConfigDir(workspace_root) : path.join(os.homedir(), '.free-llm-mcp');
+    const configDir = workspace_root ? resolveConfigDir(workspace_root) : getMcpDir();
     let skillDir = path.join(configDir, 'skills', skill);
 
     let skillMdPath = path.join(skillDir, 'SKILL.md');
@@ -258,7 +279,10 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
 
     // 5. Extract and resolve referenced files
     const referencedPaths = extractReferencedFiles(skillContent);
-    const { availableRefs, missingRefs } = await resolveReferences(skillDir, referencedPaths);
+    const { availableRefs, missingRefs: unresolved, blockedRefs } = await resolveReferences(skillDir, referencedPaths);
+    // Blocked refs are reported to the model as unavailable too (it must not try to use them), but never read.
+    const missingRefs = [...unresolved, ...blockedRefs];
+    if (blockedRefs.length > 0) console.error(`[execute-skill] Blocked skill references outside "${skill}": ${blockedRefs.join(', ')}`);
 
     // 6. Build the structured system prompt context
     let systemMessage = '';
@@ -286,13 +310,12 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
 
     // Load available reference files into context
     for (const ref of availableRefs) {
-      const refPath = path.join(skillDir, ref);
-      try {
-        const refContent = await fs.readFile(refPath, 'utf-8');
-        systemMessage += `## Skill Reference File: ${ref}\n${refContent}\n\n`;
-      } catch (err: any) {
-        console.error(`[execute-skill] Failed to read reference file "${ref}":`, err.message);
+      const refContent = await readReferenceFile(skillDir, ref);
+      if (refContent === null) {
+        console.error(`[execute-skill] Failed to read reference file "${ref}"`);
+        continue;
       }
+      systemMessage += `## Skill Reference File: ${ref}\n${refContent}\n\n`;
     }
 
     // 7. Invoke useFreeLLM with stateless custom messages

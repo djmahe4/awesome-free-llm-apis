@@ -386,9 +386,9 @@ describe('T8 harness gating — declaration cyberTools list', () => {
     expect(evaluate(decl, 'analyst', 'cyber_tool', 'run_action', { bridge: 'katana' }).kind).toBe('allow');
   });
 
-  it('auto-resolves the single listed bridge when none is named', () => {
+  it('requires the bridge to be named even when exactly one is listed', () => {
     const decl = baseDecl({ cyberTools: ['katana'] });
-    expect(evaluate(decl, 'analyst', 'cyber_tool', 'run_action', {}).kind).toBe('allow');
+    expect(evaluate(decl, 'analyst', 'cyber_tool', 'run_action', {}).kind).toBe('needs_approval');
   });
 
   it('needs approval for a bridge outside the cyberTools list', () => {
