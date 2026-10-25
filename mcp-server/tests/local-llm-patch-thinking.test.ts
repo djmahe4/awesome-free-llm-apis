@@ -30,10 +30,18 @@ beforeEach(async () => {
 });
 
 describe('local_llm_patch with a thinking model', () => {
-  it('keeps thinking on and adds reasoning headroom to the reply budget', async () => {
+  it('defaults to thinking off for code edits (same pass rate, 4-7x faster in the cross-file matrix)', async () => {
     (modelSupportsThinking as any).mockResolvedValue(true);
     (chatLocal as any).mockResolvedValue(reply(SR));
-    const r: any = await localLlmPatch({ filePath: file, instruction: 'set a to 2', workspace_root: root, outputFormat: 'search-replace' } as any);
+    await localLlmPatch({ filePath: file, instruction: 'set a to 2', workspace_root: root, outputFormat: 'search-replace' } as any);
+    expect(opts(0).think).toBe(false);
+    expect(opts(0).maxTokens).toBe(replyBudget(true, 'export const a = 1;\n'));
+  });
+
+  it("think: 'auto' keeps thinking on and adds reasoning headroom to the reply budget", async () => {
+    (modelSupportsThinking as any).mockResolvedValue(true);
+    (chatLocal as any).mockResolvedValue(reply(SR));
+    const r: any = await localLlmPatch({ filePath: file, instruction: 'set a to 2', workspace_root: root, outputFormat: 'search-replace', think: 'auto' } as any);
     expect(r.success).toBe(true);
     expect('think' in opts(0)).toBe(false);
     expect(opts(0).maxTokens).toBe(replyBudget(true, 'export const a = 1;\n') + THINKING_HEADROOM);
@@ -42,7 +50,7 @@ describe('local_llm_patch with a thinking model', () => {
   it('retries once with thinking off when the reasoning still used the whole budget', async () => {
     (modelSupportsThinking as any).mockResolvedValue(true);
     (chatLocal as any).mockResolvedValueOnce(reply('', { outputTruncated: true })).mockResolvedValueOnce(reply(SR));
-    const r: any = await localLlmPatch({ filePath: file, instruction: 'set a to 2', workspace_root: root, outputFormat: 'search-replace' } as any);
+    const r: any = await localLlmPatch({ filePath: file, instruction: 'set a to 2', workspace_root: root, outputFormat: 'search-replace', think: 'auto' } as any);
     expect(r.success).toBe(true);
     expect((chatLocal as any).mock.calls.length).toBe(2);
     expect(opts(1).think).toBe(false);

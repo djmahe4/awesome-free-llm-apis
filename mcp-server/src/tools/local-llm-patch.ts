@@ -101,7 +101,7 @@ export interface LocalLlmPatchInput {
   outputFormat?: 'full' | 'search-replace';
   /** Installed Ollama model to try first (e.g. a bigger one for a hard edit); the ranked rest are fallbacks. */
   model?: string;
-  /** Reasoning for thinking models: auto (default: on, with budget headroom, retried without if it eats the budget), on, off. */
+  /** Reasoning for thinking models: off (default; fastest at the same pass rate when measured), auto (on with budget headroom, retried without if it eats the budget), on. */
   think?: 'auto' | 'on' | 'off';
 }
 
@@ -314,16 +314,20 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
           },
           { role: 'user' as const, content: prompt },
         ];
-        // Thinking stays on for models that support it (it can help a hard edit), with room for the reasoning
-        // in the reply budget: traced, Qwythos spent a bare 2048-token budget reasoning and returned nothing.
-        const thinkMode = input.think ?? 'auto';
-        const canThink = thinkMode !== 'off' && await modelSupportsThinking(candidate);
+        // Thinking models: off by default (in the cross-file matrix thinking had the same pass rate and was
+        // 4-7x slower). 'auto'/'on' keep it, with room for the reasoning in the reply budget: traced, Qwythos
+        // spent a bare 2048-token budget reasoning and returned nothing.
+        const thinkMode = input.think ?? 'off';
+        const supportsThinking = await modelSupportsThinking(candidate);
+        const canThink = thinkMode !== 'off' && supportsThinking;
         const base = replyBudget(isSearchReplace, fileContent);
+        // Only a model that can think gets the flag: off -> false, on -> true, auto -> the model's own default.
+        const thinkFlag = !supportsThinking ? undefined : !canThink ? false : thinkMode === 'on' ? true : undefined;
         chatResult = await chatLocal(candidate, messages, {
           // Deterministic edits; explicit reply budget so num_ctx is sized for it.
           temperature: input.temperature ?? 0,
           maxTokens: canThink ? base + THINKING_HEADROOM : base,
-          ...(thinkMode === 'off' ? { think: false } : thinkMode === 'on' && canThink ? { think: true } : {}),
+          ...(thinkFlag !== undefined ? { think: thinkFlag } : {}),
         });
         // Reasoning still used the whole budget and nothing was answered: one retry with thinking off.
         if (canThink && thinkMode === 'auto' && !chatResult.content.trim() && chatResult.outputTruncated) {

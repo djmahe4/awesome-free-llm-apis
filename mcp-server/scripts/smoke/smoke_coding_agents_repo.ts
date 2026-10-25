@@ -176,6 +176,8 @@ async function runTask(t: Task) {
   const attempts = (res.repair?.attempts ?? []).map((a: any) => `${a.attempt}:${a.outcome}${a.failing !== undefined ? `(${a.failing} failing${a.rewrite ? ',rewrite' : ''})` : ''}`).join(' ');
   const ok = t.expect === 'green' ? truth.green : res.verification?.status === 'needs_user' && res.applied === true;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${t.id.padEnd(8)} ${Math.round((Date.now() - started) / 1000)}s  applied=${res.applied} repair=${res.repair?.outcome ?? '-'} [${attempts}] review=${res.review?.verdict ?? '-'} verify=${res.verification?.status ?? '-'} repoGreen=${truth.green}${truth.green ? '' : '  ' + truth.tail}`);
+  const stuckOn = (res.repair?.attempts ?? []).map((a: any) => String(a.brief ?? '').match(/Failing cases \(\d+\):\r?\n([^\r\n]*)/)?.[1]).filter(Boolean);
+  if (stuckOn.length) console.log(`        failing per attempt: ${stuckOn.map((c: string) => c.replace(/\s+\d+(\.\d+)?ms$/, '')).join(' | ')}`);
   if (res.review?.findings?.length) console.log(`        review: ${res.review.findings.map((f: any) => (f.blocking ? 'BLOCK ' : 'note ') + f.text).join(' || ').slice(0, 300)}`);
   if (!ok && res.message) console.log(`        message: ${String(res.message).slice(0, 300)}`);
   if (!ok && process.argv.includes('--verbose')) {
