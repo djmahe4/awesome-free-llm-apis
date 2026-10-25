@@ -26,6 +26,7 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error(`[CRITICAL] Unhandled Rejection at: ${promise}, reason: ${reason}`);
 });
 
+import { getMcpDir } from './utils/mcp-home.js';
 import dns from 'dns';
 try {
   dns.setDefaultResultOrder('ipv4first');
@@ -906,7 +907,7 @@ export function createExpressApp(): express.Express {
             return res.json(sessionsCache.data);
           }
 
-          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectsBase = path.join(getMcpDir(), 'projects');
           try { await fsp.access(projectsBase); } catch { return res.json({ sessions: [] }); }
 
           // Denylist: strictly exclude all test/benchmark/fixture/vitest/mock directories that pollute the dashboard
@@ -1013,7 +1014,7 @@ export function createExpressApp(): express.Express {
           const suffix = Math.random().toString(36).substring(2, 7);
           const sessionId = `${baseHash}-${suffix}`;
 
-          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectsBase = path.join(getMcpDir(), 'projects');
           const projectDir = path.resolve(projectsBase, sessionId);
           await fsp.mkdir(projectDir, { recursive: true });
 
@@ -1045,7 +1046,7 @@ export function createExpressApp(): express.Express {
             return res.status(400).json({ error: 'Name is required' });
           }
 
-          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectsBase = path.join(getMcpDir(), 'projects');
           const projectDir = path.resolve(projectsBase, sessionId);
           await fsp.mkdir(projectDir, { recursive: true });
           await fsp.writeFile(path.join(projectDir, 'name.txt'), name.trim(), 'utf-8');
@@ -1067,7 +1068,7 @@ export function createExpressApp(): express.Express {
             return;
           }
           // Step 2: Resolve and verify the resulting path is a direct child of projects/
-          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectsBase = path.join(getMcpDir(), 'projects');
           const projectDir = path.resolve(projectsBase, sessionId);
           if (path.dirname(projectDir) !== projectsBase) {
             res.status(400).json({ error: 'Invalid sessionId' });
@@ -1315,7 +1316,7 @@ export function createExpressApp(): express.Express {
           if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
             return res.status(400).json({ error: 'Invalid sessionId' });
           }
-          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectsBase = path.join(getMcpDir(), 'projects');
           const dirPath = path.resolve(projectsBase, sessionId);
           // Path traversal guard: must stay within projectsBase
           if (!dirPath.startsWith(path.resolve(projectsBase) + path.sep) && dirPath !== path.resolve(projectsBase, '__no_ws__')) {
@@ -1865,7 +1866,7 @@ export function createExpressApp(): express.Express {
           if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
             return res.status(400).json({ error: 'Invalid sessionId' });
           }
-          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectsBase = path.join(getMcpDir(), 'projects');
           const dir = path.resolve(projectsBase, sessionId);
           const logPath = path.join(dir, 'chat-logs.json');
           const legacyLogPath = path.join(dir, 'chat-log.json');

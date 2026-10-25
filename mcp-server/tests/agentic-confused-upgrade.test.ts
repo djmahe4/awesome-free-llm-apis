@@ -1,5 +1,5 @@
+import { getMcpDir } from '../src/utils/mcp-home.js';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import os from 'os';
 import path from 'path';
 import fs from 'fs-extra';
 import { AgenticMiddleware } from '../src/pipeline/middlewares/AgenticMiddleware.js';
@@ -9,7 +9,7 @@ import type { PipelineContext } from '../src/pipeline/middleware.js';
 
 describe('AgenticMiddleware - CONFUSED upgraded to QUESTION when reference content already resolved', () => {
     const sessionId = `test-confused-upgrade-${Date.now()}`;
-    const projectDir = path.join(os.homedir(), '.free-llm-mcp', 'projects', sessionId);
+    const projectDir = path.join(getMcpDir(), 'projects', sessionId);
 
     afterEach(async () => {
         vi.restoreAllMocks();
@@ -147,7 +147,7 @@ UNIQUE_MARKER_FOR_CONFUSED_UPGRADE_TEST_98765
         const middleware = new AgenticMiddleware();
         const plainConfusedGoal = 'summarize this page in one sentence.';
         const confusedSessionId = `test-confused-plain-${Date.now()}`;
-        const confusedProjectDir = path.join(os.homedir(), '.free-llm-mcp', 'projects', confusedSessionId);
+        const confusedProjectDir = path.join(getMcpDir(), 'projects', confusedSessionId);
         try {
             const context: PipelineContext = {
                 sessionId: confusedSessionId,

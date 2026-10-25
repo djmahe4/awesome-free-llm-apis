@@ -52,7 +52,8 @@ describe('Search/Replace block parsing & additive edits', () => {
     const result = applySearchReplaceBlocks('const target = true;', blocks);
     expect(result.appliedCount).toBe(1);
     expect(result.content).toBe('const target = false;');
-    expect(result.failures).toContain('Empty SEARCH block (nothing to match)');
+    // the message now also tells the model how to fix it (anchor lines in SEARCH, repeated in REPLACE)
+    expect(result.failures.some(f => f.startsWith('Empty SEARCH block'))).toBe(true);
   });
 
   it('correctly executes additive insertions retaining original lines', () => {

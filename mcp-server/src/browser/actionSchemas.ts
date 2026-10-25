@@ -55,7 +55,7 @@ export const BrowserActions = {
     },
     evaluate: {
         summary: 'Run a JS function in the page; returns a structured {ok,data|error}.',
-        params: z.object({ function: z.string(), args: z.record(z.any()).optional() }),
+        params: z.object({ function: z.string(), args: z.record(z.string(), z.any()).optional() }),
     },
     network: {
         summary: 'List/get/drain/clear captured network requests, optionally with bodies.',
@@ -70,7 +70,7 @@ export const BrowserActions = {
         summary: 'Rank discovered API endpoints, mine ids, and replay them in-page.',
         params: z.object({
             endpoints: z.union([z.array(z.string()), z.literal('auto')]).optional(),
-            idOverrides: z.record(z.string()).optional(),
+            idOverrides: z.record(z.string(), z.string()).optional(),
             maxCalls: z.number().optional(),
             flatten: z.boolean().optional(),
             export: z.boolean().optional(),
@@ -137,7 +137,7 @@ const topLevelSchema = z.object({
     outputDir: z.string().optional(),
     userInstructions: z.string().optional(),
     strict: z.boolean().optional(),
-    params: z.record(z.any()).optional(),
+    params: z.record(z.string(), z.any()).optional(),
 });
 
 export function parseInput(raw: unknown): BrowserToolInput {
