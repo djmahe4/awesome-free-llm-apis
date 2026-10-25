@@ -1,0 +1,7 @@
+{
+  "id": "currency",
+  "goal": "Add multi-currency support across three files. In src/money.js, formatPrice(cents, currency = 'USD') must format USD as $1.50, EUR as 1,50 € (comma decimal separator, a space, then the euro sign) and GBP as £1.50, and throw a RangeError for any other currency code. In src/cart.js, the Cart constructor takes an optional currency (default 'USD') and summary() formats every line and the total in that currency. In src/invoice.js, invoiceLine(item, currency = 'USD') formats the price in that currency. Keep the existing output for USD unchanged.",
+  "targets": ["src/money.js", "src/cart.js", "src/invoice.js"],
+  "test": "tests/currency.test.js",
+  "expect": "green"
+}

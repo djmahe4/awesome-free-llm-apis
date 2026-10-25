@@ -157,7 +157,9 @@ export function parseSearchReplaceBlocksDetailed(text: string): { blocks: Search
 
   const isSearchMarker = (l: string) => /^<{5,}\s*SEARCH\s*$/i.test(l.trim());
   const isDividerMarker = (l: string) => /^={5,}\s*$/i.test(l.trim());
-  const isReplaceMarker = (l: string) => /^>{5,}\s*REPLACE\s*$/i.test(l.trim());
+  // A bare ">>>>>>>" closes a block too, and so does a second "=======": qwen2.5-coder:7b writes the
+  // latter, and rejecting that reply cost a 126 s whole-file regeneration per attempt (traced live).
+  const isReplaceMarker = (l: string) => /^>{5,}\s*(REPLACE)?\s*$/i.test(l.trim()) || isDividerMarker(l);
 
   for (const line of lines) {
     if (state === 'OUTSIDE') {
@@ -197,6 +199,96 @@ export function parseSearchReplaceBlocksDetailed(text: string): { blocks: Search
   }
 
   return { blocks, incomplete: state === 'OUTSIDE' ? 0 : 1 };
+}
+
+/** "// Add this import", "// Insert this line": the model annotating its own edit, never wanted in the file. */
+const EDIT_ECHO_COMMENT = /\s+\/\/\s*(add|added|insert|inserted|new|change|changed|update|updated)\s+(this|here|the)\b.*$/i;
+/** Edits closer than this many unchanged lines are merged into one block, so their contexts never overlap. */
+const MERGE_GAP = 4;
+
+/**
+ * Asked for SEARCH/REPLACE, a small model often returns the whole edited excerpt in a code fence instead
+ * (traced live with qwen2.5-coder:7b). The edit inside is frequently right, so recover it: diff the
+ * excerpt against the original and emit one block per changed hunk. SEARCH comes from the ORIGINAL with
+ * a little context, so lines the model copied wrongly outside a hunk can never reach the file.
+ * Deletion-only hunks at the very start or end are the model dropping the excerpt's edge lines and are
+ * ignored. A copy that shares under 60% of the original's lines is a rewrite, not an edit: nothing.
+ */
+export function editsFromRewrittenExcerpt(original: string, reply: string): { blocks: SearchReplaceBlock[] } {
+  const none = { blocks: [] as SearchReplaceBlock[] };
+  if (/^<{5,}\s*SEARCH/m.test(reply)) return none;
+  const fenced = reply.match(/```[\w+-]*\r?\n([\s\S]*?)\r?\n```/);
+  if (!fenced) return none;
+  const a = original.split(/\r?\n/);
+  const b = fenced[1].split(/\r?\n/).map(l => l.replace(EDIT_ECHO_COMMENT, ''));
+  const n = a.length, m = b.length;
+  if (n === 0 || m === 0 || n * m > 4_000_000) return none;
+
+  // Longest common subsequence over lines (excerpts are ~150 lines, so the table is small).
+  const w = m + 1;
+  const dp = new Uint32Array((n + 1) * w);
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i * w + j] = a[i] === b[j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+    }
+  }
+  if (dp[0] < n * 0.6) return none;
+
+  type Hunk = { start: number; end: number; ins: string[] }; // replaces a[start, end) with ins
+  const hunks: Hunk[] = [];
+  let i = 0, j = 0, cur: Hunk | null = null;
+  const flush = () => { if (cur) { hunks.push(cur); cur = null; } };
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) { flush(); i++; j++; continue; }
+    if (!cur) cur = { start: i, end: i, ins: [] };
+    if (j < m && (i >= n || dp[i * w + j + 1] >= dp[(i + 1) * w + j])) { cur.ins.push(b[j]); j++; }
+    else { i++; cur.end = i; }
+  }
+  flush();
+
+  // Lines missing at the excerpt's edges were dropped by the copy, not deleted on purpose: keep them,
+  // also when the dropped edge shares a hunk with a real change next to it.
+  for (const h of hunks) {
+    // Only the excess: a hunk that replaces k lines with fewer has dropped the rest at the edge.
+    if (h.end === n) while (h.end - h.start > h.ins.length) h.end--;
+    if (h.start === 0) while (h.end - h.start > h.ins.length) h.start++;
+  }
+  const kept = hunks.filter(h => !(h.ins.length === 0 && h.start === h.end));
+  // Merge hunks separated by only a few unchanged lines.
+  const merged: Hunk[] = [];
+  for (const h of kept) {
+    const prev = merged[merged.length - 1];
+    if (prev && h.start - prev.end < MERGE_GAP) {
+      prev.ins = [...prev.ins, ...a.slice(prev.end, h.start), ...h.ins];
+      prev.end = h.end;
+    } else merged.push({ ...h, ins: [...h.ins] });
+  }
+
+  const occurrences = (needle: string[]) => {
+    let count = 0;
+    for (let s = 0; s + needle.length <= n; s++) {
+      let ok = true;
+      for (let t = 0; t < needle.length; t++) if (a[s + t] !== needle[t]) { ok = false; break; }
+      if (ok && ++count > 1) break;
+    }
+    return count;
+  };
+
+  const blocks: SearchReplaceBlock[] = [];
+  for (const h of merged) {
+    // Grow context until the SEARCH text is unique in the original (and never empty).
+    for (let ctx = 1; ctx <= 6; ctx++) {
+      const before = a.slice(Math.max(0, h.start - ctx), h.start);
+      const after = a.slice(h.end, Math.min(n, h.end + ctx));
+      const search = [...before, ...a.slice(h.start, h.end), ...after];
+      if (search.join('').trim() === '') continue;
+      if (occurrences(search) === 1 || ctx === 6) {
+        blocks.push({ search: search.join('\n'), replace: [...before, ...h.ins, ...after].join('\n') });
+        break;
+      }
+    }
+  }
+  return { blocks };
 }
 
 /**
@@ -360,6 +452,30 @@ export function isAdditiveInstruction(instruction: string): boolean {
   return ADD_WORDS.test(instruction) && !CHANGE_WORDS.test(instruction);
 }
 
+/**
+ * The matcher tolerates indentation differences, so a block the model copied 4 spaces too deep still
+ * matches; without this its REPLACE would land 4 spaces too deep too. Shift REPLACE by the same delta,
+ * but only for a uniform, spaces-only delta; anything else is left as written.
+ */
+export function reindentReplace(searchLines: string[], fileLines: string[], replaceLines: string[]): string[] {
+  const lead = (l: string) => l.match(/^[ 	]*/)![0];
+  let delta: number | null = null;
+  for (let i = 0; i < searchLines.length; i++) {
+    const s = searchLines[i], f = fileLines[i] ?? '';
+    if (!s.trim()) continue;
+    const ls = lead(s), lf = lead(f);
+    if (ls.includes('	') || lf.includes('	')) return replaceLines;
+    const d = lf.length - ls.length;
+    if (delta === null) delta = d;
+    else if (d !== delta) return replaceLines;
+  }
+  if (!delta) return replaceLines;
+  if (delta > 0) return replaceLines.map(l => (l.trim() ? ' '.repeat(delta!) + l : l));
+  const cut = -delta;
+  if (replaceLines.some(l => l.trim() && !l.startsWith(' '.repeat(cut)))) return replaceLines;
+  return replaceLines.map(l => (l.trim() ? l.slice(cut) : l));
+}
+
 export function applySearchReplaceBlocks(
   content: string,
   blocks: SearchReplaceBlock[],
@@ -409,15 +525,24 @@ export function applySearchReplaceBlocks(
       const replaceLines = (usedLineNumberStrip ? replace.replace(new RegExp(LINE_NUMBER_PREFIX_RE.source, 'gm'), '') : replace).split(/\r?\n/);
       if (options.additive) {
         const kept = new Set(replaceLines.map(l => l.trim()).filter(Boolean));
-        const dropped = searchLines.map(l => l.trim()).filter(l => l && !kept.has(l));
+        // A line that reappears changed (same start, e.g. a new parameter) was modified, not dropped:
+        // "Add currency support" legitimately turns formatPrice(cents) into formatPrice(cents, currency).
+        const modified = (l: string) => replaceLines.some(r => {
+          const t = r.trim();
+          let k = 0;
+          while (k < l.length && k < t.length && l[k] === t[k]) k++;
+          return k >= Math.max(12, Math.floor(l.length * 0.6));
+        });
+        const dropped = searchLines.map(l => l.trim()).filter(l => l && !kept.has(l) && !modified(l));
         if (dropped.length > 0) {
           failures.push(`anchor not retained: REPLACE dropped existing line(s) ${JSON.stringify(dropped[0].slice(0, 60))}${dropped.length > 1 ? ` (+${dropped.length - 1} more)` : ''} but the instruction only adds code; repeat the SEARCH lines in REPLACE and add the new lines after them`);
           continue;
         }
       }
+      const placed = reindentReplace(searchLines, workingLines.slice(index, index + searchLines.length), replaceLines);
       workingLines = [
         ...workingLines.slice(0, index),
-        ...replaceLines,
+        ...placed,
         ...workingLines.slice(index + searchLines.length),
       ];
       appliedCount++;
@@ -439,13 +564,21 @@ export function applySearchReplaceBlocks(
  * Non-TS/JS files skip this (no ts-morph checker available) and rely solely
  * on the guards above.
  */
+/** TS diagnostics caused only by the in-memory check's missing environment: unresolved modules (2307, 2792),
+ *  missing declaration files (7016) and node globals without @types/node (2580, 2591, 2584). */
+const ENVIRONMENT_ONLY_TS_CODES = new Set([2307, 2792, 7016, 2580, 2591, 2584]);
+
 export async function searchReplaceRegressesTsErrors(
   filePath: string,
   beforeContent: string,
   afterContent: string
 ): Promise<boolean> {
   if (!/\.(ts|tsx|js|jsx|mjs|cjs)$/i.test(filePath)) return false;
-  const countErrors = (diags: DiagnosticResult[]) => diags.filter(d => d.severity === 'error').length;
+  // The in-memory project has no node_modules, no @types/node and no sibling files, so every import and
+  // every node global is an error there. Counting those made any edit that adds an import look like a
+  // regression and threw correct edits away. Only errors in the code itself count.
+  const countErrors = (diags: DiagnosticResult[]) =>
+    diags.filter(d => d.severity === 'error' && !ENVIRONMENT_ONLY_TS_CODES.has(d.code ?? -1)).length;
   const [before, after] = await Promise.all([
     runTsMorphCheck(filePath, beforeContent),
     runTsMorphCheck(filePath, afterContent),
@@ -470,6 +603,10 @@ export function looksLikeHallucinatedReplacement(originalContent: string, patche
   // which this failure mode can otherwise still clear on a large file.
   const countEllipsis = (s: string) => (s.match(/(?<!\.)\.{3}(?!\.)/g) || []).length;
   if (countEllipsis(patchedContent) > countEllipsis(originalContent)) return true;
+  // A full-file reply that keeps a landmark or two but is a fraction of the original has dropped real code
+  // (observed live: 711 lines replaced by 102). Targeted edits go through SEARCH/REPLACE, never this path.
+  const lineCount = (s: string) => s.split(/\r?\n/).length;
+  if (lineCount(originalContent) >= 100 && lineCount(patchedContent) < lineCount(originalContent) * 0.4) return true;
   // `export` is only legal at module top level in TS/JS — never inside a
   // function or class method body — so requiring it (rather than making it
   // optional) restricts anchors to real public symbols and excludes generic

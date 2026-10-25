@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { type DiagnosticResult } from './types.js';
@@ -88,15 +90,20 @@ export function runGoVetCheck(filePath: string, workspaceRoot: string): Diagnost
 }
 
 export function runRustcCheck(filePath: string, content: string): DiagnosticResult[] {
-  // Write to a temp file — rustc requires a real file path
-  const tmpFile = `${filePath}.oagent.tmp.rs`;
+  // rustc needs a real file. It goes in the OS temp dir, never next to the user's source, and the
+  // module uses real ESM imports: a require() here threw inside an ES module and every Rust edit was
+  // reported clean.
+  const tmpFile = path.join(os.tmpdir(), `oagent-${process.pid}-${Date.now()}-${path.basename(filePath).replace(/[^\w.-]/g, '_')}.rs`);
   try {
-    require('fs').writeFileSync(tmpFile, content, 'utf-8');
-    const result = spawnSync('rustc', ['--edition', '2021', '--error-format', 'json', tmpFile], {
+    fs.writeFileSync(tmpFile, content, 'utf-8');
+    // metadata only, written to the temp dir: no binary lands in the current directory
+    const outFile = `${tmpFile}.rmeta`;
+    const result = spawnSync('rustc', ['--edition', '2021', '--error-format', 'json', '--emit=metadata', '-o', outFile, tmpFile], {
       encoding: 'utf-8',
       timeout: 30_000,
     });
-    require('fs').unlinkSync(tmpFile);
+    fs.rmSync(tmpFile, { force: true });
+    fs.rmSync(outFile, { force: true });
 
     const diags: DiagnosticResult[] = [];
     const lines = (result.stderr || '').split('\n').filter(Boolean);
@@ -118,7 +125,7 @@ export function runRustcCheck(filePath: string, content: string): DiagnosticResu
     }
     return diags;
   } catch {
-    try { require('fs').unlinkSync(tmpFile); } catch { /* ignore */ }
+    fs.rmSync(tmpFile, { force: true });
     return [];
   }
 }
@@ -209,4 +216,3 @@ export async function extractTsMorphSymbols(
     return [];
   }
 }
-

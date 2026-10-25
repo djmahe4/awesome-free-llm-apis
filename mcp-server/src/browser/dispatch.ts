@@ -12,6 +12,7 @@ import { UniversalTabularSchemaFlattener } from '../utils/UniversalTabularSchema
 import { ScraperExporter } from '../utils/ScraperExporter.js';
 import { browserBudget, fitToTokenBudget } from './BudgetPolicy.js';
 import { ContextSanitizer } from '../utils/NetworkStateTracker.js';
+import { findUnsupportedOptions } from './unsupported.js';
 import {
     type BrowserActionResult, type BrowserToolError, okResult, failResult, engineUnavailableError,
 } from './types.js';
@@ -127,6 +128,11 @@ export async function dispatchBrowserAction(rawInput: unknown): Promise<BrowserA
         if (!verdict.ok) {
             return failResult({ action: input.action, sessionId, errors: [{ stage: 'input', code: 'URL_BLOCKED', message: `${verdict.code}: ${verdict.message}`, recoverable: false }] });
         }
+    }
+
+    const unsupported = findUnsupportedOptions(input);
+    if (unsupported.length > 0) {
+        return failResult({ action: input.action, sessionId, errors: [{ stage: 'input', code: 'UNSUPPORTED_OPTION', message: `Not supported yet (not implemented): ${unsupported.join(', ')}. Remove them or use a supported option.`, recoverable: false }] });
     }
 
     // checkpoint/list_checkpoints and site_memory don't need a live browser.
@@ -386,8 +392,8 @@ async function handleEvaluate(session: BrowserSession, input: BrowserToolInput, 
 async function handleNetwork(session: BrowserSession, input: BrowserToolInput, sessionId: string): Promise<BrowserActionResult> {
     const { op, limit = browserBudget.endpointCandidates } = input.params as any;
     if (op === 'clear') {
-        session.netLogCursor = session.netLogCursor; // no-op marker; ring buffer clears naturally on next navigate
-        return okResult({ action: 'network', sessionId, data: { cleared: true } });
+        const dropped = await session.drainInterceptedRequests();
+        return okResult({ action: 'network', sessionId, data: { cleared: dropped.length } });
     }
     if (op === 'drain' || op === 'list') {
         const entries = await session.drainInterceptedRequests();

@@ -1,3 +1,4 @@
+import { loadCodingAgentsSettings, isSkippedTest } from './settings.js';
 import { spawn, spawnSync } from 'node:child_process';
 
 /**
@@ -43,16 +44,25 @@ export interface VerifyRunResult {
   /** The command failed validation and nothing was run. */
   rejected?: boolean;
   reason?: string;
+  /** Failing cases ignored because .free-llm-mcp/coding-agents.json lists them in skipFailingTests. */
+  skippedFailures?: string[];
 }
 
 const TAIL_BYTES = 4096;
 const MAX_FAILED_CASES = 200;
 
 /** Failing-case name from one output line (node:test, vitest/jest, pytest, TAP), or null. */
+// eslint-disable-next-line no-control-regex
+const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
+
 export function failedCaseName(line: string): string | null {
-  const t = line.trim();
+  // Colour codes survive even with FORCE_COLOR=0 (pytest reads any FORCE_COLOR as "force colour").
+  const t = line.replace(ANSI, '').trim();
   let m = t.match(/^[\u2716\u00d7\u2717x]\s+(.+?)(?:\s+\(\d+(?:\.\d+)?ms\))?$/);
   if (m && !/^failing tests:?$/i.test(m[1]) && !/^\d+ failed/i.test(m[1])) return m[1];
+  // pytest summary: "FAILED tests/test_x.py::test_name - AssertionError: ..." -> the test id only
+  m = t.match(/^FAILED\s+(\S+::\S+)(?:\s+-\s.*)?$/);
+  if (m) return m[1];
   m = t.match(/^FAILED\s+(.+)$/);
   if (m) return m[1];
   m = t.match(/^FAIL\s+(.+)$/);
@@ -63,10 +73,35 @@ export function failedCaseName(line: string): string | null {
 }
 const DEFAULT_TIMEOUT_MS = 120_000;
 
+function withoutKey(env: NodeJS.ProcessEnv, key: string): NodeJS.ProcessEnv {
+  const copy = { ...env };
+  delete copy[key];
+  return copy;
+}
+
 function killTree(pid: number | undefined): void {
   if (!pid) return;
   if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
   else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } } }
+}
+
+/** A failed-case entry that names a whole test file (node:test, pytest) rather than one test. */
+const FILE_LEVEL_ENTRY = /[\\/]?[\w.-]+\.(test|spec)\.[cm]?[jt]sx?$|(^|[\\/])test_[\w-]+\.py$|[\w-]+_test\.(py|go)$/i;
+
+/**
+ * Known pre-failing tests from .free-llm-mcp/coding-agents.json: they do not count. A check whose only
+ * failures are skipped is green. Needs at least one skipped case: a run with no parsed case names is
+ * never turned green.
+ */
+export function applySkipList(r: VerifyRunResult, patterns: string[]): VerifyRunResult {
+  if (patterns.length === 0 || r.failedCases.length === 0) return r;
+  const skipped = r.failedCases.filter(c => isSkippedTest(c, patterns));
+  if (skipped.length === 0) return r;
+  const remaining = r.failedCases.filter(c => !skipped.includes(c));
+  const real = remaining.filter(c => !FILE_LEVEL_ENTRY.test(c));
+  return real.length === 0
+    ? { ...r, ok: true, failedCases: [], skippedFailures: skipped }
+    : { ...r, failedCases: remaining, skippedFailures: skipped };
 }
 
 export async function runVerifyCommand(
@@ -96,7 +131,9 @@ export async function runVerifyCommand(
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
-      env: { ...process.env, CI: '1', FORCE_COLOR: '0' },
+      // No colour: NO_COLOR is the cross-tool convention, PY_COLORS covers pytest. FORCE_COLOR is removed
+      // rather than set to 0, because pytest treats it being set at all as "force colour".
+      env: { ...withoutKey(process.env, 'FORCE_COLOR'), CI: '1', NO_COLOR: '1', PY_COLORS: '0' },
     });
     const append = (d: Buffer) => {
       const text = d.toString();
@@ -116,14 +153,15 @@ export async function runVerifyCommand(
     const timer = setTimeout(() => { timedOut = true; killTree(child.pid); }, timeoutMs);
     const finish = (exitCode: number | null, extra = '') => {
       clearTimeout(timer);
-      resolve({
+      const base: VerifyRunResult = {
         ok: !timedOut && exitCode === 0,
         exitCode,
         timedOut,
         outputTail: (tail + extra).slice(-TAIL_BYTES),
         failedCases: failed,
         durationMs: Date.now() - started,
-      });
+      };
+      resolve(base.ok || timedOut ? base : applySkipList(base, loadCodingAgentsSettings(cwd).skipFailingTests));
     };
     child.on('error', err => finish(null, `\n[spawn error] ${err.message}`));
     child.on('close', code => finish(code));

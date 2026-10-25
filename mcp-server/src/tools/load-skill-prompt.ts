@@ -30,6 +30,7 @@ export interface LoadSkillPromptInput {
   type: 'load' | 'search' | 'list';
   keywords?: string[];
   name?: string;
+  /** @internal alias of `name`, still accepted from older callers; `name` is the documented field. */
   skill?: string;
   workspaceDir?: string;
   /** 'hermes' searches/loads the bundled external/hermes/ skill set instead of the agentic-awesome index. */

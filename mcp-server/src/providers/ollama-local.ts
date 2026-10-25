@@ -1,3 +1,4 @@
+import { caTrace } from '../tools/coding-agents/trace.js';
 import fetch from 'node-fetch';
 import { getModelInfo } from '../services/llmfit.js';
 
@@ -150,11 +151,31 @@ export function rankCandidateModels(availableModels: string[]): string[] {
   return [...preferred, ...rest];
 }
 
-export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number; numCtx?: number; keepAlive?: string | number }): Promise<OllamaLocalChatResult> {
+const thinkingSupport = new Map<string, boolean>();
+
+/** Whether a local model reports the 'thinking' capability (Ollama /api/show); cached, false when unknown. */
+export async function modelSupportsThinking(model: string): Promise<boolean> {
+  const known = thinkingSupport.get(model);
+  if (known !== undefined) return known;
+  let yes = false;
+  try {
+    const res = await fetch(`${getBaseUrl()}/api/show`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+    if (res.ok) yes = ((await res.json() as { capabilities?: string[] }).capabilities ?? []).includes('thinking');
+  } catch { /* unknown: treat as not thinking */ }
+  thinkingSupport.set(model, yes);
+  return yes;
+}
+
+export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number; numCtx?: number; keepAlive?: string | number; think?: boolean; signal?: AbortSignal }): Promise<OllamaLocalChatResult> {
   const url = `${getBaseUrl()}/api/chat`;
   const timeoutMs = computeChatTimeoutMs(messages);
+  // The caller's signal (e.g. a coding_agents abort) cancels the request in flight; before this an abort
+  // waited for the whole generation (up to minutes on a 7B).
+  if (options?.signal?.aborted) throw new Error(`Ollama local request for '${model}' was aborted by the caller.`);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onCallerAbort = () => controller.abort();
+  options?.signal?.addEventListener('abort', onCallerAbort, { once: true });
 
   const numCtx = options?.numCtx || await resolveNumCtx(model, messages, options?.maxTokens);
 
@@ -170,6 +191,8 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
         // 0 unloads the model right after the reply, so a staged pipeline (vision model, then code
         // model) never has both resident in VRAM at once.
         ...(options?.keepAlive !== undefined ? { keep_alive: options.keepAlive } : {}),
+        // false switches a thinking model's hidden reasoning off; other models ignore it.
+        ...(options?.think !== undefined ? { think: options.think } : {}),
         options: {
           temperature: options?.temperature,
           num_predict: options?.maxTokens,
@@ -180,11 +203,13 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
     });
   } catch (err: any) {
     if (err.name === 'AbortError') {
+      if (options?.signal?.aborted) throw new Error(`Ollama local request for '${model}' was aborted by the caller.`);
       throw new Error(`Ollama local model '${model}' did not respond within ${timeoutMs}ms (scaled to prompt size).`);
     }
     throw err;
   } finally {
     clearTimeout(timer);
+    options?.signal?.removeEventListener('abort', onCallerAbort);
   }
   if (!response.ok) {
     const text = await response.text().catch(() => '');
@@ -196,7 +221,13 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
     prompt_eval_count?: number;
     eval_count?: number;
     done_reason?: string;
+    total_duration?: number;
+    load_duration?: number;
+    prompt_eval_duration?: number;
+    eval_duration?: number;
   };
+  const ns = (v?: number) => ((v ?? 0) / 1e9).toFixed(1);
+  caTrace('ollama', `model=${model} ctx=${numCtx} total=${ns(data.total_duration)}s load=${ns(data.load_duration)}s prompt=${data.prompt_eval_count ?? 0}tok/${ns(data.prompt_eval_duration)}s gen=${data.eval_count ?? 0}tok/${ns(data.eval_duration)}s`);
   const promptTokens = data.prompt_eval_count ?? 0;
   return {
     model: data.model,

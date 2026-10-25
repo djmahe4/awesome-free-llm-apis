@@ -43,6 +43,7 @@ export interface UseFreeLLMInput {
   max_tokens?: number;
   top_p?: number;
   stream?: boolean;
+  /** @internal streaming callback for in-process callers. */
   onChunk?: (chunk: string) => void;
   provider?: string;
   fallback?: boolean;
@@ -50,6 +51,7 @@ export interface UseFreeLLMInput {
   agentic?: boolean;
   sessionId?: string;
   taskType?: TaskType | string;
+  /** @internal set by in-process callers. */
   isOnePass?: boolean;
   keywords?: string[];
   skill?: string;
@@ -67,6 +69,7 @@ export interface UseFreeLLMInput {
   // `continue <promptId> <resume_input>`.
   resume_input?: string;
   // External abort signal to cancel long-running tool execution or HTTP requests
+  /** @internal in-process cancellation. */
   signal?: AbortSignal;
 }
 

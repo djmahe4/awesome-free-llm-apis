@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { extractServerActions, extractPlaygroundActions, extractQuickstartActionRows, findActionDrift } from './action-sync.js';
+import { handlerForTool, findHandlerSource, handlerInputType, findTypeSource, interfaceFields, findInputDrift, branchArgReads, browserParamDrift } from './input-sync.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -274,6 +275,44 @@ async function main() {
     console.log('✓ 100% parameter schema alignment across MCP server, playground, and quickstart.');
   } else {
     console.log(`ℹ Schema check completed with ${driftWarnings} parameter variance notices (documented variances).`);
+  }
+
+  // 3a. Input-type drift (hard fail): for every tool, follow the handler src/mcp/index.ts calls to the
+  // module it is imported from, read the handler's input type, and require every caller-facing field in
+  // the MCP inputSchema (fields meant for in-process callers carry `@internal` in their JSDoc). Handlers
+  // without an object input type are checked by the args their dispatch branch reads; browser_tool by its
+  // zod params against what each handler reads (or src/browser/unsupported.ts refuses).
+  {
+    const indexFile = mcpIndexPath;
+    const serverRoot = path.resolve(path.dirname(mcpIndexPath), '..', '..');
+    const inputProblems: string[] = [];
+    for (const tool of registeredTools) {
+      const props = mcpToolProperties[tool] || [];
+      const h = handlerForTool(mcpContent, tool);
+      const modFile = h ? path.resolve(path.dirname(indexFile), h.module).replace(/\.js$/, '.ts') : null;
+      const hs = modFile && fs.existsSync(modFile) ? findHandlerSource(modFile, h!.fn) : null;
+      const type = hs ? handlerInputType(hs.src, h!.fn) : null;
+      const ts = type ? findTypeSource(hs!.file, type) : null;
+      const fields = ts ? interfaceFields(ts.src, type!) : null;
+      if (fields) {
+        inputProblems.push(...findInputDrift(tool, fields, props));
+      } else {
+        for (const a of branchArgReads(mcpContent, tool)) {
+          if (!props.includes(a)) inputProblems.push(`${tool}: arg '${a}' read in its dispatch branch is missing from the MCP inputSchema`);
+        }
+      }
+    }
+    inputProblems.push(...browserParamDrift(
+      fs.readFileSync(path.join(serverRoot, 'src/browser/actionSchemas.ts'), 'utf8'),
+      fs.readFileSync(path.join(serverRoot, 'src/browser/dispatch.ts'), 'utf8'),
+      fs.readFileSync(path.join(serverRoot, 'src/browser/unsupported.ts'), 'utf8'),
+    ));
+    if (inputProblems.length > 0) {
+      for (const p of inputProblems) console.error(`✗ Input drift ${p}`);
+      console.error('  Add the field to the tool\'s inputSchema in src/mcp/index.ts, or mark it @internal in the input type if MCP callers must not set it.');
+      process.exit(1);
+    }
+    console.log('✓ Every caller-facing input field of every tool handler is in its MCP inputSchema.');
   }
 
   // 3b. Action enums must be reachable from the playground and listed in the Quickstart (hard fail)

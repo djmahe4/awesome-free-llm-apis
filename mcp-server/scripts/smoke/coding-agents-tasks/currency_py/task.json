@@ -1,0 +1,8 @@
+{
+  "id": "currency_py",
+  "goal": "Add multi-currency support across three Python files. In shop/money.py, format_price(cents, currency='USD') must format USD as $1.50, EUR as 1,50 € (comma decimal separator, a space, then the euro sign) and GBP as £1.50, and raise ValueError for any other currency code. In shop/cart.py, Cart.__init__ takes an optional currency (default 'USD') and summary() formats every line and the total in that currency. In shop/invoice.py, invoice_line(item, currency='USD') formats the price in that currency. Keep the existing output for USD unchanged.",
+  "targets": ["shop/money.py", "shop/cart.py", "shop/invoice.py"],
+  "test": "tests/test_currency.py",
+  "verify": "pytest -q tests/test_currency.py",
+  "expect": "green"
+}

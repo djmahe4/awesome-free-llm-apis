@@ -1,3 +1,4 @@
+import { caTrace, caTraceReset } from './trace.js';
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
 import type { CodingAgentsInput, CodingAgentsResult, RepairAttempt } from './types.js';
 import { detectSpecialCasing } from './verify-guard.js';
@@ -15,6 +16,8 @@ import { detectSpecialCasing } from './verify-guard.js';
 
 export const MAX_REPAIR_ATTEMPTS = 5;
 const DEFAULT_REPAIR_ATTEMPTS = 4;
+/** A local 7B run is ~1 min per attempt; without a cap one goal ran 20+ minutes. */
+const DEFAULT_MAX_DURATION_MS = 5 * 60_000;
 /** Greedy decoding returns the same answer for the same prompt, so each retry samples a little hotter. */
 const RETRY_TEMPERATURE = (attempt: number) => Math.min(0.9, Math.round(3 * (attempt - 1)) / 10);
 
@@ -30,6 +33,25 @@ const SAMPLE_TEMPERATURES = [0.4, 0.6, 0.8, 0.8];
 
 /** Attempts at or under this many failing cases are patched in place; above it the file is rewritten. */
 const NEAR_MISS = 3;
+
+/**
+ * Which target files a failure points at: a stack frame inside the file, or a failing test named after it
+ * ("cart uses its currency" -> src/cart.js). Empty when nothing specific (or every file) is implicated,
+ * which means: do not narrow.
+ */
+export function filesImplicated(targets: string[], failedCases: string[], brief: string): string[] {
+  const norm = (s: string) => s.replace(/\\/g, '/').toLowerCase();
+  const text = norm(brief);
+  const hit = targets.filter(t => {
+    const rel = norm(t);
+    const base = rel.split('/').pop()!.replace(/\.[^.]+$/, '');
+    // Frames: "src/cart.js:12" (JS, Go, Rust, most tools) and Python's 'File ".../src/cart.py", line 12'.
+    if (text.includes(`/${rel}:`) || text.includes(`${rel}:`) || text.includes(`/${rel}", line`) || text.includes(`"${rel}", line`)) return true;
+    const word = new RegExp(`\\b${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    return failedCases.length > 0 && base.length >= 3 && failedCases.every(c => word.test(c));
+  });
+  return hit.length > 0 && hit.length < targets.length ? hit : [];
+}
 
 function attemptOutcome(r: CodingAgentsResult): string {
   if (r.rollbackBrief) return 'rolled_back_syntax';
@@ -78,13 +100,31 @@ export async function runWithRepairLoop(
   // The first apply's checkpoint is the ORIGINAL tree; files the agent created across attempts.
   let originalCheckpoint: string | undefined;
   // The closest attempt so far (fewest failing cases): later attempts repair THAT, not merely the latest.
-  let best: { failing: number; brief: string; files: Array<{ filePath: string; content: string }>; isOriginal?: boolean } | undefined;
+  let best: { failing: number; brief: string; files: Array<{ filePath: string; content: string }>; isOriginal?: boolean; cases?: string[] } | undefined;
   let latestIsBest = false;
   const createdFiles = new Set<string>();
+  const deadline = Date.now() + (Number.isFinite(input.maxDurationMs) && (input.maxDurationMs as number) > 0 ? (input.maxDurationMs as number) : DEFAULT_MAX_DURATION_MS);
   let outcome: NonNullable<CodingAgentsResult['repair']>['outcome'] = 'converged';
 
+  // Narrow a patch-in-place retry to the files the failure implicates; the rest stay as reference.
+  const narrowTo = (cases: string[], brief: string): Partial<CodingAgentsInput> => {
+    if (!input.targetFiles || input.targetFiles.length < 2) return {};
+    const hit = filesImplicated(input.targetFiles, cases, brief);
+    return hit.length > 0 ? { targetFiles: hit, relatedFiles: input.targetFiles.filter(f => !hit.includes(f)) } : {};
+  };
+
   for (let n = 1; ; n++) {
+    if (run?.controller.signal.aborted && n === 1) {
+      result = { sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: [], anchors: [], patchPlan: [], patchSummary: '', diagnostics: [], applied: false };
+      outcome = 'aborted';
+      break;
+    }
+    // The pipeline counts files per run; without this reset the status poll reads "2/1 file(s)" on attempt 2.
+    if (run) run.completedCount = 0;
+    if (n === 1) caTraceReset(sessionId);
+    caTrace(`attempt ${n} start`, `temp=${current.temperature ?? 0}${current.rewrite ? ' rewrite' : ''}`);
     result = await runner(current, sessionId, run);
+    caTrace(`attempt ${n} end`, String(result.verification?.status ?? (result.applied ? 'applied' : 'proposed')));
     if (!originalCheckpoint && result.checkpointId && result.applied) originalCheckpoint = result.checkpointId;
     for (const p of result.patchPlan ?? []) if ((p as any).isNewFile) createdFiles.add(p.filePath);
     let brief = briefOf(result, input);
@@ -105,7 +145,7 @@ export async function runWithRepairLoop(
         .filter(p => typeof (p as any).fullPatchedContent === 'string')
         .map(p => ({ filePath: p.filePath, content: (p as any).fullPatchedContent as string }));
       latestIsBest = !best || failing < best.failing;
-      if (latestIsBest) best = { failing, brief, files };
+      if (latestIsBest) best = { failing, brief, files, cases: result.verification?.failedCases ?? [] };
       // The tree we started from is also a candidate: if it was closer to green than this attempt, the
       // next attempt repairs THAT (with the baseline's brief) instead of rewriting or building on a regression.
       const v = result.verification;
@@ -125,6 +165,8 @@ export async function runWithRepairLoop(
     if (result.error) { outcome = 'error'; break; }
     if (result.verification?.status === 'needs_user') { outcome = 'needs_user'; break; }
     if (!brief) { outcome = 'converged'; break; }
+    if (run?.controller.signal.aborted) { outcome = 'aborted'; break; }
+    if (Date.now() >= deadline) { outcome = 'timed_out'; break; }
     if (n > budget) { outcome = 'not_converged'; break; }
 
     // ── sampling phase: independent candidates from the original ─────────────────────────
@@ -152,7 +194,7 @@ export async function runWithRepairLoop(
           await rollback!(originalCheckpoint, [...createdFiles]);
           if (!best.isOriginal && restoreFiles && best.files.length > 0) await restoreFiles(best.files);
         }
-        current = { ...input, feedback: best.brief, temperature: 0.3 };
+        current = { ...input, feedback: best.brief, temperature: 0.3, ...narrowTo(best.cases ?? [], best.brief) };
       }
       lastBrief = best.brief;
       continue;
@@ -183,15 +225,28 @@ export async function runWithRepairLoop(
       await rollback!(originalCheckpoint!, [...createdFiles]);
       nextBrief = best?.brief ?? brief;
     }
-    current = { ...input, feedback: nextBrief, temperature: RETRY_TEMPERATURE(n - samples + 2), ...(rewrite ? { rewrite: true } : {}) };
+    // A patch-in-place retry edits only the files the failure points at: re-editing files that already pass
+    // broke them in traced multi-file runs. A rewrite starts from the original tree, so it keeps all files.
+    current = {
+      ...input, feedback: nextBrief, temperature: RETRY_TEMPERATURE(n - samples + 2),
+      ...(rewrite ? { rewrite: true } : narrowTo(result.verification?.failedCases ?? [], nextBrief)),
+    };
   }
 
   // Test-first work keeps a still-red attempt applied so the next one can build on it. If it never went
   // green, do not leave the user's tree changed by an unverified attempt: restore the original.
-  if ((outcome === 'not_converged' || outcome === 'stuck') && result.verification?.status === 'not_green' && result.applied && originalCheckpoint && rollback) {
+  if ((outcome === 'not_converged' || outcome === 'stuck' || outcome === 'aborted' || outcome === 'timed_out') && result.verification?.status === 'not_green' && result.applied && originalCheckpoint && rollback) {
     result.restoredFiles = await rollback(originalCheckpoint, [...createdFiles]);
     result.applied = false;
-    result.message = `The check never went green after ${attempts.length} attempt(s), so the original files were restored. The last proposal is in patchSummary; result.verification.repairBrief says what was still failing.`;
+    result.message = outcome === 'aborted'
+      ? `Aborted after ${attempts.length} attempt(s); the original files were restored.`
+      : outcome === 'timed_out'
+        ? `The time budget ran out after ${attempts.length} attempt(s) and the check was still red, so the original files were restored. Raise maxDurationMs or narrow the goal.`
+        : `The check never went green after ${attempts.length} attempt(s), so the original files were restored. The last proposal is in patchSummary; result.verification.repairBrief says what was still failing.`;
+  } else if (outcome === 'aborted') {
+    result.message = `Aborted after ${attempts.length} attempt(s).`;
+  } else if (outcome === 'timed_out') {
+    result.message = `The time budget ran out after ${attempts.length} attempt(s).`;
   }
 
   // Only attach the record when the loop mattered (a check or a review took part).

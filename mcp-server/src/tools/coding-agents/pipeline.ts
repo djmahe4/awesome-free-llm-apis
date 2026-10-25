@@ -1,12 +1,13 @@
+import { generateFilePatch } from './generate-file-patch.js';
+import { caTrace } from './trace.js';
 import { validateVerifyCommand, runVerifyCommand } from './verify-command.js';
-import { assessPatchesForVerify, buildRepairBrief, buildSyntaxBrief, withFeedback, isTestFile, readVerifyTestContext, type PatchFact } from './verify-guard.js';
+import { assessPatchesForVerify, buildRepairBrief, buildSyntaxBrief, withFeedback, isTestFile, type PatchFact } from './verify-guard.js';
 import { reviewPatch } from './reviewer.js';
 import { runWithRepairLoop } from './repair-loop.js';
 import path from 'node:path';
 import fs from 'fs-extra';
 import { VectorStore, DocumentNode } from '../../memory/VectorStore.js';
 import { logToolCall } from '../../utils/ChatLogger.js';
-import { localLlmPatch } from '../local-llm-patch.js';
 import { RunRegistry, RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
 import { globalCasStore } from '../../memory/ContentAddressableCheckpoint.js';
 import { assertPatchPathAllowed } from '../../harness/write-guard.js';
@@ -29,18 +30,7 @@ import {
   parseTasksMarkdown,
   extractGoalFromTasksMarkdown,
 } from './tasks.js';
-import {
-  extractWindowForInstruction,
-  parseSearchReplaceBlocksDetailed,
-  applySearchReplaceBlocks,
-  isAdditiveInstruction,
-  isNoopPatch,
-  searchReplaceRegressesTsErrors,
-  looksLikeHallucinatedReplacement,
-  generateSearchReplacePatch,
-  generateCodePatchWithCloudLLM,
-  windowReplyIsSuspicious,
-} from './patch-gen.js';
+import { isNoopPatch } from './patch-gen.js';
 import {
   discoverWiringTargets,
   scanCodeFiles,
@@ -132,7 +122,12 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
       // With a check, draw 3 independent candidates first (the tests pick among them) unless told otherwise.
       const result = await runWithRepairLoop({ ...input, samples: input.samples ?? 3 }, sessionId, run, runCodingAgentsPipeline, async (checkpointId, newFiles) => {
         const { files } = await globalCasStore.restoreCheckpointToDisk(checkpointId, path.resolve(input.workspaceRoot || process.cwd()));
-        for (const f of newFiles) await fs.remove(path.resolve(input.workspaceRoot || process.cwd(), f)).catch(() => {});
+        const root = path.resolve(input.workspaceRoot || process.cwd());
+        for (const f of newFiles) {
+          const abs = path.resolve(root, f);
+          assertSafe(abs, root); // never delete outside the workspace, whatever ended up in the list
+          await fs.remove(abs).catch(() => {});
+        }
         return [...files, ...newFiles];
       }, async (files) => {
         const root = path.resolve(input.workspaceRoot || process.cwd());
@@ -325,6 +320,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     const codeFiles: string[] = await scanCodeFiles(workspaceRoot, 100);
 
     // ── Step 2: Locate (VectorStore RAG) ────────────────────────────────────
+    caTrace('locate');
     result.pipelineStage = 'locate';
     const store = new VectorStore();
     const docNodes: DocumentNode[] = [];
@@ -367,6 +363,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     }
 
     // ── Step 3: Anchor [PATH#SHA8] ───────────────────────────────────────────
+    caTrace('anchor', `files=${result.relevantFiles.length}`);
     result.pipelineStage = 'anchor';
     const anchors: SnapshotAnchor[] = [];
     const patches: LineAnchoredPatch[] = [];
@@ -382,9 +379,16 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       try {
         const { listLocalModels, rankCandidateModels } = await import('../../providers/ollama-local.js');
         const models = await listLocalModels();
+        // A caller-pinned model wins over llmfit and the router (it may exceed the VRAM budget on purpose).
+        if (input.model) {
+          resolvedModel = models.find(m => m === input.model || m.startsWith(`${input.model}:`)) ?? null;
+          if (!resolvedModel) {
+            result.diagnostics.push({ filePath: '', message: `model '${input.model}' is not installed locally (have: ${models.join(', ')}); using the automatic choice instead.`, severity: 'warning', source: 'llm-patch' });
+          }
+        }
 
         // Check llmfit hardware recommendations to find the optimal coding model
-        try {
+        if (!resolvedModel) try {
           const { recommendModels } = await import('../../services/llmfit.js');
           const fitResult = await recommendModels({ useCase: 'coding', limit: 5, workspaceRoot });
           const recommendedOllamaNames = (fitResult.models || [])
@@ -417,7 +421,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           resolvedModel = ranked[0] ?? null;
         }
       } catch {
-        console.warn('[coding-agents] Ollama unreachable — will route to cloud model fallback');
+        console.warn('[coding-agents] Ollama unreachable — only a cloud fallback (allowCloudFallback) can edit now');
       }
     }
 
@@ -429,6 +433,18 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     // to decide whether the task actually completed or should stay pending
     // for another resume attempt.
     let taskHadFailure = false;
+
+    // Multi-file runs: every file's prompt sees the others' API surface, edited ones in their new form.
+    // relatedFiles: part of the change, not edited in this call (a narrowed repair); shown in their current form.
+    const changeFiles = [...new Set([...result.relevantFiles, ...(input.relatedFiles ?? [])])];
+    const runContents = new Map<string, string>();
+    const editedInRun = new Set<string>(input.relatedFiles ?? []);
+    if (changeFiles.length > 1) {
+      for (const f of changeFiles) {
+        const abs = path.resolve(workspaceRoot, f);
+        if (await fs.pathExists(abs)) runContents.set(f, await fs.readFile(abs, 'utf-8'));
+      }
+    }
 
     for (const relPath of result.relevantFiles) {
       if (run?.controller.signal.aborted) break;
@@ -455,262 +471,12 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
 
       // 4a. LLM generation via localLlmPatch with seamless cloud fallback
       if (!dryRun && (!input.astEditOps || input.astEditOps.length === 0)) {
-        let appliedPatch = false;
-        let lastFailureReason: string | undefined;
-
-        // Compose DAG task context string if tasks exist
-        const tasksContext = loadedTasks
-          ? `Active Task: [${nextPendingTask?.id || 'adhoc'}] ${activeGoal}\nOverall Plan:\n` +
-            loadedTasks.map(t => `- [${t.status === 'completed' ? 'x' : (t.status === 'in_progress' ? '~' : ' ')}] ${t.task}`).join('\n')
-          : undefined;
-
-        const baseInstruction = tasksContext
-          ? `${activeGoal}\n\n[DAG Context]\n${tasksContext}`
-          : activeGoal;
-        // The tests the verifyCommand runs are the specification: show them (read-only).
-        const testContext = input.verifyCommand ? await readVerifyTestContext(input.verifyCommand, workspaceRoot) : '';
-        const augmentedInstruction = testContext ? `${baseInstruction}\n\n${testContext}` : baseInstruction;
-
-        // Try SEARCH/REPLACE first, local model then cloud — see
-        // generateSearchReplacePatch: unchanged content never passes through
-        // the model, so it can't be collapsed/duplicated/hallucinated the
-        // way full-file or windowed-splice replies can. Only fall through to
-        // those older (guarded, but strictly weaker) strategies if no block
-        // parses or every block fails to match — e.g. the model ignores the
-        // requested format entirely.
-        // rewrite mode (set by the repair loop) skips patching for small files and regenerates them.
-        const rewriteSmallFile = !!input.rewrite && patchedContent.split(/\r?\n/).length <= 200;
-        if (resolvedModel && !rewriteSmallFile) {
-          try {
-            // Routed through localLlmPatch (not a direct chatLocal call) so
-            // this shares the exact same model-invocation, context-gathering,
-            // and refusal-detection code as the full-content path below —
-            // including the same test/mock seam.
-            const lineCount = patchedContent.split(/\r?\n/).length;
-            const windowInfo = lineCount > 150 ? extractWindowForInstruction(patchedContent, augmentedInstruction, 150) : null;
-            const srLlmResult = await localLlmPatch({
-              filePath: fullPath,
-              instruction: augmentedInstruction,
-              workspace_root: workspaceRoot,
-              sessionId,
-              temperature: input.temperature,
-              outputFormat: 'search-replace',
-              contentOverride: windowInfo ? windowInfo.window : patchedContent,
-              excerptRange: windowInfo
-                ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }
-                : undefined,
-            });
-            if (srLlmResult.success && srLlmResult.patch?.trim()) {
-              const { blocks, incomplete } = parseSearchReplaceBlocksDetailed(srLlmResult.patch);
-              if (blocks.length === 0) {
-                lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: no ${incomplete ? 'complete ' : ''}blocks found in response${incomplete ? ' (the reply ended inside a block)' : ''}`;
-              } else {
-                // Apply against the FULL current content by exact text match —
-                // independent of whatever window was shown to the model, so
-                // there's no line-offset bookkeeping to get wrong.
-                const { content, appliedCount, failures } = applySearchReplaceBlocks(patchedContent, blocks, { additive: isAdditiveInstruction(activeGoal) });
-                if (incomplete > 0) failures.push(`${incomplete} block(s) were cut off before the REPLACE marker and were not applied`);
-                const regressed = appliedCount > 0 && await searchReplaceRegressesTsErrors(relPath, patchedContent, content);
-                if (appliedCount > 0 && !regressed) {
-                  patchedContent = content;
-                  result.modelUsed = resolvedModel;
-                  result.usedFallbackModel = false;
-                  appliedPatch = true;
-                  if (failures.length > 0) {
-                    result.diagnostics.push({
-                      filePath: relPath,
-                      message: `Local model (${resolvedModel}) SEARCH/REPLACE: ${appliedCount} block(s) applied, ${failures.length} skipped: ${failures.join('; ')}`,
-                      severity: 'warning',
-                      source: 'llm-patch',
-                    });
-                  }
-                } else if (regressed) {
-                  lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: ${appliedCount} block(s) matched, but applying them increases the file's compiler error count — rejected atomically (partial async/signature migrations are worse than no change)`;
-                } else {
-                  lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: no blocks applied (${failures.join('; ') || 'unknown reason'})`;
-                }
-              }
-            } else if (srLlmResult.error) {
-              lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: ${srLlmResult.error}`;
-            }
-          } catch (srErr: any) {
-            lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE failed: ${srErr.message}`;
-          }
-        }
-
-        // Fall back to the older full-file / windowed-splice strategy —
-        // weaker (relies on post-hoc corruption guards rather than making
-        // corruption structurally impossible) but kept as a second attempt
-        // in case the model can't/won't follow the SEARCH/REPLACE format.
-        // The corruption guard runs on ITS result immediately — not after
-        // the fact — because a local "success" that's actually a
-        // hallucinated replacement must NOT skip the cloud fallback below
-        // the way a genuine success would. Without this, a local model that
-        // reliably produces garbage (rather than erroring) would set
-        // appliedPatch=true and permanently starve cloud fallback of ever
-        // being tried, forcing identical failures on every manual resume
-        // retry instead of auto-escalating within one call.
-        if (resolvedModel && !appliedPatch) {
-          // Visible record that SEARCH/REPLACE failed and the pipeline is
-          // dropping to a strategy that can't structurally prevent scope
-          // drift — observed live: SR failed here (a vision-language model
-          // wrongly entered the candidate pool, see rankCandidateModels),
-          // full-file regen "fixed" the reported compile errors but also
-          // silently renamed/deleted methods the goal never asked to touch.
-          // The corruption guards below catch wholesale hallucination, not
-          // this — a real, syntactically valid, but scope-violating rewrite.
-          // Folded into lastFailureReason (rather than a separate diagnostic
-          // entry) so it surfaces in the single final diagnostic if this
-          // fallback also fails, matching this function's existing
-          // localReason-chaining style instead of adding a second entry.
-          const srFailureNote = lastFailureReason;
-          lastFailureReason = undefined;
-          try {
-            // Same sliding-window fix already used for the cloud fallback below:
-            // asking a local model to reproduce a large non-module file (HTML,
-            // classic browser JS with no `export`s) in full is what causes
-            // truncation/hallucination. Locate the ~120-line region the
-            // instruction actually targets and send only that; local_llm_patch
-            // splices nothing itself, so the excerpt is spliced back here,
-            // right before the corruption guard runs on the reconstructed
-            // full content — matching the cloud path's guard timing exactly.
-            const hasExports = /^\s*export\s+/m.test(patchedContent);
-            const windowInfo = !hasExports ? extractWindowForInstruction(patchedContent, activeGoal) : null;
-            const llmResult = await localLlmPatch({
-              filePath: fullPath,
-              instruction: augmentedInstruction,
-              workspace_root: workspaceRoot,
-              sessionId,
-              temperature: input.temperature,
-              contentOverride: windowInfo ? windowInfo.window : undefined,
-              excerptRange: windowInfo
-                ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }
-                : undefined,
-            });
-            if (llmResult.success && llmResult.patch?.trim()) {
-              const replyLines = llmResult.patch.split(/\r?\n/);
-              const fullLines = patchedContent.split(/\r?\n/);
-              const originalWindowLines = windowInfo ? fullLines.slice(windowInfo.startIdx, windowInfo.endIdx) : [];
-              const windowMangled = windowInfo && windowReplyIsSuspicious(originalWindowLines, replyLines);
-              const candidatePatch = windowInfo
-                ? [
-                    ...fullLines.slice(0, windowInfo.startIdx),
-                    ...replyLines,
-                    ...fullLines.slice(windowInfo.endIdx),
-                  ].join('\n')
-                : llmResult.patch;
-              if (windowMangled) {
-                lastFailureReason = `Local model (${resolvedModel}) mangled a ${originalWindowLines.length}-line excerpt instead of reproducing it verbatim (duplicated/dropped/reordered lines) — not used`;
-              } else if (originalContent && looksLikeHallucinatedReplacement(originalContent, candidatePatch)) {
-                lastFailureReason = `Local model (${resolvedModel}) produced a full-file replacement with no trace of the original file's content — likely hallucinated, not used`;
-              } else {
-                patchedContent = candidatePatch;
-                result.modelUsed = resolvedModel;
-                result.usedFallbackModel = false;
-                appliedPatch = true;
-              }
-            } else if (llmResult.error) {
-              lastFailureReason = `Local model (${resolvedModel}) failed: ${llmResult.error}`;
-            }
-          } catch (llmErr: any) {
-            lastFailureReason = `Local model (${resolvedModel}) failed: ${llmErr.message}`;
-            console.warn(`[coding-agents] ${lastFailureReason}`);
-          }
-          if (!appliedPatch && srFailureNote) {
-            lastFailureReason = `SEARCH/REPLACE attempt failed (${srFailureNote}); full-file fallback also failed: ${lastFailureReason || 'unknown reason'}`;
-          }
-        }
-
-        // If local model was unavailable, errored, or produced a hallucinated
-        // result, fall back to cloud model — same guard applied to its output.
-        if (!appliedPatch) {
-          const localReason = lastFailureReason;
-
-          // Same SEARCH/REPLACE attempt as the local model above, tried
-          // first on cloud too, before falling back to full-file/windowed
-          // generation — a stronger cloud model is more likely to follow
-          // the format correctly, and success here is unconditionally safe
-          // (unchanged content never passed through the model).
-          try {
-            const { useFreeLLM } = await import('../use-free-llm.js');
-            const srResult = await generateSearchReplacePatch(
-              patchedContent,
-              activeGoal,
-              relPath,
-              tasksContext,
-              async (prompt) => {
-                const res = await useFreeLLM({
-                  messages: [
-                    { role: 'system', content: 'You are a precise code-editing assistant. Reply with ONLY the requested SEARCH/REPLACE blocks.' },
-                    { role: 'user', content: prompt },
-                  ],
-                  keywords: ['coding', 'qwen', 'deepseek', 'codellama', 'coder'],
-                  taskType: 'coding',
-                  workspace_root: workspaceRoot,
-                  sessionId,
-                  isOnePass: true,
-                  skipIndexing: true,
-                });
-                return res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
-              }
-            );
-            const cloudRegressed = srResult.appliedCount > 0
-              && await searchReplaceRegressesTsErrors(relPath, patchedContent, srResult.content);
-            if (srResult.appliedCount > 0 && !cloudRegressed) {
-              patchedContent = srResult.content;
-              result.modelUsed = 'cloud-free-llm';
-              result.usedFallbackModel = true;
-              appliedPatch = true;
-              if (srResult.failures.length > 0) {
-                result.diagnostics.push({
-                  filePath: relPath,
-                  message: `Cloud model SEARCH/REPLACE: ${srResult.appliedCount} block(s) applied, ${srResult.failures.length} skipped: ${srResult.failures.join('; ')}`,
-                  severity: 'warning',
-                  source: 'llm-patch',
-                });
-              }
-            } else if (cloudRegressed) {
-              lastFailureReason = `Cloud model SEARCH/REPLACE: ${srResult.appliedCount} block(s) matched, but applying them increases the file's compiler error count — rejected atomically`;
-            }
-          } catch {
-            // Fall through to the older cloud strategy below regardless of why.
-          }
-        }
-
-        if (!appliedPatch) {
-          const localReason = lastFailureReason;
-          const { patch: cloudPatch, failureReason } = await generateCodePatchWithCloudLLM(
-            fullPath,
-            activeGoal,
-            patchedContent,
-            workspaceRoot,
-            sessionId,
-            tasksContext
-          );
-          if (cloudPatch?.trim() && originalContent && looksLikeHallucinatedReplacement(originalContent, cloudPatch)) {
-            lastFailureReason = `${localReason ? `${localReason} ` : ''}Cloud fallback also produced a full-file replacement with no trace of the original file's content — likely hallucinated, not used`;
-          } else if (cloudPatch?.trim()) {
-            patchedContent = cloudPatch;
-            result.modelUsed = 'cloud-free-llm';
-            result.usedFallbackModel = true;
-            appliedPatch = true;
-          } else {
-            // If local model specifically failed/refused, surface that primary reason
-            lastFailureReason = localReason
-              ? `${localReason} (Cloud fallback also failed: ${failureReason || 'no response'})`
-              : (failureReason || 'No valid code patch produced by LLM');
-          }
-        }
-
-        if (!appliedPatch && lastFailureReason) {
-          taskHadFailure = true;
-          result.diagnostics.push({
-            filePath: relPath,
-            message: `${lastFailureReason}. You can continue by re-running coding_agents with action: "resume" or providing astEditOps.`,
-            severity: 'error',
-            source: 'llm-patch',
-          });
-        }
+        const generated = await generateFilePatch({
+          input, result, relPath, fullPath, workspaceRoot, sessionId, run, resolvedModel, originalContent, activeGoal,
+          loadedTasks, nextPendingTask, changeFiles, runContents, editedInRun,
+        });
+        patchedContent = generated.patchedContent;
+        if (generated.failed) taskHadFailure = true;
       }
 
       // 4b. Structural AST rewrites (OMP-style $$$VAR patterns)
@@ -780,6 +546,10 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         isNewFile: !fileExists,
       });
 
+      if (patchedContent && patchedContent !== runContents.get(relPath)) {
+        runContents.set(relPath, patchedContent);
+        editedInRun.add(relPath);
+      }
       result.astRewritesCount = (result.astRewritesCount || 0) + rewrites;
       if (run) {
         run.completedCount++;
@@ -849,7 +619,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       }
       // Does the check pass BEFORE the edit? If it already fails, a failure afterwards proves nothing
       // about the patch, so it is reported but not used as a gate.
+      caTrace('edit done; baseline check');
       if (input.verifyCommand && !verifyManual) verifyBaseline = await runVerifyCommand(input.verifyCommand, workspaceRoot);
+      caTrace('baseline check done');
       // Step 1: Snapshot original files into CAS before modifying
       const preApplyMap: Record<string, string> = {};
       const preHistoryMap: Record<string, string | null> = {};
@@ -951,7 +723,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     // fails now) is an error diagnostic, which the post-apply gate below turns into an automatic
     // rollback from the CAS checkpoint.
     if (result.applied && input.verifyCommand && verifyBaseline) {
+      caTrace('check after apply');
       const after = await runVerifyCommand(input.verifyCommand, workspaceRoot);
+      caTrace('check done', `ok=${after.ok}`);
       result.verification = {
         command: input.verifyCommand,
         status: after.ok ? 'passed' : (verifyBaseline.ok ? 'regressed' : 'not_green'),
@@ -983,7 +757,11 @@ ${after.outputTail}`,
         // on it; either way the failing output becomes a debugger brief for the next attempt.
         taskHadFailure = true;
         {
-          result.verification.repairBrief = buildRepairBrief({ command: input.verifyCommand, exitCode: after.exitCode, timedOut: after.timedOut, outputTail: after.outputTail, failedCases: after.failedCases, patchedFiles: patches.map(p => p.filePath) });
+          result.verification.repairBrief = buildRepairBrief({
+            command: input.verifyCommand, exitCode: after.exitCode, timedOut: after.timedOut, outputTail: after.outputTail, failedCases: after.failedCases,
+            patchedFiles: patches.map(p => p.filePath),
+            fileContents: Object.fromEntries(patches.filter(p => typeof p.fullPatchedContent === 'string').map(p => [p.filePath, p.fullPatchedContent as string])),
+          });
         }
       }
     }

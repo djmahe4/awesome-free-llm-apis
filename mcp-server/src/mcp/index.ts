@@ -93,6 +93,12 @@ export async function createMCPServer(): Promise<Server> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            temperature: { type: 'number', description: 'Sampling temperature passed to the provider.' },
+            max_tokens: { type: 'number', description: 'Maximum tokens in the reply.' },
+            top_p: { type: 'number', description: 'Nucleus sampling cutoff passed to the provider.' },
+            provider: { type: 'string', description: 'Provider id to use (e.g. groq, openrouter); skips automatic routing.' },
+            fallback: { type: 'boolean', description: 'Whether to fall back to other providers when the chosen one fails.' },
+            taskType: { type: 'string', description: 'Routing hint, e.g. coding, reasoning, chat, summarization, vision.' },
             messages: {
               type: 'array',
               items: {
@@ -593,6 +599,8 @@ export async function createMCPServer(): Promise<Server> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            source: { type: 'string', enum: ['agentic-awesome', 'hermes'], description: 'Force a specific skill source instead of auto-detecting Hermes first.' },
+            skillDir: { type: 'string', description: 'Workspace-relative directory holding prompt.md + skill.yaml.' },
             skill: { type: 'string', description: 'Name of the skill directory under .free-llm-mcp/skills/' },
             input: { type: 'string', description: 'The prompt or instruction to run with the skill.' },
             model: { type: 'string', description: 'Optional model to use.' },
@@ -625,6 +633,15 @@ export async function createMCPServer(): Promise<Server> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            url: { type: 'string', description: 'register_tool: the tool source (https://github.com/<owner>/<repo>, an apt package or a docker image reference).' },
+            urlType: { type: 'string', enum: ['github', 'apt', 'docker', 'generic'], description: 'register_tool: kind of url.' },
+            category: { type: 'string', enum: ['security', 'testing', 'other'], description: 'register_tool: registry category.' },
+            mode: { type: 'string', enum: ['teach', 'dag_reverse'], description: 'learn/coach: teaching mode or DAG reverse-engineering of a repository.' },
+            repoPath: { type: 'string', description: 'dag_reverse: path of the repository to analyse.' },
+            nodeId: { type: 'string', description: 'dag_reverse: DAG node to work on.' },
+            statusOnly: { type: 'boolean', description: 'dag_reverse: report DAG status without advancing it.' },
+            sliceSize: { type: 'number', description: 'dag_reverse: files per slice, integer 1-50 (default 50).' },
+            scanWorkspace: { type: 'boolean', description: 'Scan the workspace root for dependency information (imports, commands, snippets).' },
             action: { type: 'string', enum: ['list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'osint', 'osint_status', 'run_action', 'resolve_tool'], description: 'Cyber tool action. resolve_tool: ask about any registry tool in free text (prompt); grounded in GitHub/Docker Hub/apt evidence, asks follow-ups, carries the chosen tool+source forward per sessionId, and answers not_found/could_not_verify honestly' },
             prompt: { type: 'string', description: 'For resolve_tool: free-text question, e.g. "what does hexstrike-ai depend on?"' },
             source: { type: 'string', enum: ['github', 'apt', 'docker'], description: 'For resolve_tool: source to ground against (remembered per sessionId)' },
@@ -666,6 +683,8 @@ export async function createMCPServer(): Promise<Server> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            presetCircuit: { type: 'string', enum: ['superposition_exploration', 'adversarial_debate', 'consensus_alignment', 'grover_amplification', 'entangled_verification'], description: 'setup: a predefined circuit instead of explicit gates.' },
+            autoCollapseOnDrift: { type: 'boolean', description: 'Collapse the branches automatically when they drift apart.' },
             action: { type: 'string', enum: ['setup', 'step', 'pause', 'continue', 'modify', 'reset', 'status', 'get_state', 'analyze'], description: 'Quantum circuit action' },
             sessionId: { type: 'string', description: 'Session id keying the circuit state' },
             numBranches: { type: 'number', description: 'For setup: number of reasoning branches/qubits (default 3)' },
@@ -697,6 +716,9 @@ export async function createMCPServer(): Promise<Server> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            temperature: { type: 'number', description: 'Sampling temperature (default 0: deterministic edits).' },
+            model: { type: 'string', description: 'Installed local Ollama model to try first; the ranked rest are fallbacks.' },
+            think: { type: 'string', enum: ['off', 'auto', 'on'], description: 'Reasoning for thinking models (default off).' },
             filePath: { type: 'string', description: 'Relative or absolute path to the file to be patched or created' },
             instruction: { type: 'string', description: 'Instruction explaining what edits or additions to make' },
             workspace_root: { type: 'string', description: 'Optional root workspace directory for context enrichment' },
@@ -742,6 +764,14 @@ export async function createMCPServer(): Promise<Server> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            allowCloudFallback: { type: 'boolean', description: 'Let a failed local edit fall back to free cloud models. This sends the file and goal to a third-party provider, so it is off by default (also settable in <workspace>/.free-llm-mcp/coding-agents.json).' },
+            samples: { type: 'number', description: 'Independent first-round candidates from the original file, judged by verifyCommand (default 3 with a verifyCommand, max 5, 1 disables).' },
+            maxRepairAttempts: { type: 'number', description: 'Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry).' },
+            maxDurationMs: { type: 'number', description: 'Wall-clock budget for the whole repair loop in ms (default 300000). Ends with repair.outcome timed_out and restores the original files if the check is still red.' },
+            review: { type: 'boolean', description: 'Independent review of the diff before apply (default true; never runs when a verifyCommand is given, the tests judge then).' },
+            temperature: { type: 'number', description: 'Sampling temperature for generation (default 0). The repair loop raises it on retries.' },
+            model: { type: 'string', description: 'Installed local Ollama model to use, e.g. a bigger one for a cross-file change. Overrides the automatic choice and the VRAM budget.' },
+            think: { type: 'string', enum: ['off', 'auto', 'on'], description: "Reasoning for thinking models: off (default, fastest at the same pass rate when measured), auto (on with reply-budget headroom, retried without if it uses the whole budget), on." },
             goal: { type: 'string', description: 'The refactoring, feature addition, or bugfix goal' },
             workspaceRoot: { type: 'string', description: 'Workspace root path (defaults to current working directory)' },
             dryRun: { type: 'boolean', description: 'Whether to return the line-anchored patch plan without mutating disk, synchronously (default true). false triggers real background execution — see description.' },
@@ -872,6 +902,14 @@ export async function createMCPServer(): Promise<Server> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            sessionId: { type: 'string', description: 'Session id stored in the project manifest (init_project).' },
+            projectDir: { type: 'string', description: 'Project folder (default <cwd>/projects/<projectId>); must be inside an allowed root.' },
+            artifactId: { type: 'string', description: 'Artifact to act on (required for approve_artifact, reroll_artifact, update_artifact_bounds, apply_effect, undo_effect).' },
+            name: { type: 'string', description: 'add_artifact: display name of the artifact.' },
+            allowOverlap: { type: 'boolean', description: 'add_artifact: allow the new artifact to overlap others on its track.' },
+            apiKey: { type: 'string', description: 'Pollinations API key for generation (default: POLLINATIONS_API_KEY from the environment; prefer the environment).' },
+            hfToken: { type: 'string', description: 'Hugging Face token for motion/music generation (default: HF_TOKEN from the environment; prefer the environment).' },
+            remix: { type: 'boolean', description: 'apply_effect: build on the current artifact (default true); false starts from the original.' },
             action: {
               type: 'string',
               enum: ['init_project', 'get_timeline', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'apply_effect', 'undo_effect', 'compile_timeline'],

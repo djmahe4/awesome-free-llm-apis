@@ -102,9 +102,21 @@ export interface CodingAgentsInput {
   /** Independent candidate attempts drawn from the original file before repairing the closest one (default 3 when a verifyCommand is given; 1 disables; max 5). */
   samples?: number;
   /** Regenerate the (small) file from the requirements instead of patching it; set by the repair loop when many cases fail. */
+  /** @internal set by the repair loop. */
   rewrite?: boolean;
   /** Sampling temperature for generation (default 0). The repair loop raises it on retries so a repeat is not identical. */
   temperature?: number;
+  /** Files that belong to this change but are not edited in this call; their API surface is shown as reference. Set by the repair loop when it narrows a retry. */
+  /** @internal set by the repair loop. */
+  relatedFiles?: string[];
+  /** Let a failed local edit fall back to free cloud models, which sends the file and goal to a third-party provider (default false; also settable in .free-llm-mcp/coding-agents.json). */
+  allowCloudFallback?: boolean;
+  /** Installed local model to use (e.g. a bigger one for a cross-file change). Overrides the automatic choice and the VRAM budget. */
+  model?: string;
+  /** Reasoning for thinking models: off (default), auto, on. See local_llm_patch. */
+  think?: 'auto' | 'on' | 'off';
+  /** Wall-clock budget for the whole repair loop in ms (default 5 minutes). */
+  maxDurationMs?: number;
   /** Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry). */
   maxRepairAttempts?: number;
   /** Independent review of the proposed diff before apply (default on; false disables it). */
@@ -150,7 +162,7 @@ export interface CodingAgentsResult {
   };
   /** How the automatic repair loop ended (present when a check or review took part). */
   repair?: {
-    outcome: 'converged' | 'not_converged' | 'stuck' | 'needs_user' | 'error';
+    outcome: 'converged' | 'not_converged' | 'stuck' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
     attemptCount: number;
     attempts: RepairAttempt[];
   };
