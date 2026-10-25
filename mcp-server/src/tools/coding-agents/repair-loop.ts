@@ -24,6 +24,10 @@ type Rollback = (checkpointId: string, newFiles: string[]) => Promise<string[]>;
 /** Writes known file contents back (used to return to the best attempt after a worse one). */
 type RestoreFiles = (files: Array<{ filePath: string; content: string }>) => Promise<void>;
 
+export const MAX_SAMPLES = 5;
+/** Temperatures of the independent samples after the first (the first stays deterministic). */
+const SAMPLE_TEMPERATURES = [0.4, 0.6, 0.8, 0.8];
+
 /** Attempts at or under this many failing cases are patched in place; above it the file is rewritten. */
 const NEAR_MISS = 3;
 
@@ -58,7 +62,14 @@ export async function runWithRepairLoop(
 ): Promise<CodingAgentsResult> {
   // Deterministic AST edits cannot be "re-generated", so there is nothing to repair by retrying.
   const retriable = !(input.astEditOps && input.astEditOps.length > 0);
-  const budget = retriable ? Math.min(MAX_REPAIR_ATTEMPTS, Math.max(0, input.maxRepairAttempts ?? DEFAULT_REPAIR_ATTEMPTS)) : 0;
+  const repairBudget = retriable ? Math.min(MAX_REPAIR_ATTEMPTS, Math.max(0, input.maxRepairAttempts ?? DEFAULT_REPAIR_ATTEMPTS)) : 0;
+  // Independent candidates drawn from the ORIGINAL file (tests are the verifier). Needs a way to get back
+  // to the original between candidates, and an objective check to compare them by.
+  const samples = retriable && input.verifyCommand && rollback
+    ? Math.min(MAX_SAMPLES, Math.max(1, Math.floor(input.samples ?? 1)))
+    : 1;
+  // Sampling attempts come first and do not consume the repair budget.
+  const budget = repairBudget + (samples - 1);
 
   const attempts: RepairAttempt[] = [];
   let current = input;
@@ -115,6 +126,37 @@ export async function runWithRepairLoop(
     if (result.verification?.status === 'needs_user') { outcome = 'needs_user'; break; }
     if (!brief) { outcome = 'converged'; break; }
     if (n > budget) { outcome = 'not_converged'; break; }
+
+    // ── sampling phase: independent candidates from the original ─────────────────────────
+    if (n < samples) {
+      if (originalCheckpoint) {
+        await rollback!(originalCheckpoint, [...createdFiles]);
+        // Independent samples from the original, but not blind: they are told which cases the original
+        // fails (the baseline run), which is the whole point when it is one edge case in good code.
+        const baselineBrief = result.verification?.baselineBrief;
+        current = {
+          ...input,
+          temperature: SAMPLE_TEMPERATURES[Math.min(n - 1, SAMPLE_TEMPERATURES.length - 1)],
+          ...(baselineBrief ? { feedback: baselineBrief } : {}),
+        };
+        continue;
+      }
+    } else if (n === samples && samples > 1 && best && originalCheckpoint) {
+      // Sampling is over: continue from the closest candidate. The first repair try is a shade hotter
+      // than greedy, and runs on the best candidate (restored if it was not the last one drawn).
+      if (best.failing > NEAR_MISS && !best.isOriginal) {
+        await rollback!(originalCheckpoint, [...createdFiles]);
+        current = { ...input, feedback: best.brief, temperature: 0.3, rewrite: true };
+      } else {
+        if (!latestIsBest) {
+          await rollback!(originalCheckpoint, [...createdFiles]);
+          if (!best.isOriginal && restoreFiles && best.files.length > 0) await restoreFiles(best.files);
+        }
+        current = { ...input, feedback: best.brief, temperature: 0.3 };
+      }
+      lastBrief = best.brief;
+      continue;
+    }
     // The same failure twice even at the hottest sampling temperature: more retries would only burn tokens.
     // (Below that, a repeat is expected from a near-deterministic sampler and is not yet proof of being stuck.)
     if (brief === lastBrief && (current.temperature ?? 0) >= 0.9) { outcome = 'stuck'; break; }
@@ -141,7 +183,7 @@ export async function runWithRepairLoop(
       await rollback!(originalCheckpoint!, [...createdFiles]);
       nextBrief = best?.brief ?? brief;
     }
-    current = { ...input, feedback: nextBrief, temperature: RETRY_TEMPERATURE(n + 1), ...(rewrite ? { rewrite: true } : {}) };
+    current = { ...input, feedback: nextBrief, temperature: RETRY_TEMPERATURE(n - samples + 2), ...(rewrite ? { rewrite: true } : {}) };
   }
 
   // Test-first work keeps a still-red attempt applied so the next one can build on it. If it never went

@@ -99,6 +99,8 @@ export interface CodingAgentsInput {
   verifyReport?: { exitCode: number; output: string; command?: string };
   /** Debugger brief from a previous failed attempt; appended to the goal for the retry. */
   feedback?: string;
+  /** Independent candidate attempts drawn from the original file before repairing the closest one (default 3 when a verifyCommand is given; 1 disables; max 5). */
+  samples?: number;
   /** Regenerate the (small) file from the requirements instead of patching it; set by the repair loop when many cases fail. */
   rewrite?: boolean;
   /** Sampling temperature for generation (default 0). The repair loop raises it on retries so a repeat is not identical. */

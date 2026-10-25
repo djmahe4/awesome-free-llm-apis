@@ -279,6 +279,102 @@ describe('the baseline counts as an attempt: never end up worse than where you s
   });
 });
 
+describe('n-candidate first round (sampling with the tests as verifier)', () => {
+  const cand = (failing: number, content: string) => notGreen(`brief-${failing}-${content}`, {
+    checkpointId: 'cp-orig',
+    patchPlan: [{ filePath: 'src/x.js', isNewFile: false, fullPatchedContent: content } as any],
+    verification: { command: 'c', status: 'not_green', ok: false, baselineOk: false, exitCode: 1, timedOut: false, outputTail: '', durationMs: 1,
+      repairBrief: `brief-${failing}-${content}`, failedCases: Array.from({ length: failing }, (_, i) => `case ${i}`) },
+  });
+  const run = (results: CodingAgentsResult[], extra: Partial<CodingAgentsInput> = {}) => {
+    const log: string[] = [];
+    const queue = [...results];
+    const p = runWithRepairLoop({ ...input, ...extra }, 's', undefined,
+      async (i) => { log.push(`run(t=${i.temperature},fb=${i.feedback ?? '-'})`); return queue.shift()!; },
+      async (id) => { log.push(`rollback(${id})`); return []; },
+      async (files) => { log.push(`restore(${files.map(f => f.content).join(',')})`); });
+    return { log, p };
+  };
+
+  it('draws independent samples from the ORIGINAL at rising temperatures, stopping at the first green', async () => {
+    const { log, p } = run([cand(5, 'A'), cand(3, 'B'), passed()], { samples: 3 });
+    const r = await p;
+    expect(log).toEqual([
+      'run(t=undefined,fb=-)', 'rollback(cp-orig)',
+      'run(t=0.4,fb=-)', 'rollback(cp-orig)',
+      'run(t=0.6,fb=-)',
+    ]);
+    expect(r.repair).toMatchObject({ outcome: 'converged', attemptCount: 3 });
+  });
+
+  it('every sample after the first is told which cases the ORIGINAL fails (the baseline brief), so it is targeted, not blind', async () => {
+    const withBaseline = (failing: number) => {
+      const r = cand(failing, `S${failing}`);
+      r.verification!.baselineBrief = 'BASELINE: rejects "1.5h" fails';
+      r.verification!.baselineFailedCases = ['rejects "1.5h"'];
+      return r;
+    };
+    const { log, p } = run([withBaseline(6), withBaseline(5), passed()], { samples: 3 });
+    await p;
+    expect(log).toEqual([
+      'run(t=undefined,fb=-)', 'rollback(cp-orig)',
+      'run(t=0.4,fb=BASELINE: rejects "1.5h" fails)', 'rollback(cp-orig)',
+      'run(t=0.6,fb=BASELINE: rejects "1.5h" fails)',
+    ]);
+  });
+
+  it('after the samples, repairs the closest candidate (restoring it first when it was not the last)', async () => {
+    const { log, p } = run([cand(1, 'A'), cand(6, 'B'), passed()], { samples: 2, maxRepairAttempts: 2 });
+    const r = await p;
+    expect(log).toEqual([
+      'run(t=undefined,fb=-)', 'rollback(cp-orig)',
+      'run(t=0.4,fb=-)',
+      'rollback(cp-orig)', 'restore(A)', 'run(t=0.3,fb=brief-1-A)',
+    ]);
+    expect(r.repair?.outcome).toBe('converged');
+  });
+
+  it('when the last sample is the closest it is repaired in place', async () => {
+    const { log, p } = run([cand(6, 'A'), cand(2, 'B'), passed()], { samples: 2, maxRepairAttempts: 2 });
+    await p;
+    expect(log).toEqual(['run(t=undefined,fb=-)', 'rollback(cp-orig)', 'run(t=0.4,fb=-)', 'run(t=0.3,fb=brief-2-B)']);
+  });
+
+  it('a far-from-green best candidate is rewritten from the original instead of patched', async () => {
+    const { log, p } = run([cand(8, 'A'), cand(7, 'B'), passed()], { samples: 2, maxRepairAttempts: 2 });
+    await p;
+    expect(log).toEqual(['run(t=undefined,fb=-)', 'rollback(cp-orig)', 'run(t=0.4,fb=-)', 'rollback(cp-orig)', 'run(t=0.3,fb=brief-7-B)']);
+  });
+
+  it('samples: 1 (or no rollback available) keeps the old single-first-attempt behaviour', async () => {
+    const one = run([cand(2, 'A'), passed()], { samples: 1, maxRepairAttempts: 2 });
+    await one.p;
+    expect(one.log.filter(l => l.startsWith('run(')).length).toBe(2);
+    expect(one.log[0]).toBe('run(t=undefined,fb=-)');
+    expect(one.log[1]).toBe('run(t=0.3,fb=brief-2-A)');
+    const results = [cand(2, 'A'), passed()];
+    const seen: Array<number | undefined> = [];
+    await runWithRepairLoop({ ...input, samples: 3, maxRepairAttempts: 2 }, 's', undefined, async (i) => { seen.push(i.temperature); return results.shift()!; });
+    expect(seen).toEqual([undefined, 0.3]); // no rollback callback: cannot draw fresh samples
+  });
+
+  it('the sampling attempts do not eat the repair budget', async () => {
+    let n = 0;
+    const r = await runWithRepairLoop({ ...input, samples: 3, maxRepairAttempts: 2 }, 's', undefined,
+      async () => cand(2, `x${++n}`), async () => [], async () => {});
+    expect(n).toBe(3 + 2); // 3 samples (the first is the normal attempt), then exactly 2 repairs
+    expect(r.repair?.outcome).toBe('not_converged');
+  });
+
+  it('a needs_user or error result during sampling stops immediately', async () => {
+    let n = 0;
+    const r = await runWithRepairLoop({ ...input, samples: 3 }, 's', undefined,
+      async () => { n++; return base({ error: 'model offline' }); }, async () => [], async () => {});
+    expect(n).toBe(1);
+    expect(r.repair?.outcome).toBe('error');
+  });
+});
+
 describe('parseReview', () => {
   it('blocks only on a finding that cites a concrete input, expected and actual', () => {
     const text = [

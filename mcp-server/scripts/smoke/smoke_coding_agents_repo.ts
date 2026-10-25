@@ -17,6 +17,7 @@ import path from 'node:path';
 const arg = (k: string, d?: string) => { const i = process.argv.indexOf(`--${k}`); return i >= 0 ? process.argv[i + 1] : d; };
 const PORT = arg('port', '3111');
 const ATTEMPTS = Number(arg('attempts', '4'));
+const SAMPLES = Number(arg('samples', '3'));
 const WANT = (arg('tasks', 'counter,slug,tests,roman,duration,unique') as string).split(',');
 const BASE = `http://localhost:${PORT}`;
 
@@ -136,7 +137,7 @@ async function runTask(t: Task) {
   const sessionId = `smoke-${t.id}-${Date.now()}`;
   const started = Date.now();
   const verifyCommand = `node --test ${t.test}`;
-  await post({ goal: t.goal, workspaceRoot: ws, dryRun: false, topKFiles: 1, targetFiles: [t.target], sessionId, resolve: { action: 'apply' }, verifyCommand, maxRepairAttempts: ATTEMPTS });
+  await post({ goal: t.goal, workspaceRoot: ws, dryRun: false, topKFiles: 1, targetFiles: [t.target], sessionId, resolve: { action: 'apply' }, verifyCommand, maxRepairAttempts: ATTEMPTS, samples: SAMPLES });
   let res: any;
   for (let i = 0; i < 120; i++) {
     res = await post({ action: 'status', workspaceRoot: ws, sessionId });

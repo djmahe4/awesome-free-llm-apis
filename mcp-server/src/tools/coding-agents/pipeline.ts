@@ -129,7 +129,8 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
   (async () => {
     try {
       // Real execution: a failed check or a blocking review is retried with a debugger brief (bounded).
-      const result = await runWithRepairLoop(input, sessionId, run, runCodingAgentsPipeline, async (checkpointId, newFiles) => {
+      // With a check, draw 3 independent candidates first (the tests pick among them) unless told otherwise.
+      const result = await runWithRepairLoop({ ...input, samples: input.samples ?? 3 }, sessionId, run, runCodingAgentsPipeline, async (checkpointId, newFiles) => {
         const { files } = await globalCasStore.restoreCheckpointToDisk(checkpointId, path.resolve(input.workspaceRoot || process.cwd()));
         for (const f of newFiles) await fs.remove(path.resolve(input.workspaceRoot || process.cwd(), f)).catch(() => {});
         return [...files, ...newFiles];
