@@ -203,13 +203,29 @@ function boundedProgress(progress: ProgressRecord): ProgressRecord {
     };
 }
 
-/** Never throws — the coach must keep responding even if a page can't be persisted this turn. */
-async function safeWikiWrite(wiki: WikiMemory, title: string, content: string, tags: string[], links: string[] = []): Promise<boolean> {
+/**
+ * Never throws — the coach must keep responding even if a page can't be persisted this turn. A failure is
+ * recorded in `failures` (one entry per page) so the action's answer can say persisted:false instead of a plain success.
+ */
+async function safeWikiWrite(failures: string[], wiki: WikiMemory, title: string, content: string, tags: string[], links: string[] = []): Promise<boolean> {
     try {
         await wiki.write(title, content, tags, links);
         return true;
     } catch (err) {
         console.error(`[cyber_tool] wiki write failed for "${title}":`, err);
+        failures.push(`${title}: ${(err as Error)?.message || err}`);
+        return false;
+    }
+}
+
+/** persistGraph that records a failure the same way instead of failing the whole action. */
+async function safePersistGraph(failures: string[], wiki: WikiMemory, sessionId: string, graph: RepositoryGraph): Promise<boolean> {
+    try {
+        await persistGraph(wiki, sessionId, graph);
+        return true;
+    } catch (err) {
+        console.error('[cyber_tool] graph save failed:', err);
+        failures.push(`${graphPageTitle(sessionId)}: ${(err as Error)?.message || err}`);
         return false;
     }
 }
@@ -233,6 +249,8 @@ export async function cyberTool(input: CyberToolInput) {
     const sessionId = input.sessionId || 'cyber_tools_session';
     let result: any;
     let isError = false;
+    // wiki pages / graph saves that failed during this call (see safeWikiWrite)
+    const failures: string[] = [];
 
     try {
         // toolName becomes a wiki page segment and frontmatter tag: reject anything that is not a plain name.
@@ -275,7 +293,7 @@ export async function cyberTool(input: CyberToolInput) {
             let page = await wiki.read(pagePath);
             if (!page) {
                 const defaultContent = '# ' + input.toolName + ' Flags & Troubleshooting\n\nDefault operational flags and guidance for ' + input.toolName + '.';
-                await safeWikiWrite(wiki, pagePath, defaultContent, ['cyber', 'tool-guide', input.toolName]);
+                await safeWikiWrite(failures, wiki, pagePath, defaultContent, ['cyber', 'tool-guide', input.toolName]);
                 page = await wiki.read(pagePath);
             }
             result = {
@@ -382,11 +400,11 @@ export async function cyberTool(input: CyberToolInput) {
                     nodes: manifest.nodes.map(n => ({ id: n.id, sliceKey: n.sliceKey, status: n.status, itemCount: n.itemCount, wikiPage: n.wikiPage, error: n.error }))
                 };
                 const manifestKey = `dag_manifest/${sessionId}`;
-                await safeWikiWrite(wiki, manifestKey, JSON.stringify(manifestForStorage), ['cyber', 'dag', input.toolName]);
+                await safeWikiWrite(failures, wiki, manifestKey, JSON.stringify(manifestForStorage), ['cyber', 'dag', input.toolName]);
 
                 const graph = await loadGraph(wiki, sessionId);
                 graph.addNode('root', 'concept', { ctfType: 'goal', label: input.goal || `DAG Reverse ${input.toolName}` });
-                await persistGraph(wiki, sessionId, graph);
+                await safePersistGraph(failures, wiki, sessionId, graph);
 
                 result = {
                     success: true,
@@ -462,11 +480,11 @@ export async function cyberTool(input: CyberToolInput) {
                     stepCount: 0,
                     createdAt: new Date().toISOString()
                 };
-                await safeWikiWrite(wiki, progressPageTitle(sessionId), JSON.stringify(boundedProgress(progress)), ['cyber', 'learn']);
+                await safeWikiWrite(failures, wiki, progressPageTitle(sessionId), JSON.stringify(boundedProgress(progress)), ['cyber', 'learn']);
 
                 const graph = await loadGraph(wiki, sessionId);
                 graph.addNode('root', 'concept', { ctfType: 'goal', label: input.goal });
-                await persistGraph(wiki, sessionId, graph);
+                await safePersistGraph(failures, wiki, sessionId, graph);
 
                 result = {
                     success: true,
@@ -599,7 +617,11 @@ export async function cyberTool(input: CyberToolInput) {
                         invokedTools: invokedTools.length > 0 ? invokedTools.slice(0, 20) : []
                     });
                 } catch (err: any) {
-                    analysis = `(LLM call unavailable: ${err?.message || err})\n\nItems scanned:\n${itemSummary}`;
+                    // No analysis, no page: writing "(LLM call unavailable ...)" and marking the node done made a
+                    // failed node look finished and blocked its retry. It stays pending so the same call can be repeated.
+                    targetNode.error = `model call failed: ${err?.message || err}`;
+                    isError = true;
+                    return result = { success: false, nodeId: targetNode.id, status: 'pending', error: `Could not analyse node ${targetNode.id}: ${err?.message || err}. It stays pending; call again to retry.` };
                 }
 
                 for (const item of targetNode.items) {
@@ -609,7 +631,7 @@ export async function cyberTool(input: CyberToolInput) {
                         : `Install: ${item.method} | URL: ${item.url} | Category: ${item.module} | Use: security testing`;
                     const existing = await wiki.read(`${name}/run_suggestions`);
                     const appended = trimToByteBudget(existing ? `${existing.content}\n\n---\n${note}` : note, TOOL_MEMORY_MAX_BYTES);
-                    await safeWikiWrite(wiki, `${name}/run_suggestions`, appended, ['cyber', manifest.toolName]);
+                    await safeWikiWrite(failures, wiki, `${name}/run_suggestions`, appended, ['cyber', manifest.toolName]);
                 }
 
                 const toolRows = targetNode.items.map((item: any) => {
@@ -636,12 +658,17 @@ export async function cyberTool(input: CyberToolInput) {
                     analysis
                 ].join('\n');
 
-                await safeWikiWrite(wiki, targetNode.id, wikiContent, ['cyber', 'dag', manifest.toolName]);
+                const pageSaved = await safeWikiWrite(failures, wiki, targetNode.id, wikiContent, ['cyber', 'dag', manifest.toolName]);
+                if (!pageSaved) {
+                    // the node's result has nowhere to live: it must not be marked done
+                    isError = true;
+                    return result = { success: false, nodeId: targetNode.id, status: 'pending', persisted: false, persistWarnings: [...failures], error: `Could not save the wiki page for node ${targetNode.id}. It stays pending; call again to retry.` };
+                }
 
                 const graph = await loadGraph(wiki, sessionId);
                 graph.addNode(targetNode.id, 'concept', { ctfType: 'action', label: `Node ${targetNode.id}: ${targetNode.itemCount} items` });
                 graph.addEdge('root', targetNode.id, 'references');
-                await persistGraph(wiki, sessionId, graph);
+                await safePersistGraph(failures, wiki, sessionId, graph);
 
                 targetNode.status = 'done';
                 targetNode.wikiPage = targetNode.id;
@@ -653,7 +680,7 @@ export async function cyberTool(input: CyberToolInput) {
                     ...manifest,
                     nodes: manifest.nodes.map(n => ({ id: n.id, sliceKey: n.sliceKey, status: n.status, itemCount: n.itemCount, wikiPage: n.wikiPage, error: n.error }))
                 };
-                await safeWikiWrite(wiki, manifestKey, JSON.stringify(manifestForStorage), ['cyber', 'dag', manifest.toolName]);
+                await safeWikiWrite(failures, wiki, manifestKey, JSON.stringify(manifestForStorage), ['cyber', 'dag', manifest.toolName]);
 
                 const nextPending = manifest.nodes.find(n => n.status === 'pending');
                 result = {
@@ -718,7 +745,7 @@ export async function cyberTool(input: CyberToolInput) {
                         { observation: input.observation ? capText(input.observation, STEP_TEXT_CAP) : undefined, advice: capText(advice, STEP_TEXT_CAP), at: new Date().toISOString() }
                     ]
                 };
-                await safeWikiWrite(wiki, progressPageTitle(sessionId), JSON.stringify(boundedProgress(updatedProgress)), ['cyber', 'learn']);
+                await safeWikiWrite(failures, wiki, progressPageTitle(sessionId), JSON.stringify(boundedProgress(updatedProgress)), ['cyber', 'learn']);
 
                 const stepId = `step-${stepNumber}`;
                 const priorStepId = stepNumber > 1 ? `step-${stepNumber - 1}` : 'root';
@@ -727,7 +754,7 @@ export async function cyberTool(input: CyberToolInput) {
                     label: input.observation ? `Observed: ${input.observation}` : advice.slice(0, 120)
                 });
                 graph.addEdge(priorStepId, stepId, 'references');
-                await persistGraph(wiki, sessionId, graph);
+                await safePersistGraph(failures, wiki, sessionId, graph);
 
                 if (input.toolName) {
                     const suggestionNote = advice.slice(0, TOOL_NOTE_CAP);
@@ -735,7 +762,7 @@ export async function cyberTool(input: CyberToolInput) {
                     const structuredNote = `Install: ${suggestionNote}\nUse: security testing`;
                     const existing = await wiki.read(`${input.toolName}/run_suggestions`);
                     const appended = trimToByteBudget(existing ? `${existing.content}\n\n---\n${structuredNote}` : structuredNote, TOOL_MEMORY_MAX_BYTES);
-                    await safeWikiWrite(wiki, `${input.toolName}/run_suggestions`, appended, ['cyber']);
+                    await safeWikiWrite(failures, wiki, `${input.toolName}/run_suggestions`, appended, ['cyber']);
                     if (isFailure) {
                         GlobalWikiManager.logFailure(input.toolName);
                     } else {
@@ -760,7 +787,7 @@ export async function cyberTool(input: CyberToolInput) {
                 graph.addNode(id, 'concept', { ctfType: type || 'action', label });
                 if (from) graph.addEdge(from, id, 'references');
             }
-            await persistGraph(wiki, sessionId, graph);
+            await safePersistGraph(failures, wiki, sessionId, graph);
             result = {
                 success: true,
                 sessionId,
@@ -788,7 +815,7 @@ export async function cyberTool(input: CyberToolInput) {
                 const structuredNote = `Install: ${capText(input.note, TOOL_NOTE_CAP)}\nUse: security testing`;
                 const existing = await wiki.read(`${input.toolName}/run_suggestions`);
                 const appended = trimToByteBudget(existing ? `${existing.content}\n\n---\n${structuredNote}` : structuredNote, TOOL_MEMORY_MAX_BYTES);
-                const written = await safeWikiWrite(wiki, `${input.toolName}/run_suggestions`, appended, ['cyber']);
+                const written = await safeWikiWrite(failures, wiki, `${input.toolName}/run_suggestions`, appended, ['cyber']);
                 result = { success: written, toolName: input.toolName, wikiPage: written ? await wiki.read(`${input.toolName}/run_suggestions`) : null };
             } else {
                 const suggestions = await wiki.read(`${input.toolName}/run_suggestions`);
@@ -958,7 +985,7 @@ export async function cyberTool(input: CyberToolInput) {
                 + `## Recommended Google / Recon Dorks\n${recommendedDorks.map(d => `- \`${d}\``).join('\n')}\n\n`
                 + (input.autoSearch && searchStatus === 'done' ? `## Automated Search Results\n\`\`\`json\n${JSON.stringify(searchResults, null, 2)}\n\`\`\`\n` : '');
 
-            await safeWikiWrite(wiki, `osint/${target.replace(/[^\w.-]/g, '_')}`, wikiContent, ['cyber', 'osint']);
+            await safeWikiWrite(failures, wiki, `osint/${target.replace(/[^\w.-]/g, '_')}`, wikiContent, ['cyber', 'osint']);
 
             result = {
                 success: true,
@@ -1036,6 +1063,11 @@ export async function cyberTool(input: CyberToolInput) {
             }
         } else {
             throw new Error(`Unsupported cyber_tool action: ${action}`);
+        }
+        // Anything that could not be saved is part of the answer (it used to be swallowed behind success:true)
+        if (failures.length > 0 && result && typeof result === 'object' && !Array.isArray(result)) {
+            result.persisted = false;
+            result.persistWarnings = [...failures];
         }
     } catch (err: any) {
         isError = true;
