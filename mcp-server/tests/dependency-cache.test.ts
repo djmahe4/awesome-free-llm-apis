@@ -17,7 +17,7 @@ describe('Dependency & Concept Cache', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   describe('Parsers & Extraction', () => {

@@ -26,7 +26,7 @@ Do the test thing.`);
     });
 
     afterAll(async () => {
-        await fs.remove(TEST_SKILL_DIR);
+        await fs.rm(TEST_SKILL_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         await generateManifest(); // regenerate so the fixture doesn't linger in manifest.json
     });
 

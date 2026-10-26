@@ -26,7 +26,7 @@ describe('GET & POST /api/chat-log/:sessionId & /api/tool tool call visibility',
   afterEach(async () => {
     server?.close();
     try {
-      await fsp.rm(sessionDir, { recursive: true, force: true });
+      await fsp.rm(sessionDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     } catch {}
   });
 

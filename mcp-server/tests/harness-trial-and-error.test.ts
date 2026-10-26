@@ -55,7 +55,7 @@ describe('harness trial-and-error — bounded retry on failure (integration)', (
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('retries an empty-content failure once (default maxAttemptsPerStep 2), succeeds on the second attempt, writes a lesson node', async () => {

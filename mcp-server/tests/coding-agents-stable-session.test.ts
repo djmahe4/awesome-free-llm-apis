@@ -29,8 +29,8 @@ describe('CodingAgentsHandler — stable workspace sessionId', () => {
   });
 
   afterEach(async () => {
-    if (ws1) await fs.remove(ws1);
-    if (ws2) await fs.remove(ws2);
+    if (ws1) await fs.rm(ws1, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    if (ws2) await fs.rm(ws2, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('derives the same sessionId across calls on one workspace when sessionId is omitted', async () => {

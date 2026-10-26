@@ -29,7 +29,7 @@ describe('validateVerifyCommand', () => {
 
 describe('runVerifyCommand', () => {
   let ws = '';
-  afterEach(async () => { if (ws) await fs.remove(ws); ws = ''; });
+  afterEach(async () => { if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); ws = ''; });
 
   it('reports exit 0 as ok and captures output', async () => {
     ws = await makeWs({ 'ok.js': 'console.log("all green");' });
@@ -79,7 +79,7 @@ describe('runVerifyCommand', () => {
 
 describe('CodingAgentsHandler verifyCommand gate', () => {
   let ws = '';
-  afterEach(async () => { if (ws) await fs.remove(ws); ws = ''; });
+  afterEach(async () => { if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); ws = ''; });
 
   const SRC = 'src/app.ts';
   const ORIGINAL = ['export function greet() {', '  return "hello";', '}'].join('\n');

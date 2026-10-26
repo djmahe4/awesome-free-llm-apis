@@ -29,7 +29,7 @@ describe('codeEditCandidates with a pinned model', () => {
 });
 
 let ws = '';
-afterEach(async () => { vi.restoreAllMocks(); if (ws) await fs.remove(ws); });
+afterEach(async () => { vi.restoreAllMocks(); if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 describe('coding_agents model input', () => {
     it('passes the pinned model down to local_llm_patch and reports it as used', async () => {

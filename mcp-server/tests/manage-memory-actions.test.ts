@@ -19,8 +19,8 @@ beforeAll(async () => {
 });
 afterAll(async () => {
     if (prevHome === undefined) delete process.env.FREE_LLM_MCP_HOME; else process.env.FREE_LLM_MCP_HOME = prevHome;
-    await fs.rm(home, { recursive: true, force: true });
-    await fs.rm(ws, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 const call = (input: Record<string, unknown>) => manageMemory({ workspace_root: ws, ...input });

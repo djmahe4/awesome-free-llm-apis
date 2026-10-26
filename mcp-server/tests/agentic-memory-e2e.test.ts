@@ -146,9 +146,9 @@ describe('Agentic Memory End-to-End', () => {
     });
 
     afterAll(async () => {
-        await fs.rm(TEST_WORKSPACE, { recursive: true, force: true });
+        await fs.rm(TEST_WORKSPACE, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         const projectDir = path.join(PROJECTS_DIR, TEST_SESSION);
-        await fs.rm(projectDir, { recursive: true, force: true });
+        await fs.rm(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
 
     it('should decompose tasks and harvest skills across multiple subtasks', async () => {
@@ -227,6 +227,6 @@ describe('Agentic Memory End-to-End', () => {
         expect(injectedContent).toContain('New query');
 
         // Cleanup
-        await fs.rm(projectDir, { recursive: true, force: true });
+        await fs.rm(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
 });

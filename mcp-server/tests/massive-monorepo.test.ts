@@ -37,7 +37,7 @@ describe('TDD Scenario A - The Massive Monorepo (Pre-emptive Indexing)', () => {
 
     afterAll(async () => {
         try {
-            await fs.remove(testRepoDir);
+            await fs.rm(testRepoDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         } catch {}
     });
 

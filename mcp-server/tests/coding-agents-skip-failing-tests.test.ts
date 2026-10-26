@@ -21,7 +21,7 @@ beforeEach(async () => {
     ws = await fs.mkdtemp(path.join(os.tmpdir(), 'skip-tests-'));
     await fs.outputFile(path.join(ws, 'tests/t.test.js'), TEST_FILE);
 });
-afterEach(async () => { delete process.env.REAL_EXPECT; await fs.remove(ws); });
+afterEach(async () => { delete process.env.REAL_EXPECT; await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 const settings = (s: object) => fs.outputFile(path.join(ws, '.free-llm-mcp/coding-agents.json'), JSON.stringify(s));
 

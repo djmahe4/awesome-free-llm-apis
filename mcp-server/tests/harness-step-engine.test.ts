@@ -47,7 +47,7 @@ describe('harness step engine — two-role chain (integration)', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('runs researcher then analyst as two real steps, chaining a validated handoff between them', async () => {
@@ -151,7 +151,7 @@ describe('harness step engine — repeat detector (unit)', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('trips when the same callId+argsHash already reached a successful tool_result', async () => {

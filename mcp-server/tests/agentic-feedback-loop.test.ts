@@ -14,7 +14,7 @@ describe('Agentic Middleware Feedback Loop Tests', () => {
     });
 
     afterEach(async () => {
-        await fs.remove(testDir);
+        await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         vi.restoreAllMocks();
     });
 
@@ -56,7 +56,7 @@ describe('Agentic Middleware Feedback Loop Tests', () => {
         const gatherSpy = vi.spyOn(ContextGatherer, 'gatherContext').mockResolvedValue([]);
 
         const logPath = path.join(os.homedir(), '.free-llm-mcp', 'projects', 'test-session-logging', 'agentic-debug.log');
-        await fs.remove(logPath);
+        await fs.rm(logPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 
         await middleware.execute(context, async () => {});
 

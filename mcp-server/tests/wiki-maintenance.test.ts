@@ -75,7 +75,7 @@ describe('shouldRunWikiMaintenance (non-git fallback)', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     const keys = await memoryManager.longTerm.list();
     for (const key of keys) {
       if (key.startsWith(`file:${wsHash}:`)) await memoryManager.longTerm.delete(key);
@@ -113,12 +113,12 @@ describe('markStaleForRemovedFiles', () => {
   const wsHash = 'stale-test-hash';
 
   beforeEach(async () => {
-    await fs.rm(testDir, { recursive: true, force: true });
+    await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     await fs.mkdir(testDir, { recursive: true });
   });
 
   afterEach(async () => {
-    await fs.rm(testDir, { recursive: true, force: true });
+    await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('marks a wiki page stale when its content references a deleted file', async () => {
@@ -215,6 +215,6 @@ describe('decideWikiUpdates no-op smoke test', () => {
     expect(getInstanceSpy).not.toHaveBeenCalled();
 
     getInstanceSpy.mockRestore();
-    await fs.rm(path.join(os.tmpdir(), 'wiki-maint-smoke'), { recursive: true, force: true });
+    await fs.rm(path.join(os.tmpdir(), 'wiki-maint-smoke'), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 });

@@ -21,7 +21,7 @@ const goodBlock = '<<<<<<< SEARCH\n    const y = x + 1;\n=======\n    const y = 
 const badBlock = '<<<<<<< SEARCH\n    const nothingLikeThis = 0;\n=======\n    const y = x + 2;\n>>>>>>> REPLACE\n';
 
 let ws = '';
-afterEach(async () => { vi.restoreAllMocks(); if (ws) await fs.remove(ws); });
+afterEach(async () => { vi.restoreAllMocks(); if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 async function run(replies: Array<{ success: boolean; patch?: string; error?: string }>) {
     ws = await fs.mkdtemp(path.join(os.tmpdir(), 'ca-sr-retry-'));

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import fs from 'fs-extra';
 import path from 'node:path';
 import os from 'node:os';
@@ -12,12 +12,14 @@ vi.mock('../src/utils/ChatLogger.js', () => ({ logToolCall: vi.fn().mockResolved
 
 import { listLocalModels, chatLocal } from '../src/providers/ollama-local.js';
 import { localLlmPatch } from '../src/tools/local-llm-patch.js';
+import { removeDir } from './helpers/temp-dir.js';
 
 const SR = '<<<<<<< SEARCH\nexport function add(a: number, b: number) { return a + b; }\n=======\nexport function add(a: number, b: number) { return a + b; }\nexport const two = 2;\n>>>>>>> REPLACE';
 const reply = (content: string, extra: any = {}) => ({ model: 'm', content, promptTokens: 100, completionTokens: 10, numCtx: 4096, promptTruncated: false, outputTruncated: false, ...extra });
 
 describe('local_llm_patch workspace boundary', () => {
   const root = path.join(os.tmpdir(), 'llp-boundary-' + Date.now());
+  afterAll(() => removeDir(root));
   const inside = path.join(root, 'ws', 'a.ts');
   const outside = path.join(root, 'secret.ts');
   beforeEach(async () => {
@@ -53,6 +55,7 @@ describe('local_llm_patch workspace boundary', () => {
 
 describe('local_llm_patch robustness', () => {
   const dir = path.join(os.tmpdir(), 'llp-robust-' + Date.now());
+  afterAll(() => removeDir(dir));
   const file = path.join(dir, 'a.ts');
   beforeEach(async () => {
     await fs.ensureDir(dir);

@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { extractServerActions, extractPlaygroundActions, extractQuickstartActionRows, findActionDrift } from './action-sync.js';
+import { findTempHygieneProblems, findRetrylessRemovals } from './test-hygiene.js';
 import { handlerForTool, findHandlerSource, handlerInputType, findTypeSource, interfaceFields, findInputDrift, branchArgReads, browserParamDrift } from './input-sync.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -541,6 +542,26 @@ async function main() {
       console.warn(`⚠ Notice: npm audit check skipped (network offline or endpoint unreachable).`);
     }
   }
+
+  // 7. Test hygiene: temp files a test creates must be removed again
+  console.log('\n7. Verifying tests clean up the temp files they create...');
+  const testFiles: { path: string; content: string }[] = [];
+  const walkTests = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walkTests(full);
+      else if (entry.name.endsWith('.ts')) testFiles.push({ path: path.relative(mcpDir, full), content: fs.readFileSync(full, 'utf-8') });
+    }
+  };
+  walkTests(path.join(mcpDir, 'tests'));
+  const leaks = findTempHygieneProblems(testFiles);
+  if (leaks.length > 0) {
+    console.error('✗ Tests that leave temp files behind:');
+    for (const l of leaks) console.error(`  - ${l.file}: ${l.problem}`);
+    process.exit(1);
+  }
+  for (const w of findRetrylessRemovals(testFiles)) console.warn(`⚠ ${w.file}: ${w.problem}`);
+  console.log('✓ Every test that writes to the temp directory removes it.');
 
   console.log('\n=== All Pre-Commit Checks Passed Successfully ===');
 }

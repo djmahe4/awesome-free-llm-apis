@@ -132,7 +132,7 @@ describe('buildRepairBrief (debugger persona)', () => {
 
 describe('readVerifyTestContext (the failing tests are the spec: the agent may READ them)', () => {
   let ws = '';
-  afterEach(async () => { if (ws) await fs.remove(ws); ws = ''; });
+  afterEach(async () => { if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); ws = ''; });
   const make = async (files: Record<string, string>) => {
     ws = await fs.mkdtemp(path.join(os.tmpdir(), 'ca-ctx-'));
     for (const [rel, c] of Object.entries(files)) { await fs.ensureDir(path.dirname(path.join(ws, rel))); await fs.writeFile(path.join(ws, rel), c); }
@@ -218,7 +218,7 @@ describe('withFeedback', () => {
 
 describe('CodingAgentsHandler: suspicious edits are withheld for the user to verify', () => {
   let ws = '';
-  afterEach(async () => { if (ws) await fs.remove(ws); ws = ''; });
+  afterEach(async () => { if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); ws = ''; });
 
   async function make(files: Record<string, string>) {
     ws = await fs.mkdtemp(path.join(os.tmpdir(), 'ca-guard-'));

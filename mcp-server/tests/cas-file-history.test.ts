@@ -42,7 +42,7 @@ describe('ContentAddressableStore — per-file history ring buffer', () => {
   });
 
   afterEach(async () => {
-    if (ws) await fs.remove(ws);
+    if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('caps history at 3 entries (CAS_FILE_HISTORY_DEPTH default), newest first', () => {
@@ -123,7 +123,7 @@ describe('ContentAddressableStore — per-file history ring buffer', () => {
     await expect(cas.undoFileVersionToDisk(ws, rel)).rejects.toThrow();
     expect(cas.fileHistoryVersions(ws, rel)).toEqual(['prior content']);
 
-    await fs.remove(target);
+    await fs.rm(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     const out = await cas.undoFileVersionToDisk(ws, rel);
     expect(out).toEqual({ restored: true, remainingDepth: 0 });
     expect(await fs.readFile(target, 'utf-8')).toBe('prior content');
@@ -144,7 +144,7 @@ describe('ContentAddressableStore — per-file history ring buffer', () => {
         .rejects.toThrow(/invalid relative path/);
       expect(await fs.pathExists(path.join(outside, 'escape.ts'))).toBe(false);
     } finally {
-      await fs.remove(outside);
+      await fs.rm(outside, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -165,7 +165,7 @@ describe('ContentAddressableStore — per-file history ring buffer', () => {
         .rejects.toThrow(/invalid relative path/);
       expect(await fs.pathExists(path.join(outside, 'pwn.txt'))).toBe(false);
     } finally {
-      await fs.remove(outside);
+      await fs.rm(outside, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 });
@@ -178,7 +178,7 @@ describe('CodingAgentsHandler — resolve undo_file / file_history', () => {
   });
 
   afterEach(async () => {
-    if (ws) await fs.remove(ws);
+    if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   const applyVersion = (from: string, to: string) => CodingAgentsHandler({

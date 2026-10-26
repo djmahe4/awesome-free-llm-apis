@@ -12,7 +12,7 @@ describe('Universal Multi-Language Manifest Dependency Resolver', () => {
     });
 
     afterEach(async () => {
-        await fs.rm(mockWorkspace, { recursive: true, force: true });
+        await fs.rm(mockWorkspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
 
     it('should dynamically extract Python requirements.txt dependencies without hardcoding', async () => {

@@ -18,7 +18,7 @@ describe('Firebase & Telemetry Encryption Phase 0 Tests', () => {
     });
 
     afterEach(async () => {
-        await fs.remove(testDir);
+        await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         vi.unstubAllEnvs();
         vi.restoreAllMocks();
     });

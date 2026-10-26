@@ -52,7 +52,7 @@ describe('newDuplicateDefinitions', () => {
 });
 
 let ws = '';
-afterEach(async () => { vi.restoreAllMocks(); if (ws) await fs.remove(ws); });
+afterEach(async () => { vi.restoreAllMocks(); if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 describe('pipeline: an edit that adds a second definition', () => {
     it('is not applied; the retry is told to edit the existing definition', async () => {

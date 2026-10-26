@@ -25,7 +25,7 @@ async function findSkillMd(ws: string): Promise<string | null> {
 describe('store_workspace_skill input validation', () => {
   let ws = '';
   beforeEach(async () => { ws = await fs.mkdtemp(path.join(os.tmpdir(), 'store-skill-')); });
-  afterEach(async () => { await fs.remove(ws); });
+  afterEach(async () => { await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   it.each(['', '   ', '!!!', '---', '../..', '\u0000'])('rejects the unusable name %j without writing anything', async (name) => {
     const r: any = await storeWorkspaceSkill({ name, description: 'd', what: ['x'], workspace_root: ws });

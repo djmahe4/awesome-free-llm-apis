@@ -14,7 +14,7 @@ describe('AgenticMiddleware - CONFUSED upgraded to QUESTION when reference conte
     afterEach(async () => {
         vi.restoreAllMocks();
         try {
-            await fs.remove(projectDir);
+            await fs.rm(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         } catch {}
     });
 
@@ -167,7 +167,7 @@ UNIQUE_MARKER_FOR_CONFUSED_UPGRADE_TEST_98765
             expect(roles).toContain('user');
             expect(roles).toContain('assistant');
         } finally {
-            await fs.remove(confusedProjectDir).catch(() => {});
+            await fs.rm(confusedProjectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => {});
         }
     });
 });

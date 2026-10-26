@@ -18,7 +18,7 @@ beforeAll(async () => {
     const tools = ['networking', 'recon', 'sqli', 'xss'].map(m => ({ name: `${m}-tool`, method: 'EXEC', url: `https://example.com/${m}`, module: m }));
     await fs.writeFile(path.join(repo, 'tools_config.json'), JSON.stringify(tools), 'utf-8');
 });
-afterAll(async () => { await fs.rm(repo, { recursive: true, force: true }); });
+afterAll(async () => { await fs.rm(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 afterEach(() => { vi.restoreAllMocks(); llm.mockReset(); });
 
 async function startDag(sessionId: string) {

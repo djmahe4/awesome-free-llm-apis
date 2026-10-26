@@ -5,7 +5,7 @@ import fs from 'fs-extra';
 import { CodingAgentsHandler } from '../src/tools/coding-agents.js';
 
 let ws = '';
-afterEach(async () => { vi.restoreAllMocks(); if (ws) await fs.remove(ws); });
+afterEach(async () => { vi.restoreAllMocks(); if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 describe('pipeline: an edit importing a file that does not exist', () => {
     it('is not applied; the retry is told which import is wrong and what exists', async () => {

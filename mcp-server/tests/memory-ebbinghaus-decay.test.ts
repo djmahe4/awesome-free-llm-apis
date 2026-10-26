@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import path from 'path';
 import fs from 'fs-extra';
 import os from 'os';
@@ -7,9 +7,11 @@ import { WorkspaceScanner } from '../src/cache/workspace.js';
 import { WorkspaceIndexer } from '../src/memory/indexer.js';
 import { VectorStore } from '../src/memory/vector.js';
 import { WorkspaceWalker } from '../src/pipeline/middlewares/workspace-walker.js';
+import { removeDir } from './helpers/temp-dir.js';
 
 describe('Memory & Storage Architecture Hardening', () => {
     const testDir = path.join(os.tmpdir(), `mcp-ebbinghaus-test-${Date.now()}`);
+    afterAll(() => removeDir(testDir));
 
     beforeEach(async () => {
         await fs.ensureDir(testDir);

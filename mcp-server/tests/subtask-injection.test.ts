@@ -161,7 +161,7 @@ Network Forensics with Wireshark and Cryptography Fundamentals`;
             const responseContent = context.response?.choices?.[0]?.message?.content;
             expect(responseContent).toContain('hello-proactive-context');
         } finally {
-            await fs.remove(testFile);
+            await fs.rm(testFile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
             vi.restoreAllMocks();
         }
     });

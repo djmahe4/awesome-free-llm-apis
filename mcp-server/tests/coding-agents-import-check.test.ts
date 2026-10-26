@@ -20,7 +20,7 @@ beforeAll(async () => {
     await write('shop/money.py');
     await write('shop/sub/__init__.py');
 });
-afterAll(async () => { await fs.remove(ws); });
+afterAll(async () => { await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 const ts = (body: string) => `import { a } from './unsupported.js';\n${body}`;
 

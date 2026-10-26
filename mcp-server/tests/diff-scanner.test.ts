@@ -13,7 +13,7 @@ describe('DiffScanner Lock-Based Git Integration Tests', () => {
     });
 
     afterEach(async () => {
-        await fs.remove(testDir);
+        await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         vi.restoreAllMocks();
     });
 
@@ -69,6 +69,6 @@ describe('DiffScanner Lock-Based Git Integration Tests', () => {
         expect(acquired).toBe(true);
         expect(await fs.pathExists(expectedProjectDir)).toBe(true);
 
-        await fs.remove(expectedProjectDir);
+        await fs.rm(expectedProjectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
 });

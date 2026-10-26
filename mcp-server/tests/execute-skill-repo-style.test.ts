@@ -55,7 +55,7 @@ describe('execute_skill — repo-style workspace skill (skills/<name>/prompt.md 
   });
 
   afterEach(async () => {
-    await fs.remove(ws);
+    await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('resolves <workspace_root>/skills/<name>/prompt.md (+ skill.yaml description) instead of falling through to Hermes/configDir download', async () => {

@@ -30,7 +30,7 @@ describe('A1 — resolveDeclarationPath: path-like references', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('loads an absolute .yaml path directly', async () => {
@@ -76,7 +76,7 @@ describe('A1 — resolveDeclarationPath: bare-name workspace discovery', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('falls back to <workspaceRoot>/harness/<name>.yaml when the uniform dir has none', async () => {
@@ -112,7 +112,7 @@ describe('A1 — resolveDeclarationPath: bare-name workspace discovery', () => {
       const decl = await loadHarnessDeclaration('research-analysis', emptyWs);
       expect(decl.harness.name).toBe('research-analysis-harness');
     } finally {
-      await fs.remove(emptyWs);
+      await fs.rm(emptyWs, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -158,7 +158,7 @@ describe('A1 — loadHarnessDeclaration: normalization, cache, validation', () =
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('normalizes relative allowedWorkspaceRoots against the declaration file directory', async () => {
@@ -200,7 +200,7 @@ describe('A1 — loadHarnessDeclaration: normalization, cache, validation', () =
       const b = await loadHarnessDeclaration(file, otherWs);
       expect(b).not.toBe(a);
     } finally {
-      await fs.remove(otherWs);
+      await fs.rm(otherWs, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
