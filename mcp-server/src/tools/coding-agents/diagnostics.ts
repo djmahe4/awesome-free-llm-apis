@@ -12,6 +12,15 @@ import { type DiagnosticResult } from './types.js';
 //   Rust   → rustc --error-format json (compiler errors)
 //   TS/JS  → ts-morph getPreEmitDiagnostics (syntactic + semantic)
 
+/** A checker that hit its time limit did not find the code clean; say so instead of returning nothing. */
+function timedOut(result: { error?: Error & { code?: string } }): boolean {
+  return result.error?.code === 'ETIMEDOUT';
+}
+
+function timeoutNotice(filePath: string, tool: string, seconds: number): DiagnosticResult {
+  return { filePath, message: `${tool} timed out after ${seconds}s; this file was not checked`, severity: 'warning', source: 'subprocess' };
+}
+
 export function getPythonCmd(): string | null {
   for (const cmd of ['python', 'python3']) {
     try {
@@ -44,6 +53,7 @@ except Exception as e:
     windowsHide: true,
   });
 
+  if (timedOut(result)) return [timeoutNotice(filePath, 'python syntax check', 10)];
   if (result.error || !result.stdout) return [];
 
   try {
@@ -70,6 +80,7 @@ export function runGoVetCheck(filePath: string, workspaceRoot: string): Diagnost
   });
 
   const diags: DiagnosticResult[] = [];
+  if (timedOut(result)) return [timeoutNotice(filePath, 'go vet', 30)];
   if (result.error || result.status === 0) return diags;
 
   const stderr = result.stderr?.toString() || '';
@@ -106,6 +117,7 @@ export function runRustcCheck(filePath: string, content: string): DiagnosticResu
     fs.rmSync(outFile, { force: true });
 
     const diags: DiagnosticResult[] = [];
+    if (timedOut(result)) return [timeoutNotice(filePath, 'rustc', 30)];
     const lines = (result.stderr || '').split('\n').filter(Boolean);
     for (const line of lines) {
       try {

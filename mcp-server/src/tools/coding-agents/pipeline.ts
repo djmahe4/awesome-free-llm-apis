@@ -390,7 +390,13 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         // Check llmfit hardware recommendations to find the optimal coding model
         if (!resolvedModel) try {
           const { recommendModels } = await import('../../services/llmfit.js');
-          const fitResult = await recommendModels({ useCase: 'coding', limit: 5, workspaceRoot });
+          // The first probe can take ~9 s (it starts a subprocess) and its result is cached afterwards, so a slow
+          // one must not hold up the edit: past the limit the router below chooses, and the probe warms the cache.
+          const probeMs = Number(process.env.CODING_AGENTS_LLMFIT_MS) || 3000;
+          const fitResult = await Promise.race([
+            recommendModels({ useCase: 'coding', limit: 5, workspaceRoot }),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('llmfit probe is slow')), probeMs).unref()),
+          ]);
           const recommendedOllamaNames = (fitResult.models || [])
             .map(m => m.ollamaName)
             .filter(Boolean) as string[];
