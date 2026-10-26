@@ -156,7 +156,7 @@ export async function gatedCall(
     // Bound strictly to this run+call+exact-args-hash — never re-matched by
     // tool name alone, and never satisfied by an approval granted for a
     // differently-hashed payload (e.g. a different goal on a later resume).
-    const approved = await store.findApprovedFor(run.runId, callId, argsHash);
+    const approved = await store.consumeApproval(run.runId, callId, argsHash);
     if (!approved) {
       const pending = (await store.listApprovals()).find(
         a => a.runId === run.runId && a.callId === callId && a.argsHash === argsHash && a.status === 'pending'
@@ -232,7 +232,7 @@ export async function gatedDetach(
   }
   if (decision.kind === 'needs_approval') {
     await store.expireStale(decl.harness.approval.timeoutMinutes);
-    const approved = await store.findApprovedFor(run.runId, callId, argsHash);
+    const approved = await store.consumeApproval(run.runId, callId, argsHash);
     if (!approved) {
       const pending = (await store.listApprovals()).find(
         a => a.runId === run.runId && a.callId === callId && a.argsHash === argsHash && a.status === 'pending'

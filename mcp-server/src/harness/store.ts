@@ -172,7 +172,20 @@ export class HarnessStore {
 
   async findApprovedFor(runId: string, callId: string, argsHash: string): Promise<ApprovalRequest | null> {
     const list = await this.loadApprovalsUnsafe();
-    return list.find(a => a.runId === runId && a.callId === callId && a.argsHash === argsHash && a.status === 'approved') ?? null;
+    return list.find(a => a.runId === runId && a.callId === callId && a.argsHash === argsHash && a.status === 'approved' && !a.usedAt) ?? null;
+  }
+
+  /**
+   * Spends an approval: atomically finds an unused approved entry for exactly this run+call+args and marks it used,
+   * so one human decision authorises one execution (a rerun or a second identical call must be approved again).
+   */
+  async consumeApproval(runId: string, callId: string, argsHash: string): Promise<ApprovalRequest | null> {
+    return this.mutateApprovals(list => {
+      const req = list.find(a => a.runId === runId && a.callId === callId && a.argsHash === argsHash && a.status === 'approved' && !a.usedAt);
+      if (!req) return null;
+      req.usedAt = Date.now();
+      return req;
+    });
   }
 
   async appendTrace(event: Omit<TraceEvent, 'seq' | 'ts'>): Promise<void> {

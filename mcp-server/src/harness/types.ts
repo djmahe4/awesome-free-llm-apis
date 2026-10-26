@@ -94,6 +94,8 @@ export interface ApprovalRequest {
   decidedAt?: number;
   decidedBy?: string;
   note?: string;
+  /** Set when the approval was spent on an execution; an approval authorises one run of the exact call. */
+  usedAt?: number;
 }
 
 export interface TraceEvent {

@@ -22,7 +22,14 @@ export interface AgentHarnessInput {
 export async function agentHarness(input: AgentHarnessInput) {
   switch (input.action) {
     case 'deploy': {
-      if (!input.goal) throw new Error('deploy requires `goal`.');
+      if (typeof input.goal !== 'string' || !input.goal.trim()) throw new Error('deploy requires `goal` (non-empty text).');
+      if (input.goal.length > 20_000) throw new Error('`goal` is too long (limit 20000 characters); put the detail in a file and point to it.');
+      if (input.maxTokens !== undefined && !(typeof input.maxTokens === 'number' && Number.isFinite(input.maxTokens) && input.maxTokens > 0)) {
+        throw new Error('`maxTokens` must be a positive number.');
+      }
+      if (input.harness !== undefined && (typeof input.harness !== 'string' || input.harness.length > 500)) {
+        throw new Error('`harness` must be a declaration name or .yaml path (text, up to 500 characters).');
+      }
       const runId = input.runId || crypto.randomUUID();
       const run = await deployHarness({
         runId,
@@ -36,6 +43,9 @@ export async function agentHarness(input: AgentHarnessInput) {
     case 'resume': {
       if (!input.runId) throw new Error('resume requires `runId`.');
       const run = await resumeHarness(input.runId, input.workspace_root, { maxWallMinutes: input.maxWallMinutes });
+      if (run.status === 'monitoring') {
+        return { success: true, run, note: 'The run is still waiting on its monitored process; nothing has advanced. Check monitor_tool, then resume again.' };
+      }
       return { success: true, run };
     }
     case 'rerun':
@@ -67,9 +77,18 @@ export async function agentHarness(input: AgentHarnessInput) {
       // a declaration with a longer timeout was having its approvals expired
       // early just from listing them.
       const run = await store.loadRun();
-      const timeoutMinutes = run ? (await loadHarnessDeclaration(run.declarationName, run.workspaceRoot)).harness.approval.timeoutMinutes : 60;
+      let timeoutMinutes = 60;
+      let warning: string | undefined;
+      if (run) {
+        try {
+          timeoutMinutes = (await loadHarnessDeclaration(run.declarationName, run.workspaceRoot)).harness.approval.timeoutMinutes;
+        } catch (err: any) {
+          // the declaration was moved or deleted after deploy: listing approvals must still work, so a human can see what is pending
+          warning = `Declaration '${run.declarationName}' could not be loaded (${err?.message ?? err}); using the default ${timeoutMinutes}-minute approval timeout.`;
+        }
+      }
       await store.expireStale(timeoutMinutes);
-      return { approvals: await store.listApprovals() };
+      return warning ? { approvals: await store.listApprovals(), warning } : { approvals: await store.listApprovals() };
     }
     case 'approve':
     case 'reject': {
