@@ -26,7 +26,7 @@ describe('AgenticMiddleware - Concurrency Stress Test', () => {
 
     afterAll(async () => {
         try {
-            await fs.remove(projectDir);
+            await fs.rm(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         } catch {}
     });
 

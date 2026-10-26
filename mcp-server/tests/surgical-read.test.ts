@@ -8,12 +8,12 @@ describe('SurgicalRead (Phase C)', () => {
     const testFile = path.join(testDir, 'doc.md');
 
     beforeEach(async () => {
-        await fs.rm(testDir, { recursive: true, force: true });
+        await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         await fs.mkdir(testDir, { recursive: true });
     });
 
     afterEach(async () => {
-        await fs.rm(testDir, { recursive: true, force: true });
+        await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
 
     it('surgicalRead() returns only the matching section, not full file', async () => {

@@ -46,7 +46,7 @@ describe('cyber_tool dag_reverse mode', () => {
     afterAll(async () => {
         if (tempDirCreated && existsSync(cybersecPath)) {
             try {
-                await fs.rm(cybersecPath, { recursive: true, force: true });
+                await fs.rm(cybersecPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
             } catch {}
         }
     });

@@ -66,8 +66,8 @@ describe('workspace-roots', () => {
     });
 
     afterAll(() => {
-      fs.rmSync(outside, { recursive: true, force: true });
-      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
 
     it('resolves relative paths inside the server cwd', () => {

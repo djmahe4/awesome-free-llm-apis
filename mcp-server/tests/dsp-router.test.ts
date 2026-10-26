@@ -19,7 +19,7 @@ describe('DSP Router & Remix Plugins', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(TEST_DIR);
+    await fs.rm(TEST_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   describe('buildAudioDspFilter', () => {

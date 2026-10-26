@@ -14,7 +14,7 @@ describe('AgenticMiddleware - lazy PDF/file context resolution (Phase 2)', () =>
     afterEach(async () => {
         vi.restoreAllMocks();
         try {
-            await fs.remove(projectDir);
+            await fs.rm(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         } catch {}
     });
 
@@ -73,7 +73,7 @@ describe('AgenticMiddleware - resume mutation on QueueTask objects', () => {
     afterEach(async () => {
         vi.restoreAllMocks();
         try {
-            await fs.remove(projectDir);
+            await fs.rm(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         } catch {}
     });
 

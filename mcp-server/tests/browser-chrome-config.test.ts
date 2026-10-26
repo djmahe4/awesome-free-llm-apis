@@ -56,7 +56,7 @@ describe('resolveChromeExecutable', () => {
       const resolved = await resolveChromeExecutable({ platform: 'win32', env: { CHROME_PATH: exe } as NodeJS.ProcessEnv });
       expect(resolved).toBe(exe);
     } finally {
-      await fsp.rm(dir, { recursive: true, force: true });
+      await fsp.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -70,7 +70,7 @@ describe('resolveChromeExecutable', () => {
       const resolved = await resolveChromeExecutable({ platform: 'darwin', env: { CHROME_PATH: exe, HOME: '/nonexistent-home' } as NodeJS.ProcessEnv });
       expect(resolved).toBeUndefined();
     } finally {
-      await fsp.rm(dir, { recursive: true, force: true });
+      await fsp.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 

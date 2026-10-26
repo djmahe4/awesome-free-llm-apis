@@ -15,7 +15,7 @@ describe('movie_tool actions', () => {
   afterAll(async () => {
     if (prevRoots === undefined) delete process.env.WORKSPACE_ROOTS;
     else process.env.WORKSPACE_ROOTS = prevRoots;
-    await fs.remove(tmpProjectDir).catch(() => {});
+    await fs.rm(tmpProjectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => {});
   });
 
   it('initializes timeline, retrieves tracks, and adds external media artifact', async () => {

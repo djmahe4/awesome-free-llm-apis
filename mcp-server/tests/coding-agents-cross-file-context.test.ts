@@ -46,7 +46,7 @@ describe('apiSurface', () => {
 });
 
 let ws = '';
-afterEach(async () => { vi.restoreAllMocks(); if (ws) await fs.remove(ws); });
+afterEach(async () => { vi.restoreAllMocks(); if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 describe('multi-file runs share context', () => {
     it("the second file's prompt shows the first file's NEW signature and says which file to edit", async () => {

@@ -62,7 +62,7 @@ describe('local_llm_patch', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(testDir);
+    await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('fails fast with a clear error when no local Ollama server is reachable', async () => {

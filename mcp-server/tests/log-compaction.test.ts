@@ -22,7 +22,7 @@ describe('Context Gatherer Log & JSON Compaction Tests', () => {
 
     afterEach(async () => {
         process.env.LOG_COMPACTION_THRESHOLD = originalThreshold;
-        await fs.rm(mockWorkspaceRoot, { recursive: true, force: true });
+        await fs.rm(mockWorkspaceRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
 
     it('should semantically compact intermediate lines of a large .log file, maintaining head and tail of matches', async () => {

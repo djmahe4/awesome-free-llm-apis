@@ -8,7 +8,7 @@ import { WikiMemory } from '../src/memory/wiki.js';
 
 let dir = '';
 beforeAll(async () => { dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wiki-names-')); });
-afterAll(async () => { await fs.rm(dir, { recursive: true, force: true }); });
+afterAll(async () => { await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 describe('wiki filenames', () => {
     it('different punctuation-only titles are different pages', async () => {
@@ -47,7 +47,7 @@ describe('namespace cannot leave the wiki folder', () => {
         }
         await expect(manageMemory({ action: 'wiki_write', workspace_root: home, namespace: 'x'.repeat(65), title: 't', content: 'c' } as any)).rejects.toThrow(/namespace/i);
         await expect(manageMemory({ action: 'wiki_list', workspace_root: home, namespace: 'team-a.v1_2' } as any)).resolves.toBeTruthy();
-        await fs.rm(home, { recursive: true, force: true });
+        await fs.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         delete process.env.FREE_LLM_MCP_HOME;
     });
 });

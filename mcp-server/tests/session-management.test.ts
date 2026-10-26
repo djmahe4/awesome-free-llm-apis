@@ -9,11 +9,11 @@ describe('Intelligent Conversation Naming & Session Management (TDD)', () => {
   const testProjectDir = path.join(getMcpDir(), 'projects', testSessionId);
 
   beforeEach(async () => {
-    await fs.remove(testProjectDir);
+    await fs.rm(testProjectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   afterEach(async () => {
-    await fs.remove(testProjectDir);
+    await fs.rm(testProjectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   describe('extractIntelligentTitle', () => {

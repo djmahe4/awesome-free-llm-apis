@@ -18,7 +18,7 @@ describe('reconcileRunsOnBoot', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   function baseRun(overrides: Partial<HarnessRun> = {}): HarnessRun {
@@ -84,7 +84,7 @@ describe('reconcileRunsOnBoot', () => {
       const reconciled = await reconcileRunsOnBoot(emptyDir);
       expect(reconciled).toEqual([]);
     } finally {
-      await fs.remove(emptyDir);
+      await fs.rm(emptyDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 

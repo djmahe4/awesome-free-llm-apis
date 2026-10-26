@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import fs from 'fs-extra';
 import path from 'node:path';
 import os from 'node:os';
@@ -12,6 +12,7 @@ vi.mock('../src/utils/ChatLogger.js', () => ({ logToolCall: vi.fn().mockResolved
 
 import { listLocalModels, chatLocal, modelSupportsThinking } from '../src/providers/ollama-local.js';
 import { localLlmPatch, replyBudget, THINKING_HEADROOM } from '../src/tools/local-llm-patch.js';
+import { removeDir } from './helpers/temp-dir.js';
 
 // Thinking stays ON by default (it can help on hard edits); the reply budget gets room for it. Only a reply
 // whose reasoning still used the whole budget (empty content, cut off) is retried once with thinking off.
@@ -19,6 +20,7 @@ const SR = '<<<<<<< SEARCH\nexport const a = 1;\n=======\nexport const a = 2;\n>
 const reply = (content: string, extra: any = {}) => ({ model: 'm', content, promptTokens: 100, completionTokens: 10, numCtx: 8192, promptTruncated: false, outputTruncated: false, ...extra });
 
 const root = path.join(os.tmpdir(), 'llp-think-' + Date.now());
+afterAll(() => removeDir(root));
 const file = path.join(root, 'a.ts');
 const opts = (i: number) => (chatLocal as any).mock.calls[i][2];
 

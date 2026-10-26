@@ -121,7 +121,7 @@ describe('TDD Fixes Verification Suite', () => {
                 expect(base64).not.toBeNull();
                 expect(base64).toContain('data:image/png;base64,');
             } finally {
-                await fs.rm(tempDir, { recursive: true, force: true });
+                await fs.rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
             }
         });
     });

@@ -54,7 +54,7 @@ describe('monitoring — attach-time budget gating (integration)', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('never attaches (never calls cyberTool) when maxToolCalls is already 0 — same gate as gatedCall, no exception for detached work', async () => {
@@ -82,7 +82,7 @@ describe('monitoring — mid-flight wall-clock budget (integration)', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('pauses paused_budget on resume when maxWallMinutes has elapsed while still monitoring', async () => {

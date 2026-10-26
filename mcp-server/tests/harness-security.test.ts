@@ -66,7 +66,7 @@ describe('clampRunTokens: a caller can lower the declared token budget, never ra
 describe('approvals on runs that do not exist or are already decided', () => {
   let ws = '';
   beforeEach(async () => { ws = await fs.mkdtemp(path.join(os.tmpdir(), 'harness-sec-')); });
-  afterEach(async () => { await fs.remove(ws); });
+  afterEach(async () => { await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   const run = (runId: string): any => ({ runId, declarationName: 'x', goal: 'g', workspaceRoot: ws, status: 'paused_approval', budget: { maxTokens: 10, used: 0, reserved: 0, toolCalls: 0 }, createdAt: 1, updatedAt: 1 });
 

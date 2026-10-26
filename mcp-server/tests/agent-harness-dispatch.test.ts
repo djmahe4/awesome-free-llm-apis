@@ -49,7 +49,7 @@ describe('harness runner — role-declared tool dispatch (integration)', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('dispatches to load_skill_prompt when the role declares it, not use_free_llm', async () => {

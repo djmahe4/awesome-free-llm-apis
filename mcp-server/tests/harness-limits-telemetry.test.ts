@@ -48,7 +48,7 @@ describe('harness limits + telemetry (integration)', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('records used tokens under the executing role', async () => {

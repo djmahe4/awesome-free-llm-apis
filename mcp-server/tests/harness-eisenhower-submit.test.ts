@@ -51,7 +51,7 @@ describe('harness eisenhower review — submit half (integration)', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('submits a real open question from the reply as an eisenhower_add task, important because it shares a finding term', async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import fs from 'fs-extra';
 import path from 'node:path';
 import os from 'node:os';
@@ -12,12 +12,14 @@ vi.mock('../src/utils/ChatLogger.js', () => ({ logToolCall: vi.fn().mockResolved
 
 import { listLocalModels, chatLocal } from '../src/providers/ollama-local.js';
 import { localLlmPatch } from '../src/tools/local-llm-patch.js';
+import { removeDir } from './helpers/temp-dir.js';
 
 const FILE = "import { a } from './a.js';\n\nexport function run(x: number) {\n    const y = a(x);\n    return y;\n}\n";
 const reply = (content: string) => ({ model: 'm', content, promptTokens: 100, completionTokens: 10, numCtx: 4096, promptTruncated: false, outputTruncated: false });
 
 describe('local_llm_patch: an edited-excerpt reply to a SEARCH/REPLACE request', () => {
   const root = path.join(os.tmpdir(), 'llp-excerpt-' + Date.now());
+  afterAll(() => removeDir(root));
   const file = path.join(root, 'run.ts');
   beforeEach(async () => {
     await fs.ensureDir(root);

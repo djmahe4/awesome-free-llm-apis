@@ -15,7 +15,7 @@ describe('Persistence Layer Hardening', () => {
     });
 
     afterEach(async () => {
-        await fs.remove(testDir);
+        await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         vi.unstubAllEnvs();
     });
 

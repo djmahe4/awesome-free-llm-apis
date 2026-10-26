@@ -65,7 +65,7 @@ describe('T5 cyclic lane execution', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('walks the lane once per allowed cycle: plan ids, real steps, tasks.md cursor', async () => {

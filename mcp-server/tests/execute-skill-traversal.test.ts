@@ -20,7 +20,7 @@ describe('skill reference containment', () => {
     await fs.ensureDir(path.join(root, 'skills', 'other'));
     await fs.writeFile(path.join(root, 'skills', 'other', 'notes.md'), 'another skill');
   });
-  afterEach(async () => { await fs.remove(root); });
+  afterEach(async () => { await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   it('extracts references from SKILL.md text exactly as before', () => {
     const refs = extractReferencedFiles('See `references/ok.md` and [guide](resources/guide.md) and `examples/a.txt`.');

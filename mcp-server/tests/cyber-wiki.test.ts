@@ -8,12 +8,12 @@ describe('Cyber tools global wiki', () => {
     const testDir = path.join(process.cwd(), 'temp_test_cyber_wiki_ws');
 
     beforeEach(async () => {
-        await fs.rm(testDir, { recursive: true, force: true });
+        await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         await fs.mkdir(testDir, { recursive: true });
     });
 
     afterEach(async () => {
-        await fs.rm(testDir, { recursive: true, force: true });
+        await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
 
     it('persists a discovered tool under the global namespace, independent of any per-workspace hash', async () => {

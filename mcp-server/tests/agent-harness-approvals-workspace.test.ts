@@ -43,7 +43,7 @@ describe('A2 — approvals uses the run workspaceRoot for declaration lookup', (
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('loads the declaration with (declarationName, run.workspaceRoot) and honors its timeout', async () => {

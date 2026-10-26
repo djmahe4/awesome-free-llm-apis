@@ -14,13 +14,13 @@ describe('WorkspaceInitializer (Phase A)', () => {
     const backupHomedir = os.homedir();
 
     beforeEach(async () => {
-        await fs.rm(testRoot, { recursive: true, force: true });
+        await fs.rm(testRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         await fs.mkdir(testDir, { recursive: true });
         vi.restoreAllMocks();
     });
 
     afterEach(async () => {
-        await fs.rm(testRoot, { recursive: true, force: true });
+        await fs.rm(testRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         vi.restoreAllMocks();
     });
 

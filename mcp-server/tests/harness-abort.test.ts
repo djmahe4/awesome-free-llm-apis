@@ -44,7 +44,7 @@ describe('agent_harness abort', () => {
     vi.clearAllMocks();
     currentDecl = twoRoleDecl();
   });
-  afterEach(async () => { await fs.remove(tmpDir); });
+  afterEach(async () => { await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   it('stops a running run: the next step never starts and the persisted status is aborted', async () => {
     let release!: () => void;
@@ -76,7 +76,7 @@ describe('agent_harness abort', () => {
 describe('agentHarness abort when the live run is gone from the registry', () => {
   let tmpDir: string;
   beforeEach(async () => { tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'harness-abort2-')); });
-  afterEach(async () => { await fs.remove(tmpDir); });
+  afterEach(async () => { await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   it('marks a persisted non-terminal run aborted (restart / registry TTL) instead of an unexplained false', async () => {
     const { HarnessStore } = await import('../src/harness/store.js');

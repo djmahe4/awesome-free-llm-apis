@@ -29,7 +29,7 @@ beforeEach(async () => {
 afterEach(async () => {
   delete process.env.EXECUTE_SKILL_DOWNLOAD_POLL_MS;
   delete process.env.EXECUTE_SKILL_DOWNLOAD_TIMEOUT_MS;
-  await fs.remove(ws);
+  await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 const run = () => executeSkill({ skill: 'demo', input: 'go', workspace_root: ws, source: 'agentic-awesome' } as any);

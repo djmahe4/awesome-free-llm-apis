@@ -9,7 +9,7 @@ import { CodingAgentsHandler } from '../src/tools/coding-agents.js';
 // Cloud fallback is now opt-in: input allowCloudFallback, or .free-llm-mcp/coding-agents.json.
 
 let ws = '';
-afterEach(async () => { vi.restoreAllMocks(); if (ws) await fs.remove(ws); });
+afterEach(async () => { vi.restoreAllMocks(); if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 async function run(extra: Record<string, unknown> = {}, settings?: object) {
     ws = await fs.mkdtemp(path.join(os.tmpdir(), 'ca-cloud-'));

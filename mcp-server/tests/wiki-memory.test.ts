@@ -10,12 +10,12 @@ describe('WikiMemory (Phase B)', () => {
     const wsHash = 'test_workspace_hash';
 
     beforeEach(async () => {
-        await fs.rm(testDir, { recursive: true, force: true });
+        await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         await fs.mkdir(testDir, { recursive: true });
     });
 
     afterEach(async () => {
-        await fs.rm(testDir, { recursive: true, force: true });
+        await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
 
     it('write() creates page with frontmatter and confidence=0.5', async () => {

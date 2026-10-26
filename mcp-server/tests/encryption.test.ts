@@ -15,7 +15,7 @@ describe('Encryption key persistence', () => {
     });
 
     afterEach(async () => {
-        await fs.remove(testHome);
+        await fs.rm(testHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         vi.unstubAllEnvs();
         vi.restoreAllMocks();
     });

@@ -75,7 +75,7 @@ describe('T6 session-memory', () => {
       } catch {
       }
     }
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   describe('store', () => {

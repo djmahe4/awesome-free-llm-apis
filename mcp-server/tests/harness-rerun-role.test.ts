@@ -15,7 +15,7 @@ describe('Selective Role Reorchestration', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('allows rerunning a specific role from a complete run without discarding prior steps', async () => {
