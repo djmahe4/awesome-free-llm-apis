@@ -80,11 +80,11 @@ describe('T8 cyber_tool run_action — project bridge dispatch', () => {
 
   afterAll(async () => {
     delete process.env.BRIDGE_WORKSPACE_ROOTS;
-    await fs.rm(ws, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => {});
   });
 
   beforeEach(async () => {
-    await fs.rm(path.join(ws, '.free-llm-mcp'), { recursive: true, force: true }).catch(() => {});
+    await fs.rm(path.join(ws, '.free-llm-mcp'), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => {});
   });
 
   it('spawns the single declared bridge (auto-select) and returns its parsed JSON finding', async () => {

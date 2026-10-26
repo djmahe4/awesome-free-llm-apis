@@ -555,35 +555,8 @@ export function createExpressApp(): express.Express {
               break;
             }
             case 'manage_memory':
-              result = await manageMemory({
-                action: params.action,
-                workspace_root: params.workspace_root,
-                query: params.query,
-                limit: params.limit,
-                title: params.title,
-                content: params.content,
-                tags: params.tags,
-                links: params.links,
-                persona: params.persona,
-                namespace: params.namespace,
-                node: params.node,
-                nodeId: params.nodeId,
-                from: params.from,
-                to: params.to,
-                relation: params.relation,
-                task: params.task,
-                urgent: params.urgent,
-                important: params.important,
-                quadrant: params.quadrant,
-                includeCompleted: params.includeCompleted,
-                taskId: params.taskId,
-                sessionRefId: params.sessionRefId,
-                label: params.label,
-                durationMinutes: params.durationMinutes,
-                aborted: params.aborted,
-                pomodoroLimit: params.pomodoroLimit,
-                autoClassify: params.autoClassify,
-              });
+              // forward every field: a hand-kept whitelist silently dropped any input added to manage_memory later
+                result = await manageMemory(params as any);
               break;
             case 'index_workspace':
               result = await indexWorkspace({

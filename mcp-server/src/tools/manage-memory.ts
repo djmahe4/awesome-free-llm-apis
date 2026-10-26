@@ -134,6 +134,10 @@ export async function manageMemory(input: ManageMemoryInput) {
         action, workspace_root: workspaceRoot, query, limit = 10, title, content, tags, links, persona, namespace, node, nodeId, from, to, relation,
         task, urgent, important, quadrant, includeCompleted, taskId, sessionRefId, label, durationMinutes, aborted, pomodoroLimit, autoClassify,
     } = input;
+    // a namespace names a wiki directory: letters, digits, dot, dash, underscore only
+    if (namespace !== undefined && !/^(?!.*\.\.)[A-Za-z0-9._-]{1,64}$/.test(namespace)) {
+      throw new Error('invalid `namespace`: use 1-64 letters, digits, dots, dashes or underscores (no "..").');
+    }
     const wsHash = await workspaceScanner.getWorkspaceHash(workspaceRoot);
     switch (action) {
         case 'eisenhower_add': {
