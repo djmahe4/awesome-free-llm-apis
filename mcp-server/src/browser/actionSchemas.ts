@@ -55,7 +55,14 @@ export const BrowserActions = {
     },
     evaluate: {
         summary: 'Run a JS function in the page; returns a structured {ok,data|error}.',
-        params: z.object({ function: z.string(), args: z.record(z.string(), z.any()).optional() }),
+        params: z.object({
+            function: z.string(),
+            args: z.record(z.string(), z.any()).optional(),
+            /** Paths to keep from the result, e.g. ["rows.*.name"] ("*" = every element); the rest is dropped. */
+            select: z.array(z.string().max(200)).max(20).optional(),
+            /** Words for what you need; when the result is still too large, matching items are kept first. */
+            query: z.string().max(500).optional(),
+        }),
     },
     network: {
         summary: 'List/get/drain/clear captured network requests, optionally with bodies.',

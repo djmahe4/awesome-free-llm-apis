@@ -109,12 +109,24 @@ describe('cache', () => {
 });
 
 describe('response size cap', () => {
-    it('a JSON body over 5 MB is not parsed and says so', async () => {
-        const huge = '{"a":"' + 'x'.repeat(5 * 1024 * 1024 + 10) + '"}';
-        const m = mockFetch([{ match: 'x', body: huge }]);
+    it('a large but reasonable JSON body is parsed in full (a big repo file tree is several MB)', async () => {
+        const body = '{"a":"' + 'x'.repeat(6 * 1024 * 1024) + '"}';
+        const m = mockFetch([{ match: 'x', body }]);
         const r = await httpGetJson('https://api.github.com/x', { fetchImpl: m.fetchImpl, sleep: async () => {}, retries: 0 });
-        expect(r.json).toBeUndefined();
-        expect(r.ok).toBe(false);
-        expect(r.error).toMatch(/too large/i);
+        expect(r.ok).toBe(true);
+        expect((r.json as any).a.length).toBe(6 * 1024 * 1024);
+    });
+
+    it('a body over the parse ceiling (HTTP_MAX_JSON_BYTES, default 25 MB) is refused and says so', async () => {
+        process.env.HTTP_MAX_JSON_BYTES = '100000';
+        try {
+            const m = mockFetch([{ match: 'x', body: '{"a":"' + 'x'.repeat(150_000) + '"}' }]);
+            const r = await httpGetJson('https://api.github.com/x', { fetchImpl: m.fetchImpl, sleep: async () => {}, retries: 0 });
+            expect(r.json).toBeUndefined();
+            expect(r.ok).toBe(false);
+            expect(r.error).toMatch(/too large.*HTTP_MAX_JSON_BYTES/i);
+        } finally {
+            delete process.env.HTTP_MAX_JSON_BYTES;
+        }
     });
 });
