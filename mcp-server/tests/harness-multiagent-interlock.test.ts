@@ -12,7 +12,7 @@ describe('Multiagent Interlock & Scope Protection', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('prevents file collisions while passing reasoning findings between agents', async () => {

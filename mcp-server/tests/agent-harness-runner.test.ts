@@ -41,7 +41,7 @@ describe('harness runner — approval binding and resume (integration)', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('parks at paused_approval with the REAL payload recorded, not a placeholder', async () => {

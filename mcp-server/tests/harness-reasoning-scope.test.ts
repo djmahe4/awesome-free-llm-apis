@@ -14,7 +14,7 @@ describe('ReasoningScopeRegistry & Context Relay', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('detects keyword collision between subagents and relays weighted context', async () => {
