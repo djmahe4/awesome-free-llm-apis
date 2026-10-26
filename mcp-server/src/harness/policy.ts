@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { resolvePathWithinRoots } from '../utils/workspace-roots.js';
 import type { AllowRule, HarnessDeclaration, PolicyDecision } from './types.js';
 
 /**
@@ -173,7 +174,14 @@ export function canStartLaneCycle(decl: HarnessDeclaration, cycle: number): bool
  */
 export function assertWorkspaceRootAllowed(decl: HarnessDeclaration, workspaceRoot: string | undefined): void {
   const allowed = decl.harness.allowedWorkspaceRoots;
-  if (!allowed || allowed.length === 0) return;
+  if (!allowed || allowed.length === 0) {
+    // Unrestricted unless the operator opts in: HARNESS_RESTRICT_ROOTS=1 limits every harness run to the server's
+    // working directory plus WORKSPACE_ROOTS, the same roots the other tools use.
+    if (process.env.HARNESS_RESTRICT_ROOTS === '1' && workspaceRoot && !resolvePathWithinRoots(workspaceRoot)) {
+      throw new Error(`workspace_root '${workspaceRoot}' is outside the allowed roots (server working directory and WORKSPACE_ROOTS)`);
+    }
+    return;
+  }
   if (!workspaceRoot) {
     throw new Error(`Harness '${decl.harness.name}' requires workspace_root to be one of: ${allowed.join(', ')}`);
   }
