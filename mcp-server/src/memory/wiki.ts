@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import os from 'os';
 import { promises as fs } from 'fs';
 import { existsSync, readdirSync } from 'fs';
@@ -39,7 +40,11 @@ const DECISION_PATTERNS = [
 ];
 
 function getFilename(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9_-]/g, '_') + '.md';
+  if (!title || !title.trim()) throw new Error('wiki page title must not be empty');
+  const name = title.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  // nothing readable left (e.g. "???" vs "!!!"): name it by a hash of the title so pages do not overwrite each other
+  if (!/[a-z0-9]/.test(name)) return `page_${createHash('sha1').update(title).digest('hex').slice(0, 12)}.md`;
+  return name + '.md';
 }
 
 const FRONTMATTER_BLOCK_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
