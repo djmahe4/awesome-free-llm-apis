@@ -7,56 +7,6 @@ export const GLOBAL_CYBER_WIKI_NS = 'global-cyber-tools';
 export const DEFAULT_CYBER_TOOL_NAMES = ['nmap', 'sqlmap', 'hydra', 'gobuster', 'ffuf', 'nikto'];
 export const CYBER_TOOL_NAMES: string[] = [...DEFAULT_CYBER_TOOL_NAMES];
 
-/** Dynamic tool pattern mappings - loaded from registry for auto-detection */
-export const TOOL_PATTERN_MAP: Record<string, RegExp[]> = {};
-
-/**
- * Initialize tool patterns from the cyber tools registry.
- * Must be called after registry loads to set up dynamic pattern matching.
- */
-export function initializeToolPatterns(registry: Record<string, { githubUrl: string; category: string }>): void {
-  CYBER_TOOL_NAMES.length = 0;
-
-  // Add tools with real GitHub URLs from registry (not test-tool entries)
-  for (const [name, entry] of Object.entries(registry)) {
-    const lowerName = name.toLowerCase();
-    // Skip test-tool entries and add real tools
-    if (!lowerName.startsWith('test-tool') && lowerName in registry) {
-      CYBER_TOOL_NAMES.push(lowerName);
-
-      // Create regex patterns for this tool based on common CLI patterns
-      const patterns: RegExp[] = [];
-      switch (lowerName) {
-        case 'nmap':
-          patterns.push(/nmap\s*\(/, /nmap\.\s*scan\s*\(/i, /nmap\s*-/i);
-          break;
-        case 'sqlmap':
-          patterns.push(/sqlmap/, /--url\s/, /--data\s/);
-          break;
-        case 'hydra':
-          patterns.push(/hydra/, /-l\s/, /-p\s/);
-          break;
-        case 'gobuster':
-          patterns.push(/gobuster/, /dir\s/, /brute/);
-          break;
-        case 'nikto':
-          patterns.push(/nikto/, /-h\s/, /-Tuning\s/);
-          break;
-        case 'ffuf':
-          patterns.push(/ffuf/, /-u\s/, /-request/);
-          break;
-        case 'hydra':
-          patterns.push(/hydra/, /-l\s/, /-p\s/);
-          break;
-        default:
-          // Generic pattern: tool name followed by space or dash
-          patterns.push(new RegExp(`\\b${lowerName}\\s*`, 'i'));
-      }
-      TOOL_PATTERN_MAP[lowerName] = patterns;
-    }
-  }
-}
-
 export class GithubRepoScanner {
   /**
    * Parses a Github URL to extract the owner and repository name.
@@ -316,22 +266,6 @@ export class GithubRepoScanner {
           score -= 5;
         }
 
-        // Dynamic tool pattern matching
-        if (Object.keys(TOOL_PATTERN_MAP).length > 0 && commands) {
-          for (const cmd of commands) {
-            const cmdLower = cmd.toLowerCase();
-            // Check if command matches any known tool pattern
-            for (const [toolName, patterns] of Object.entries(TOOL_PATTERN_MAP)) {
-              for (const pattern of patterns) {
-                if (pattern.test(cmdLower)) {
-                  score += 20; // Boost score for tool-related commands
-                  break;
-                }
-              }
-            }
-          }
-        }
-
         candidates.push({ path: entry.path, score });
       }
 
@@ -345,25 +279,8 @@ export class GithubRepoScanner {
       try {
         const fileContent = await this.fetchRawContent(owner, repo, filePath, branch);
         const analysis = this.analyzeCode(fileContent);
-        // Detect invoked tools using dynamic patterns
+        // invokedTools stays in the shape for consumers; the pattern-based detector that fed it was never initialised
         const invokedTools: string[] = [];
-        if (Object.keys(TOOL_PATTERN_MAP).length > 0) {
-          for (const [toolName, patterns] of Object.entries(TOOL_PATTERN_MAP)) {
-            const lowerTool = toolName.toLowerCase();
-            // Check if tool name appears in the file content
-            const toolPattern = new RegExp(`\\b${lowerTool}\\b`, 'i');
-            if (toolPattern.test(fileContent)) {
-              // Verify it's not just a string variable or comment by checking context
-              const lines = fileContent.split('\n');
-              for (const line of lines) {
-                if (toolPattern.test(line) && !line.trim().startsWith('//') && !line.trim().startsWith('/*')) {
-                  invokedTools.push(lowerTool);
-                  break; // Only add once per tool
-                }
-              }
-            }
-          }
-        }
         scannedFiles.push({
           path: filePath,
           dependencies: analysis.dependencies,

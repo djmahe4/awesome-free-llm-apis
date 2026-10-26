@@ -1,5 +1,6 @@
 import { httpGetJson, httpGetText, type HttpOptions } from './http.js';
-import { notFound, failFromHttp, type Lookup } from './grounding.js';
+import { notFound, failFromHttp, isRateLimited, type Lookup } from './grounding.js';
+import { BoundedMap } from './bounded-map.js';
 import { MANIFEST_BASENAMES, parseManifest, type Dependency, type ManifestInfo } from './RepoManifests.js';
 
 export interface RepoMeta {
@@ -67,18 +68,45 @@ export function extractUsage(readme: string): { install: string[]; run: string[]
   return { install, run };
 }
 
+/** Successful GitHub answers, shared by every client instance for a few minutes (one lookup costs ~12 requests of a 60/hour quota). */
+const CACHE_TTL_MS = 5 * 60_000;
+const responseCache = new BoundedMap<string, { at: number; res: any }>(200);
+export function resetGithubCache(): void { responseCache.clear(); }
+
+/** A personal access token raises the API limit from 60 to 5000 requests/hour. Sent to the GitHub hosts only, never logged. */
+const githubToken = (): string | undefined => process.env.GITHUB_TOKEN || process.env.GH_TOKEN || undefined;
+
 export class GithubRepoClient {
   private readonly http: HttpOptions;
-  constructor(opts: HttpOptions = {}) { this.http = opts; }
+  private readonly cacheOn: boolean;
+  /** `cache`: default on, except with an injected fetch (tests), which keeps its own call counts. */
+  constructor(opts: HttpOptions & { cache?: boolean } = {}) {
+    const { cache, ...http } = opts;
+    this.http = http;
+    this.cacheOn = cache ?? !http.fetchImpl;
+  }
+
+  private headers(accept: string): Record<string, string> {
+    const token = githubToken();
+    return { Accept: accept, ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(this.http.headers ?? {}) };
+  }
+
+  private async cached<T extends { ok: boolean }>(url: string, fetcher: () => Promise<T>): Promise<T> {
+    if (!this.cacheOn) return fetcher();
+    const now = (this.http.now ?? Date.now)();
+    const hit = responseCache.get(url);
+    if (hit && now - hit.at < CACHE_TTL_MS) return hit.res as T;
+    const res = await fetcher();
+    if (res.ok) responseCache.set(url, { at: now, res }); // failures are never cached
+    return res;
+  }
 
   async getMeta(owner: string, repo: string): Promise<Lookup<RepoMeta>> {
-    const res = await httpGetJson<any>(`https://api.github.com/repos/${enc(owner)}/${enc(repo)}`, {
-      ...this.http, headers: { Accept: 'application/vnd.github+json', ...(this.http.headers ?? {}) },
-    });
+    const url = `https://api.github.com/repos/${enc(owner)}/${enc(repo)}`;
+    const res = await this.cached(url, () => httpGetJson<any>(url, { ...this.http, headers: this.headers('application/vnd.github+json') }));
     if (!res.ok || !res.json) {
-      // Unauthenticated GitHub signals its quota with 403 + remaining 0.
-      if (res.status === 403 && res.rateLimit?.remaining === 0) {
-        return notFound('rate_limited', 'GitHub API quota exhausted', res.url, res.retryAfterMs);
+      if (isRateLimited(res)) {
+        return notFound('rate_limited', 'GitHub API quota exhausted (set GITHUB_TOKEN to raise the limit)', res.url, res.retryAfterMs);
       }
       return failFromHttp(res, `GitHub ${owner}/${repo}`);
     }
@@ -97,7 +125,8 @@ export class GithubRepoClient {
   }
 
   private async raw(owner: string, repo: string, ref: string, path: string): Promise<string | null> {
-    const res = await httpGetText(`https://raw.githubusercontent.com/${enc(owner)}/${enc(repo)}/${enc(ref)}/${enc(path)}`, this.http);
+    const url = `https://raw.githubusercontent.com/${enc(owner)}/${enc(repo)}/${enc(ref)}/${enc(path)}`;
+    const res = await this.cached(url, () => httpGetText(url, { ...this.http, headers: this.headers('text/plain, text/markdown, */*') }));
     return res.ok && typeof res.text === 'string' ? res.text : null;
   }
 
@@ -109,10 +138,8 @@ export class GithubRepoClient {
     const notes: string[] = [];
     if (meta.archived) notes.push('Repository is archived (read-only upstream).');
 
-    const treeRes = await httpGetJson<any>(
-      `https://api.github.com/repos/${enc(owner)}/${enc(repo)}/git/trees/${enc(meta.defaultBranch)}?recursive=1`,
-      { ...this.http, headers: { Accept: 'application/vnd.github+json', ...(this.http.headers ?? {}) } },
-    );
+    const treeUrl = `https://api.github.com/repos/${enc(owner)}/${enc(repo)}/git/trees/${enc(meta.defaultBranch)}?recursive=1`;
+    const treeRes = await this.cached(treeUrl, () => httpGetJson<any>(treeUrl, { ...this.http, headers: this.headers('application/vnd.github+json') }));
     let paths: string[] = [];
     let treeTruncated = false;
     if (treeRes.ok && Array.isArray(treeRes.json?.tree)) {
@@ -120,7 +147,9 @@ export class GithubRepoClient {
       treeTruncated = !!treeRes.json.truncated;
       if (treeTruncated) notes.push('File tree was truncated by GitHub; counts are lower bounds.');
     } else {
-      notes.push(`File tree unavailable (${treeRes.status || treeRes.error || 'error'}); only the README was read.`);
+      notes.push(isRateLimited(treeRes)
+        ? 'GitHub API quota exhausted while reading the file tree (set GITHUB_TOKEN to raise the limit); only the README was read.'
+        : `File tree unavailable (${treeRes.status || treeRes.error || 'error'}); only the README was read.`);
     }
 
     const ref = meta.defaultBranch;

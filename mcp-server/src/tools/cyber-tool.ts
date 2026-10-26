@@ -1,3 +1,5 @@
+import { BoundedMap } from '../utils/bounded-map.js';
+import { lookupDnsRecords } from '../utils/dns-report.js';
 import { CyberToolsRegistry, type CyberToolsRegistryCategory } from '../utils/CyberToolsRegistry.js';
 import { GlobalWikiManager } from '../utils/GlobalWikiManager.js';
 import { WikiMemory } from '../memory/wiki.js';
@@ -14,7 +16,8 @@ import { runProjectBridge } from './project-bridge.js';
 // so the dork loop executes off the request/response path (see 'osint' action
 // below) instead of blocking the tool call — callers poll with action:'osint_status'
 // using the same sessionId+target, mirroring use_free_llm's run/continue/status pattern.
-const osintResultsCache = new Map<string, any[]>();
+// Bounded: every autoSearch run kept its full results for the life of the server.
+export const osintResultsCache = new BoundedMap<string, any[]>(100);
 
 /** A tool name that is safe to use as a registry key and wiki page segment. */
 export function isValidToolName(name: unknown): boolean {
@@ -203,13 +206,29 @@ function boundedProgress(progress: ProgressRecord): ProgressRecord {
     };
 }
 
-/** Never throws — the coach must keep responding even if a page can't be persisted this turn. */
-async function safeWikiWrite(wiki: WikiMemory, title: string, content: string, tags: string[], links: string[] = []): Promise<boolean> {
+/**
+ * Never throws — the coach must keep responding even if a page can't be persisted this turn. A failure is
+ * recorded in `failures` (one entry per page) so the action's answer can say persisted:false instead of a plain success.
+ */
+async function safeWikiWrite(failures: string[], wiki: WikiMemory, title: string, content: string, tags: string[], links: string[] = []): Promise<boolean> {
     try {
         await wiki.write(title, content, tags, links);
         return true;
     } catch (err) {
         console.error(`[cyber_tool] wiki write failed for "${title}":`, err);
+        failures.push(`${title}: ${(err as Error)?.message || err}`);
+        return false;
+    }
+}
+
+/** persistGraph that records a failure the same way instead of failing the whole action. */
+async function safePersistGraph(failures: string[], wiki: WikiMemory, sessionId: string, graph: RepositoryGraph): Promise<boolean> {
+    try {
+        await persistGraph(wiki, sessionId, graph);
+        return true;
+    } catch (err) {
+        console.error('[cyber_tool] graph save failed:', err);
+        failures.push(`${graphPageTitle(sessionId)}: ${(err as Error)?.message || err}`);
         return false;
     }
 }
@@ -227,12 +246,32 @@ function trimToByteBudget(content: string, maxBytes: number): string {
     return joined;
 }
 
+/**
+ * run_action values end up in a bridge subprocess's argv/stdin: bound them before they get there. The
+ * action name is the bridge's own vocabulary (plain identifier), the target a single line of reasonable length.
+ */
+export function runActionInputProblem(input: Pick<CyberToolInput, 'actionName' | 'target' | 'authorization'>): string | null {
+    const { actionName, target, authorization } = input;
+    if (actionName !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(actionName)) {
+        return "actionName must be 1-64 characters: letters, digits, . _ : - (the bridge's own action name).";
+    }
+    if (target !== undefined && (target.length > 2048 || /[\u0000-\u001f\u007f]/.test(target))) {
+        return 'target must be a single line of at most 2048 characters.';
+    }
+    if (authorization !== undefined && authorization.length > 2000) {
+        return 'authorization must be at most 2000 characters.';
+    }
+    return null;
+}
+
 export async function cyberTool(input: CyberToolInput) {
     const start = Date.now();
     const action = input.action || 'list_tools';
     const sessionId = input.sessionId || 'cyber_tools_session';
     let result: any;
     let isError = false;
+    // wiki pages / graph saves that failed during this call (see safeWikiWrite)
+    const failures: string[] = [];
 
     try {
         // toolName becomes a wiki page segment and frontmatter tag: reject anything that is not a plain name.
@@ -275,7 +314,7 @@ export async function cyberTool(input: CyberToolInput) {
             let page = await wiki.read(pagePath);
             if (!page) {
                 const defaultContent = '# ' + input.toolName + ' Flags & Troubleshooting\n\nDefault operational flags and guidance for ' + input.toolName + '.';
-                await safeWikiWrite(wiki, pagePath, defaultContent, ['cyber', 'tool-guide', input.toolName]);
+                await safeWikiWrite(failures, wiki, pagePath, defaultContent, ['cyber', 'tool-guide', input.toolName]);
                 page = await wiki.read(pagePath);
             }
             result = {
@@ -382,11 +421,11 @@ export async function cyberTool(input: CyberToolInput) {
                     nodes: manifest.nodes.map(n => ({ id: n.id, sliceKey: n.sliceKey, status: n.status, itemCount: n.itemCount, wikiPage: n.wikiPage, error: n.error }))
                 };
                 const manifestKey = `dag_manifest/${sessionId}`;
-                await safeWikiWrite(wiki, manifestKey, JSON.stringify(manifestForStorage), ['cyber', 'dag', input.toolName]);
+                await safeWikiWrite(failures, wiki, manifestKey, JSON.stringify(manifestForStorage), ['cyber', 'dag', input.toolName]);
 
                 const graph = await loadGraph(wiki, sessionId);
                 graph.addNode('root', 'concept', { ctfType: 'goal', label: input.goal || `DAG Reverse ${input.toolName}` });
-                await persistGraph(wiki, sessionId, graph);
+                await safePersistGraph(failures, wiki, sessionId, graph);
 
                 result = {
                     success: true,
@@ -462,11 +501,11 @@ export async function cyberTool(input: CyberToolInput) {
                     stepCount: 0,
                     createdAt: new Date().toISOString()
                 };
-                await safeWikiWrite(wiki, progressPageTitle(sessionId), JSON.stringify(boundedProgress(progress)), ['cyber', 'learn']);
+                await safeWikiWrite(failures, wiki, progressPageTitle(sessionId), JSON.stringify(boundedProgress(progress)), ['cyber', 'learn']);
 
                 const graph = await loadGraph(wiki, sessionId);
                 graph.addNode('root', 'concept', { ctfType: 'goal', label: input.goal });
-                await persistGraph(wiki, sessionId, graph);
+                await safePersistGraph(failures, wiki, sessionId, graph);
 
                 result = {
                     success: true,
@@ -599,7 +638,11 @@ export async function cyberTool(input: CyberToolInput) {
                         invokedTools: invokedTools.length > 0 ? invokedTools.slice(0, 20) : []
                     });
                 } catch (err: any) {
-                    analysis = `(LLM call unavailable: ${err?.message || err})\n\nItems scanned:\n${itemSummary}`;
+                    // No analysis, no page: writing "(LLM call unavailable ...)" and marking the node done made a
+                    // failed node look finished and blocked its retry. It stays pending so the same call can be repeated.
+                    targetNode.error = `model call failed: ${err?.message || err}`;
+                    isError = true;
+                    return result = { success: false, nodeId: targetNode.id, status: 'pending', error: `Could not analyse node ${targetNode.id}: ${err?.message || err}. It stays pending; call again to retry.` };
                 }
 
                 for (const item of targetNode.items) {
@@ -609,7 +652,7 @@ export async function cyberTool(input: CyberToolInput) {
                         : `Install: ${item.method} | URL: ${item.url} | Category: ${item.module} | Use: security testing`;
                     const existing = await wiki.read(`${name}/run_suggestions`);
                     const appended = trimToByteBudget(existing ? `${existing.content}\n\n---\n${note}` : note, TOOL_MEMORY_MAX_BYTES);
-                    await safeWikiWrite(wiki, `${name}/run_suggestions`, appended, ['cyber', manifest.toolName]);
+                    await safeWikiWrite(failures, wiki, `${name}/run_suggestions`, appended, ['cyber', manifest.toolName]);
                 }
 
                 const toolRows = targetNode.items.map((item: any) => {
@@ -636,12 +679,17 @@ export async function cyberTool(input: CyberToolInput) {
                     analysis
                 ].join('\n');
 
-                await safeWikiWrite(wiki, targetNode.id, wikiContent, ['cyber', 'dag', manifest.toolName]);
+                const pageSaved = await safeWikiWrite(failures, wiki, targetNode.id, wikiContent, ['cyber', 'dag', manifest.toolName]);
+                if (!pageSaved) {
+                    // the node's result has nowhere to live: it must not be marked done
+                    isError = true;
+                    return result = { success: false, nodeId: targetNode.id, status: 'pending', persisted: false, persistWarnings: [...failures], error: `Could not save the wiki page for node ${targetNode.id}. It stays pending; call again to retry.` };
+                }
 
                 const graph = await loadGraph(wiki, sessionId);
                 graph.addNode(targetNode.id, 'concept', { ctfType: 'action', label: `Node ${targetNode.id}: ${targetNode.itemCount} items` });
                 graph.addEdge('root', targetNode.id, 'references');
-                await persistGraph(wiki, sessionId, graph);
+                await safePersistGraph(failures, wiki, sessionId, graph);
 
                 targetNode.status = 'done';
                 targetNode.wikiPage = targetNode.id;
@@ -653,7 +701,7 @@ export async function cyberTool(input: CyberToolInput) {
                     ...manifest,
                     nodes: manifest.nodes.map(n => ({ id: n.id, sliceKey: n.sliceKey, status: n.status, itemCount: n.itemCount, wikiPage: n.wikiPage, error: n.error }))
                 };
-                await safeWikiWrite(wiki, manifestKey, JSON.stringify(manifestForStorage), ['cyber', 'dag', manifest.toolName]);
+                await safeWikiWrite(failures, wiki, manifestKey, JSON.stringify(manifestForStorage), ['cyber', 'dag', manifest.toolName]);
 
                 const nextPending = manifest.nodes.find(n => n.status === 'pending');
                 result = {
@@ -718,7 +766,7 @@ export async function cyberTool(input: CyberToolInput) {
                         { observation: input.observation ? capText(input.observation, STEP_TEXT_CAP) : undefined, advice: capText(advice, STEP_TEXT_CAP), at: new Date().toISOString() }
                     ]
                 };
-                await safeWikiWrite(wiki, progressPageTitle(sessionId), JSON.stringify(boundedProgress(updatedProgress)), ['cyber', 'learn']);
+                await safeWikiWrite(failures, wiki, progressPageTitle(sessionId), JSON.stringify(boundedProgress(updatedProgress)), ['cyber', 'learn']);
 
                 const stepId = `step-${stepNumber}`;
                 const priorStepId = stepNumber > 1 ? `step-${stepNumber - 1}` : 'root';
@@ -727,7 +775,7 @@ export async function cyberTool(input: CyberToolInput) {
                     label: input.observation ? `Observed: ${input.observation}` : advice.slice(0, 120)
                 });
                 graph.addEdge(priorStepId, stepId, 'references');
-                await persistGraph(wiki, sessionId, graph);
+                await safePersistGraph(failures, wiki, sessionId, graph);
 
                 if (input.toolName) {
                     const suggestionNote = advice.slice(0, TOOL_NOTE_CAP);
@@ -735,7 +783,7 @@ export async function cyberTool(input: CyberToolInput) {
                     const structuredNote = `Install: ${suggestionNote}\nUse: security testing`;
                     const existing = await wiki.read(`${input.toolName}/run_suggestions`);
                     const appended = trimToByteBudget(existing ? `${existing.content}\n\n---\n${structuredNote}` : structuredNote, TOOL_MEMORY_MAX_BYTES);
-                    await safeWikiWrite(wiki, `${input.toolName}/run_suggestions`, appended, ['cyber']);
+                    await safeWikiWrite(failures, wiki, `${input.toolName}/run_suggestions`, appended, ['cyber']);
                     if (isFailure) {
                         GlobalWikiManager.logFailure(input.toolName);
                     } else {
@@ -760,7 +808,7 @@ export async function cyberTool(input: CyberToolInput) {
                 graph.addNode(id, 'concept', { ctfType: type || 'action', label });
                 if (from) graph.addEdge(from, id, 'references');
             }
-            await persistGraph(wiki, sessionId, graph);
+            await safePersistGraph(failures, wiki, sessionId, graph);
             result = {
                 success: true,
                 sessionId,
@@ -788,7 +836,7 @@ export async function cyberTool(input: CyberToolInput) {
                 const structuredNote = `Install: ${capText(input.note, TOOL_NOTE_CAP)}\nUse: security testing`;
                 const existing = await wiki.read(`${input.toolName}/run_suggestions`);
                 const appended = trimToByteBudget(existing ? `${existing.content}\n\n---\n${structuredNote}` : structuredNote, TOOL_MEMORY_MAX_BYTES);
-                const written = await safeWikiWrite(wiki, `${input.toolName}/run_suggestions`, appended, ['cyber']);
+                const written = await safeWikiWrite(failures, wiki, `${input.toolName}/run_suggestions`, appended, ['cyber']);
                 result = { success: written, toolName: input.toolName, wikiPage: written ? await wiki.read(`${input.toolName}/run_suggestions`) : null };
             } else {
                 const suggestions = await wiki.read(`${input.toolName}/run_suggestions`);
@@ -825,38 +873,11 @@ export async function cyberTool(input: CyberToolInput) {
 
             const shouldQueryDns = osintType === 'domain' || osintType === 'ip' || osintType === 'all';
 
-            // Helper to wrap DNS promise with timeout guard (default 3000ms)
-            const withDnsTimeout = <T>(p: Promise<T>, ms = 3000): Promise<T> =>
-                Promise.race([
-                    p,
-                    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('DNS Timeout')), ms))
-                ]);
-
             if (shouldQueryDns) {
-                try {
-                    const a = await withDnsTimeout(dns.resolve4(target)).catch(() => []);
-                    if (a.length) { dnsReport.A = a; resolvedIps.push(...a); }
-                } catch { }
-
-                try {
-                    const aaaa = await withDnsTimeout(dns.resolve6(target)).catch(() => []);
-                    if (aaaa.length) { dnsReport.AAAA = aaaa; resolvedIps.push(...aaaa); }
-                } catch { }
-
-                try {
-                    const mx = await withDnsTimeout(dns.resolveMx(target)).catch(() => []);
-                    if (mx.length) dnsReport.MX = mx;
-                } catch { }
-
-                try {
-                    const txt = await withDnsTimeout(dns.resolveTxt(target)).catch(() => []);
-                    if (txt.length) dnsReport.TXT = txt;
-                } catch { }
-
-                try {
-                    const ns = await withDnsTimeout(dns.resolveNs(target)).catch(() => []);
-                    if (ns.length) dnsReport.NS = ns;
-                } catch { }
+                // parallel, each bounded by its own (cleared) timer
+                const looked = await lookupDnsRecords(target, dns as any, 3000);
+                Object.assign(dnsReport, looked.report);
+                resolvedIps.push(...looked.resolvedIps);
             }
 
             const recommendedDorks: string[] = [];
@@ -958,7 +979,7 @@ export async function cyberTool(input: CyberToolInput) {
                 + `## Recommended Google / Recon Dorks\n${recommendedDorks.map(d => `- \`${d}\``).join('\n')}\n\n`
                 + (input.autoSearch && searchStatus === 'done' ? `## Automated Search Results\n\`\`\`json\n${JSON.stringify(searchResults, null, 2)}\n\`\`\`\n` : '');
 
-            await safeWikiWrite(wiki, `osint/${target.replace(/[^\w.-]/g, '_')}`, wikiContent, ['cyber', 'osint']);
+            await safeWikiWrite(failures, wiki, `osint/${target.replace(/[^\w.-]/g, '_')}`, wikiContent, ['cyber', 'osint']);
 
             result = {
                 success: true,
@@ -997,21 +1018,23 @@ export async function cyberTool(input: CyberToolInput) {
             }
         } else if (action === 'resolve_tool') {
             const { resolveTool } = await import('./resolve-tool.js');
-            result = await resolveTool({ prompt: input.prompt, toolName: input.toolName, source: input.source, choice: input.choice, sessionId });
+            // the raw sessionId: without one, resolve_tool gives the caller a private session instead of the shared default
+            result = await resolveTool({ prompt: input.prompt, toolName: input.toolName, source: input.source, choice: input.choice, sessionId: input.sessionId });
         } else if (action === 'run_action') {
             // T8 — dispatch through a project-declared bridge subprocess
             // (general mechanism: any project's `.free-llm-mcp/bridges.json`,
             // any server, multiple project roots per MCP server). Every
             // failure below returns success:false instead of throwing so the
             // caller always gets a structured result.
+            // A failure answers success:false AND is logged as an error (it used to be logged as a normal call).
+            const rejectRunAction = (error: string) => { isError = true; result = { success: false, action, error }; };
+            const inputProblem = runActionInputProblem(input);
             if (!input.authorization) {
-                result = {
-                    success: false,
-                    action,
-                    error: 'run_action requires authorization framing — only pass targets you are explicitly authorized to test',
-                };
+                rejectRunAction('run_action requires authorization framing — only pass targets you are explicitly authorized to test');
             } else if (!input.actionName || !input.target) {
-                result = { success: false, action, error: 'run_action requires actionName and target' };
+                rejectRunAction('run_action requires actionName and target');
+            } else if (inputProblem) {
+                rejectRunAction(inputProblem);
             } else {
                 try {
                     const { bridge, finding } = await runProjectBridge({
@@ -1031,11 +1054,16 @@ export async function cyberTool(input: CyberToolInput) {
                         finding,
                     };
                 } catch (err: any) {
-                    result = { success: false, action, error: String(err?.message || err) };
+                    rejectRunAction(String(err?.message || err));
                 }
             }
         } else {
             throw new Error(`Unsupported cyber_tool action: ${action}`);
+        }
+        // Anything that could not be saved is part of the answer (it used to be swallowed behind success:true)
+        if (failures.length > 0 && result && typeof result === 'object' && !Array.isArray(result)) {
+            result.persisted = false;
+            result.persistWarnings = [...failures];
         }
     } catch (err: any) {
         isError = true;
