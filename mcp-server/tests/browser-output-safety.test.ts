@@ -103,13 +103,38 @@ describe('B12: evaluate limits', () => {
         expect(launches()).toBe(0);
     });
 
-    it('caps what comes back and says it did', async () => {
-        const { pool } = installPool(() => envelope('y'.repeat(500_000)));
+    it('reduces what comes back to the budget, keeps it valid, and says so', async () => {
+        const rows = Array.from({ length: 4000 }, (_, i) => ({ id: i, name: `row ${i}`, note: 'lorem ipsum '.repeat(30) }));
+        const { pool } = installPool(() => envelope({ total: 4000, rows }));
         const r: any = await dispatchBrowserAction({ action: 'evaluate', sessionId: 's-ev3', params: { function: fn } });
         expect(r.success).toBe(true);
-        expect(JSON.stringify(r.data).length).toBeLessThan(110_000);
-        expect(r.data.truncated).toBe(true);
-        expect(r.data.originalChars).toBeGreaterThan(500_000);
+        expect(JSON.stringify(r.data).length).toBeLessThanOrEqual(100_000);
+        expect(r.data.total).toBe(4000);
+        expect(r.data.rows[r.data.rows.length - 1]._of).toBe(4000);
+        expect(r.warnings.join(' ')).toMatch(/RESULT_REDUCED/);
+        await pool.shutdownAll();
+    });
+
+    it('an oversized string result is cut with a marker, not dropped', async () => {
+        const { pool } = installPool(() => envelope('y'.repeat(500_000)));
+        const r: any = await dispatchBrowserAction({ action: 'evaluate', sessionId: 's-ev3b', params: { function: fn } });
+        expect(r.success).toBe(true);
+        expect(typeof r.data).toBe('string');
+        expect(r.data.length).toBeLessThanOrEqual(100_000);
+        expect(r.data).toMatch(/\+\d+ chars\]$/);
+        await pool.shutdownAll();
+    });
+
+    it('select returns only the requested fields, and query keeps matching rows when it still has to cut', async () => {
+        const rows = Array.from({ length: 4000 }, (_, i) => ({ id: i, name: i === 3777 ? 'Quantum Widget' : `row ${i}`, note: 'lorem ipsum '.repeat(30) }));
+        const { pool } = installPool(() => envelope({ rows }));
+        const picked: any = await dispatchBrowserAction({ action: 'evaluate', sessionId: 's-ev3c', params: { function: fn, select: ['rows.*.name'] } });
+        expect(picked.data.rows[0]).toEqual({ name: 'row 0' });
+        expect(picked.data.rows[3777]).toEqual({ name: 'Quantum Widget' });
+        expect(picked.warnings.join(' ')).toMatch(/SELECTED/);
+
+        const queried: any = await dispatchBrowserAction({ action: 'evaluate', sessionId: 's-ev3d', params: { function: fn, query: 'quantum widget' } });
+        expect(queried.data.rows.some((x: any) => x.id === 3777)).toBe(true);
         await pool.shutdownAll();
     });
 

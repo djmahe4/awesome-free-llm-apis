@@ -1,5 +1,6 @@
 import { replayConfidence, boundedMs, safeScreenshotName, safeSessionSegment, evaluateAllowed, MAX_EVALUATE_SOURCE_CHARS, MAX_EVALUATE_RESULT_CHARS } from './limits.js';
 import { pathParamWithinRoots } from '../utils/workspace-roots.js';
+import { reduceJson } from '../utils/json-reduce.js';
 import { checkBrowserUrl } from './urlGuard.js';
 import path from 'node:path';
 import { parseInput, type BrowserToolInput } from './actionSchemas.js';
@@ -431,17 +432,19 @@ async function handleWait(session: BrowserSession, input: BrowserToolInput, sess
 }
 
 async function handleEvaluate(session: BrowserSession, input: BrowserToolInput, sessionId: string): Promise<BrowserActionResult> {
-    const { function: fnSource, args } = input.params as any;
+    const { function: fnSource, args, select, query } = input.params as any;
     const res = await evaluateStructured(session.client, fnSource, args);
     if (!res.ok) {
         return failResult({ action: 'evaluate', sessionId, errors: [{ stage: 'evaluate', code: 'PAGE_FUNCTION_THREW', message: res.error || 'unknown', recoverable: true }] });
     }
-    // cap what a page function can send back: a 50 MB string would flood the model context and the transport
-    const text = JSON.stringify(res.json ?? null);
-    if (text.length > MAX_EVALUATE_RESULT_CHARS) {
-        return okResult({ action: 'evaluate', sessionId, data: { truncated: true, originalChars: text.length, preview: text.slice(0, MAX_EVALUATE_RESULT_CHARS) } });
-    }
-    return okResult({ action: 'evaluate', sessionId, data: res.json });
+    // What a page function sends back goes into a model's context: keep only what was asked for (`select`),
+    // then shrink to the budget by dropping detail, matching items first (`query`). Raw-text truncation used to
+    // cut valid JSON in half and keep whatever happened to come first.
+    const { value, info } = reduceJson(res.json ?? null, { maxChars: MAX_EVALUATE_RESULT_CHARS, select, query });
+    const warnings: string[] = [];
+    if (info.selected) warnings.push(`RESULT_SELECTED: kept ${select.length} path(s)${info.note ? ` (${info.note})` : ''}`);
+    if (info.reduced) warnings.push(`RESULT_REDUCED: ${info.originalChars} -> ${info.reducedChars} characters, ${info.omittedItems} item(s) omitted; ask for less with params.select or params.query`);
+    return okResult({ action: 'evaluate', sessionId, data: value, warnings });
 }
 
 async function handleNetwork(session: BrowserSession, input: BrowserToolInput, sessionId: string): Promise<BrowserActionResult> {
