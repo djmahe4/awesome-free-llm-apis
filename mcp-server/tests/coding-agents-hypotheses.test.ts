@@ -104,6 +104,15 @@ describe('runProbe: arity', () => {
     it('refuting says how many it actually has', async () => {
         expect((await runProbe('arity:plain@src/a.ts=5', ws)).evidence).toMatch(/2/);
     });
+    it.each([['Box', 'src/a.ts'], ['Shape', 'src/a.ts'], ['Mode', 'src/a.ts'], ['Id', 'src/a.ts'], ['C', 'src/b.py'], ['Thing', 'src/d.rs']])(
+        'a %s in %s is not callable: no parameter list to count, even if a method inside it has one', async (name, file) => {
+        const r = await runProbe(`arity:${name}@${file}=2`, ws);
+        expect(r.status).toBe('refuted');
+        expect(r.evidence).toMatch(/not a function|no parameter list/i);
+    });
+    it('a constant that is not a function has none either', async () => {
+        expect((await runProbe('arity:DEFAULT@src/a.ts=0', ws)).status).toBe('refuted');
+    });
     it('a function that is not there is refuted', async () => {
         expect((await runProbe('arity:ghost@src/a.ts=1', ws)).status).toBe('refuted');
     });

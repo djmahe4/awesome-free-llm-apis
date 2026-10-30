@@ -155,10 +155,18 @@ function findDefinition(lines: string[], lang: Lang, name: string): Definition |
 /** The parameter list (with parentheses) that follows `name` at a definition, read across lines if needed. */
 function paramListAfter(lines: string[], def: Definition, lang: Lang, name: string): string | null {
   const window = lines.slice(def.line - 1, def.line - 1 + 25).join('\n');
-  const at = window.search(new RegExp(`${esc(name)}\\b`));
+  // whole word: `f` must not match the end of `def`
+  const at = window.search(new RegExp(`(?<![\\w$])${esc(name)}(?![\\w$])`));
   if (at < 0) return null;
-  const i = window.indexOf('(', at + name.length);
-  if (i < 0) return null;
+  // The list must start right after the name: `fn name(`, `name<T>(`, or `name = (` / `name = async function (`.
+  // Anything else (a class, interface, enum, struct, constant) has no parameter list of its own, and a '(' further
+  // along belongs to something nested in it, such as a method.
+  const after = window.slice(at + name.length);
+  const direct = /^\s*(<[^>]*>)?\s*\(/.exec(after);
+  const assigned = lang === 'ts' ? /^\s*(:[^=]*)?=\s*(async\s*)?(function\s*\*?\s*\w*\s*)?(<[^>]*>)?\s*\(/.exec(after) : null;
+  const m = direct ?? assigned;
+  if (!m) return null;
+  const i = at + name.length + m[0].length - 1;
   let depth = 0;
   for (let j = i; j < window.length; j++) {
     if (window[j] === '(') depth++;
@@ -235,7 +243,7 @@ export async function runProbe(probeText: string, workspaceRoot: string): Promis
   }
 
   const params = paramListAfter(lines, def, lang, probe.name);
-  if (params === null) return { status: 'refuted', evidence: `${probe.name} at ${probe.path}:L${def.line} has no parameter list to count` };
+  if (params === null) return { status: 'refuted', evidence: `${probe.name} at ${probe.path}:L${def.line} is not a function or method, so it has no parameter list to count` };
   const actual = countParams(params);
   return actual === probe.expected
     ? { status: 'confirmed', evidence: `${probe.name} takes ${actual} parameter${actual === 1 ? '' : 's'} (${probe.path}:L${def.line})` }
