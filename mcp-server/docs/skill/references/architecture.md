@@ -11,6 +11,9 @@ The pipeline enforces strict grounding to prevent hallucinations when performing
 ### 🔄 Pre-emptive Memory Indexing
 Triggered automatically for `agentic: true` requests in a valid workspace. The `WorkspaceContextMiddleware` runs a non-force indexing pass to ensure the LLM's vector search is grounded in the absolute latest state of the project files.
 
+### 🧾 Retrieved context is checked against disk
+Each vector hit keeps where it came from (`memoryManager.searchWithProvenance` returns `content`, `path`, `contentHash` and the index time; `search` still returns bare content). Before memory entries reach a prompt, `WorkspaceContextMiddleware` re-hashes the cited file: an entry for a file that was edited or deleted since it was indexed is dropped (the debug log names the file and whether it was `stale` or `missing`), and the rest are ordered code first, then config, then everything else. The grep/graph context cache is discarded when a file it quotes (`--- FILE: ... ---` or `--- RELATED FILE: ... (via dep-graph) ---`) was modified after the result was cached. The helpers are in `src/memory/evidence.ts`.
+
 ### 🏷️ Attestation Tags
 The pipeline injects a **Grounding Protocol** into the system prompt of every LLM it calls. This forces the model to tag its claims:
 - **`[RETRIEVED]`** — fact is directly present in injected context blocks (e.g., resolved `file://` or `artifact://` URIs, session memory).

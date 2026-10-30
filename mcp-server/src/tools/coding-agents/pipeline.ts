@@ -31,6 +31,7 @@ import {
   extractGoalFromTasksMarkdown,
 } from './tasks.js';
 import { isNoopPatch } from './patch-gen.js';
+import { resolveGateMode, runHypothesisGate, writeHypothesesFile } from './hypothesis-gate.js';
 import {
   discoverWiringTargets,
   scanCodeFiles,
@@ -278,6 +279,18 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       result.isPaused = true;
       result.status = 'paused';
       result.patchSummary = `Created tasks.md with ${tasks.length} task(s) and paused. Call with action="resume" to proceed.`;
+
+      // What the plan assumes, checked against the workspace now, while the plan can still be changed.
+      const planGate = await runHypothesisGate({ mode: resolveGateMode(workspaceRoot), goal: input.goal, files: planCandidateFiles, targetFiles: input.targetFiles, tasks, workspaceRoot });
+      if (planGate.hypotheses.length > 0) {
+        await writeHypothesesFile(workspaceRoot, input.goal, planGate.hypotheses).catch(() => {});
+        result.hypotheses = planGate.hypotheses;
+        result.hypothesesFile = 'hypotheses.md';
+        if (planGate.refuted.length > 0) {
+          result.patchSummary += ` ${planGate.summary.split('\n')[0]} See hypotheses.md; fix the plan before resuming.`;
+          for (const h of planGate.refuted) result.diagnostics.push({ filePath: '', message: `Assumption refuted: ${h.claim} (${h.evidence})`, severity: planGate.blocked ? 'error' : 'warning', source: 'hypothesis' });
+        }
+      }
       result.content = formatCodingAgentsMarkdown(result);
       result.markdown = result.content;
       return result;
@@ -318,6 +331,31 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
 
     // ── Step 1: Enumerate ────────────────────────────────────────────────────
     const codeFiles: string[] = await scanCodeFiles(workspaceRoot, 100);
+
+    // ── Step 1b: Check the assumptions before anything is edited ─────────────
+    // Names the goal relies on and the files it targets are looked up in the workspace; a refuted one is reported
+    // (warn) or stops the run here, before any model call (enforce). Settings: hypothesisGate in coding-agents.json.
+    {
+      const gate = await runHypothesisGate({
+        mode: resolveGateMode(workspaceRoot), goal: activeGoal, files: codeFiles,
+        targetFiles: effectiveTargetFiles, tasks: nextPendingTask ? [nextPendingTask] : undefined, workspaceRoot,
+      });
+      if (gate.hypotheses.length > 0) {
+        await writeHypothesesFile(workspaceRoot, activeGoal, gate.hypotheses).catch(() => {});
+        result.hypotheses = gate.hypotheses;
+        result.hypothesesFile = 'hypotheses.md';
+      }
+      for (const h of gate.refuted) {
+        result.diagnostics.push({ filePath: '', message: `Assumption refuted: ${h.claim} (${h.evidence})`, severity: gate.blocked ? 'error' : 'warning', source: 'hypothesis' });
+      }
+      if (gate.blocked) {
+        caTrace('hypothesis gate blocked', `${gate.refuted.length} refuted`);
+        result.isPaused = true;
+        result.status = 'paused';
+        result.patchSummary = `Blocked before editing: ${gate.summary} Correct the goal or the plan (see hypotheses.md), or set hypothesisGate to "warn" in .free-llm-mcp/coding-agents.json.`;
+        return finalizeResult();
+      }
+    }
 
     // ── Step 2: Locate (VectorStore RAG) ────────────────────────────────────
     caTrace('locate');

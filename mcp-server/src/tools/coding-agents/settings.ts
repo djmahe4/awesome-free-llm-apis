@@ -17,6 +17,8 @@ export interface CodingAgentsSettings {
   skipFailingTests: string[];
   /** Let a failed local edit fall back to free cloud models (sends the file and goal off this machine). Default false. */
   allowCloudFallback: boolean;
+  /** What a refuted assumption in the plan does: off = not checked, warn = reported, enforce = the run stops before editing. */
+  hypothesisGate: 'off' | 'warn' | 'enforce';
 }
 
 export function loadCodingAgentsSettings(workspaceRoot: string): CodingAgentsSettings {
@@ -26,9 +28,10 @@ export function loadCodingAgentsSettings(workspaceRoot: string): CodingAgentsSet
     return {
       skipFailingTests: list.filter((p: unknown): p is string => typeof p === 'string' && p.trim() !== ''),
       allowCloudFallback: raw?.allowCloudFallback === true,
+      hypothesisGate: raw?.hypothesisGate === 'off' || raw?.hypothesisGate === 'enforce' ? raw.hypothesisGate : 'warn',
     };
   } catch {
-    return { skipFailingTests: [], allowCloudFallback: false };
+    return { skipFailingTests: [], allowCloudFallback: false, hypothesisGate: 'warn' };
   }
 }
 

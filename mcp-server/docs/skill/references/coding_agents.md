@@ -43,9 +43,14 @@ interface CodingAgentsInput {
   // A check whose only failures are listed is green; result.verification lists what was skipped.
   "skipFailingTests": ["flaky network call", "/^legacy snapshot \\d+$/", "test_needs_gpu"],
   // off by default: a failed local edit never goes to a cloud model unless this (or the call) allows it
-  "allowCloudFallback": false
+  "allowCloudFallback": false,
+  // what a refuted assumption in the plan does: "off" (not checked), "warn" (default: reported as a warning diagnostic),
+  // "enforce" (the run stops before any edit). CODING_AGENTS_HYPOTHESIS_GATE overrides it.
+  "hypothesisGate": "warn"
 }
 ```
+
+**Assumption check (hypotheses):** before editing, coding_agents lists what the goal and plan assume and checks each against the workspace, with no model involved: every target file should exist, and every code name the goal mentions in backticks or as `name()` should be defined in some file (unless the goal says to add or create it). The result is in `result.hypotheses` and `hypotheses.md` next to `tasks.md` (claim, probe, status, evidence). With `hypothesisGate: "enforce"` a refuted assumption returns `status:"paused"` and a `Blocked before editing` summary instead of an edit; correct the goal or plan and call again. Probe kinds available to the checker: `file:`, `defined:`, `symbol:`, `arity:`, `grep:`, `cite:`.
 Use it for known pre-failing, flaky or environment-dependent tests, so they don't keep every check red and send the repair loop chasing them.
 
 **Tracing (environment):** `CODING_AGENTS_TRACE=1` prints one stderr line per stage with elapsed time and Ollama's load / prompt / generation split; `CODING_AGENTS_TRACE_DIR=<dir>` also saves every rejected model reply there.
@@ -82,6 +87,8 @@ interface CodingAgentsResult {
   wiringFiles?: string[];        // Automatically discovered barrels/consumers for new files
   tasksPlan?: TaskItem[];        // DAG tasks with completed/pending states
   tasksFile?: string;            // Created tasks.md
+  hypotheses?: Array<{ id: string; claim: string; probe: string; status: 'open' | 'confirmed' | 'refuted'; evidence?: string }>; // the plan's assumptions and what the workspace said about each
+  hypothesesFile?: string;       // 'hypotheses.md', written next to tasks.md when there are any
   isPaused?: boolean;
   applied: boolean;
   checkpointId?: string;
@@ -120,6 +127,17 @@ interface CodingAgentsResult {
 
 **Multi-file changes:** each file is edited in its own call; every prompt names the one file to edit and shows the other files' API surface (declaration/export lines), edited ones in their new form. Surfaces are language-aware: JS/TS, Python (`def`/`class`), Go (`func`/`type`), Rust (`fn`/`struct`/`impl`).
 
+**Assumption blackboard (`hypotheses.md`)**, written next to `tasks.md` by the `plan` action and by every run that has something to check:
+```
+# Hypotheses: make `fetchUser` cache its result
+
+| id | claim | probe | status | evidence |
+|----|-------|-------|--------|----------|
+| h1 | planned target src/currency.ts exists | `file:src/currency.ts` | confirmed | src/currency.ts exists |
+| h2 | `fetchUser`, which the goal refers to, is defined in the workspace | `defined:fetchUser` | refuted | fetchUser is not defined in any of the 2 files searched |
+```
+Statuses are `open`, `confirmed`, `refuted`. The verdict and evidence are computed from the files by the probe, never written by a model, and a status someone else writes into the file is ignored the next time it is checked. Probes: `file:<path>`, `defined:<name>` (defined in any scanned code file), `symbol:<name>@<path>` (TS/JS, Python, Go, Rust; a name only mentioned in a comment or string does not count), `arity:<name>@<path>=<n>` (parameter count; `self`/`cls`/`&self` not counted; a class, interface or constant has none), `grep:<regex>@<path>`, `cite:<path>:L<a>-L<b>#<hash>` (cited lines still hash as recorded). Paths outside the workspace and files over 2 MB are refuted with a reason.
+
 **Blackboard task shape (`tasks.md`):**
 ```typescript
 interface TaskItem {
@@ -146,9 +164,11 @@ interface TaskItem {
    - **Blackboard, not just a checkbox**: every resume attempt appends a log line to that task — files touched, model used, `applied` outcome, diagnostic count, or the failure reason — this is the durable AI-agent ↔ `local_llm_patch` interaction history, not a transient in-memory thing. A resume that fails to produce a real patch (generation failure, or the hallucinated-replacement guard in Step 6) leaves the task **`pending`** (not `completed`) with the failure appended to its log, so the *next* `resume` retries the *same* task instead of silently moving on to the next one. Only a genuinely successful apply marks it `completed`.
    - The file's original goal header (`# Tasks Plan: ...`) is preserved across resumes regardless of what `goal` string a given resume call passes.
    - Poll a background run (see **Execution model** above) with `action: 'status'`; cancel one with `action: 'abort'`.
+   - The same call also checks the plan's assumptions (see **Assumption check** above) and writes `hypotheses.md`; a refuted one is added to `diagnostics` (`source: 'hypothesis'`) and named in `patchSummary`, so the plan can be corrected before `resume`.
 2. **Enumerate & Filter**:
    - Auto-scan strictly skips non-code directories (`docs/`, `documentation/`, `site/`, `wiki/`, `specs/`) and `.md` files to prevent false-positive RAG keyword matching.
    - Explicit `targetFiles` overrides allow targeting any file (including `.md`, `.html`, `.css`), safely bypassing TypeScript compiler passes.
+   - **Assumption gate** (right after enumerate, before locate or any model call): the goal's backticked names and the target files are checked against these files. `hypothesisGate: "warn"` (default) adds warning diagnostics (`source: 'hypothesis'`); `"enforce"` returns `status: 'paused'` with a `Blocked before editing` summary and edits nothing; `"off"` skips it. A name the goal asks to add, create or implement is not expected to exist yet.
 3. **Automatic Wiring Discovery**:
    - When targeting non-existent files, `ContextGatherer` scans for parent barrel files (`index.ts`) and caller modules to recommend exact wiring targets.
 4. **Anchor**:
