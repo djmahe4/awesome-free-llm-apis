@@ -33,10 +33,11 @@ const TOOLS = [
   {
     id: 'load_skill_prompt', label: 'load_skill_prompt', icon: '📥',
     tag: 'Skill Loading',
+    actionField: 'type',
     fields: [
       { id: 'type',         label: 'Action Type', type: 'select', options: ['load', 'search', 'list'] },
-      { id: 'name',         label: 'Skill Name', type: 'text', placeholder: 'tdd-workflow' },
-      { id: 'keywords',     label: 'Keywords (comma-separated for search)', type: 'text', placeholder: 'tdd, testing' },
+      { id: 'name',         label: 'Skill Name', type: 'text', placeholder: 'tdd-workflow', showFor: ['load'] },
+      { id: 'keywords',     label: 'Keywords (comma-separated for search)', type: 'text', placeholder: 'tdd, testing', showFor: ['search'] },
       { id: 'workspaceDir', label: 'Workspace Directory (optional)', type: 'text', placeholder: 'C:/path/to/workspace' },
       { id: 'source',       label: 'Source (optional)', type: 'select', options: ['', 'agentic-awesome', 'hermes'] },
       { id: 'sessionId',    label: 'Session ID (for background download polling)', type: 'text', placeholder: 'load-1' },
@@ -48,19 +49,31 @@ const TOOLS = [
     tag: 'Memory',
     fields: [
       { id: 'action',         label: 'Action', type: 'select', options: ['search','list','stats','clear','wiki_search','wiki_write','wiki_list','wiki_read','node_add','node_link','node_list','node_get','node_review','graph_query','adr_write','adr_list','eisenhower_add','eisenhower_list','eisenhower_complete','pomodoro_start','pomodoro_stop','pomodoro_list'] },
-      { id: 'query',          label: 'Query (for search / wiki_search)', type: 'text', placeholder: 'authentication patterns' },
-      { id: 'limit',          label: 'Limit (results)', type: 'number', placeholder: '5' },
-      { id: 'title',          label: 'Title (for wiki_write / wiki_read)', type: 'text', placeholder: 'Auth Overview' },
-      { id: 'content',        label: 'Content (for wiki_write)', type: 'textarea', placeholder: 'Page content...' },
-      { id: 'tags',           label: 'Tags (comma-separated; node_list filters by tags[0])', type: 'text', placeholder: 'auth, security' },
-      { id: 'links',          label: 'Links (comma-separated, for wiki_write)', type: 'text', placeholder: 'Related Page' },
-      { id: 'persona',        label: 'Persona (for wiki_search)', type: 'text', placeholder: 'coder' },
-      { id: 'namespace',      label: 'Namespace (for wiki_*)', type: 'text', placeholder: 'global-cyber-tools' },
-      { id: 'node',           label: 'Node JSON (for node_add)', type: 'textarea', placeholder: '{"type":"text","content":"auth uses JWT","tags":["auth"]}' },
-      { id: 'nodeId',         label: 'Node ID (for node_get)', type: 'text', placeholder: 'a1b2c3...' },
-      { id: 'from',           label: 'From Node ID (for node_link)', type: 'text', placeholder: 'a1b2c3...' },
-      { id: 'to',             label: 'To Node ID (for node_link)', type: 'text', placeholder: 'd4e5f6...' },
-      { id: 'relation',       label: 'Relation Label (for node_link)', type: 'text', placeholder: 'relates-to' },
+      { id: 'query',          label: 'Query', type: 'text', placeholder: 'authentication patterns', showFor: ['search','wiki_search'] },
+      { id: 'limit',          label: 'Limit (results)', type: 'number', placeholder: '5', showFor: ['search','wiki_search'] },
+      { id: 'title',          label: 'Title', type: 'text', placeholder: 'Auth Overview', showFor: ['wiki_write','wiki_read','adr_write'] },
+      { id: 'content',        label: 'Content', type: 'textarea', placeholder: 'Page content...', showFor: ['wiki_write','adr_write'] },
+      { id: 'tags',           label: 'Tags (comma-separated; node_list filters by tags[0])', type: 'text', placeholder: 'auth, security', showFor: ['wiki_write','adr_write','node_list','eisenhower_add'] },
+      { id: 'links',          label: 'Links (comma-separated)', type: 'text', placeholder: 'Related Page', showFor: ['wiki_write','adr_write'] },
+      { id: 'persona',        label: 'Persona', type: 'text', placeholder: 'coder', showFor: ['wiki_search'] },
+      { id: 'namespace',      label: 'Namespace (letters, digits, . - _)', type: 'text', placeholder: 'global-cyber-tools', showFor: ['wiki_search','wiki_write','wiki_list','wiki_read','adr_write','adr_list'] },
+      { id: 'node',           label: 'Node JSON', type: 'textarea', placeholder: '{"type":"text","content":"..."}', showFor: ['node_add'] },
+      { id: 'nodeId',         label: 'Node ID', type: 'text', placeholder: 'a1b2c3...', showFor: ['node_get','node_review'] },
+      { id: 'from',           label: 'From Node ID', type: 'text', placeholder: 'a1b2c3...', showFor: ['node_link'] },
+      { id: 'to',             label: 'To Node ID', type: 'text', placeholder: 'd4e5f6...', showFor: ['node_link'] },
+      { id: 'relation',       label: 'Relation Label', type: 'text', placeholder: 'relates-to', showFor: ['node_link'] },
+      { id: 'task',           label: 'Task', type: 'text', placeholder: 'Ship the release notes', showFor: ['eisenhower_add'] },
+      { id: 'urgent',         label: 'Urgent', type: 'toggle', showFor: ['eisenhower_add'] },
+      { id: 'important',      label: 'Important', type: 'toggle', showFor: ['eisenhower_add'] },
+      { id: 'autoClassify',   label: 'Let an LLM classify urgent/important (opt-in)', type: 'toggle', showFor: ['eisenhower_add'] },
+      { id: 'quadrant',       label: 'Quadrant', type: 'select', options: ['', 'do', 'schedule', 'delegate', 'delete'], showFor: ['eisenhower_list'] },
+      { id: 'includeCompleted', label: 'Include completed', type: 'toggle', showFor: ['eisenhower_list'] },
+      { id: 'taskId',         label: 'Task ID', type: 'text', placeholder: 'task id from eisenhower_list', showFor: ['eisenhower_complete'] },
+      { id: 'label',          label: 'Session label', type: 'text', placeholder: 'Write tests', showFor: ['pomodoro_start'] },
+      { id: 'durationMinutes', label: 'Duration (minutes)', type: 'number', placeholder: '25', showFor: ['pomodoro_start'] },
+      { id: 'sessionRefId',   label: 'Session ID', type: 'text', placeholder: 'id from pomodoro_start', showFor: ['pomodoro_stop'] },
+      { id: 'aborted',        label: 'Abandoned (not completed)', type: 'toggle', showFor: ['pomodoro_stop'] },
+      { id: 'pomodoroLimit',  label: 'How many recent sessions', type: 'number', placeholder: '20', showFor: ['pomodoro_list'] },
     ]
   },
   {
@@ -180,14 +193,17 @@ const TOOLS = [
     tag: 'Multi-Agent Harness',
     fields: [
       { id: 'action', label: 'Action', type: 'select', options: ['deploy', 'resume', 'rerun', 'reorchestrate', 'status', 'approvals', 'approve', 'reject', 'trace', 'tasks', 'abort'] },
-      { id: 'goal', label: 'Goal (for deploy)', type: 'textarea', placeholder: 'Audit authentication flow and harden session tokens' },
-      { id: 'runId', label: 'Run ID', type: 'text', placeholder: 'Run UUID (leave blank for new deploy)' },
-      { id: 'harness', label: 'Harness Template', type: 'text', placeholder: 'research-analysis' },
-      { id: 'role', label: 'Role Name (for rerun)', type: 'text', placeholder: 'security-reviewer' },
-      { id: 'followupContext', label: 'Followup Steering Context (for rerun)', type: 'textarea', placeholder: 'Focus strictly on JWT cookie scoping' },
-      { id: 'approvalId', label: 'Approval ID (for approve/reject)', type: 'text', placeholder: 'appr-123' },
+      { id: 'goal', label: 'Goal', type: 'textarea', placeholder: 'Audit authentication flow and harden session tokens', showFor: ['deploy'] },
+      { id: 'runId', label: 'Run ID', type: 'text', placeholder: 'Run UUID (leave blank for a new deploy)' },
+      { id: 'harness', label: 'Harness Template', type: 'text', placeholder: 'research-analysis', showFor: ['deploy'] },
+      { id: 'role', label: 'Role Name', type: 'text', placeholder: 'security-reviewer', showFor: ['rerun','reorchestrate'] },
+      { id: 'followupContext', label: 'Followup Steering Context', type: 'textarea', placeholder: 'Focus strictly on JWT cookie scoping', showFor: ['rerun','reorchestrate'] },
+      { id: 'approvalId', label: 'Approval ID', type: 'text', placeholder: 'appr-123', showFor: ['approve','reject'] },
+      { id: 'note', label: 'Note (optional)', type: 'text', placeholder: 'why', showFor: ['approve','reject'] },
       { id: 'workspace_root', label: 'Workspace Root (optional)', type: 'text', placeholder: 'C:/path/to/project' },
-      { id: 'maxTokens', label: 'Max Tokens (optional)', type: 'number', placeholder: '60000' }
+      { id: 'maxTokens', label: 'Max Tokens (optional)', type: 'number', placeholder: '60000', showFor: ['deploy'] },
+      { id: 'maxWallMinutes', label: 'Raise wall-clock cap (minutes)', type: 'number', placeholder: '120', showFor: ['resume'] },
+      { id: 'limit', label: 'Events to return', type: 'number', placeholder: '200', showFor: ['trace'] }
     ]
   },
   {
@@ -598,6 +614,20 @@ function renderToolForm(tool) {
 
     pgForm.appendChild(wrap);
   });
+
+  // Show only the inputs that apply to the chosen action (fields without showFor are always shown).
+  const actionId = tool.actionField || 'action';
+  const applyVisibility = () => {
+    const actionEl = document.getElementById(`pg-field-${actionId}`);
+    const action = actionEl ? actionEl.value : '';
+    tool.fields.forEach(f => {
+      const w = document.getElementById(`field-wrap-${f.id}`);
+      if (w) w.style.display = fieldVisibleFor(f, action) ? '' : 'none';
+    });
+  };
+  const chosen = document.getElementById(`pg-field-${actionId}`);
+  if (chosen) chosen.addEventListener('change', applyVisibility);
+  applyVisibility();
 }
 
 function collectParams(tool) {
@@ -605,9 +635,14 @@ function collectParams(tool) {
   const ws = pgWorkspace.value.trim();
   if (ws) params.workspace_root = ws;
 
+  const actionEl = document.getElementById(`pg-field-${tool.actionField || 'action'}`);
+  const currentAction = actionEl ? actionEl.value : '';
+
   tool.fields.forEach(f => {
     const el = document.getElementById(`pg-field-${f.id}`);
     if (!el) return;
+    // an input that does not apply to the chosen action is not sent (it may hold a stale value)
+    if (!fieldVisibleFor(f, currentAction)) return;
 
     if (f.type === 'toggle')       params[f.id] = el.checked;
     else if (f.type === 'number' && f.id === 'temperature') params[f.id] = el.value ? parseFloat(el.value) : undefined;

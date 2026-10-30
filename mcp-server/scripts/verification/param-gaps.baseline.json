@@ -1,0 +1,256 @@
+{
+  "use_free_llm": {
+    "playground": [
+      "action",
+      "agentic",
+      "fallback",
+      "google_search",
+      "max_tokens",
+      "messages",
+      "provider",
+      "resume_input",
+      "sessionId",
+      "skill",
+      "skipIndexing",
+      "stream",
+      "taskType",
+      "temperature",
+      "top_p",
+      "workspace_root"
+    ],
+    "quickstart": [
+      "fallback",
+      "max_tokens",
+      "provider",
+      "stream",
+      "taskType",
+      "temperature",
+      "top_p"
+    ]
+  },
+  "vision_tool": {
+    "playground": [
+      "workspace_root"
+    ],
+    "quickstart": []
+  },
+  "load_skill_prompt": {
+    "playground": [],
+    "quickstart": [
+      "pollAction",
+      "sessionId",
+      "source"
+    ]
+  },
+  "manage_memory": {
+    "playground": [
+      "workspace_root"
+    ],
+    "quickstart": [
+      "aborted",
+      "autoClassify",
+      "content",
+      "durationMinutes",
+      "from",
+      "important",
+      "includeCompleted",
+      "label",
+      "links",
+      "namespace",
+      "node",
+      "nodeId",
+      "persona",
+      "pomodoroLimit",
+      "quadrant",
+      "relation",
+      "sessionRefId",
+      "tags",
+      "task",
+      "taskId",
+      "title",
+      "to",
+      "urgent"
+    ]
+  },
+  "store_workspace_skill": {
+    "playground": [],
+    "quickstart": [
+      "example",
+      "pollAction",
+      "script_instructions",
+      "sessionId"
+    ]
+  },
+  "index_workspace": {
+    "playground": [
+      "workspace_root"
+    ],
+    "quickstart": []
+  },
+  "execute_skill": {
+    "playground": [
+      "sessionId",
+      "skillDir",
+      "source",
+      "workspace_root"
+    ],
+    "quickstart": [
+      "sessionId",
+      "skillDir",
+      "source"
+    ]
+  },
+  "browser_tool": {
+    "playground": [
+      "outputDir",
+      "params",
+      "strict"
+    ],
+    "quickstart": [
+      "outputDir",
+      "params",
+      "strict"
+    ]
+  },
+  "cyber_tool": {
+    "playground": [
+      "actionName",
+      "args",
+      "authorization",
+      "bridge",
+      "category",
+      "mode",
+      "nodeId",
+      "repoPath",
+      "scanWorkspace",
+      "sliceSize",
+      "statusOnly",
+      "url",
+      "urlType",
+      "workspaceRoot"
+    ],
+    "quickstart": [
+      "actionName",
+      "args",
+      "authorization",
+      "bridge",
+      "category",
+      "githubUrl",
+      "goal",
+      "level",
+      "memoryOp",
+      "mode",
+      "nodeId",
+      "note",
+      "repoPath",
+      "scanWorkspace",
+      "sliceSize",
+      "statusOnly",
+      "url",
+      "urlType",
+      "workspaceRoot"
+    ]
+  },
+  "quantum_tool": {
+    "playground": [
+      "autoCollapseOnDrift",
+      "presetCircuit"
+    ],
+    "quickstart": [
+      "autoCollapseOnDrift",
+      "numBranches",
+      "personas",
+      "temperature"
+    ]
+  },
+  "local_llm_patch": {
+    "playground": [
+      "allowCreate",
+      "model",
+      "temperature",
+      "think"
+    ],
+    "quickstart": [
+      "allowCreate",
+      "model",
+      "temperature",
+      "think"
+    ]
+  },
+  "coding_agents": {
+    "playground": [
+      "allowCloudFallback",
+      "maxDurationMs",
+      "maxRepairAttempts",
+      "model",
+      "review",
+      "samples",
+      "temperature",
+      "think"
+    ],
+    "quickstart": [
+      "action",
+      "allowCloudFallback",
+      "feedback",
+      "lspAction",
+      "maxDurationMs",
+      "maxRepairAttempts",
+      "model",
+      "pauseOnTaskPlan",
+      "review",
+      "samples",
+      "targetFiles",
+      "temperature",
+      "think",
+      "verifyCommand",
+      "verifyReport"
+    ]
+  },
+  "agent_harness": {
+    "playground": [],
+    "quickstart": [
+      "harness",
+      "limit",
+      "maxWallMinutes",
+      "note"
+    ]
+  },
+  "movie_tool": {
+    "playground": [
+      "allowOverlap",
+      "apiKey",
+      "duration_ms",
+      "effect",
+      "engine",
+      "hfToken",
+      "metadata",
+      "model",
+      "name",
+      "projectDir",
+      "prompt",
+      "remix",
+      "sessionId"
+    ],
+    "quickstart": [
+      "allowOverlap",
+      "apiKey",
+      "artifactId",
+      "artifact_path",
+      "duration_ms",
+      "effect",
+      "end_ms",
+      "engine",
+      "hfToken",
+      "label",
+      "metadata",
+      "model",
+      "name",
+      "premise",
+      "projectDir",
+      "projectId",
+      "remix",
+      "start_ms",
+      "track"
+    ]
+  }
+}
