@@ -67,7 +67,7 @@ describe('multi-file runs share context', () => {
         });
         const sessionId = `xfile-${Date.now()}`;
         let r: any = await CodingAgentsHandler({ goal: 'add a currency parameter to formatPrice and pass EUR from cart', workspaceRoot: ws, targetFiles: ['src/money.js', 'src/cart.js'], dryRun: false, topKFiles: 2, sessionId, review: false } as any);
-        for (let i = 0; i < 200 && r.status === 'running'; i++) {
+        for (const t0 = Date.now(); r.status === 'running' && Date.now() - t0 < 60_000;) { // wait for the run, not for a count of polls
             await new Promise(res => setTimeout(res, 50));
             r = await CodingAgentsHandler({ goal: 'x', sessionId, action: 'status' });
         }

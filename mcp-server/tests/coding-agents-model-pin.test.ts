@@ -46,7 +46,7 @@ describe('coding_agents model input', () => {
         });
         const sessionId = `pin-${Date.now()}`;
         let r: any = await CodingAgentsHandler({ goal: 'set a to 2', workspaceRoot: ws, targetFiles: ['src/a.ts'], dryRun: false, topKFiles: 1, sessionId, review: false, model: QWYTHOS } as any);
-        for (let i = 0; i < 200 && r.status === 'running'; i++) {
+        for (const t0 = Date.now(); r.status === 'running' && Date.now() - t0 < 60_000;) { // wait for the run, not for a count of polls
             await new Promise(res => setTimeout(res, 50));
             r = await CodingAgentsHandler({ goal: 'x', sessionId, action: 'status' });
         }

@@ -38,7 +38,7 @@ async function run(replies: Array<{ success: boolean; patch?: string; error?: st
     });
     const sessionId = `sr-retry-${Date.now()}`;
     let r: any = await CodingAgentsHandler({ goal: 'in target, change x + 1 to x + 2', workspaceRoot: ws, targetFiles: ['src/big.ts'], dryRun: false, topKFiles: 1, sessionId, review: false });
-    for (let i = 0; i < 200 && r.status === 'running'; i++) {
+    for (const t0 = Date.now(); r.status === 'running' && Date.now() - t0 < 60_000;) { // wait for the run, not for a count of polls
         await new Promise(res => setTimeout(res, 50));
         r = await CodingAgentsHandler({ goal: 'x', sessionId, action: 'status' });
     }

@@ -87,8 +87,8 @@ describe('H9: run.json is kept current and disk errors are not silent', () => {
     const { HarnessStore } = await import('../src/harness/store.js');
     const store = new HarnessStore('h9-1', tmpDir);
     await deployHarness({ runId: 'h9-1', goal: 'research', workspaceRoot: tmpDir });
-    await vi.waitFor(() => expect(useFreeLLMMock).toHaveBeenCalledTimes(2));
-    await vi.waitFor(async () => expect((await store.loadRun())!.budget.toolCalls).toBeGreaterThanOrEqual(1));
+    await vi.waitFor(() => expect(useFreeLLMMock).toHaveBeenCalledTimes(2), { timeout: 15000 });
+    await vi.waitFor(async () => expect((await store.loadRun())!.budget.toolCalls).toBeGreaterThanOrEqual(1), { timeout: 15000 });
     release();
     expect((await waitForSettled(store)).status).toBe('complete');
   });

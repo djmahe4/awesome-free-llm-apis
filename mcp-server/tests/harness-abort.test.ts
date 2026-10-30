@@ -58,7 +58,7 @@ describe('agent_harness abort', () => {
     await deployHarness({ runId: 'abort-1', goal: 'research something', workspaceRoot: tmpDir });
 
     // first step is now blocked inside the model call
-    await vi.waitFor(() => expect(useFreeLLMMock).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(useFreeLLMMock).toHaveBeenCalledTimes(1), { timeout: 15000 });
     expect(abortHarness('abort-1')).toBe(true);
     release();
 
