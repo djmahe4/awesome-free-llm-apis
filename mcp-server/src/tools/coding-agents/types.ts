@@ -30,7 +30,7 @@ export interface DiagnosticResult {
   message: string;
   severity: 'error' | 'warning' | 'info';
   code?: number;
-  source?: 'omp-lsp' | 'ast-syntactic' | 'semantic' | 'subprocess' | 'json-syntax' | 'llm-patch' | 'verify-command';
+  source?: 'omp-lsp' | 'ast-syntactic' | 'semantic' | 'subprocess' | 'json-syntax' | 'llm-patch' | 'verify-command' | 'hypothesis';
 }
 
 export interface LspActionRequest {
@@ -200,6 +200,9 @@ export interface CodingAgentsResult {
   content?: string;
   error?: string;
   tasksPlan?: TaskItem[];
+  /** The plan's assumptions and what the workspace said about each (also written to hypotheses.md). */
+  hypotheses?: Array<{ id: string; claim: string; probe: string; status: 'open' | 'confirmed' | 'refuted'; evidence?: string }>;
+  hypothesesFile?: string;
   tasksFile?: string;
   isPaused?: boolean;
   modelUsed?: string;

@@ -43,9 +43,14 @@ interface CodingAgentsInput {
   // A check whose only failures are listed is green; result.verification lists what was skipped.
   "skipFailingTests": ["flaky network call", "/^legacy snapshot \\d+$/", "test_needs_gpu"],
   // off by default: a failed local edit never goes to a cloud model unless this (or the call) allows it
-  "allowCloudFallback": false
+  "allowCloudFallback": false,
+  // what a refuted assumption in the plan does: "off" (not checked), "warn" (default: reported as a warning diagnostic),
+  // "enforce" (the run stops before any edit). CODING_AGENTS_HYPOTHESIS_GATE overrides it.
+  "hypothesisGate": "warn"
 }
 ```
+
+**Assumption check (hypotheses):** before editing, coding_agents lists what the goal and plan assume and checks each against the workspace, with no model involved: every target file should exist, and every code name the goal mentions in backticks or as `name()` should be defined in some file (unless the goal says to add or create it). The result is in `result.hypotheses` and `hypotheses.md` next to `tasks.md` (claim, probe, status, evidence). With `hypothesisGate: "enforce"` a refuted assumption returns `status:"paused"` and a `Blocked before editing` summary instead of an edit; correct the goal or plan and call again. Probe kinds available to the checker: `file:`, `defined:`, `symbol:`, `arity:`, `grep:`, `cite:`.
 Use it for known pre-failing, flaky or environment-dependent tests, so they don't keep every check red and send the repair loop chasing them.
 
 **Tracing (environment):** `CODING_AGENTS_TRACE=1` prints one stderr line per stage with elapsed time and Ollama's load / prompt / generation split; `CODING_AGENTS_TRACE_DIR=<dir>` also saves every rejected model reply there.

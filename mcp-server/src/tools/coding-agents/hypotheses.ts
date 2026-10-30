@@ -23,6 +23,7 @@ export interface Hypothesis {
 
 export type Probe =
   | { kind: 'file'; path: string }
+  | { kind: 'defined'; name: string }
   | { kind: 'symbol'; name: string; path: string }
   | { kind: 'arity'; name: string; path: string; expected: number }
   | { kind: 'grep'; pattern: string; path: string }
@@ -44,6 +45,8 @@ export function parseProbe(text: string): Probe | null {
   if (!rest.trim()) return null;
 
   if (kind === 'file') return { kind: 'file', path: rest.trim() };
+
+  if (kind === 'defined') return IDENT.test(rest.trim()) ? { kind: 'defined', name: rest.trim() } : null;
 
   if (kind === 'symbol') {
     const at = rest.indexOf('@');
@@ -199,13 +202,32 @@ async function readText(root: string, rel: string): Promise<{ ok: true; text: st
 
 const clip = (s: string) => (s.length > 120 ? `${s.slice(0, 117)}...` : s);
 
-export async function runProbe(probeText: string, workspaceRoot: string): Promise<ProbeResult> {
+export interface ProbeContext {
+  /** Workspace-relative code files a `defined:` probe may search. */
+  files?: string[];
+}
+
+export async function runProbe(probeText: string, workspaceRoot: string, ctx: ProbeContext = {}): Promise<ProbeResult> {
   const probe = parseProbe(probeText);
-  if (!probe) return { status: 'refuted', evidence: `unrecognised probe "${clip(String(probeText))}" (use file:, symbol:, arity:, grep: or cite:)` };
+  if (!probe) return { status: 'refuted', evidence: `unrecognised probe "${clip(String(probeText))}" (use file:, defined:, symbol:, arity:, grep: or cite:)` };
 
   if (probe.kind === 'file') {
     const r = await readText(workspaceRoot, probe.path);
     return r.ok ? { status: 'confirmed', evidence: `${probe.path} exists` } : { status: 'refuted', evidence: r.evidence };
+  }
+
+  if (probe.kind === 'defined') {
+    const files = ctx.files ?? [];
+    if (files.length === 0) return { status: 'refuted', evidence: `no files to search for ${probe.name}` };
+    for (const f of files) {
+      const lang = langOf(f);
+      if (!lang) continue;
+      const r = await readText(workspaceRoot, f);
+      if (!r.ok) continue;
+      const def = findDefinition(r.text.split(/\r?\n/), lang, probe.name);
+      if (def) return { status: 'confirmed', evidence: `${f}:L${def.line}: ${clip(def.text.trim())}` };
+    }
+    return { status: 'refuted', evidence: `${probe.name} is not defined in any of the ${files.length} file${files.length === 1 ? '' : 's'} searched` };
   }
 
   const file = await readText(workspaceRoot, probe.path);
@@ -251,10 +273,10 @@ export async function runProbe(probeText: string, workspaceRoot: string): Promis
 }
 
 /** Runs every probe. The status a model wrote is ignored: the probe decides. */
-export async function validateHypotheses(list: Hypothesis[], workspaceRoot: string): Promise<Hypothesis[]> {
+export async function validateHypotheses(list: Hypothesis[], workspaceRoot: string, ctx: ProbeContext = {}): Promise<Hypothesis[]> {
   const out: Hypothesis[] = [];
   for (const h of list) {
-    const r = await runProbe(h.probe, workspaceRoot);
+    const r = await runProbe(h.probe, workspaceRoot, ctx);
     out.push({ id: h.id, claim: h.claim, probe: h.probe, status: r.status, evidence: r.evidence });
   }
   return out;
