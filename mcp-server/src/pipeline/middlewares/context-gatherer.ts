@@ -52,6 +52,7 @@ interface CacheEntry {
 }
 
 import os from 'os';
+import { anyChangedSince, filesCitedIn } from '../../memory/evidence.js';
 
 const contextCache = new LRUCache<string, CacheEntry>({
     max: 500,
@@ -95,7 +96,12 @@ export class ContextGatherer {
         // Check cache
         const queryHash = crypto.createHash('md5').update(query).digest('hex');
         const cacheKey = `${wsHash}:${branch}:${queryHash}`;
-        const cached = contextCache.get(cacheKey);
+        let cached = contextCache.get(cacheKey);
+        // A result is only as fresh as the files it quotes: drop it when any of them changed since it was cached.
+        if (cached && await anyChangedSince(filesCitedIn(cached.results), workspaceRoot, cached.timestamp)) {
+          contextCache.delete(cacheKey);
+          cached = undefined;
+        }
         if (cached && cached.branch === branch) {
             const grepElapsedMs = Date.now() - grepStartMs;
             const sessionId = options.sessionId;
