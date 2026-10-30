@@ -31,6 +31,7 @@ describe('dashboard index.html assembly', () => {
       (m) => m[1]
     );
     expect(jsTags).toEqual([
+      '/js/00-field-visibility.js',
       '/js/01-utils.js',
       '/js/02-markdown.js',
       '/js/03-shell.js',
