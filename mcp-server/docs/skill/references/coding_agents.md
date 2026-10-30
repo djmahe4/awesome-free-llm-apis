@@ -79,6 +79,15 @@ This mirrors `use_free_llm`'s `run`/`continue`/`status`/`abort` pattern (`RunReg
 ```typescript
 interface CodingAgentsResult {
   status?: 'applied' | 'rollback' | 'dry_run' | 'paused' | 'running';
+  pipelineStage: 'enumerate' | 'locate' | 'anchor' | 'edit' | 'verify' | 'completed'; // last stage reached
+  anchors: Array<{ filePath: string; hashTag: string; lineCount: number; capturedAt: number }>; // hashTag is [PATH#SHA8], e.g. src/server.ts#a1b2c3d4, taken before editing
+  content?: string;              // the result rendered as Markdown for display
+  markdown?: string;             // same text as content
+  astRewritesCount?: number;     // structural (AST) rewrites applied
+  wiringContext?: string[];      // snippets from the barrels/consumers behind wiringFiles
+  restored?: boolean;            // resolve/undo_file: the previous version was written back
+  remainingDepth?: number;       // undo_file: history entries left (0 = drained)
+  fileHistory?: Array<string | null>; // file_history: newest-first versions (null = the file did not exist before that apply)
   message?: string;              // Progress/ack text when status is 'running'
   patchSummary?: string;
   patchPlan?: LineAnchoredPatch[];
