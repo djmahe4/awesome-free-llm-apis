@@ -69,6 +69,14 @@ describe('cached grep results', () => {
     it('lists the files a cached result cites', () => {
         expect(filesCitedIn(results)).toEqual(['src/a.ts', 'src/b.ts']);
     });
+    it('also lists files quoted by dependency-graph snippets, including several in one entry', () => {
+        const withGraph = [
+            '[Context] --- FILE: src/a.ts ---',
+            ['[Graph-Context] --- RELATED FILE: src/dep.ts (via dep-graph) ---', 'export const x = 1;'].join('\n'),
+            ['L1: foo', '[Graph-Context] --- RELATED FILE: src/other.ts (via dep-graph) ---', 'bar'].join('\n'),
+        ];
+        expect(filesCitedIn(withGraph)).toEqual(['src/a.ts', 'src/dep.ts', 'src/other.ts']);
+    });
     it('notices a cited file edited after the result was cached', async () => {
         await fs.mkdir(path.join(root, 'src'));
         await fs.writeFile(path.join(root, 'src/a.ts'), 'v1');

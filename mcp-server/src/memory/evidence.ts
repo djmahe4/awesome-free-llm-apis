@@ -81,12 +81,16 @@ export function sortCodeFirst<T extends { path?: string }>(list: T[]): T[] {
   return [...list].sort((a, b) => rank(a.path) - rank(b.path));
 }
 
-/** Files named by `--- FILE: <path> ---` headers in a cached grep result. */
+/**
+ * Files a cached context result quotes: `--- FILE: <path> ---` (grep) and `--- RELATED FILE: <path> (via dep-graph) ---`
+ * (graph expansion) headers. An entry can hold several headers, so every one is collected.
+ */
 export function filesCitedIn(results: string[]): string[] {
   const out: string[] = [];
-  for (const line of results) {
-    const m = line.match(/--- FILE: (.+?) ---/);
-    if (m && !out.includes(m[1])) out.push(m[1]);
+  for (const entry of results) {
+    for (const m of entry.matchAll(/--- (?:RELATED )?FILE: (.+?)(?: \(via dep-graph\))? ---/g)) {
+      if (!out.includes(m[1])) out.push(m[1]);
+    }
   }
   return out;
 }
