@@ -102,8 +102,6 @@
   },
   "browser_tool": {
     "playground": [
-      "outputDir",
-      "params",
       "strict"
     ],
     "quickstart": [
@@ -227,7 +225,6 @@
       "model",
       "name",
       "projectDir",
-      "prompt",
       "remix",
       "sessionId"
     ],

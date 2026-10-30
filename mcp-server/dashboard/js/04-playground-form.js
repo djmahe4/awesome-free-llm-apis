@@ -88,8 +88,10 @@ const TOOLS = [
     tag: 'Web Scraping',
     fields: [
       { id: 'action', label: 'Action', type: 'select', options: ['navigate', 'snapshot', 'click', 'scroll', 'wait', 'evaluate', 'network', 'api_replay', 'extract', 'deep_scrape', 'screenshot', 'checkpoint', 'session', 'scrape'] },
-      { id: 'url', label: 'Target URL', type: 'text', placeholder: 'https://example.com' },
-      { id: 'userInstructions', label: 'Extraction Instructions', type: 'textarea', placeholder: 'Scrape page headlines and stats' },
+      { id: 'url', label: 'Target URL', type: 'text', placeholder: 'https://example.com', showFor: ['navigate', 'scrape'] },
+      { id: 'userInstructions', label: 'Extraction Instructions', type: 'textarea', placeholder: 'Scrape page headlines and stats', showFor: ['scrape'] },
+      { id: 'outputDir', label: 'Output Directory (optional)', type: 'text', placeholder: 'browser-output', showFor: ['screenshot', 'extract', 'api_replay', 'deep_scrape', 'checkpoint', 'scrape'] },
+      { id: 'params', label: 'Action params JSON (click: {"by":"uid","value":"..."}; scroll: {"target":"page"}; wait: {"until":"dom-stable"}; evaluate: {"function":"..."}; network/checkpoint/session: {"op":"..."})', type: 'textarea', placeholder: '{"by":"uid","value":"1_2"}' },
       { id: 'sessionId', label: 'Session ID', type: 'text', placeholder: 'browser_session_1' }
     ]
   },
@@ -98,22 +100,22 @@ const TOOLS = [
     tag: 'Cyber Security',
     fields: [
       { id: 'action', label: 'Action', type: 'select', options: ['osint', 'osint_status', 'list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'run_action', 'resolve_tool'] },
-      { id: 'prompt', label: 'Question (for resolve_tool)', type: 'textarea', placeholder: 'what libraries does hexstrike-ai depend on?' },
-      { id: 'source', label: 'Source (for resolve_tool)', type: 'select', options: ['', 'github', 'docker', 'apt'] },
-      { id: 'choice', label: 'Reply to follow-up (for resolve_tool)', type: 'text', placeholder: 'docker' },
-      { id: 'target', label: 'Target (for osint)', type: 'text', placeholder: 'example.com or johndoe' },
-      { id: 'osintType', label: 'OSINT Type (for osint)', type: 'select', options: ['all', 'domain', 'ip', 'username'] },
-      { id: 'autoSearch', label: 'Auto Search Recon Dorks (osint)', type: 'select', options: ['false', 'true'] },
-      { id: 'allowPrivateIps', label: 'Allow Private / Internal IPs (SSRF Bypass)', type: 'select', options: ['false', 'true'] },
-      { id: 'toolName', label: 'Tool Name', type: 'text', placeholder: 'sqlmap' },
-      { id: 'githubUrl', label: 'GitHub URL (for register)', type: 'text', placeholder: 'https://github.com/sqlmapproject/sqlmap' },
+      { id: 'prompt', label: 'Question (for resolve_tool)', type: 'textarea', placeholder: 'what libraries does hexstrike-ai depend on?', showFor: ['resolve_tool'] },
+      { id: 'source', label: 'Source (for resolve_tool)', type: 'select', options: ['', 'github', 'docker', 'apt'], showFor: ['resolve_tool'] },
+      { id: 'choice', label: 'Reply to follow-up (for resolve_tool)', type: 'text', placeholder: 'docker', showFor: ['resolve_tool'] },
+      { id: 'target', label: 'Target (for osint)', type: 'text', placeholder: 'example.com or johndoe', showFor: ['osint', 'osint_status', 'run_action'] },
+      { id: 'osintType', label: 'OSINT Type (for osint)', type: 'select', options: ['all', 'domain', 'ip', 'username'], showFor: ['osint'] },
+      { id: 'autoSearch', label: 'Auto Search Recon Dorks (osint)', type: 'select', options: ['false', 'true'], showFor: ['osint'] },
+      { id: 'allowPrivateIps', label: 'Allow Private / Internal IPs (SSRF Bypass)', type: 'select', options: ['false', 'true'], showFor: ['osint'] },
+      { id: 'toolName', label: 'Tool Name', type: 'text', placeholder: 'sqlmap', showFor: ['get_tool', 'register_tool', 'wiki_lookup', 'tool_memory', 'learn', 'coach', 'resolve_tool'] },
+      { id: 'githubUrl', label: 'GitHub URL (for register)', type: 'text', placeholder: 'https://github.com/sqlmapproject/sqlmap', showFor: ['register_tool'] },
       { id: 'sessionId', label: 'Session / CTF ID', type: 'text', placeholder: 'ctf-challenge-1' },
-      { id: 'goal', label: 'Goal (for learn)', type: 'textarea', placeholder: 'enumerate services on a lab host with nmap' },
-      { id: 'level', label: 'Level (for learn)', type: 'select', options: ['', 'beginner', 'intermediate', 'advanced'] },
-      { id: 'observation', label: 'Observation (for coach)', type: 'textarea', placeholder: 'nmap showed port 80 open' },
-      { id: 'graphNode', label: 'Graph Node JSON (for save_graph)', type: 'textarea', placeholder: '{"id":"hyp-1","label":"try SQLi on login form","type":"hypothesis","from":"root"}' },
-      { id: 'memoryOp', label: 'Memory Op (for tool_memory)', type: 'select', options: ['', 'read', 'write'] },
-      { id: 'note', label: 'Note (for tool_memory write)', type: 'textarea', placeholder: '-sV -p- for a full service scan on lab targets' }
+      { id: 'goal', label: 'Goal (for learn)', type: 'textarea', placeholder: 'enumerate services on a lab host with nmap', showFor: ['learn', 'coach'] },
+      { id: 'level', label: 'Level (for learn)', type: 'select', options: ['', 'beginner', 'intermediate', 'advanced'], showFor: ['learn', 'coach'] },
+      { id: 'observation', label: 'Observation (for coach)', type: 'textarea', placeholder: 'nmap showed port 80 open', showFor: ['coach'] },
+      { id: 'graphNode', label: 'Graph Node JSON (for save_graph)', type: 'textarea', placeholder: '{"id":"hyp-1","label":"try SQLi on login form","type":"hypothesis","from":"root"}', showFor: ['save_graph'] },
+      { id: 'memoryOp', label: 'Memory Op (for tool_memory)', type: 'select', options: ['', 'read', 'write'], showFor: ['tool_memory'] },
+      { id: 'note', label: 'Note (for tool_memory write)', type: 'textarea', placeholder: '-sV -p- for a full service scan on lab targets', showFor: ['tool_memory'] }
     ]
   },
   {
@@ -159,21 +161,21 @@ const TOOLS = [
     id: 'coding_agents', label: 'coding_agents', icon: '🤖',
     tag: 'Autonomous Multi-File Coding',
     fields: [
-      { id: 'goal', label: 'Refactoring / Coding Goal', type: 'textarea', placeholder: 'Add rate limiting to express endpoints' },
+      { id: 'goal', label: 'Refactoring / Coding Goal', type: 'textarea', placeholder: 'Add rate limiting to express endpoints', showFor: ['', 'plan', 'execute', 'resume'] },
       { id: 'workspaceRoot', label: 'Workspace Root (optional)', type: 'text', placeholder: 'C:/path/to/workspace' },
-      { id: 'dryRun', label: 'Dry Run Mode (simulate only)', type: 'toggle', default: true },
-      { id: 'topKFiles', label: 'Candidate Files Count (RAG)', type: 'number', placeholder: '5' },
+      { id: 'dryRun', label: 'Dry Run Mode (simulate only)', type: 'toggle', default: true, showFor: ['', 'execute', 'resume'] },
+      { id: 'topKFiles', label: 'Candidate Files Count (RAG)', type: 'number', placeholder: '5', showFor: ['', 'plan', 'execute'] },
       { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'coding-session-1' },
       { id: 'action', label: 'Action', type: 'select', options: ['', 'plan', 'execute', 'resume', 'status', 'abort'] },
-      { id: 'pauseOnTaskPlan', label: 'Pause On Task Plan', type: 'toggle' },
-      { id: 'verifyCommand', label: 'Verify Command (rolls back on regression)', type: 'text', placeholder: 'npx vitest run tests/a.test.ts' },
-      { id: 'feedback', label: 'Feedback / Repair Brief (retry)', type: 'textarea', placeholder: 'paste result.verification.repairBrief from the previous attempt' },
-      { id: 'verifyReport', label: 'Verify Report JSON (your own test run)', type: 'textarea', placeholder: '{"exitCode":1,"output":"..."}' },
-      { id: 'targetFiles', label: 'Target Files (comma-separated)', type: 'text', placeholder: 'src/foo.ts, src/bar.ts' },
-      { id: 'verifyLspDiagnostics', label: 'Verify LSP Diagnostics', type: 'toggle', default: true },
-      { id: 'astEditOps', label: 'AST Edit Ops JSON (optional)', type: 'textarea', placeholder: '[{"pat":"old($$A)","out":"new($$A)"}]' },
-      { id: 'resolve', label: 'Resolve JSON (optional)', type: 'textarea', placeholder: '{"action":"apply"}' },
-      { id: 'lspAction', label: 'LSP Action JSON (optional)', type: 'textarea', placeholder: '{"action":"diagnostics"}' },
+      { id: 'pauseOnTaskPlan', label: 'Pause On Task Plan', type: 'toggle', showFor: ['', 'execute'] },
+      { id: 'verifyCommand', label: 'Verify Command (rolls back on regression)', type: 'text', placeholder: 'npx vitest run tests/a.test.ts', showFor: ['', 'execute', 'resume'] },
+      { id: 'feedback', label: 'Feedback / Repair Brief (retry)', type: 'textarea', placeholder: 'paste result.verification.repairBrief from the previous attempt', showFor: ['', 'execute', 'resume'] },
+      { id: 'verifyReport', label: 'Verify Report JSON (your own test run)', type: 'textarea', placeholder: '{"exitCode":1,"output":"..."}', showFor: ['', 'execute', 'resume'] },
+      { id: 'targetFiles', label: 'Target Files (comma-separated)', type: 'text', placeholder: 'src/foo.ts, src/bar.ts', showFor: ['', 'plan', 'execute', 'resume'] },
+      { id: 'verifyLspDiagnostics', label: 'Verify LSP Diagnostics', type: 'toggle', default: true, showFor: ['', 'execute'] },
+      { id: 'astEditOps', label: 'AST Edit Ops JSON (optional)', type: 'textarea', placeholder: '[{"pat":"old($$A)","out":"new($$A)"}]', showFor: ['', 'execute', 'resume'] },
+      { id: 'resolve', label: 'Resolve JSON (optional)', type: 'textarea', placeholder: '{"action":"apply"}', showFor: ['', 'execute', 'resume'] },
+      { id: 'lspAction', label: 'LSP Action JSON (optional)', type: 'textarea', placeholder: '{"action":"diagnostics"}', showFor: ['', 'execute'] },
     ]
   },
   {
@@ -210,15 +212,16 @@ const TOOLS = [
     id: 'movie_tool', label: 'movie_tool', icon: '🎬',
     tag: 'Vibe Movie Engine',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['init_project', 'get_timeline', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'apply_effect', 'undo_effect', 'compile_timeline'] },
+      { id: 'action', label: 'Action', type: 'select', options: ['init_project', 'get_timeline', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'update_artifact_bounds', 'apply_effect', 'undo_effect', 'compile_timeline'] },
       { id: 'projectId', label: 'Project ID', type: 'text', placeholder: 'proj_cyberpunk_01' },
-      { id: 'premise', label: 'Premise / Prompt', type: 'textarea', placeholder: 'Cyberpunk rainy alleyway with neon signs' },
-      { id: 'track', label: 'Track Lane', type: 'select', options: ['video', 'vfx', 'bgm', 'bgm_drums', 'bgm_bass', 'bgm_melody', 'vocal', 'song', 'script', 'dialogue'] },
-      { id: 'start_ms', label: 'Start Time (ms)', type: 'number', placeholder: '0' },
-      { id: 'end_ms', label: 'End Time (ms)', type: 'number', placeholder: '5000' },
-      { id: 'label', label: 'Artifact Label', type: 'text', placeholder: 'Opening Cut' },
-      { id: 'artifact_path', label: 'File Path / URL', type: 'text', placeholder: 'projects/default/video.mp4' },
-      { id: 'artifactId', label: 'Artifact ID (for approve/reroll/effects)', type: 'text', placeholder: 'art_123' }
+      { id: 'premise', label: 'Premise / Prompt', type: 'textarea', placeholder: 'Cyberpunk rainy alleyway with neon signs', showFor: ['init_project', 'propose_slots', 'generate_story'] },
+      { id: 'prompt', label: 'Prompt (generate_assets / generate_story)', type: 'textarea', placeholder: 'Neon rain on an empty street, slow dolly in', showFor: ['generate_assets', 'generate_story'] },
+      { id: 'track', label: 'Track Lane', type: 'select', options: ['video', 'vfx', 'bgm', 'bgm_drums', 'bgm_bass', 'bgm_melody', 'vocal', 'song', 'script', 'dialogue'], showFor: ['generate_assets', 'add_artifact', 'propose_slots', 'apply_effect'] },
+      { id: 'start_ms', label: 'Start Time (ms)', type: 'number', placeholder: '0', showFor: ['add_artifact', 'update_artifact_bounds'] },
+      { id: 'end_ms', label: 'End Time (ms)', type: 'number', placeholder: '5000', showFor: ['add_artifact', 'update_artifact_bounds'] },
+      { id: 'label', label: 'Artifact Label', type: 'text', placeholder: 'Opening Cut', showFor: ['add_artifact'] },
+      { id: 'artifact_path', label: 'File Path / URL', type: 'text', placeholder: 'projects/default/video.mp4', showFor: ['add_artifact', 'generate_assets'] },
+      { id: 'artifactId', label: 'Artifact ID (for approve/reroll/effects)', type: 'text', placeholder: 'art_123', showFor: ['reroll_artifact', 'approve_artifact', 'apply_effect', 'undo_effect', 'update_artifact_bounds'] }
     ]
   }
 ];
@@ -657,7 +660,7 @@ function collectParams(tool) {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
     } else if (f.id === 'files') {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
-    } else if (f.id === 'graphNode' || f.id === 'gates' || f.id === 'script_instructions' || f.id === 'metadata') {
+    } else if (f.id === 'params' || f.id === 'graphNode' || f.id === 'gates' || f.id === 'script_instructions' || f.id === 'metadata') {
       const raw = el.value.trim();
       if (raw) {
         try { params[f.id] = JSON.parse(raw); } catch { params[f.id] = raw; }

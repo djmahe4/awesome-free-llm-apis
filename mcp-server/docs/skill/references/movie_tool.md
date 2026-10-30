@@ -2,46 +2,42 @@
 
 **Purpose:** Autonomous multi-lane timeline manifest media compiler and Vibe Movie Engine. Manages multi-modal media asset generation across audio, speech/TTS, video, music, lyrics, story, and SEO metadata with reversible timeline mutations and effect stacks.
 
-**Input:**
+**Input** (the schema in `src/mcp/index.ts` is the source of truth):
 ```typescript
 interface MovieToolInput {
-  action: 'create_timeline' | 'add_clip' | 'remove_clip' | 'apply_effect' | 'render_timeline' | 'undo' | 'get_manifest';
-  timelineId?: string;
-  manifest?: TimelineManifest;
-  params?: {
-    prompt?: string;
-    mediaType?: 'video' | 'audio' | 'music' | 'tts' | 'image';
-    duration?: number;
-    startTime?: number;
-    provider?: string;
-    model?: string;
-    aspectRatio?: '16:9' | '9:16' | '1:1';
-    voice?: string;
-    style?: string;
-    tags?: string[];
-    effectType?: 'dsp' | 'pitch' | 'tempo' | 'volume' | 'filter' | 'remix';
-    effectParams?: Record<string, any>;
-    clipId?: string;
-    effectId?: string;
-  };
-  sessionId?: string;
-  workspaceRoot?: string;
+  action: 'init_project' | 'get_timeline' | 'propose_slots' | 'add_artifact' | 'approve_artifact' | 'reroll_artifact'
+        | 'generate_assets' | 'generate_story' | 'update_artifact_bounds' | 'apply_effect' | 'undo_effect' | 'compile_timeline';
+  projectId?: string;        // project folder is projects/<projectId> unless projectDir is given
+  projectDir?: string;
+  sessionId?: string;        // stored in the project manifest (init_project)
+  premise?: string;          // story premise or scene description
+  prompt?: string;           // generation prompt (generate_assets, generate_story)
+  track?: 'video' | 'vfx' | 'bgm' | 'bgm_drums' | 'bgm_bass' | 'bgm_melody' | 'vocal' | 'song' | 'script' | 'dialogue';
+  start_ms?: number; end_ms?: number; duration_ms?: number;
+  artifactId?: string; label?: string; name?: string; artifact_path?: string;
+  engine?: string; model?: string; effect?: string; remix?: boolean; allowOverlap?: boolean;
+  metadata?: Record<string, any>;   // width, height, emotion, tempo_bpm, voice, tone, scene, characters
 }
 ```
 
-**Output:**
-```typescript
-interface MovieToolResult {
-  success: boolean;
-  timelineId: string;
-  manifest: TimelineManifest;
-  actionTaken: string;
-  mediaUrl?: string;
-  localPath?: string;
-  metadata?: Record<string, any>;
-  error?: string;
-}
-```
+**What each action needs** (errors come back as `{ success: false, error }`; each requirement below is checked against the handler source by `tests/dashboard-showfor-hypotheses.test.ts`, and the dashboard playground shows only the inputs of the chosen action):
+
+| action | required | optional |
+|---|---|---|
+| `init_project` | `projectId`, `premise` | `sessionId` |
+| `get_timeline` | none | none |
+| `propose_slots` | `premise` | `duration_ms` (default 15000), `track` |
+| `add_artifact` | `track`, `start_ms`, `end_ms` | `name`, `label`, `allowOverlap`, `engine`, `model`, `artifact_path`, `metadata` |
+| `update_artifact_bounds` | `artifactId`, `start_ms`, `end_ms` | none |
+| `approve_artifact` | `artifactId` | none |
+| `reroll_artifact` | `artifactId` | none |
+| `generate_assets` | `track`, `prompt` | `engine`, `model`, `apiKey`, `hfToken`, `duration_ms`, `metadata`, `artifact_path` |
+| `generate_story` | `premise` or `prompt` | `model`, `apiKey`, `metadata` |
+| `apply_effect` | `artifactId` | `effect` (a random one is used when missing or invalid), `track`, `remix` |
+| `undo_effect` | `artifactId` | `remix` |
+| `compile_timeline` | none up front; errors if no video clip has an `artifact_path` or ffmpeg is missing | none |
+
+**Output:** `{ success: boolean, error?: string, ... }` plus an action-specific payload (the project manifest, the artifact, or the compiled file path).
 
 ---
 

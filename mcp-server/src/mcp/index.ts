@@ -913,7 +913,7 @@ export async function createMCPServer(): Promise<Server> {
             remix: { type: 'boolean', description: 'apply_effect: build on the current artifact (default true); false starts from the original.' },
             action: {
               type: 'string',
-              enum: ['init_project', 'get_timeline', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'apply_effect', 'undo_effect', 'compile_timeline'],
+              enum: ['init_project', 'get_timeline', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'update_artifact_bounds', 'apply_effect', 'undo_effect', 'compile_timeline'],
               description: 'Action to perform on the timeline or media project'
             },
             projectId: { type: 'string', description: 'Target project ID' },
