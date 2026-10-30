@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { extractServerActions, extractPlaygroundActions, extractQuickstartActionRows, findActionDrift } from './action-sync.js';
+import { computeGaps, findNewGaps, findClosedGaps, type Gaps } from './param-gaps.js';
 import { findTempHygieneProblems, findRetrylessRemovals } from './test-hygiene.js';
 import { handlerForTool, findHandlerSource, handlerInputType, findTypeSource, interfaceFields, findInputDrift, branchArgReads, browserParamDrift } from './input-sync.js';
 
@@ -270,6 +271,24 @@ async function main() {
       console.warn(`  ↳ Quickstart (index.html) omitted props: ${missingInQuickstart.join(', ')}`);
       driftWarnings++;
     }
+  }
+
+  // Gaps already on record are tolerated (the baseline can only shrink); a new one fails the commit.
+  {
+    const baselinePath = path.join(__dirname, 'param-gaps.baseline.json');
+    const current = computeGaps(mcpToolProperties, playgroundFields, quickstartParams, registeredTools);
+    if (process.env.UPDATE_PARAM_BASELINE === '1') {
+      fs.writeFileSync(baselinePath, JSON.stringify(current, null, 2) + String.fromCharCode(10), 'utf-8');
+      console.log(`✓ Wrote ${path.relative(mcpDir, baselinePath)}`);
+    }
+    const baseline: Gaps = fs.existsSync(baselinePath) ? JSON.parse(fs.readFileSync(baselinePath, 'utf-8')) : {};
+    const added = findNewGaps(current, baseline);
+    if (added.length > 0) {
+      for (const g of added) console.error(`✗ New frontend gap ${g}`);
+      console.error('  Add the input to the playground (dashboard/js/04-playground-form.js) and the Quickstart table, or run with UPDATE_PARAM_BASELINE=1 to record it as a known gap.');
+      process.exit(1);
+    }
+    for (const c of findClosedGaps(current, baseline)) console.warn(`ℹ Gap closed, regenerate the baseline (UPDATE_PARAM_BASELINE=1): ${c}`);
   }
 
   if (driftWarnings === 0) {
