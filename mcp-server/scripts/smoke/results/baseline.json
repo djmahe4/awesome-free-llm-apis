@@ -1,47 +1,68 @@
 {
-  "generatedAt": "2026-10-31T01:00:05.563Z",
+  "generatedAt": "2026-10-31T01:10:00.605Z",
   "fixtures": [
     {
       "name": "hypothesis-gate",
       "covers": "wrong-symbol, invented-file",
       "passed": true,
       "checks": 6,
-      "ms": 1963
+      "ms": 2135
     },
     {
       "name": "hypothesis-probes",
       "covers": "arity, symbol, cite, grep",
       "passed": true,
       "checks": 12,
-      "ms": 237
+      "ms": 233
     },
     {
       "name": "stale-evidence",
       "covers": "stale-cache",
       "passed": true,
       "checks": 2,
-      "ms": 2314
+      "ms": 2159
     },
     {
       "name": "wiki-claims-and-human-edits",
       "covers": "stale-wiki, human edits",
       "passed": true,
       "checks": 13,
-      "ms": 366
+      "ms": 391
     },
     {
       "name": "rerank-distractor",
       "covers": "distractor",
       "passed": true,
       "checks": 4,
-      "ms": 523
+      "ms": 491
     },
     {
       "name": "dashboard-showfor",
       "covers": "dashboard sync",
       "passed": true,
       "checks": 58,
-      "ms": 292
+      "ms": 306
+    },
+    {
+      "name": "model-layer-and-commands",
+      "covers": "model-proposed hypotheses, one re-plan, cmd:/test: probes",
+      "passed": true,
+      "checks": 15,
+      "ms": 681
+    },
+    {
+      "name": "gate-off-vs-on",
+      "covers": "catch rate and false blocks, gate off vs on",
+      "passed": true,
+      "checks": 3,
+      "ms": 284,
+      "metrics": {
+        "catch_rate_off": 0,
+        "catch_rate_on": 1,
+        "false_block_rate_off": 0,
+        "false_block_rate_on": 0,
+        "gate_ms_per_goal": 1.3
+      }
     }
   ]
 }

@@ -81,6 +81,23 @@ export interface GateOutcome {
   refuted: Hypothesis[];
   blocked: boolean;
   summary: string;
+  /** The goal the run should use: the corrected one when a re-plan succeeded, otherwise the one passed in. */
+  goal: string;
+  replanned: boolean;
+  /** Model proposals that were not turned into checks, with the reason. */
+  rejected: Array<{ probe: string; reason: string }>;
+}
+
+/** A model's extra assumptions: only the claim and the probe are taken, any status it wrote is ignored. */
+export type Proposer = (ctx: { goal: string; files: string[]; derived: Hypothesis[] }) => Promise<Array<{ claim: string; probe: string; status?: unknown }>>;
+/** Returns a corrected goal given the assumptions the workspace refuted. Called at most once per run. */
+export type Reviser = (ctx: { goal: string; refuted: Hypothesis[] }) => Promise<string>;
+
+export interface GateInput extends DeriveInput {
+  mode: GateMode;
+  workspaceRoot: string;
+  propose?: Proposer;
+  revise?: Reviser;
 }
 
 /**
@@ -99,21 +116,77 @@ async function readHumanRows(workspaceRoot: string): Promise<Hypothesis[]> {
   }
 }
 
-export async function runHypothesisGate(input: DeriveInput & { mode: GateMode; workspaceRoot: string }): Promise<GateOutcome> {
-  if (input.mode === 'off') return { mode: 'off', hypotheses: [], refuted: [], blocked: false, summary: '' };
-  const derived = deriveHypotheses(input);
+const VACUOUS =/^(?:\.\*|\.\+|\^|\$|\.|\*|\^\$|\^\.\*\$?)$/;
+
+/** Why a model-proposed probe is not worth running, or null. It must name something that can be wrong, and must not execute anything. */
+function rejectProposal(probe: string): string | null {
+  const p = parseProbe(probe);
+  if (!p) return 'not a probe the checker can run';
+  if (p.kind === 'cmd' || p.kind === 'test') return 'command probes are not taken from a model';
+  if (p.kind === 'grep' && (p.pattern.trim().length < 3 || VACUOUS.test(p.pattern.trim()))) return 'a pattern that matches almost anything proves nothing';
+  return null;
+}
+
+async function hypothesesFor(input: GateInput, goal: string, humanRows: Hypothesis[], exec: boolean): Promise<{ hypotheses: Hypothesis[]; rejected: GateOutcome['rejected'] }> {
+  const derived = deriveHypotheses({ ...input, goal });
+  const rejected: GateOutcome['rejected'] = [];
   const taken = new Set(derived.map(h => h.probe));
-  const human = (await readHumanRows(input.workspaceRoot)).filter(h => !taken.has(h.probe));
-  const checked = await validateHypotheses([...derived, ...human], input.workspaceRoot, { files: input.files });
-  // A probe nobody can run proves nothing either way: leave the person's row open instead of calling it refuted.
-  const hypotheses = checked.map(h => isHumanId(h.id) && !parseProbe(h.probe)
-    ? { ...h, status: 'open' as const, evidence: `probe not recognised, so nothing was checked (use file:, defined:, symbol:, arity:, grep: or cite:)` }
+  const proposed: Array<Omit<Hypothesis, 'id'>> = [];
+  if (input.propose) {
+    try {
+      for (const raw of await input.propose({ goal, files: input.files, derived })) {
+        const probe = String(raw?.probe ?? '').trim();
+        const why = rejectProposal(probe);
+        if (why) { rejected.push({ probe, reason: why }); continue; }
+        if (taken.has(probe)) continue;
+        taken.add(probe);
+        proposed.push({ claim: String(raw?.claim ?? probe).slice(0, 200), probe, status: 'open' });
+      }
+    } catch { /* a model that is down must not take the mechanical checks with it */ }
+  }
+  const room = Math.max(0, MAX_HYPOTHESES - derived.length);
+  const model = proposed.slice(0, room).map((h, i) => ({ id: 'm' + (i + 1), ...h }));
+  const human = humanRows.filter(h => !taken.has(h.probe));
+  // commands only ever run for rows a person wrote, and only when the workspace settings allow it
+  const checkedMachine = await validateHypotheses([...derived, ...model], input.workspaceRoot, { files: input.files });
+  const checkedHuman = await validateHypotheses(human, input.workspaceRoot, { files: input.files, allowExec: exec });
+  // a probe nobody can run proves nothing either way: leave the person's row open instead of calling it refuted
+  const humanFinal = checkedHuman.map(h => !parseProbe(h.probe)
+    ? { ...h, status: 'open' as const, evidence: 'probe not recognised, so nothing was checked (use file:, defined:, symbol:, arity:, grep:, cite:, cmd: or test:)' }
     : h);
-  const refuted = hypotheses.filter(h => h.status === 'refuted');
+  return { hypotheses: [...checkedMachine, ...humanFinal], rejected };
+}
+
+export async function runHypothesisGate(input: GateInput): Promise<GateOutcome> {
+  if (input.mode === 'off') return { mode: 'off', hypotheses: [], refuted: [], blocked: false, summary: '', goal: input.goal, replanned: false, rejected: [] };
+  const human = await readHumanRows(input.workspaceRoot);
+  const exec = loadCodingAgentsSettings(input.workspaceRoot).hypothesisExec;
+
+  let goal = input.goal;
+  let { hypotheses, rejected } = await hypothesesFor(input, goal, human, exec);
+  let refuted = hypotheses.filter(h => h.status === 'refuted');
+  let replanned = false;
+
+  // One chance to correct the goal when the run would stop: the model sees what the workspace refuted, and its answer
+  // goes through the same checks. Never a second round.
+  if (input.mode === 'enforce' && refuted.length > 0 && input.revise) {
+    try {
+      const revised = (await input.revise({ goal, refuted })).trim();
+      if (revised && revised !== goal) {
+        const again = await hypothesesFor(input, revised, human, exec);
+        replanned = true;
+        goal = revised;
+        hypotheses = again.hypotheses;
+        rejected = [...rejected, ...again.rejected];
+        refuted = hypotheses.filter(h => h.status === 'refuted');
+      }
+    } catch { /* keep the original verdict */ }
+  }
+
   const blocked = input.mode === 'enforce' && refuted.length > 0;
   const lines = refuted.map(h => `- ${h.claim}: ${h.evidence}`);
   const summary = refuted.length === 0 ? '' : `${refuted.length} assumption${refuted.length === 1 ? '' : 's'} in the plan ${refuted.length === 1 ? 'is' : 'are'} refuted by the workspace:\n${lines.join('\n')}`;
-  return { mode: input.mode, hypotheses, refuted, blocked, summary };
+  return { mode: input.mode, hypotheses, refuted, blocked, summary, goal, replanned, rejected };
 }
 
 /** Lines a person wrote around the table (notes, reminders) are not part of any row; they are carried over. */

@@ -203,6 +203,8 @@ export interface CodingAgentsResult {
   /** The plan's assumptions and what the workspace said about each (also written to hypotheses.md). */
   hypotheses?: Array<{ id: string; claim: string; probe: string; status: 'open' | 'confirmed' | 'refuted'; evidence?: string }>;
   hypothesesFile?: string;
+  /** Set when the gate (enforce) found a refuted assumption and the model supplied one corrected goal that the run then used. */
+  replannedGoal?: string;
   tasksFile?: string;
   isPaused?: boolean;
   modelUsed?: string;

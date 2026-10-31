@@ -19,6 +19,10 @@ export interface CodingAgentsSettings {
   allowCloudFallback: boolean;
   /** What a refuted assumption in the plan does: off = not checked, warn = reported, enforce = the run stops before editing. */
   hypothesisGate: 'off' | 'warn' | 'enforce';
+  /** Lets cmd: and test: rows a person wrote in hypotheses.md run an allowlisted command. Off by default: the agent can write that file. */
+  hypothesisExec: boolean;
+  /** Asks the model for extra assumptions to check, and for one corrected goal when enforce finds a refuted one. Off by default (costs model calls). */
+  hypothesisModel: boolean;
 }
 
 export function loadCodingAgentsSettings(workspaceRoot: string): CodingAgentsSettings {
@@ -29,9 +33,11 @@ export function loadCodingAgentsSettings(workspaceRoot: string): CodingAgentsSet
       skipFailingTests: list.filter((p: unknown): p is string => typeof p === 'string' && p.trim() !== ''),
       allowCloudFallback: raw?.allowCloudFallback === true,
       hypothesisGate: raw?.hypothesisGate === 'off' || raw?.hypothesisGate === 'enforce' ? raw.hypothesisGate : 'warn',
+      hypothesisExec: raw?.hypothesisExec === true,
+      hypothesisModel: raw?.hypothesisModel === true,
     };
   } catch {
-    return { skipFailingTests: [], allowCloudFallback: false, hypothesisGate: 'warn' };
+    return { skipFailingTests: [], allowCloudFallback: false, hypothesisGate: 'warn', hypothesisExec: false, hypothesisModel: false };
   }
 }
 

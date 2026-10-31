@@ -27,8 +27,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const TSX = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
 
 export interface Fixture { name: string; covers: string; script: string }
-export interface FixtureResult { name: string; covers: string; passed: boolean; checks: number; ms: number }
+export interface FixtureResult { name: string; covers: string; passed: boolean; checks: number; ms: number; metrics?: Record<string, number> }
 export interface Report { generatedAt: string; fixtures: FixtureResult[] }
+
+/** Metrics held to the baseline: a catch rate may not fall and a false-block rate may not rise. Time is reported, never gated. */
+const HIGHER_IS_BETTER = ['catch_rate_on'];
+const LOWER_IS_BETTER = ['false_block_rate_on'];
 
 export const FIXTURES: Fixture[] = [
   { name: 'hypothesis-gate', covers: 'wrong-symbol, invented-file', script: 'ca_hypothesis_gate_smoke.ts' },
@@ -37,6 +41,8 @@ export const FIXTURES: Fixture[] = [
   { name: 'wiki-claims-and-human-edits', covers: 'stale-wiki, human edits', script: 'wiki_claims_human_smoke.ts' },
   { name: 'rerank-distractor', covers: 'distractor', script: 'ca_rerank_smoke.ts' },
   { name: 'dashboard-showfor', covers: 'dashboard sync', script: 'dashboard_showfor_hypotheses_smoke.ts' },
+  { name: 'model-layer-and-commands', covers: 'model-proposed hypotheses, one re-plan, cmd:/test: probes', script: 'ca_model_hypotheses_smoke.ts' },
+  { name: 'gate-off-vs-on', covers: 'catch rate and false blocks, gate off vs on', script: 'ca_gate_ab_smoke.ts' },
 ];
 
 /** A check is a line a smoke script prints as "ok ..." or "PASS ..." ("PASS: ..." is a summary), or the claims count of the dashboard smoke. */
@@ -49,6 +55,16 @@ export function countChecks(output: string): number {
   return n;
 }
 
+/** METRIC name=value lines a smoke script prints. */
+export function parseMetrics(output: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const l of output.split(/\r?\n/)) {
+    const m = /^METRIC\s+([\w.]+)=(-?[\d.]+)\s*$/.exec(l);
+    if (m) out[m[1]] = Number(m[2]);
+  }
+  return out;
+}
+
 function runOne(fx: Fixture, dir: string): Promise<FixtureResult> {
   return new Promise(resolve => {
     const started = Date.now();
@@ -57,7 +73,10 @@ function runOne(fx: Fixture, dir: string): Promise<FixtureResult> {
     child.stdout.on('data', d => { out += d; });
     child.stderr.on('data', d => { out += d; });
     child.on('error', () => resolve({ name: fx.name, covers: fx.covers, passed: false, checks: 0, ms: Date.now() - started }));
-    child.on('close', code => resolve({ name: fx.name, covers: fx.covers, passed: code === 0, checks: countChecks(out), ms: Date.now() - started }));
+    child.on('close', code => {
+      const metrics = parseMetrics(out);
+      resolve({ name: fx.name, covers: fx.covers, passed: code === 0, checks: countChecks(out), ms: Date.now() - started, ...(Object.keys(metrics).length ? { metrics } : {}) });
+    });
   });
 }
 
@@ -75,7 +94,11 @@ export function compare(baseline: Report | null, latest: Report): string[] {
   for (const b of baseline.fixtures) {
     const f = latest.fixtures.find(x => x.name === b.name);
     if (!f) problems.push(`${b.name}: in the baseline but not run`);
-    else if (f.checks < b.checks) problems.push(`${b.name}: ${f.checks} passing checks, baseline has ${b.checks} (a check was removed or stopped passing)`);
+    else {
+      if (f.checks < b.checks) problems.push(`${b.name}: ${f.checks} passing checks, baseline has ${b.checks} (a check was removed or stopped passing)`);
+      for (const k of HIGHER_IS_BETTER) if (b.metrics?.[k] !== undefined && (f.metrics?.[k] ?? -1) < b.metrics[k]) problems.push(`${b.name}: ${k} is ${f.metrics?.[k] ?? 'missing'}, baseline has ${b.metrics[k]}`);
+      for (const k of LOWER_IS_BETTER) if (b.metrics?.[k] !== undefined && (f.metrics?.[k] ?? Infinity) > b.metrics[k]) problems.push(`${b.name}: ${k} is ${f.metrics?.[k] ?? 'missing'}, baseline has ${b.metrics[k]}`);
+    }
   }
   return problems;
 }
@@ -90,8 +113,13 @@ async function main() {
   fs.mkdirSync(resultsDir, { recursive: true });
   const latest = await runFixtures(FIXTURES, dir);
   fs.writeFileSync(path.join(resultsDir, 'latest.json'), JSON.stringify(latest, null, 2) + '\n');
+  // one line per run, kept locally (gitignored) so the trend over runs can be read
+  fs.appendFileSync(path.join(resultsDir, 'history.jsonl'), JSON.stringify({ at: latest.generatedAt, fixtures: latest.fixtures.map(f => ({ name: f.name, passed: f.passed, checks: f.checks, ms: f.ms, ...(f.metrics ? { metrics: f.metrics } : {}) })) }) + '\n');
 
-  for (const f of latest.fixtures) console.log(`${f.passed ? 'PASS' : 'FAIL'}  ${f.name.padEnd(30)} ${String(f.checks).padStart(3)} checks  ${(f.ms / 1000).toFixed(1)}s  (${f.covers})`);
+  for (const f of latest.fixtures) {
+    console.log(`${f.passed ? 'PASS' : 'FAIL'}  ${f.name.padEnd(30)} ${String(f.checks).padStart(3)} checks  ${(f.ms / 1000).toFixed(1)}s  (${f.covers})`);
+    if (f.metrics) console.log('      ' + Object.entries(f.metrics).map(([k, v]) => `${k}=${v}`).join('  '));
+  }
   const total = latest.fixtures.reduce((n, f) => n + f.ms, 0);
   console.log(`\n${latest.fixtures.filter(f => f.passed).length}/${latest.fixtures.length} fixtures passed, ${latest.fixtures.reduce((n, f) => n + f.checks, 0)} checks, ${(total / 1000).toFixed(1)}s`);
 

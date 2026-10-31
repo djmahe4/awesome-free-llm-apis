@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { compare, countChecks, runFixtures, FIXTURES, type Report } from '../scripts/smoke/ca_eval.js';
+import { compare, countChecks, parseMetrics, runFixtures, FIXTURES, type Report } from '../scripts/smoke/ca_eval.js';
 
 // Slice 7: the evaluation runner fails when a planted hallucination gets through, and when a check is quietly removed.
 
@@ -48,5 +48,19 @@ describe('the committed baseline', () => {
         const baseline = JSON.parse(fs.readFileSync(path.join(__dirname, '../scripts/smoke/results/baseline.json'), 'utf-8')) as Report;
         expect(baseline.fixtures.map(f => f.name).sort()).toEqual(FIXTURES.map(f => f.name).sort());
         expect(baseline.fixtures.every(f => f.passed && f.checks > 0)).toBe(true);
+    });
+});
+
+describe('metrics', () => {
+    const withMetrics = (m: Record<string, number>): Report => ({ generatedAt: '', fixtures: [{ name: 'ab', covers: '', passed: true, checks: 3, ms: 1, metrics: m }] });
+    it('parseMetrics reads METRIC lines only', () => {
+        expect(parseMetrics('METRIC catch_rate_on=1\nMETRIC gate_ms_per_goal=1.5\nnoise\nMETRIC bad=x')).toEqual({ catch_rate_on: 1, gate_ms_per_goal: 1.5 });
+    });
+    it('a catch rate that falls or a false-block rate that rises fails; time never does', () => {
+        const base = withMetrics({ catch_rate_on: 1, false_block_rate_on: 0, gate_ms_per_goal: 1 });
+        expect(compare(base, withMetrics({ catch_rate_on: 1, false_block_rate_on: 0, gate_ms_per_goal: 500 }))).toEqual([]);
+        expect(compare(base, withMetrics({ catch_rate_on: 0.875, false_block_rate_on: 0, gate_ms_per_goal: 1 })).join()).toMatch(/catch_rate_on is 0.875, baseline has 1/);
+        expect(compare(base, withMetrics({ catch_rate_on: 1, false_block_rate_on: 0.125, gate_ms_per_goal: 1 })).join()).toMatch(/false_block_rate_on is 0.125, baseline has 0/);
+        expect(compare(base, withMetrics({})).join()).toMatch(/catch_rate_on is missing/);
     });
 });

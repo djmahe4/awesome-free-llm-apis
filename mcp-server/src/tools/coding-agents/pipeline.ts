@@ -32,6 +32,8 @@ import {
 } from './tasks.js';
 import { isNoopPatch } from './patch-gen.js';
 import { resolveGateMode, runHypothesisGate, writeHypothesesFile } from './hypothesis-gate.js';
+import { modelProposer, modelReviser } from './hypothesis-model.js';
+import { loadCodingAgentsSettings } from './settings.js';
 import {
   discoverWiringTargets,
   scanCodeFiles,
@@ -339,7 +341,13 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       const gate = await runHypothesisGate({
         mode: resolveGateMode(workspaceRoot), goal: activeGoal, files: codeFiles,
         targetFiles: effectiveTargetFiles, tasks: nextPendingTask ? [nextPendingTask] : undefined, workspaceRoot,
+        ...(loadCodingAgentsSettings(workspaceRoot).hypothesisModel ? { propose: modelProposer(workspaceRoot, sessionId), revise: modelReviser(workspaceRoot, sessionId) } : {}),
       });
+      if (gate.replanned) {
+        activeGoal = gate.goal;
+        result.replannedGoal = gate.goal;
+        caTrace('hypothesis gate re-planned', gate.goal.slice(0, 80));
+      }
       if (gate.hypotheses.length > 0) {
         await writeHypothesesFile(workspaceRoot, activeGoal, gate.hypotheses).catch(() => {});
         result.hypotheses = gate.hypotheses;

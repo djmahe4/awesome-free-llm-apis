@@ -46,11 +46,15 @@ interface CodingAgentsInput {
   "allowCloudFallback": false,
   // what a refuted assumption in the plan does: "off" (not checked), "warn" (default: reported as a warning diagnostic),
   // "enforce" (the run stops before any edit). CODING_AGENTS_HYPOTHESIS_GATE overrides it.
-  "hypothesisGate": "warn"
+  "hypothesisGate": "warn",
+  // off by default: lets cmd:/test: rows you wrote in hypotheses.md run an allowlisted command (same allowlist as verifyCommand)
+  "hypothesisExec": false,
+  // off by default (costs model calls): the model proposes extra assumptions to check, and in enforce mode corrects a refuted goal once
+  "hypothesisModel": false
 }
 ```
 
-**Assumption check (hypotheses):** before editing, coding_agents lists what the goal and plan assume and checks each against the workspace, with no model involved: every target file should exist, and every code name the goal mentions in backticks or as `name()` should be defined in some file (unless the goal says to add or create it). The result is in `result.hypotheses` and `hypotheses.md` next to `tasks.md` (claim, probe, status, evidence). With `hypothesisGate: "enforce"` a refuted assumption returns `status:"paused"` and a `Blocked before editing` summary instead of an edit; correct the goal or plan and call again. Probe kinds available to the checker: `file:`, `defined:`, `symbol:`, `arity:`, `grep:`, `cite:`.
+**Assumption check (hypotheses):** before editing, coding_agents lists what the goal and plan assume and checks each against the workspace, with no model involved: every target file should exist, and every code name the goal mentions in backticks or as `name()` should be defined in some file (unless the goal says to add or create it). The result is in `result.hypotheses` and `hypotheses.md` next to `tasks.md` (claim, probe, status, evidence). With `hypothesisGate: "enforce"` a refuted assumption returns `status:"paused"` and a `Blocked before editing` summary instead of an edit; correct the goal or plan and call again. Probe kinds available to the checker: `file:`, `defined:`, `symbol:`, `arity:`, `grep:`, `cite:`, and the command probes `cmd:<exit code>@<command>` (the command exits with that code) and `test:<command>` (the command passes). Command probes run only for rows you wrote yourself, only with `hypothesisExec: true` in the settings file, and only for the commands `verifyCommand` allows (no shell syntax); otherwise the row stays `open` and nothing runs. Wiki claims and model proposals never run commands.
 Use it for known pre-failing, flaky or environment-dependent tests, so they don't keep every check red and send the repair loop chasing them.
 
 **Tracing (environment):** `CODING_AGENTS_TRACE=1` prints one stderr line per stage with elapsed time and Ollama's load / prompt / generation split; `CODING_AGENTS_TRACE_DIR=<dir>` also saves every rejected model reply there.
@@ -98,6 +102,7 @@ interface CodingAgentsResult {
   tasksFile?: string;            // Created tasks.md
   hypotheses?: Array<{ id: string; claim: string; probe: string; status: 'open' | 'confirmed' | 'refuted'; evidence?: string }>; // the plan's assumptions and what the workspace said about each
   hypothesesFile?: string;       // 'hypotheses.md', written next to tasks.md when there are any
+  replannedGoal?: string;        // the corrected goal, when hypothesisModel is on and enforce found a refuted assumption
   isPaused?: boolean;
   applied: boolean;
   checkpointId?: string;
@@ -146,6 +151,8 @@ interface CodingAgentsResult {
 | h2 | `fetchUser`, which the goal refers to, is defined in the workspace | `defined:fetchUser` | refuted | fetchUser is not defined in any of the 2 files searched |
 ```
 Statuses are `open`, `confirmed`, `refuted`. The verdict and evidence are computed from the files by the probe, never written by a model, and a status someone else writes into the file is ignored the next time it is checked. Probes: `file:<path>`, `defined:<name>` (defined in any scanned code file), `symbol:<name>@<path>` (TS/JS, Python, Go, Rust; a name only mentioned in a comment or string does not count), `arity:<name>@<path>=<n>` (parameter count; `self`/`cls`/`&self` not counted; a class, interface or constant has none), `grep:<regex>@<path>`, `cite:<path>:L<a>-L<b>#<hash>` (cited lines still hash as recorded). Paths outside the workspace and files over 2 MB are refuted with a reason.
+
+**Model layer (`hypothesisModel: true`):** the model may propose up to six more assumptions, each a claim plus one of the non-command probes above (ids `m1`, `m2`); any status it writes is ignored and the probe decides. A proposal is rejected, and listed in the gate outcome, when it is not a runnable probe, runs a command, or is a pattern that matches almost anything. When `hypothesisGate` is `enforce` and an assumption is refuted, the model is asked once to correct the goal using the refuting evidence; the corrected goal goes through the same checks, and if it still fails the run stops as before. A successful correction is returned as `replannedGoal` and used for the rest of the run. There is never a second round, and `warn` and `off` make no extra model call.
 
 **Adding your own rows:** you can add rows to `hypotheses.md` by hand. Start the id with `u` (`u1`, `u2`) and give a probe; the next run keeps the row, checks it like any other assumption, and a refuted one blocks under `enforce`. Every other row belongs to the run that wrote it and is rebuilt from the goal. Notes you write outside the table are kept. A status you type is ignored (the probe decides), and a probe the checker cannot run leaves the row `open` with a note instead of being counted as true or false.
 
