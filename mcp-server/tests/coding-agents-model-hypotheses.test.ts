@@ -141,3 +141,37 @@ describe('model-backed proposer and reviser', () => {
         expect(JSON.stringify(llm.mock.calls[0][0].messages)).toContain('not defined in 1 file');
     });
 });
+
+// Found in a live run against a real model: its own too-narrow grep refuted a true fact and blocked the run, and its
+// "corrected goal" was a paragraph that repeated the missing name and never named the one that exists.
+describe('lessons from the live run', () => {
+    it('a refuted model-proposed row is reported but never blocks', async () => {
+        const g = await runHypothesisGate({ ...base, mode: 'enforce', propose: async () => [{ claim: 'only user fn', probe: 'grep:^export\s+function.*user@src/a.ts' }] });
+        expect(g.hypotheses.find(h => h.id === 'm1')?.status).toBe('refuted');
+        expect(g.blocked).toBe(false);
+    });
+    it('the reviser is told which similar names exist', async () => {
+        const revise = vi.fn(async () => 'make `getUser` cache its result');
+        await runHypothesisGate({ ...base, mode: 'enforce', goal: 'make `fetchUser` cache its result', revise });
+        expect(revise.mock.calls[0][0].similar).toEqual({ fetchUser: ['getUser'] });
+    });
+    it('only the first line of the reviser reply is used, and the similar names reach the prompt', async () => {
+        const llm = vi.fn(async () => ({ choices: [{ message: { content: 'make `getUser` cache its result\nThe workspace does not contain `fetchUser`, so...' } }] }));
+        const out = await modelReviser(ws, 's1', llm)({ goal: 'make `fetchUser` cache', refuted: [], similar: { fetchUser: ['getUser'] } });
+        expect(out).toBe('make `getUser` cache its result');
+        expect(JSON.stringify(llm.mock.calls[0][0].messages)).toContain('fetchUser: getUser');
+    });
+});
+
+describe('collapseRepeats', () => {
+    it('collapses an answer repeated on one line, and leaves normal text alone', async () => {
+        const { collapseRepeats } = await import('../src/tools/coding-agents/hypothesis-model.js');
+        expect(collapseRepeats('make `getUser` cache it.'.repeat(5))).toBe('make `getUser` cache it.');
+        expect(collapseRepeats('fix the fix')).toBe('fix the fix');
+        expect(collapseRepeats('abab')).toBe('ab');
+    });
+    it('the reviser returns the collapsed goal', async () => {
+        const llm = async () => ({ content: 'make `getUser` cache its result in a Map.'.repeat(5) });
+        expect(await modelReviser(ws, 's1', llm)({ goal: 'make `fetchUser` cache its result in a Map', refuted: [], similar: {} })).toBe('make `getUser` cache its result in a Map.');
+    });
+});

@@ -713,6 +713,9 @@ export class TextRouterMiddleware implements Middleware {
         .sort((a, b) => confused ? a.score - b.score : b.score - a.score);
 
         finalTierModels = scoredCandidates.slice(0, 15).map(c => c.modelId);
+        if (finalTierModels.length === 0) {
+            finalTierModels = availableProviders.flatMap(p => p.models.map(m => m.id));
+        }
 
         if (requestedModel === 'any') {
             const allAvailableModels = availableProviders.flatMap(p => p.models.map(m => m.id));
@@ -971,7 +974,7 @@ export class TextRouterMiddleware implements Middleware {
                         // nothing in this formula ever asked whether the prompt needed it.
                         // Cap at a "chat-sufficient" ceiling so cheap/fast models compete
                         // evenly; genuinely-classified Reasoning/Coding keep full cap above.
-                        alignment = Math.min(cap, 0.6);
+                        alignment = estimatedTokens > 8000 ? cap : Math.min(cap, 0.6);
                         break;
                     default:
                         alignment = cap;

@@ -91,7 +91,7 @@ export interface GateOutcome {
 /** A model's extra assumptions: only the claim and the probe are taken, any status it wrote is ignored. */
 export type Proposer = (ctx: { goal: string; files: string[]; derived: Hypothesis[] }) => Promise<Array<{ claim: string; probe: string; status?: unknown }>>;
 /** Returns a corrected goal given the assumptions the workspace refuted. Called at most once per run. */
-export type Reviser = (ctx: { goal: string; refuted: Hypothesis[] }) => Promise<string>;
+export type Reviser = (ctx: { goal: string; refuted: Hypothesis[]; /** for each refuted name, names that do exist in the workspace and share a word with it */ similar: Record<string, string[]> }) => Promise<string>;
 
 export interface GateInput extends DeriveInput {
   mode: GateMode;
@@ -125,6 +125,31 @@ function rejectProposal(probe: string): string | null {
   if (p.kind === 'cmd' || p.kind === 'test') return 'command probes are not taken from a model';
   if (p.kind === 'grep' && (p.pattern.trim().length < 3 || VACUOUS.test(p.pattern.trim()))) return 'a pattern that matches almost anything proves nothing';
   return null;
+}
+
+/** A refuted row from the model is a guess about how to test something, not a fact about the code; it is reported, never blocking. */
+const isModelId = (id: string) => /^m\d+$/.test(id);
+
+const DEFINITION = /(?:function|class|def|const|let|var|interface|type|struct|fn|func|enum)\s+([A-Za-z_$][\w$]*)/g;
+const words = (name: string) => name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').split(/[^A-Za-z0-9]+/).map(w => w.toLowerCase()).filter(w => w.length > 2);
+
+/** Names defined in the workspace that share a word with a name the goal used and the code does not have (fetchUser -> getUser). */
+export async function similarNames(missing: string[], workspaceRoot: string, files: string[]): Promise<Record<string, string[]>> {
+  const defined = new Set<string>();
+  for (const f of files.slice(0, 100)) {
+    try {
+      const text = (await fs.readFile(path.join(workspaceRoot, f), 'utf-8')).slice(0, 200_000);
+      for (const m of text.matchAll(DEFINITION)) defined.add(m[1]);
+    } catch { /* unreadable file: skip */ }
+  }
+  const out: Record<string, string[]> = {};
+  for (const name of missing) {
+    const mine = new Set(words(name));
+    const scored = [...defined].map(d => ({ d, n: words(d).filter(w => mine.has(w)).length })).filter(x => x.n > 0 && x.d !== name);
+    scored.sort((a, b) => b.n - a.n || a.d.localeCompare(b.d));
+    if (scored.length) out[name] = scored.slice(0, 5).map(x => x.d);
+  }
+  return out;
 }
 
 async function hypothesesFor(input: GateInput, goal: string, humanRows: Hypothesis[], exec: boolean): Promise<{ hypotheses: Hypothesis[]; rejected: GateOutcome['rejected'] }> {
@@ -167,11 +192,14 @@ export async function runHypothesisGate(input: GateInput): Promise<GateOutcome> 
   let refuted = hypotheses.filter(h => h.status === 'refuted');
   let replanned = false;
 
+  const blocking = () => refuted.filter(h => !isModelId(h.id));
+
   // One chance to correct the goal when the run would stop: the model sees what the workspace refuted, and its answer
   // goes through the same checks. Never a second round.
-  if (input.mode === 'enforce' && refuted.length > 0 && input.revise) {
+  if (input.mode === 'enforce' && blocking().length > 0 && input.revise) {
     try {
-      const revised = (await input.revise({ goal, refuted })).trim();
+      const missing = blocking().map(h => /^defined:(.+)$/.exec(h.probe)?.[1]).filter((n): n is string => !!n);
+      const revised = (await input.revise({ goal, refuted: blocking(), similar: await similarNames(missing, input.workspaceRoot, input.files) })).trim();
       if (revised && revised !== goal) {
         const again = await hypothesesFor(input, revised, human, exec);
         replanned = true;
@@ -183,7 +211,7 @@ export async function runHypothesisGate(input: GateInput): Promise<GateOutcome> 
     } catch { /* keep the original verdict */ }
   }
 
-  const blocked = input.mode === 'enforce' && refuted.length > 0;
+  const blocked = input.mode === 'enforce' && blocking().length > 0;
   const lines = refuted.map(h => `- ${h.claim}: ${h.evidence}`);
   const summary = refuted.length === 0 ? '' : `${refuted.length} assumption${refuted.length === 1 ? '' : 's'} in the plan ${refuted.length === 1 ? 'is' : 'are'} refuted by the workspace:\n${lines.join('\n')}`;
   return { mode: input.mode, hypotheses, refuted, blocked, summary, goal, replanned, rejected };

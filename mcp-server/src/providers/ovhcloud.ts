@@ -23,13 +23,19 @@ export class OVHcloudProvider extends BaseProvider {
 
   /**
    * OVHcloud AI Endpoints provides a 100% free anonymous tier (2 RPM per model)
-   * that requires no account or API key. If OVHCLOUD_API_KEY is unset, it remains available keyless.
+   * that can be enabled by setting OVHCLOUD_API_KEY='free' or 'keyless' (or a paid Kepler token).
    */
   override isAvailable(): boolean {
-    return true;
+    const key = process.env[this.envVar];
+    if (!key || key.trim() === '') return false;
+    return super.isAvailable();
   }
 
   protected override getApiKey(): string {
-    return process.env[this.envVar] || '';
+    const key = process.env[this.envVar] || '';
+    if (key.toLowerCase() === 'free' || key.toLowerCase() === 'keyless') {
+      return '';
+    }
+    return key;
   }
 }
