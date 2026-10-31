@@ -90,3 +90,5 @@ mcp-server/src/
     ├── PersistenceManager.ts # Encrypted disk persistence for LLM & search health
     └── TaskClassifier.ts     # Centralized task classification
 ```
+
+**Grounding evaluation.** `npm run eval:grounding` (`scripts/smoke/ca_eval.ts`) runs the planted-hallucination fixtures with real components and no model call: a goal naming a function that does not exist, an invented target file, a wrong argument count, a cached result or wiki claim whose source has changed, a distractor-heavy workspace, human edits to `hypotheses.md`, and the dashboard per-action inputs. It writes `scripts/smoke/results/latest.json` (per-fixture result, passing checks, time) and compares it with the committed `baseline.json`: it fails when a fixture fails, disappears, or has fewer passing checks than the baseline. Time is reported but never gated. After adding a fixture or check on purpose, run it with `--update-baseline`. CI runs it after the tests.

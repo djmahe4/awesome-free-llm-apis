@@ -1,0 +1,47 @@
+{
+  "generatedAt": "2026-10-31T01:00:05.563Z",
+  "fixtures": [
+    {
+      "name": "hypothesis-gate",
+      "covers": "wrong-symbol, invented-file",
+      "passed": true,
+      "checks": 6,
+      "ms": 1963
+    },
+    {
+      "name": "hypothesis-probes",
+      "covers": "arity, symbol, cite, grep",
+      "passed": true,
+      "checks": 12,
+      "ms": 237
+    },
+    {
+      "name": "stale-evidence",
+      "covers": "stale-cache",
+      "passed": true,
+      "checks": 2,
+      "ms": 2314
+    },
+    {
+      "name": "wiki-claims-and-human-edits",
+      "covers": "stale-wiki, human edits",
+      "passed": true,
+      "checks": 13,
+      "ms": 366
+    },
+    {
+      "name": "rerank-distractor",
+      "covers": "distractor",
+      "passed": true,
+      "checks": 4,
+      "ms": 523
+    },
+    {
+      "name": "dashboard-showfor",
+      "covers": "dashboard sync",
+      "passed": true,
+      "checks": 58,
+      "ms": 292
+    }
+  ]
+}
