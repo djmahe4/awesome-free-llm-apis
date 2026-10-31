@@ -44,6 +44,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
+        env:
+          # onnxruntime-node downloads CUDA binaries from a Microsoft host at install time; this runner is CPU-only and the download times out intermittently
+          ONNXRUNTIME_NODE_INSTALL: skip
 
       - name: Build
         run: npm run build
