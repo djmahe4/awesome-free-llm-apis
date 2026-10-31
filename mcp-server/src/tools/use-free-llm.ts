@@ -829,7 +829,7 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     const userContent = userMessage ? (typeof userMessage.content === 'string' ? userMessage.content : JSON.stringify(userMessage.content)) : '';
     const persona = detectPersona(originalUserContent, workspaceRoot);
 
-    if (context.taskType !== TaskType.Vision && persona === 'debugger') {
+    if (context.taskType !== TaskType.Vision && persona === 'debugger' && input.isOnePass !== true) {
       const isWindows = os.platform() === 'win32';
       const queryLower = originalUserContent.toLowerCase();
 

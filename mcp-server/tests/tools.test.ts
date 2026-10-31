@@ -148,6 +148,33 @@ describe('use_free_llm input validation', () => {
     }
   });
 
+  it('does not append CLI diagnostics when the caller asked for only the answer (isOnePass: true)', async () => {
+    vi.stubEnv('GROQ_API_KEY', 'test-key-long-enough');
+    (ProviderRegistry as unknown as { instance: undefined }).instance = undefined;
+
+    const registry = ProviderRegistry.getInstance();
+    const groq = registry.getProvider('groq');
+    if (!groq) return;
+
+    vi.spyOn(groq, 'chat').mockResolvedValue({
+      id: 'one-pass-test-id',
+      object: 'chat.completion',
+      created: Date.now(),
+      model: 'llama-3.3-70b-versatile',
+      choices: [{ index: 0, message: { role: 'assistant' as const, content: 'Base response' }, finish_reason: 'stop' }],
+    });
+
+    const result = await useFreeLLM({
+      model: 'llama-3.3-70b-versatile',
+      // a different prompt from the test above: replies are cached by prompt, and that one was stored with the tips on it
+      messages: [{ role: 'user', content: 'fix TypeError JSON error in the one-pass caller' }],
+      workspace_root: process.cwd(),
+      isOnePass: true
+    });
+
+    expect(result.choices[0].message.content).toBe('Base response');
+  });
+
   it('does NOT append CLI diagnostics for vision tasks even under debugger persona', async () => {
     vi.stubEnv('GROQ_API_KEY', 'test-key-long-enough');
     (ProviderRegistry as unknown as { instance: undefined }).instance = undefined;

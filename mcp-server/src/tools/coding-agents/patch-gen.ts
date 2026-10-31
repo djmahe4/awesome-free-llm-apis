@@ -150,7 +150,7 @@ export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
  */
 export function parseSearchReplaceBlocksDetailed(text: string): { blocks: SearchReplaceBlock[]; incomplete: number } {
   const blocks: SearchReplaceBlock[] = [];
-  const lines = text.split(/\r?\n/);
+  const lines = text.replace(/([^\s=])(={5,})[ \t]*$/gm, (_m, a, b) => a + String.fromCharCode(10) + b).replace(/([^\s>])(>{5,}[ \t]*(?:REPLACE)?)[ \t]*$/gim, (_m, a, b) => a + String.fromCharCode(10) + b).split(/\r?\n/);
   let state: 'OUTSIDE' | 'IN_SEARCH' | 'IN_REPLACE' = 'OUTSIDE';
   let curSearch: string[] = [];
   let curReplace: string[] = [];
@@ -373,7 +373,13 @@ export function closestLines(workingLines: string[], searchLines: string[], maxL
   for (let i = 0; i < workingLines.length; i++) {
     if (!workingLines[i].trim()) continue;
     const score = Math.max(...wanted.map(w => lineSimilarity(workingLines[i], w)));
-    if (score >= 0.55) scored.push({ i, score });
+    if (score >= 0.55) {
+      scored.push({ i, score });
+    } else {
+      const have = new Set(workingLines[i].toLowerCase().match(/[a-z_$][a-z0-9_$]*/g) ?? []);
+      const shared = new Set((wanted.join(' ').toLowerCase().match(/[a-z_$][a-z0-9_$]*/g) ?? []).filter(w => have.has(w))).size;
+      if (shared >= 2) scored.push({ i, score: shared / 100 });
+    }
   }
   scored.sort((a, b) => b.score - a.score || a.i - b.i);
   const top = scored.slice(0, maxLines).sort((a, b) => a.i - b.i);
