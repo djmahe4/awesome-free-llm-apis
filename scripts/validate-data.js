@@ -83,6 +83,41 @@ for (const [i, p] of (data.providers || []).entries()) {
 
 for (const id of footnoteIds) if (!referenced.has(id)) fail(`footnotes id ${id}`, 'not referenced by any provider');
 
+// sources.json: the proof of each fact. scripts/check-sources.js reads it.
+const sourcesFile = path.join(path.dirname(file), 'sources.json');
+if (fs.existsSync(sourcesFile)) {
+	let src;
+	try {
+		src = JSON.parse(fs.readFileSync(sourcesFile, 'utf8'));
+	} catch (err) {
+		fail('sources.json', `not valid JSON: ${err.message}`);
+	}
+	if (src) {
+		const FACTS = ['freeTier', 'listed', 'context', 'maxOutput', 'modality', 'rateLimit'];
+		const providers = new Map((data.providers || []).map(p => [p.name, p]));
+		const seen = new Set();
+		if (!Array.isArray(src.sources)) fail('sources.json', 'sources must be an array');
+		for (const [i, s] of (src.sources || []).entries()) {
+			const where = `sources.json sources[${i}] (${s.provider} ${s.model || ''} ${s.fact})`;
+			const p = providers.get(s.provider);
+			if (!p) fail(where, 'provider is not in data.json');
+			if (!FACTS.includes(s.fact)) fail(where, `fact must be one of ${FACTS.join(', ')}`);
+			if ((s.fact === 'freeTier') !== (s.model === null || s.model === undefined)) fail(where, 'freeTier has no model, the other facts have one');
+			if (p && s.model && !p.models.some(m => m.id === s.model)) fail(where, 'model is not in data.json');
+			if (!/^https:\/\/\S+$/.test(s.url || '')) fail(where, 'url must be an https URL');
+			if (!isText(s.quote)) fail(where, 'quote is required');
+			if (!isText(s.value)) fail(where, 'value is required');
+			const key = `${s.provider}|${s.model || ''}|${s.fact}|${s.url}`;
+			if (seen.has(key)) fail(where, 'duplicate entry');
+			seen.add(key);
+		}
+		for (const [i, c] of (src.catalogs || []).entries()) {
+			if (!providers.has(c.provider)) fail(`sources.json catalogs[${i}]`, 'provider is not in data.json');
+			if (!['openrouter', 'ollama', 'openai'].includes(c.type)) fail(`sources.json catalogs[${i}]`, 'type must be openrouter, ollama or openai');
+		}
+	}
+}
+
 if (errors.length) {
 	console.error(`data.json has ${errors.length} problem(s):`);
 	for (const e of errors) console.error(`  - ${e}`);

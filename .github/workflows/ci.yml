@@ -12,6 +12,30 @@ on:
   workflow_dispatch:
 
 jobs:
+  validate:
+    name: Validate data.json & README
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate data.json
+        run: node scripts/validate-data.js
+      - name: README generates from data.json
+        run: node scripts/generate-readme.js
+      - name: Sources and links still match data.json
+        run: |
+          git fetch -q origin main || true
+          changed="$(git diff --name-only origin/main...HEAD 2>/dev/null || true)"
+          if echo "$changed" | grep -qx sources.json; then
+            node scripts/check-sources.js --out /tmp/sources-report.json --strict || true
+          elif echo "$changed" | grep -qx data.json; then
+            node scripts/check-sources.js --out /tmp/sources-report.json --consistent || true
+          fi
+
   test:
     name: Build & Test MCP Server (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

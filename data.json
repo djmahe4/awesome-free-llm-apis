@@ -1,5 +1,5 @@
 {
-  "lastUpdated": "2026-10-23",
+  "lastUpdated": "2026-10-25",
   "providers": [
     {
       "name": "Aion Labs",
@@ -164,28 +164,12 @@
           "rateLimit": "—"
         },
         {
-          "id": "gemini-3.7-flash",
-          "name": "Gemini 3.7 Flash",
-          "context": "1M",
-          "maxOutput": "65K",
-          "modality": "Text + Image + Audio + Video",
-          "rateLimit": "—"
-        },
-        {
           "id": "gemini-3.6-flash",
           "name": "Gemini 3.6 Flash",
           "context": "1M",
           "maxOutput": "65K",
           "modality": "Text + Image + Audio + Video",
-          "rateLimit": "15 RPM, 1,500 RPD"
-        },
-        {
-          "id": "gemini-3.5-flash",
-          "name": "Gemini 3.5 Flash",
-          "context": "1M",
-          "maxOutput": "65K",
-          "modality": "Text + Image + Audio + Video",
-          "rateLimit": "15 RPM, 1,500 RPD"
+          "rateLimit": "—"
         },
         {
           "id": "gemini-3.5-flash-lite",
@@ -193,7 +177,7 @@
           "context": "1M",
           "maxOutput": "65K",
           "modality": "Text + Image + Audio + Video",
-          "rateLimit": "15 RPM, 500 RPD"
+          "rateLimit": "—"
         },
         {
           "id": "gemini-3.1-flash-lite",
@@ -201,7 +185,7 @@
           "context": "1M",
           "maxOutput": "65K",
           "modality": "Text + Image + Audio + Video",
-          "rateLimit": "15 RPM, 500 RPD"
+          "rateLimit": "—"
         },
         {
           "id": "gemini-2.5-flash",
@@ -209,7 +193,7 @@
           "context": "1M",
           "maxOutput": "65K",
           "modality": "Text + Image + Audio + Video",
-          "rateLimit": "15 RPM, 1,500 RPD"
+          "rateLimit": "—"
         },
         {
           "id": "gemini-2.5-flash-lite",
@@ -217,22 +201,14 @@
           "context": "1M",
           "maxOutput": "65K",
           "modality": "Text + Image + Audio + Video",
-          "rateLimit": "30 RPM, 1,500 RPD"
-        },
-        {
-          "id": "gemini-2.5-pro",
-          "name": "Gemini 2.5 Pro",
-          "context": "1M",
-          "maxOutput": "65K",
-          "modality": "Text + Image + Audio + Video",
-          "rateLimit": "5 RPM, 50 RPD"
+          "rateLimit": "—"
         },
         {
           "id": "gemma-4-31b-it",
           "name": "Gemma 4 31B",
           "context": "256K",
           "maxOutput": "32K",
-          "modality": "Text",
+          "modality": "Text + Image",
           "rateLimit": "—"
         },
         {
@@ -240,7 +216,7 @@
           "name": "Gemma 4 26B A4B",
           "context": "256K",
           "maxOutput": "32K",
-          "modality": "Text",
+          "modality": "Text + Image",
           "rateLimit": "—"
         }
       ]
@@ -252,7 +228,7 @@
       "flag": "🇫🇷",
       "url": "https://console.mistral.ai/api-keys",
       "baseUrl": "https://api.mistral.ai/v1",
-      "description": "Free mode, enabled by default, no credit card required. $10/month in API credits, and free-mode prompts may be used to train Mistral models unless you opt out.",
+      "description": "Free mode, enabled by default, no credit card required. Free-mode prompts may be used to train Mistral models unless you opt out.",
       "footnoteRef": 13,
       "models": [
         {
@@ -438,7 +414,7 @@
         {
           "id": "MiniMaxAI/MiniMax-M2.7",
           "name": "MiniMaxAI/MiniMax-M2.7",
-          "context": "204K",
+          "context": "200K",
           "maxOutput": "16K",
           "modality": "Text (reasoning)",
           "rateLimit": "~1M tokens/month (shared, varies by model)"
@@ -506,66 +482,6 @@
       ]
     },
     {
-      "name": "Hugging Face",
-      "category": "inference_provider",
-      "country": "US",
-      "flag": "🇺🇸",
-      "url": "https://huggingface.co/settings/tokens",
-      "baseUrl": "https://router.huggingface.co/v1",
-      "description": "$0.10/month in Inference Provider credits for free users (subject to change). Routes to Fireworks, Together, Hyperbolic, Nebius, Novita, DeepInfra and others. Thousands of models.",
-      "footnoteRef": null,
-      "models": [
-        {
-          "id": "meta-llama/Llama-3.1-8B-Instruct",
-          "name": "Meta-Llama-3.1-8B-Instruct",
-          "context": "128K",
-          "maxOutput": "~4K",
-          "modality": "Text",
-          "rateLimit": "Credit-metered"
-        },
-        {
-          "id": "google/gemma-3-4b-it",
-          "name": "gemma-3-4b-it",
-          "context": "131K",
-          "maxOutput": "~4K",
-          "modality": "Text",
-          "rateLimit": "Credit-metered"
-        },
-        {
-          "id": "microsoft/phi-4",
-          "name": "phi-4",
-          "context": "16K",
-          "maxOutput": "~4K",
-          "modality": "Text",
-          "rateLimit": "Credit-metered"
-        },
-        {
-          "id": "Qwen/Qwen2.5-Coder-7B-Instruct",
-          "name": "Qwen2.5-Coder-7B-Instruct",
-          "context": "131K",
-          "maxOutput": "~4K",
-          "modality": "Text",
-          "rateLimit": "Credit-metered"
-        },
-        {
-          "id": "Qwen/Qwen2.5-7B-Instruct",
-          "name": "Qwen2.5-7B-Instruct",
-          "context": "131K",
-          "maxOutput": "~4K",
-          "modality": "Text",
-          "rateLimit": "Credit-metered"
-        },
-        {
-          "id": null,
-          "name": "+ thousands of community models",
-          "context": "Varies",
-          "maxOutput": "Varies",
-          "modality": "Text, Image, Audio, Embeddings",
-          "rateLimit": "Credit-metered"
-        }
-      ]
-    },
-    {
       "name": "Kilo Code",
       "category": "inference_provider",
       "country": "US",
@@ -580,14 +496,6 @@
           "name": "nvidia/nemotron-3-ultra-550b-a55b:free",
           "context": "1M",
           "maxOutput": "65K",
-          "modality": "Text",
-          "rateLimit": "200 req/hr"
-        },
-        {
-          "id": "nvidia/nemotron-3-super-120b-a12b:free",
-          "name": "nvidia/nemotron-3-super-120b-a12b:free",
-          "context": "262K",
-          "maxOutput": "262K",
           "modality": "Text",
           "rateLimit": "200 req/hr"
         },
@@ -632,14 +540,6 @@
           "rateLimit": "200 req/hr"
         },
         {
-          "id": "tencent/hy3:free",
-          "name": "tencent/hy3:free",
-          "context": "262K",
-          "maxOutput": "128K",
-          "modality": "Text",
-          "rateLimit": "200 req/hr"
-        },
-        {
           "id": "nvidia/nemotron-3.5-lightning:free",
           "name": "nvidia/nemotron-3.5-lightning:free",
           "context": "1M",
@@ -660,22 +560,6 @@
           "name": "kilo-auto/free",
           "context": "256K",
           "maxOutput": "32K",
-          "modality": "Text",
-          "rateLimit": "200 req/hr"
-        },
-        {
-          "id": "inclusionai/ling-3.1-flash",
-          "name": "inclusionai/ling-3.1-flash",
-          "context": "262K",
-          "maxOutput": "32K",
-          "modality": "Text",
-          "rateLimit": "200 req/hr"
-        },
-        {
-          "id": "apodex/apodex-1.1-mini:free",
-          "name": "apodex/apodex-1.1-mini:free",
-          "context": "262K",
-          "maxOutput": "235K",
           "modality": "Text",
           "rateLimit": "200 req/hr"
         },
@@ -717,6 +601,22 @@
           "context": "1M",
           "maxOutput": "131K",
           "modality": "Text",
+          "rateLimit": "200 req/hr"
+        },
+        {
+          "id": "stealth/glyph-cluster",
+          "name": "stealth/glyph-cluster",
+          "context": "256K",
+          "maxOutput": "256K",
+          "modality": "Text (code)",
+          "rateLimit": "200 req/hr"
+        },
+        {
+          "id": "nvidia/nemotron-3.5-content-safety:free",
+          "name": "nvidia/nemotron-3.5-content-safety:free",
+          "context": "128K",
+          "maxOutput": "8K",
+          "modality": "Text + Vision (moderation)",
           "rateLimit": "200 req/hr"
         }
       ]
@@ -820,35 +720,11 @@
       "footnoteRef": null,
       "models": [
         {
-          "id": "nvidia/nemotron-3-super-120b-a12b",
-          "name": "nvidia/nemotron-3-super-120b-a12b",
-          "context": "1M",
-          "maxOutput": "262K",
-          "modality": "Text",
-          "rateLimit": "40 RPM, 10,000 RPD"
-        },
-        {
-          "id": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
-          "name": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
-          "context": "128K",
-          "maxOutput": "4K",
-          "modality": "Text",
-          "rateLimit": "40 RPM, 10,000 RPD"
-        },
-        {
           "id": "google/gemma-4-31b-it",
           "name": "google/gemma-4-31b-it",
           "context": "262K",
           "maxOutput": "8K",
-          "modality": "Text",
-          "rateLimit": "40 RPM, 10,000 RPD"
-        },
-        {
-          "id": "mistralai/mistral-large-2-instruct",
-          "name": "mistralai/mistral-large-2-instruct",
-          "context": "128K",
-          "maxOutput": "4K",
-          "modality": "Text",
+          "modality": "Text + Image + Video",
           "rateLimit": "40 RPM, 10,000 RPD"
         },
         {
@@ -878,98 +754,6 @@
       ]
     },
     {
-      "name": "Ollama Cloud",
-      "category": "inference_provider",
-      "country": "US",
-      "flag": "🇺🇸",
-      "url": "https://ollama.com/settings/keys",
-      "baseUrl": "https://ollama.com/api",
-      "description": "Free tier with usage limits. 16 cloud model families from the Ollama library. OpenAI SDK-compatible via https://ollama.com/v1.",
-      "footnoteRef": 3,
-      "models": [
-        {
-          "id": "deepseek-v4-pro",
-          "name": "deepseek-v4-pro",
-          "context": "1M",
-          "maxOutput": "Model-dependent",
-          "modality": "Text",
-          "rateLimit": "Session/weekly limits (unpublished)"
-        },
-        {
-          "id": "deepseek-v4-flash",
-          "name": "deepseek-v4-flash",
-          "context": "1M",
-          "maxOutput": "Model-dependent",
-          "modality": "Text",
-          "rateLimit": "Session/weekly limits (unpublished)"
-        },
-        {
-          "id": "minimax-m3",
-          "name": "minimax-m3",
-          "context": "512K",
-          "maxOutput": "Model-dependent",
-          "modality": "Text",
-          "rateLimit": "Session/weekly limits (unpublished)"
-        },
-        {
-          "id": "kimi-k3",
-          "name": "kimi-k3",
-          "context": "1M",
-          "maxOutput": "Model-dependent",
-          "modality": "Text",
-          "rateLimit": "Session/weekly limits (unpublished)"
-        },
-        {
-          "id": "gpt-oss:120b",
-          "name": "gpt-oss:120b",
-          "context": "128K",
-          "maxOutput": "Model-dependent",
-          "modality": "Text",
-          "rateLimit": "Session/weekly limits (unpublished)"
-        },
-        {
-          "id": "gpt-oss:20b",
-          "name": "gpt-oss:20b",
-          "context": "131K",
-          "maxOutput": "Model-dependent",
-          "modality": "Text",
-          "rateLimit": "Session/weekly limits (unpublished)"
-        },
-        {
-          "id": "nemotron-3-ultra",
-          "name": "nemotron-3-ultra",
-          "context": "262K",
-          "maxOutput": "Model-dependent",
-          "modality": "Text",
-          "rateLimit": "Session/weekly limits (unpublished)"
-        },
-        {
-          "id": "mistral-large-3:675b",
-          "name": "mistral-large-3:675b",
-          "context": "256K",
-          "maxOutput": "Model-dependent",
-          "modality": "Text",
-          "rateLimit": "Session/weekly limits (unpublished)"
-        },
-        {
-          "id": "qwen3.5:397b",
-          "name": "qwen3.5:397b",
-          "context": "256K",
-          "maxOutput": "Model-dependent",
-          "modality": "Text",
-          "rateLimit": "Session/weekly limits (unpublished)"
-        },
-        {
-          "id": null,
-          "name": "+ 7 more cloud models",
-          "context": "Varies",
-          "maxOutput": "Varies",
-          "modality": "Text",
-          "rateLimit": "Session/weekly limits (unpublished)"
-        }
-      ]
-    },
-    {
       "name": "OpenRouter",
       "category": "inference_provider",
       "country": "US",
@@ -979,14 +763,6 @@
       "description": "17 free models (marked with `:free` suffix). OpenAI SDK-compatible.",
       "footnoteRef": 4,
       "models": [
-        {
-          "id": "nvidia/nemotron-3-super-120b-a12b:free",
-          "name": "nvidia/nemotron-3-super-120b-a12b:free",
-          "context": "262K",
-          "maxOutput": "262K",
-          "modality": "Text",
-          "rateLimit": "20 RPM, 50 RPD"
-        },
         {
           "id": "cohere/north-mini-code:free",
           "name": "cohere/north-mini-code:free",
@@ -1008,23 +784,7 @@
           "name": "google/gemma-4-31b-it:free",
           "context": "262K",
           "maxOutput": "32K",
-          "modality": "Text + Image",
-          "rateLimit": "20 RPM, 50 RPD"
-        },
-        {
-          "id": "nvidia/nemotron-nano-9b-v2:free",
-          "name": "nvidia/nemotron-nano-9b-v2:free",
-          "context": "128K",
-          "maxOutput": "—",
-          "modality": "Text",
-          "rateLimit": "20 RPM, 50 RPD"
-        },
-        {
-          "id": "nvidia/nemotron-nano-12b-v2-vl:free",
-          "name": "nvidia/nemotron-nano-12b-v2-vl:free",
-          "context": "128K",
-          "maxOutput": "128K",
-          "modality": "Text + Image",
+          "modality": "Text + Image + Video",
           "rateLimit": "20 RPM, 50 RPD"
         },
         {
@@ -1041,30 +801,6 @@
           "context": "262K",
           "maxOutput": "32K",
           "modality": "Text (code)",
-          "rateLimit": "20 RPM, 50 RPD"
-        },
-        {
-          "id": "apodex/apodex-1.1-mini:free",
-          "name": "apodex/apodex-1.1-mini:free",
-          "context": "262K",
-          "maxOutput": "235K",
-          "modality": "Text",
-          "rateLimit": "20 RPM, 50 RPD"
-        },
-        {
-          "id": "inclusionai/ling-3.0-flash-sante:free",
-          "name": "inclusionai/ling-3.0-flash-sante:free",
-          "context": "262K",
-          "maxOutput": "32K",
-          "modality": "Text",
-          "rateLimit": "20 RPM, 50 RPD"
-        },
-        {
-          "id": "qwen/qwen3.8-27b:free",
-          "name": "qwen/qwen3.8-27b:free",
-          "context": "262K",
-          "maxOutput": "235K",
-          "modality": "Text + Image + Video",
           "rateLimit": "20 RPM, 50 RPD"
         },
         {
@@ -1140,11 +876,19 @@
           "rateLimit": "20 RPM, 50 RPD"
         },
         {
-          "id": null,
-          "name": "+ 6 more free models",
-          "context": "Varies",
-          "maxOutput": "Varies",
-          "modality": "Text / Image",
+          "id": "thinkingmachines/inkling-small:free",
+          "name": "thinkingmachines/inkling-small:free",
+          "context": "1M",
+          "maxOutput": "262K",
+          "modality": "Text + Image + Audio",
+          "rateLimit": "20 RPM, 50 RPD"
+        },
+        {
+          "id": "nvidia/nemotron-3.5-content-safety:free",
+          "name": "nvidia/nemotron-3.5-content-safety:free",
+          "context": "128K",
+          "maxOutput": "8K",
+          "modality": "Text + Image (moderation)",
           "rateLimit": "20 RPM, 50 RPD"
         }
       ]
@@ -1170,7 +914,7 @@
         {
           "id": "gpt-oss-120b",
           "name": "gpt-oss-120b",
-          "context": "128K",
+          "context": "131K",
           "maxOutput": "~32K",
           "modality": "Text",
           "rateLimit": "2 RPM (anonymous)"
@@ -1178,7 +922,7 @@
         {
           "id": "gpt-oss-20b",
           "name": "gpt-oss-20b",
-          "context": "128K",
+          "context": "131K",
           "maxOutput": "~8K",
           "modality": "Text",
           "rateLimit": "2 RPM (anonymous)"
@@ -1216,14 +960,6 @@
           "rateLimit": "2 RPM (anonymous)"
         },
         {
-          "id": "Qwen3-32B",
-          "name": "Qwen3-32B",
-          "context": "131K",
-          "maxOutput": "~32K",
-          "modality": "Text",
-          "rateLimit": "2 RPM (anonymous)"
-        },
-        {
           "id": "Qwen2.5-VL-72B-Instruct",
           "name": "Qwen2.5-VL-72B-Instruct",
           "context": "32K",
@@ -1236,13 +972,13 @@
           "name": "Mistral-Small-3.2-24B-Instruct",
           "context": "128K",
           "maxOutput": "~4K",
-          "modality": "Text",
+          "modality": "Text + Vision",
           "rateLimit": "2 RPM (anonymous)"
         },
         {
           "id": "Mistral-Nemo-Instruct-2407",
           "name": "Mistral-Nemo-Instruct-2407",
-          "context": "128K",
+          "context": "118K",
           "maxOutput": "~4K",
           "modality": "Text",
           "rateLimit": "2 RPM (anonymous)"
@@ -1288,16 +1024,12 @@
       "text": "Groq shut down qwen/qwen3.6-27b on September 14, 2026 (replaced by qwen/qwen3.8-27b) and groq/compound and groq/compound-mini on September 21, 2026 ([deprecations](https://console.groq.com/docs/deprecations)). Free-plan limits vary by model; the chat models listed get 1,000 RPD ([rate limits](https://console.groq.com/docs/rate-limits))."
     },
     {
-      "id": 3,
-      "text": "Ollama Cloud measures usage by input, cached input, and output tokens weighted per model ([FAQ](https://docs.ollama.com/cloud)). Free tier has session limits resetting every 5 hours and weekly limits resetting every 7 days. Cloud models are also served through Ollama's OpenAI-compatible endpoint at ollama.com/v1."
-    },
-    {
       "id": 4,
-      "text": "Free models default to 50 RPD per model. A one-time purchase of $10+ in credits unlocks 1,000 RPD for free models. OpenRouter also offers a [Free Models Router](https://openrouter.ai/docs/guides/routing/routers/free-models-router) (`openrouter/free`) and [model fallbacks](https://openrouter.ai/docs/guides/routing/model-fallbacks) for chaining models in priority order. Free providers may log prompts for training."
+      "text": "Free models allow 20 requests per minute and 50 requests per day, counted across all free models. Accounts that bought at least 10 credits get 1,000 requests per day ([limits](https://openrouter.ai/docs/api-reference/limits)). OpenRouter also offers a [Free Models Router](https://openrouter.ai/docs/guides/routing/routers/free-router) (`openrouter/free`) and [model fallbacks](https://openrouter.ai/docs/guides/routing/model-fallbacks) for chaining models in priority order. Free providers may log prompts for training."
     },
     {
       "id": 5,
-      "text": "Kilo Code's free pool changes frequently, and the /api/gateway/models catalog can lag what is actually served: probe results have confirmed models absent from the catalog still answering. Rows through liquid/lfm-2.5-2.6b:free answered a live request between 2026-08-19 and 2026-08-21; the rows after it were added on 2026-10-05 (through dots-studio/dots-3-note-preview:free) and 2026-10-23 from the catalog, where they are priced at $0, and have not been probed. The catalog describes reflection/beam-free as served through Vercel AI Gateway and notes that prompts may be retained for training. Free models are reachable with no API key, at 200 requests per hour per IP ([authentication](https://kilo.ai/docs/gateway/authentication)). The kilo-auto/free router picks a model from the free pool, and Kilo's docs warn it \"may route your requests to providers that log prompts and outputs\". The NVIDIA free endpoints carry NVIDIA's own condition, quoted on Kilo's [models page](https://kilo.ai/docs/gateway/models-and-providers): \"Trial use only - do not submit personal or confidential data. Your use is logged for security purposes and to improve NVIDIA products and services.\""
+      "text": "Kilo Code's free pool changes frequently, and the /api/gateway/models catalog can lag what is actually served: probe results have confirmed models absent from the catalog still answering. Rows through liquid/lfm-2.5-2.6b:free answered a live request between 2026-08-19 and 2026-08-21; the rows after it were added on 2026-10-05 (through dots-studio/dots-3-note-preview:free), 2026-10-23 and 2026-10-25 from the catalog, where they are priced at $0, and have not been probed. The catalog describes reflection/beam-free as served through Vercel AI Gateway and notes that prompts may be retained for training. Free models are reachable with no API key, at 200 requests per hour per IP ([authentication](https://kilo.ai/docs/gateway/authentication)). The kilo-auto/free router picks a model from the free pool, and Kilo's docs warn it \"may route your requests to providers that log prompts and outputs\". The NVIDIA free endpoints carry NVIDIA's own condition, quoted on Kilo's [models page](https://kilo.ai/docs/gateway/models-and-providers): \"Trial use only - do not submit personal or confidential data. Your use is logged for security purposes and to improve NVIDIA products and services.\""
     },
     {
       "id": 6,
@@ -1305,7 +1037,7 @@
     },
     {
       "id": 7,
-      "text": "OVHcloud AI Endpoints offers a permanent free anonymous tier (2 requests per minute per IP, per model) with no signup or API key required. Higher rate limits (400 RPM per Public Cloud project per model) require an API key and are billed pay-as-you-go per token; new Public Cloud accounts get up to $200 in free trial credits. Models are hosted in EU data centers."
+      "text": "OVHcloud AI Endpoints offers a permanent free anonymous tier (2 requests per minute per IP, per model) with no signup or API key required. Higher rate limits (400 RPM per Public Cloud project per model) require an API key and are billed pay-as-you-go per token; new Public Cloud accounts get up to $200 in free trial credits. Models are hosted in EU data centers. The catalog lists an end of life on November 4, 2026 for Mistral-Small-3.2-24B-Instruct-2506 and Mistral-Nemo-Instruct-2407."
     },
     {
       "id": 9,
@@ -1325,11 +1057,11 @@
     },
     {
       "id": 13,
-      "text": "Mistral plans are global: the monthly allowance is shared across Studio, the API, and Vibe Code, so CLI usage eats the same budget ([subscriptions](https://docs.mistral.ai/admin/billing-usage/subscriptions)). Free mode is the default for new accounts and needs no credit card ([quickstart](https://docs.mistral.ai/getting-started/quickstarts/studio/activate-and-generate-api-key)), and the Free plan card on the [pricing page](https://mistral.ai/pricing) is what carries the $10/month in API credits figure quoted in the description. Free-mode inputs and outputs may be used to train Mistral models, and you can opt out at any time ([data usage](https://help.mistral.ai/en/articles/347617-do-you-use-my-user-data-to-train-your-artificial-intelligence-models)). Mistral no longer publishes numeric free-tier rate limits and points you at the Limits page of the admin panel instead ([rate limits](https://help.mistral.ai/en/articles/698531-why-am-i-hitting-api-rate-limits-and-how-do-i-increase-them)); the rate limit column is kept from the last published values."
+      "text": "Mistral plans are global: the monthly allowance is shared across Studio, the API, and Vibe Code, so CLI usage eats the same budget ([subscriptions](https://docs.mistral.ai/admin/billing-usage/subscriptions)). Free mode is the default for new accounts and needs no credit card ([quickstart](https://docs.mistral.ai/getting-started/quickstarts/studio/activate-and-generate-api-key)), and the Free plan card on the [pricing page](https://mistral.ai/pricing) lists no API credit amount. Free-mode inputs and outputs may be used to train Mistral models, and you can opt out at any time ([data usage](https://help.mistral.ai/en/articles/347617-do-you-use-my-user-data-to-train-your-artificial-intelligence-models)). Mistral no longer publishes numeric free-tier rate limits and points you at the Limits page of the admin panel instead ([rate limits](https://help.mistral.ai/en/articles/698531-why-am-i-hitting-api-rate-limits-and-how-do-i-increase-them)); the rate limit column is kept from the last published values."
     },
     {
       "id": 14,
-      "text": "The free grant is issued only after SMS verification with a real (non-VoIP) phone number, one grant per number ([billing docs](https://docs.gonkabroker.com/guides/billing-and-deposits/)). Unused free tokens do not carry over to the next month. The grant is sized as at least 1M tokens of the most expensive model; cheaper models stretch further (e.g. ~12.5M tokens for BGE-M3) ([free tier page](https://gonkabroker.com/free-llm-api/)). While running on free-tier funds only, requests are capped at a lower rate; the current cap is returned as `maxRpm` by `/test-auth` ([limits](https://docs.gonkabroker.com/reference/limits-and-quotas/))."
+      "text": "The free grant is issued only after SMS verification with a real (non-VoIP) phone number, one grant per number ([billing docs](https://docs.gonkabroker.com/guides/billing-and-deposits/)). Unused free tokens do not carry over to the next month. The grant is sized as at least 1M tokens of the most expensive model; cheaper models stretch further (e.g. ~6M tokens for BGE-M3) ([free tier page](https://gonkabroker.com/free-llm-api/)). While running on free-tier funds only, requests are capped at a lower rate; the current cap is returned as `maxRpm` by `/test-auth` ([limits](https://docs.gonkabroker.com/reference/limits-and-quotas/))."
     }
   ],
   "glossary": [
