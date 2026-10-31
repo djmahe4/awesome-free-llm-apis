@@ -1,7 +1,8 @@
 import { generateFilePatch } from './generate-file-patch.js';
 import { caTrace } from './trace.js';
 import { validateVerifyCommand, runVerifyCommand } from './verify-command.js';
-import { assessPatchesForVerify, buildRepairBrief, buildSyntaxBrief, withFeedback, isTestFile, type PatchFact } from './verify-guard.js';
+import { assessPatchesForVerify, buildRepairBrief, buildSyntaxBrief, withFeedback, isTestFile, deletedLines, type PatchFact } from './verify-guard.js';
+import { cachedVerify } from './verify-cache.js';
 import { reviewPatch } from './reviewer.js';
 import { runWithRepairLoop } from './repair-loop.js';
 import path from 'node:path';
@@ -672,8 +673,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       // Does the check pass BEFORE the edit? If it already fails, a failure afterwards proves nothing
       // about the patch, so it is reported but not used as a gate.
       caTrace('edit done; baseline check');
-      if (input.verifyCommand && !verifyManual) verifyBaseline = await runVerifyCommand(input.verifyCommand, workspaceRoot);
-      caTrace('baseline check done');
+      // the same tree was usually just checked by the previous attempt's after-check (#108)
+      if (input.verifyCommand && !verifyManual) verifyBaseline = await cachedVerify(input.verifyCommand, workspaceRoot, patches.map(p => p.filePath));
+      caTrace('baseline check done', (verifyBaseline as { cached?: boolean } | undefined)?.cached ? 'cached' : '');
       // Step 1: Snapshot original files into CAS before modifying
       const preApplyMap: Record<string, string> = {};
       const preHistoryMap: Record<string, string | null> = {};
@@ -776,7 +778,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     // rollback from the CAS checkpoint.
     if (result.applied && input.verifyCommand && verifyBaseline) {
       caTrace('check after apply');
-      const after = await runVerifyCommand(input.verifyCommand, workspaceRoot);
+      const after = await cachedVerify(input.verifyCommand, workspaceRoot, patches.map(p => p.filePath));
       caTrace('check done', `ok=${after.ok}`);
       result.verification = {
         command: input.verifyCommand,
@@ -811,6 +813,9 @@ ${after.outputTail}`,
         {
           result.verification.repairBrief = buildRepairBrief({
             command: input.verifyCommand, exitCode: after.exitCode, timedOut: after.timedOut, outputTail: after.outputTail, failedCases: after.failedCases,
+            // what failed before this edit, and what it deleted, so the brief can say "you broke these" (#109)
+            baselineFailedCases: verifyBaseline.failedCases,
+            deletedLines: patchFacts.flatMap(f => deletedLines(f.before, f.after)).slice(0, 15),
             patchedFiles: patches.map(p => p.filePath),
             fileContents: Object.fromEntries(patches.filter(p => typeof p.fullPatchedContent === 'string').map(p => [p.filePath, p.fullPatchedContent as string])),
           });

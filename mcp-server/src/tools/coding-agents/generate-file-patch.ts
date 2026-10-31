@@ -75,7 +75,11 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
     // requested format entirely.
     // rewrite mode (set by the repair loop) skips patching for small files and regenerates them.
     const rewriteSmallFile = !!input.rewrite && patchedContent.split(/\r?\n/).length <= 200;
-    if (resolvedModel && !rewriteSmallFile) {
+    // The repair loop escalates to the cloud model when the local one keeps repeating a wrong edit (#106).
+    const cloudFirst = !!input.preferCloud && (input.allowCloudFallback ?? loadCodingAgentsSettings(workspaceRoot).allowCloudFallback);
+    const localModel = cloudFirst ? null : resolvedModel;
+    if (cloudFirst) caTrace('cloud first (escalated by the repair loop)', relPath);
+    if (localModel && !rewriteSmallFile) {
       try {
         // Routed through localLlmPatch (not a direct chatLocal call) so
         // this shares the exact same model-invocation, context-gathering,
@@ -121,7 +125,7 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
             const duplicateDefs = appliedCount > 0 && !regressed ? newDuplicateDefinitions(relPath, patchedContent, content) : [];
             if (appliedCount > 0 && !regressed && importProblems.length === 0 && duplicateDefs.length === 0) {
               patchedContent = content;
-              result.modelUsed = resolvedModel;
+              result.modelUsed = localModel;
               result.usedFallbackModel = false;
               appliedPatch = true;
               if (failures.length > 0) {
@@ -165,10 +169,10 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
     // retry instead of auto-escalating within one call.
     // A large module is not regenerated whole after SEARCH/REPLACE failed twice: that is the slowest
     // path (minutes on a 7B) and the one that drops or renames code. The repair loop retries instead.
-    const skipWholeFileRegen = !!resolvedModel && !rewriteSmallFile && !appliedPatch
+    const skipWholeFileRegen = !!localModel && !rewriteSmallFile && !appliedPatch
       && patchedContent.split(/\r?\n/).length > 300 && /^\s*export\s+/m.test(patchedContent);
     if (skipWholeFileRegen) caTrace('whole-file regeneration skipped (large module)', relPath);
-    if (resolvedModel && !appliedPatch && !skipWholeFileRegen) {
+    if (localModel && !appliedPatch && !skipWholeFileRegen) {
       // Visible record that SEARCH/REPLACE failed and the pipeline is
       // dropping to a strategy that can't structurally prevent scope
       // drift — observed live: SR failed here (a vision-language model
@@ -228,7 +232,7 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
             lastFailureReason = `Local model (${resolvedModel}) produced a full-file replacement with no trace of the original file's content — likely hallucinated, not used`;
           } else {
             patchedContent = candidatePatch;
-            result.modelUsed = resolvedModel;
+            result.modelUsed = localModel;
             result.usedFallbackModel = false;
             appliedPatch = true;
           }

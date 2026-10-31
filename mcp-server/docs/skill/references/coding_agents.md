@@ -120,7 +120,7 @@ interface CodingAgentsResult {
     skippedFailures?: string[];  // failures ignored via skipFailingTests
   };
   repair?: {                     // how the automatic repair loop ended
-    outcome: 'converged' | 'not_converged' | 'stuck' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
+    outcome: 'converged' | 'not_converged' | 'stuck' | 'cycling' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
     attemptCount: number;
     attempts: Array<{ attempt: number; outcome: string; failing?: number; rewrite?: boolean; brief?: string }>;
   };
@@ -132,6 +132,9 @@ interface CodingAgentsResult {
 **Repair loop** (`src/tools/coding-agents/repair-loop.ts`, needs a `verifyCommand`):
 - The tests named in `verifyCommand` are shown to the model read-only as the specification; the agent never edits or runs a test it wrote (such edits are withheld and you run them, reporting back with `verifyReport`).
 - First round: `samples` independent candidates from the original file; the closest one (fewest failing cases) is repaired next. The original tree counts as a candidate too.
+- The check runs once per state of the files: the result is keyed on the content of the edited files and of the test files the command names, so an attempt whose starting tree was just checked reuses that result (the trace says `baseline check done cached`). The cache is cleared when a run starts.
+- The repair brief separates the tests the edit broke (they passed before it) from the ones that were already failing, and lists the lines the edit deleted with nothing in their place.
+- A failing set that repeats after the first round means the loop is going in circles. The first time, the next attempt starts over from the original file, and with `allowCloudFallback` every later attempt goes to the cloud model instead of the local one. The second time, the loop stops with `repair.outcome: "cycling"` and the original files are restored (`status: "rollback"`).
 - Each retry gets a debugger brief: failing case names, assertion lines, stack frames in the edited files, plus targeted hints (a hard-coded test input, a numeric mismatch that suggests checking what a call returns, or a member read but never assigned such as `this.currency` / `self.currency`).
 - More hints in the brief: a function called with different argument counts in one edited file (a half-finished signature change), and Python `takes N positional arguments but M were given` / `unexpected keyword argument`, which spell out "add the parameter to the definition".
 - **Rejected before the check runs:** an edit that adds a second definition of an existing name (the later one wins; traced as the cause of a six-attempt stall) or an import that does not resolve is turned back into a retry with the reason, in the same attempt.

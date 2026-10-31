@@ -1,7 +1,13 @@
 import { caTrace, caTraceReset } from './trace.js';
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
-import type { CodingAgentsInput, CodingAgentsResult, RepairAttempt } from './types.js';
+import { formatCodingAgentsMarkdown, type CodingAgentsInput, type CodingAgentsResult, type RepairAttempt } from './types.js';
 import { detectSpecialCasing } from './verify-guard.js';
+import { resetVerifyCache } from './verify-cache.js';
+import { loadCodingAgentsSettings } from './settings.js';
+
+/** The failing set as an identity: case names without their durations, sorted. Empty when nothing is known. */
+const failingSignature = (cases: string[] | undefined) =>
+  (cases ?? []).map(c => c.replace(/\s*\(?\d+(?:\.\d+)?\s*m?s\)?\s*$/, '').trim()).sort().join('\n');
 
 /**
  * Bounded repair loop around one pipeline run.
@@ -105,6 +111,12 @@ export async function runWithRepairLoop(
   const createdFiles = new Set<string>();
   const deadline = Date.now() + (Number.isFinite(input.maxDurationMs) && (input.maxDurationMs as number) > 0 ? (input.maxDurationMs as number) : DEFAULT_MAX_DURATION_MS);
   let outcome: NonNullable<CodingAgentsResult['repair']>['outcome'] = 'converged';
+  // Failing sets already seen after the sampling phase, to notice a loop that goes back and forth (#106).
+  const seenFailing = new Set<string>();
+  let cycleSeen = false;
+  // After a cycle the local model has shown it repeats itself; with cloud fallback allowed, the rest goes to the cloud model.
+  const cloudAllowed = input.allowCloudFallback ?? (input.workspaceRoot ? loadCodingAgentsSettings(input.workspaceRoot).allowCloudFallback : false);
+  let escalated = false;
 
   // Narrow a patch-in-place retry to the files the failure implicates; the rest stay as reference.
   const narrowTo = (cases: string[], brief: string): Partial<CodingAgentsInput> => {
@@ -121,8 +133,9 @@ export async function runWithRepairLoop(
     }
     // The pipeline counts files per run; without this reset the status poll reads "2/1 file(s)" on attempt 2.
     if (run) run.completedCount = 0;
-    if (n === 1) caTraceReset(sessionId);
+    if (n === 1) { caTraceReset(sessionId); resetVerifyCache(); }
     caTrace(`attempt ${n} start`, `temp=${current.temperature ?? 0}${current.rewrite ? ' rewrite' : ''}`);
+    if (escalated) current = { ...current, preferCloud: true };
     result = await runner(current, sessionId, run);
     caTrace(`attempt ${n} end`, String(result.verification?.status ?? (result.applied ? 'applied' : 'proposed')));
     if (!originalCheckpoint && result.checkpointId && result.applied) originalCheckpoint = result.checkpointId;
@@ -168,6 +181,30 @@ export async function runWithRepairLoop(
     if (run?.controller.signal.aborted) { outcome = 'aborted'; break; }
     if (Date.now() >= deadline) { outcome = 'timed_out'; break; }
     if (n > budget) { outcome = 'not_converged'; break; }
+
+    // A failing set seen before means the loop is going in circles (observed live: 18, 1, 18, 1, 18, 1, 18 failing,
+    // the budget spent without trying anything new). The first time, start over from the original with the best
+    // brief; the second time, stop. Only after sampling, where independent candidates may repeat by chance.
+    const signature = failingSignature(result.verification?.failedCases);
+    if (n > samples && signature) {
+      if (seenFailing.has(signature)) {
+        if (cycleSeen || !rollback || !originalCheckpoint || !best) { outcome = 'cycling'; break; }
+        cycleSeen = true;
+        escalated = cloudAllowed;
+        caTrace('repair cycle', escalated ? 'starting over from the original with the cloud model' : 'starting over from the original');
+        await rollback(originalCheckpoint, [...createdFiles]);
+        current = {
+          ...input, rewrite: true, temperature: 0.3,
+          feedback: `${best.brief}\n\nThe last attempts went back and forth between the same failures. Start again from the original file and change only what the goal asks for; keep every other line.`,
+        };
+        lastBrief = best.brief;
+        // not cleared: landing on a failing set seen before, even after starting over, means another lap
+        continue;
+      }
+      seenFailing.add(signature);
+    } else if (signature) {
+      seenFailing.add(signature);
+    }
 
     // ── sampling phase: independent candidates from the original ─────────────────────────
     if (n < samples) {
@@ -235,9 +272,11 @@ export async function runWithRepairLoop(
 
   // Test-first work keeps a still-red attempt applied so the next one can build on it. If it never went
   // green, do not leave the user's tree changed by an unverified attempt: restore the original.
-  if ((outcome === 'not_converged' || outcome === 'stuck' || outcome === 'aborted' || outcome === 'timed_out') && result.verification?.status === 'not_green' && result.applied && originalCheckpoint && rollback) {
+  if ((outcome === 'not_converged' || outcome === 'stuck' || outcome === 'aborted' || outcome === 'timed_out' || outcome === 'cycling') && result.verification?.status === 'not_green' && result.applied && originalCheckpoint && rollback) {
     result.restoredFiles = await rollback(originalCheckpoint, [...createdFiles]);
     result.applied = false;
+    // The status was settled by the attempt, which had applied its edit; it no longer has (#105).
+    result.status = 'rollback';
     result.message = outcome === 'aborted'
       ? `Aborted after ${attempts.length} attempt(s); the original files were restored.`
       : outcome === 'timed_out'
@@ -252,6 +291,11 @@ export async function runWithRepairLoop(
   // Only attach the record when the loop mattered (a check or a review took part).
   if (input.verifyCommand || result.review || attempts.length > 1) {
     result.repair = { outcome, attemptCount: attempts.length, attempts };
+  }
+  // the markdown was rendered by the last attempt, before the loop's own outcome and any rollback
+  if (result.status === 'rollback' || result.repair) {
+    result.content = formatCodingAgentsMarkdown(result);
+    result.markdown = result.content;
   }
   return result;
 }
