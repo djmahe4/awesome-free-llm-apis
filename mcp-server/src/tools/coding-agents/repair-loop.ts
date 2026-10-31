@@ -6,6 +6,7 @@ import { resetVerifyCache } from './verify-cache.js';
 import { loadCodingAgentsSettings } from './settings.js';
 import { alreadyAdded } from './work-order.js';
 import { runSteps, splitSteps } from './goal-steps.js';
+import { FILE_LEVEL_ENTRY } from './verify-command.js';
 import { classifyMistake, recordMistake, remediationsFor } from './mistakes.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -63,6 +64,14 @@ export function filesImplicated(targets: string[], failedCases: string[], brief:
     return failedCases.length > 0 && base.length >= 3 && failedCases.every(c => word.test(c));
   });
   return hit.length > 0 && hit.length < targets.length ? hit : [];
+}
+
+/** How many tests an attempt leaves failing; a suite that never loads says nothing about its tests, so it ranks last (#128). */
+function failureScore(cases: string[] | undefined): number | undefined {
+  if (cases === undefined) return undefined;
+  const fileOnly = (c: string) => /^\S+\.(?:test|spec)\.[cm]?[jt]sx?(?:\s*\[.*\])?$/i.test(c) || FILE_LEVEL_ENTRY.test(c.replace(/^(.+?) \[ \1 \]$/, '$1'));
+  const named = cases.filter(c => !fileOnly(c)).length;
+  return named === 0 && cases.length > 0 ? 999 : named;
 }
 
 function attemptOutcome(r: CodingAgentsResult): string {
@@ -183,10 +192,7 @@ export async function runWithRepairLoop(
     }
     if (unfinished) brief = unfinished;
     if (!brief && result.applied && !result.error) brief = noChangeBrief((result.patchPlan ?? []) as Array<{ unchanged?: boolean }>);
-    const SUITE_LEVEL_CASE = /^\S+\.(?:test|spec)\.[cm]?[jt]sx?(?:\s*\[.*\])?$/i;
-    const failedCases = result.verification?.failedCases;
-    const namedFailures = failedCases?.filter(c => !SUITE_LEVEL_CASE.test(c)).length;
-    const failing = failedCases === undefined ? undefined : (namedFailures === 0 && failedCases.length > 0 ? 999 : namedFailures);
+    const failing = failureScore(result.verification?.failedCases);
     if (result.symbolLoss?.length) {
       brief = 'Your last edit removed ' + result.symbolLoss.join(', ') + ', which the goal does not mention. Keep every existing declaration.' + (brief ? '\n\n' + brief : '');
     }
@@ -199,8 +205,9 @@ export async function runWithRepairLoop(
       // The tree we started from is also a candidate: if it was closer to green than this attempt, the
       // next attempt repairs THAT (with the baseline's brief) instead of rewriting or building on a regression.
       const v = result.verification;
-      if (v?.baselineBrief && v.baselineFailedCases && v.baselineFailedCases.length < failing && v.baselineFailedCases.length < (best?.failing ?? Infinity) + (latestIsBest ? 1 : 0)) {
-        best = { failing: v.baselineFailedCases.length, brief: v.baselineBrief, files: [], isOriginal: true };
+      const baselineFailing = failureScore(v?.baselineFailedCases) ?? Infinity;
+      if (v?.baselineBrief && baselineFailing < failing && baselineFailing < (best?.failing ?? Infinity) + (latestIsBest ? 1 : 0)) {
+        best = { failing: baselineFailing, brief: v.baselineBrief, files: [], isOriginal: true };
         latestIsBest = false;
       }
     }
