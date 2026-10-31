@@ -22,7 +22,9 @@ describe('dashboard index.html assembly', () => {
       .join('');
     const onDisk = fs.readFileSync(indexPath, 'utf-8');
 
-    expect(assembled).toBe(onDisk);
+    // line endings depend on core.autocrlf on the machine; the drift being checked is in the content
+    const lf = (t: string) => t.replace(/\r\n/g, '\n');
+    expect(lf(assembled)).toBe(lf(onDisk));
   });
 
   it('keeps the split script tag order intact in the assembled page', () => {
