@@ -117,6 +117,35 @@ export interface RepairBriefInput {
   patchedFiles: string[];
   /** Current content of the edited files, for cheap static hints (e.g. a member read but never assigned). */
   fileContents?: Record<string, string>;
+  /** Cases that already failed before this edit. With it, the brief separates what the edit broke from what was red already. */
+  baselineFailedCases?: string[];
+  /** Lines the edit removed with nothing equal in their place (see deletedLines). */
+  deletedLines?: string[];
+}
+
+/** Test runners append a duration ("... 4ms", "(12 ms)"); it changes between runs, so it is not part of a case's identity. */
+const caseKey = (c: string) => c.replace(/\s*\(?\d+(?:\.\d+)?\s*m?s\)?\s*$/, '').trim();
+
+const TRIVIAL_LINE = /^[\s{}()[\];,]*$/;
+
+/**
+ * Lines of `before` that do not appear in `after` (counted, so a line kept once out of two counts once), ignoring
+ * blank and bracket-only lines. A small model asked to replace one loop also deleted the next one in three attempts
+ * out of three, and nothing told it so (#109).
+ */
+export function deletedLines(before: string | null | undefined, after: string): string[] {
+  if (!before) return [];
+  const left = new Map<string, number>();
+  for (const l of after.split(/\r?\n/)) { const t = l.trim(); left.set(t, (left.get(t) ?? 0) + 1); }
+  const out: string[] = [];
+  for (const l of before.split(/\r?\n/)) {
+    const t = l.trim();
+    if (TRIVIAL_LINE.test(t)) continue;
+    const n = left.get(t) ?? 0;
+    if (n > 0) left.set(t, n - 1);
+    else out.push(t);
+  }
+  return out;
 }
 
 /**
@@ -326,9 +355,19 @@ export function buildRepairBrief(i: RepairBriefInput): string {
   const dedupe = (a: string[]) => [...new Set(a)];
   const parts: string[] = [PERSONA, `Check: ${i.command} (${i.timedOut ? 'timed out' : `exit ${i.exitCode}`})`];
   const cases = i.failedCases ?? [];
-  if (cases.length) {
-    const shown = cases.slice(0, 15);
-    parts.push(`Failing cases (${cases.length}):\n${shown.join('\n')}${cases.length > shown.length ? `\n(+${cases.length - shown.length} more)` : ''}`);
+  const list = (a: string[]) => `${a.slice(0, 15).join('\n')}${a.length > 15 ? `\n(+${a.length - 15} more)` : ''}`;
+  if (cases.length && i.baselineFailedCases) {
+    // What the edit broke comes first: those tests passed a moment ago, so the edit itself is the cause.
+    const before = new Set(i.baselineFailedCases.map(caseKey));
+    const broke = cases.filter(c => !before.has(caseKey(c)));
+    const still = cases.filter(c => before.has(caseKey(c)));
+    if (broke.length) parts.push(`Your edit broke ${broke.length === 1 ? 'this test, which' : `these ${broke.length} tests, which`} passed before it. Fix ${broke.length === 1 ? 'it' : 'them'} first; usually the edit removed or changed code ${broke.length === 1 ? 'it relies' : 'they rely'} on:\n${list(broke)}`);
+    if (still.length) parts.push(`Still failing, as before the edit (${still.length}):\n${list(still)}`);
+  } else if (cases.length) {
+    parts.push(`Failing cases (${cases.length}):\n${list(cases)}`);
+  }
+  if (i.deletedLines && i.deletedLines.length) {
+    parts.push(`Your edit deleted these lines and nothing in it replaces them. If the goal did not ask for that, keep them:\n${i.deletedLines.slice(0, 15).join('\n')}`);
   }
   if (/Missing expected exception|did not throw|expected .* to throw/i.test(i.outputTail)) {
     parts.push('A call that should have thrown returned normally: the current logic ACCEPTS that input. Find the part that accepts it (a regex or condition that is too permissive) and tighten that. Do not add a special case for the input.');

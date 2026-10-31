@@ -111,6 +111,8 @@ export interface CodingAgentsInput {
   relatedFiles?: string[];
   /** Let a failed local edit fall back to free cloud models, which sends the file and goal to a third-party provider (default false; also settable in .free-llm-mcp/coding-agents.json). */
   allowCloudFallback?: boolean;
+  /** @internal Set by the repair loop when it escalates: skip the local model and go straight to the cloud one (needs allowCloudFallback). */
+  preferCloud?: boolean;
   /** Installed local model to use (e.g. a bigger one for a cross-file change). Overrides the automatic choice and the VRAM budget. */
   model?: string;
   /** Reasoning for thinking models: off (default), auto, on. See local_llm_patch. */
@@ -162,7 +164,7 @@ export interface CodingAgentsResult {
   };
   /** How the automatic repair loop ended (present when a check or review took part). */
   repair?: {
-    outcome: 'converged' | 'not_converged' | 'stuck' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
+    outcome: 'converged' | 'not_converged' | 'stuck' | 'cycling' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
     attemptCount: number;
     attempts: RepairAttempt[];
   };
