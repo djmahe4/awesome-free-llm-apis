@@ -409,6 +409,13 @@ export function buildRepairBrief(i: RepairBriefInput): string {
   return text.length > BRIEF_CAP ? `${text.slice(0, BRIEF_CAP)}\n... (brief truncated)` : text;
 }
 
+/** True when a substantial line of a SEARCH block is a line of the read-only tests shown as the specification, i.e. the model copied from the tests instead of the file it must edit. */
+export function searchComesFromTests(search: string, testContext: string): boolean {
+  if (!testContext) return false;
+  const testLines = new Set(testContext.split(/\r?\n/).map(l => l.trim()).filter(l => l.length >= 12));
+  return search.split(/\r?\n/).map(l => l.trim()).some(l => l.length >= 12 && testLines.has(l));
+}
+
 const TEST_CTX_PER_FILE = 5000;
 const TEST_CTX_TOTAL = 6500;
 

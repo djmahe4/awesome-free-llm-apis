@@ -179,3 +179,27 @@ describe('#117: a suite that failed to load is not a list of cases', () => {
         expect(f({ ok: false, failedCases: ['tests/a.test.ts > suite > case'] })).toEqual(['tests/a.test.ts > suite > case']);
     });
 });
+
+describe('#128: a test file that did not load is not a near miss', () => {
+    const tenNamed = Array.from({ length: 10 }, (_, i) => `case ${i + 1} fails`);
+    const suiteOnly = ['tests/x.test.ts [ tests/x.test.ts ]'];
+
+    it('the attempt after a suite-level failure is told about the best earlier attempt, not about the suite error', async () => {
+        const seq = [tenNamed, suiteOnly, tenNamed, tenNamed, tenNamed, tenNamed];
+        let calls = 0;
+        const inputs: CodingAgentsInput[] = [];
+        await runWithRepairLoop(input, 's', undefined, async (i) => { inputs.push(i); return red(seq[calls++]); }, async () => []);
+        expect(inputs.length).toBeGreaterThanOrEqual(3);
+        expect(String(inputs[2].feedback)).toContain('case 1 fails');
+        expect(String(inputs[2].feedback)).not.toContain('x.test.ts [');
+        expect(inputs[2].rewrite).toBe(true);
+    });
+    it('real single failures are still a near miss and are patched in place', async () => {
+        const seq = [tenNamed, ['only this case fails'], ['only this case fails'], ['only this case fails']];
+        let calls = 0;
+        const inputs: CodingAgentsInput[] = [];
+        await runWithRepairLoop({ ...input, maxRepairAttempts: 3 }, 's', undefined, async (i) => { inputs.push(i); return red(seq[Math.min(calls++, seq.length - 1)]); }, async () => []);
+        expect(String(inputs[2].feedback)).toContain('only this case fails');
+        expect(inputs[2].rewrite).not.toBe(true);
+    });
+});

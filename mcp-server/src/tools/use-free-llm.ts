@@ -731,7 +731,8 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     // every non-agentic use_free_llm call (workspace or not) always allowed memory injection,
     // and with no workspaceRoot it fell back to the single shared '__no_ws__' namespace —
     // leaking unrelated memory/wiki content from every other one-shot conversation into this one.
-    isOnePass: input.isOnePass ?? !agentic
+    isOnePass: input.isOnePass ?? !agentic,
+    explicitOnePass: input.isOnePass === true
   };
 
   let finalContext = await pipeline.execute(context);

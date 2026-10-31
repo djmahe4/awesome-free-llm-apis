@@ -862,15 +862,15 @@ export class TextRouterMiddleware implements Middleware {
 
             if (successfulResponse && successfulProviderId) {
                 const res = successfulResponse as ChatResponse;
+
                 if (res.choices && res.choices[0]?.message) {
                     const msg = res.choices[0].message as any;
                     const thoughts = (msg.thinking || msg.reasoning || '').toString().trim();
-                    if (thoughts) {
+                    if (thoughts && !context.explicitOnePass) {
                         prependToMessageContent(msg, `THOUGHTS: ${thoughts}\n\n`);
                         delete msg.thinking;
                         delete msg.reasoning;
                     }
-
                     if (typeof msg.content === 'string') {
                         msg.content = squeezeJsonReply(msg.content);
                     } else if (Array.isArray(msg.content)) {
@@ -906,7 +906,7 @@ export class TextRouterMiddleware implements Middleware {
                         if (res.choices && res.choices[0]?.message) {
                             const msg = res.choices[0].message as any;
                             const thoughts = (msg.thinking || msg.reasoning || '').toString().trim();
-                            if (thoughts) {
+                            if (thoughts && !context.explicitOnePass) {
                                 prependToMessageContent(msg, `THOUGHTS: ${thoughts}\n\n`);
                                 delete msg.thinking;
                                 delete msg.reasoning;

@@ -152,7 +152,10 @@ export async function runWithRepairLoop(
         brief += `\n\nYour last edit hard-coded the input ${hard.map(h => `"${h}"`).join(', ')}. That is not a fix: find what makes the code accept or mishandle it in general, and change that.`;
       }
     }
-    const failing = result.verification?.failedCases?.length;
+    const SUITE_LEVEL_CASE = /^\S+\.(?:test|spec)\.[cm]?[jt]sx?(?:\s*\[.*\])?$/i;
+    const failedCases = result.verification?.failedCases;
+    const namedFailures = failedCases?.filter(c => !SUITE_LEVEL_CASE.test(c)).length;
+    const failing = failedCases === undefined ? undefined : (namedFailures === 0 && failedCases.length > 0 ? 999 : namedFailures);
     if (brief && failing !== undefined) {
       const files = (result.patchPlan ?? [])
         .filter(p => typeof (p as any).fullPatchedContent === 'string')

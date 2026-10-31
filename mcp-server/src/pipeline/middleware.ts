@@ -10,6 +10,8 @@ export interface PipelineContext {
     wsHash?: string;
     keywords?: string[];
     isOnePass?: boolean;
+    /** True only when the caller passed isOnePass: true itself, i.e. a program that parses the answer. */
+    explicitOnePass?: boolean;
     /**
      * Set by LLMExecutor after a successful provider call when the provider
      * reports remaining token quota via response headers (x-ratelimit-remaining-tokens).

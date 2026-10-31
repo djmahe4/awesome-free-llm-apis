@@ -148,6 +148,17 @@ export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
  * closed with a REPLACE marker (typically a reply cut off at the output limit). Such a
  * block is not applied, but callers must be able to tell it was lost.
  */
+/** Markdown fences around the code of a reply are not source code: a fence-only SEARCH is empty, and a fenced REPLACE loses its fence lines unless the SEARCH is itself fenced text. */
+function unfenceBlock(b: SearchReplaceBlock): SearchReplaceBlock {
+  const fenceOpen = /^\s*```[\w-]*\s*$/;
+  const fenceClose = /^\s*```\s*$/;
+  const sLines = b.search.split(/\r?\n/);
+  if (sLines.length > 0 && sLines.every(l => fenceOpen.test(l) || fenceClose.test(l)) && b.search.trim() !== '') return unfenceBlock({ search: '', replace: b.replace });
+  if (b.search.trim() !== '' && fenceOpen.test(sLines[0])) return b;
+  const rLines = b.replace.split(/\r?\n/);
+  if (rLines.length >= 2 && fenceOpen.test(rLines[0]) && fenceClose.test(rLines[rLines.length - 1])) return { search: b.search, replace: rLines.slice(1, -1).join('\n') };
+  return b;
+}
 export function parseSearchReplaceBlocksDetailed(text: string): { blocks: SearchReplaceBlock[]; incomplete: number } {
   const blocks: SearchReplaceBlock[] = [];
   const lines = text.replace(/([^\s=])(={5,})[ \t]*$/gm, (_m, a, b) => a + String.fromCharCode(10) + b).replace(/([^\s>])(>{5,}[ \t]*(?:REPLACE)?)[ \t]*$/gim, (_m, a, b) => a + String.fromCharCode(10) + b).split(/\r?\n/);
@@ -198,7 +209,7 @@ export function parseSearchReplaceBlocksDetailed(text: string): { blocks: Search
     }
   }
 
-  return { blocks, incomplete: state === 'OUTSIDE' ? 0 : 1 };
+  return { blocks: blocks.map(unfenceBlock), incomplete: state === 'OUTSIDE' ? 0 : 1 };
 }
 
 /** "// Add this import", "// Insert this line": the model annotating its own edit, never wanted in the file. */
@@ -453,9 +464,10 @@ export interface ApplyOptions {
 const ADD_WORDS = /\b(add|insert|append|introduce|implement|create|new)\b/i;
 const CHANGE_WORDS = /\b(remove|delete|replace|rename|change|fix|rewrite|refactor|modify|update|swap|drop|move)\b/i;
 
-/** True for instructions that only add code (so REPLACE must keep its SEARCH anchor). */
+/** True for instructions that only add code (so REPLACE must keep its SEARCH anchor). A negated change word, as in "change nothing else", is not a request to change. */
 export function isAdditiveInstruction(instruction: string): boolean {
-  return ADD_WORDS.test(instruction) && !CHANGE_WORDS.test(instruction);
+  const asked = instruction.replace(/\b(?:do not|don't|never|without)\s+(?:\w+\s+){0,2}?(?:change|changing|modify|modifying|touch|touching|replace|replacing|remove|removing|delete|deleting|rewrite|rewriting|rename|renaming)\b[^.;\n]*|\b(?:change|modify|touch|replace|remove|delete|rewrite|rename)\s+(?:nothing|none)\b[^.;\n]*/gi, ' ');
+  return ADD_WORDS.test(asked) && !CHANGE_WORDS.test(asked);
 }
 
 /** True when the instruction says the new code goes at the end of the file, so an empty SEARCH may append. */
