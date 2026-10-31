@@ -121,11 +121,19 @@ export interface RepairBriefInput {
   baselineFailedCases?: string[];
   /** Lines the edit removed with nothing equal in their place (see deletedLines). */
   deletedLines?: string[];
+  /** Names the goal says the module exports that the edited file does not export. */
+  missingExports?: string[];
 }
 
 /** Test runners append a duration ("... 4ms", "(12 ms)"); it changes between runs, so it is not part of a case's identity. */
 const caseKey = (c: string) => c.replace(/\s*\(?\d+(?:\.\d+)?\s*m?s\)?\s*$/, '').trim();
 
+/** The cases that failed before the edit, or undefined when the baseline failed without naming any (e.g. the module did not load). */
+export function informativeBaseline(b: { ok: boolean; failedCases: string[] }): string[] | undefined {
+  if (b.ok) return [];
+  const named = b.failedCases.filter(c => !/^\S+\.(?:test|spec)\.[cm]?[jt]sx?(?:\s*\[.*\])?$/i.test(c));
+  return named.length > 0 ? named : undefined;
+}
 const TRIVIAL_LINE = /^[\s{}()[\];,]*$/;
 
 /**
@@ -382,6 +390,7 @@ export function buildRepairBrief(i: RepairBriefInput): string {
       parts.push(`${file} reads ${missing.map(m => `${py ? 'self' : 'this'}.${m}`).join(', ')} but never assigns ${missing.length > 1 ? 'them' : 'it'}, so ${missing.length > 1 ? 'they are' : 'it is'} never set: store the value (for example in ${py ? '__init__' : 'the constructor'}) before using it.`);
     }
   }
+  if (i.missingExports && i.missingExports.length > 0) parts.push(`The goal requires these names to be exported, but the edit does not export them: ${i.missingExports.join(', ')}. Add the export keyword to each declaration.`);
   const arity = arityErrorHint(i.outputTail || '');
   if (arity) parts.push(arity);
   for (const [file, content] of Object.entries(i.fileContents ?? {})) {

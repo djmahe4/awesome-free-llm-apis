@@ -1,6 +1,6 @@
 import { newDuplicateDefinitions } from './duplicate-defs.js';
 import { localLlmPatch } from '../local-llm-patch.js';
-import { caTrace } from './trace.js';
+import { caTrace, caTraceDump } from './trace.js';
 import { crossFileContext } from './cross-file.js';
 import { newImportProblems } from './import-check.js';
 import { loadCodingAgentsSettings, SETTINGS_FILE } from './settings.js';
@@ -286,7 +286,9 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
               isOnePass: true,
               skipIndexing: true,
             });
-            return res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
+            const reply = res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
+            caTraceDump('cloud-sr-' + relPath, reply);
+            return reply;
           }
         );
         const cloudRegressed = srResult.appliedCount > 0
@@ -323,6 +325,7 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
         sessionId,
         tasksContext
       );
+      caTraceDump('cloud-full-' + relPath, cloudPatch ?? '');
       if (cloudPatch?.trim() && originalContent && looksLikeHallucinatedReplacement(originalContent, cloudPatch)) {
         lastFailureReason = `${localReason ? `${localReason} ` : ''}Cloud fallback also produced a full-file replacement with no trace of the original file's content — likely hallucinated, not used`;
       } else if (cloudPatch?.trim()) {

@@ -132,3 +132,50 @@ describe('#106: after a cycle the local model is not asked again when the cloud 
         }
     });
 });
+
+describe('#117: the baseline only counts when it actually ran the cases', () => {
+    const load = async () => (await import('../src/tools/coding-agents/verify-guard.js')) as { informativeBaseline?: (b: { ok: boolean; failedCases: string[] }) => string[] | undefined };
+
+    it('a passing baseline has no failing cases', async () => {
+        expect((await load()).informativeBaseline?.({ ok: true, failedCases: [] })).toEqual([]);
+    });
+    it('a failing baseline with case names gives those names', async () => {
+        expect((await load()).informativeBaseline?.({ ok: false, failedCases: ['a', 'b'] })).toEqual(['a', 'b']);
+    });
+    it('a baseline that failed without any case names (the suite did not load) says nothing', async () => {
+        expect((await load()).informativeBaseline?.({ ok: false, failedCases: [] })).toBeUndefined();
+    });
+    it('the brief then keeps the plain list instead of claiming a regression', () => {
+        const brief = buildRepairBrief({ command: 'c', exitCode: 1, outputTail: '', patchedFiles: [], failedCases: ['x', 'y'], baselineFailedCases: undefined });
+        expect(brief).toMatch(/Failing cases \(2\)/);
+        expect(brief).not.toMatch(/broke/);
+    });
+});
+
+describe('the pipeline feeds the repair brief (wiring)', () => {
+    // The pipeline is too large to run end to end here, so this checks the call that builds the brief after an apply.
+    // A type check alone let a partial edit through once: the imports were added, the properties were not.
+    it('passes the informative baseline and the export gaps into buildRepairBrief', async () => {
+        const { readFileSync } = await import('node:fs');
+        const src = readFileSync(path.join(__dirname, '../src/tools/coding-agents/pipeline.ts'), 'utf-8');
+        const call = src.slice(src.indexOf('result.verification.repairBrief = buildRepairBrief({'), src.indexOf('result.verification.repairBrief = buildRepairBrief({') + 1200);
+        expect(call).toMatch(/baselineFailedCases:\s*informativeBaseline\(verifyBaseline\)/);
+        expect(call).toMatch(/missingExports:\s*exportGaps\(activeGoal,/);
+        expect(call).not.toMatch(/baselineFailedCases:\s*verifyBaseline\.failedCases/);
+    });
+});
+
+describe('#117: a suite that failed to load is not a list of cases', () => {
+    const load = async () => (await import('../src/tools/coding-agents/verify-guard.js')) as { informativeBaseline?: (b: { ok: boolean; failedCases: string[] }) => string[] | undefined };
+
+    it('a baseline whose only entry names the test file (the module did not load) says nothing', async () => {
+        const f = (await load()).informativeBaseline!;
+        expect(f({ ok: false, failedCases: ['tests/reverse-sanitize.test.ts [ tests/reverse-sanitize.test.ts ]'] })).toBeUndefined();
+        expect(f({ ok: false, failedCases: ['tests/a.spec.ts'] })).toBeUndefined();
+    });
+    it('real case names are kept, and file-level entries are dropped from a mixed list', async () => {
+        const f = (await load()).informativeBaseline!;
+        expect(f({ ok: false, failedCases: ['tests/a.test.ts [ tests/a.test.ts ]', 'does the thing 4ms'] })).toEqual(['does the thing 4ms']);
+        expect(f({ ok: false, failedCases: ['tests/a.test.ts > suite > case'] })).toEqual(['tests/a.test.ts > suite > case']);
+    });
+});

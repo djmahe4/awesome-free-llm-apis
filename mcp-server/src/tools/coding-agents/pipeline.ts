@@ -1,8 +1,9 @@
 import { generateFilePatch } from './generate-file-patch.js';
 import { caTrace } from './trace.js';
 import { validateVerifyCommand, runVerifyCommand } from './verify-command.js';
-import { assessPatchesForVerify, buildRepairBrief, buildSyntaxBrief, withFeedback, isTestFile, deletedLines, type PatchFact } from './verify-guard.js';
+import { assessPatchesForVerify, buildRepairBrief, buildSyntaxBrief, withFeedback, isTestFile, deletedLines, type PatchFact, informativeBaseline } from './verify-guard.js';
 import { cachedVerify } from './verify-cache.js';
+import { exportGaps } from './required-exports.js';
 import { reviewPatch } from './reviewer.js';
 import { runWithRepairLoop } from './repair-loop.js';
 import path from 'node:path';
@@ -814,8 +815,9 @@ ${after.outputTail}`,
           result.verification.repairBrief = buildRepairBrief({
             command: input.verifyCommand, exitCode: after.exitCode, timedOut: after.timedOut, outputTail: after.outputTail, failedCases: after.failedCases,
             // what failed before this edit, and what it deleted, so the brief can say "you broke these" (#109)
-            baselineFailedCases: verifyBaseline.failedCases,
+            baselineFailedCases: informativeBaseline(verifyBaseline),
             deletedLines: patchFacts.flatMap(f => deletedLines(f.before, f.after)).slice(0, 15),
+            missingExports: exportGaps(activeGoal, patches.map(p => ({ filePath: p.filePath, content: p.fullPatchedContent }))),
             patchedFiles: patches.map(p => p.filePath),
             fileContents: Object.fromEntries(patches.filter(p => typeof p.fullPatchedContent === 'string').map(p => [p.filePath, p.fullPatchedContent as string])),
           });

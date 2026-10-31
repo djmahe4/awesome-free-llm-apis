@@ -492,7 +492,7 @@ export function applySearchReplaceBlocks(
   const failures: string[] = [];
 
   for (const { search, replace } of blocks) {
-    if (!search) {
+    if (!search || workingLines.every(l => l.trim() === '')) {
       if (options.allowAppend || content.trim() === '') {
         // New or empty file, or an explicit append: the text goes at the end.
         const addition = replace.split(/\r?\n/);

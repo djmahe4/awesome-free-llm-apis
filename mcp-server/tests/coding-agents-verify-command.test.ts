@@ -142,3 +142,50 @@ describe('CodingAgentsHandler verifyCommand gate', () => {
     expect(r.verification).toBeUndefined();
   });
 });
+
+// Issue #113: -p, -c and -e mean inline code only after an interpreter; for build tools they are ordinary options.
+describe('inline-code flags are only refused after an interpreter', () => {
+  it.each([
+    'npx tsc -p tsconfig.build.json --noEmit',
+    'npx tsc -p tsconfig.json',
+    'cargo test -p mycrate',
+    'pytest -c setup.cfg',
+    'go test -c ./pkg',
+    'mvn -e test',
+    'gradle -p sub test',
+    'make -C sub test',
+  ])('accepts %s', (cmd) => {
+    expect(validateVerifyCommand(cmd).ok).toBe(true);
+  });
+
+  it.each([
+    'node -p 1',
+    'node -e 1',
+    'node --eval 1',
+    'python -c 1',
+    'python3 -c 1',
+    'npx node -p 1',
+    'npx python -c 1',
+    'npm exec node -e 1',
+  ])('still refuses %s', (cmd) => {
+    expect(validateVerifyCommand(cmd).ok).toBe(false);
+  });
+});
+
+// npx -c and npm exec -c / --call run their argument through a shell, whatever the command is; they stay refused.
+describe('package-runner shell flags stay refused', () => {
+  it.each([
+    'npx -c ls',
+    'npx --call ls',
+    'npm exec -c ls',
+    'npm exec --call ls',
+    'pnpm exec -c ls',
+    'yarn exec -c ls',
+  ])('refuses %s', (cmd) => {
+    expect(validateVerifyCommand(cmd).ok).toBe(false);
+  });
+  it('still accepts the same flags on tools that mean something else by them', () => {
+    expect(validateVerifyCommand('pytest -c setup.cfg').ok).toBe(true);
+    expect(validateVerifyCommand('go test -c ./pkg').ok).toBe(true);
+  });
+});

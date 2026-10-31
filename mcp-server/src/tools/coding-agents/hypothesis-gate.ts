@@ -63,7 +63,10 @@ export function deriveHypotheses(input: DeriveInput): Hypothesis[] {
   }
 
   const names: string[] = [];
-  for (const m of input.goal.matchAll(/`([^`\n]{1,80})`/g)) names.push(m[1]);
+  const spans = input.goal.split('`');
+  for (let i = 1; i < spans.length - 1; i += 2) {
+    names.push(spans[i]);
+  }
   for (const m of input.goal.matchAll(/\b([A-Za-z_$][\w$]{2,})\s*\(\)/g)) names.push(m[1]);
   for (const raw of names) {
     const name = raw.trim().replace(/\(\)$/, '');

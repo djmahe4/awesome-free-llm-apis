@@ -13,6 +13,8 @@ import { spawn, spawnSync } from 'node:child_process';
 const ALLOWED_EXECUTABLES = new Set([
   'npx', 'npm', 'pnpm', 'yarn', 'node', 'pytest', 'python', 'python3', 'go', 'cargo', 'dotnet', 'mvn', 'gradle', 'make',
 ]);
+const INTERPRETERS = new Set(['node', 'python', 'python3']);
+const RUNNER_SHELL_FLAGS = new Set(['-c', '--call']);
 const INLINE_CODE_FLAGS = new Set(['-e', '--eval', '-p', '--print', '-c', '--command', '--exec']);
 const SHELL_CHARS = /[;&|<>`$(){}\\\n\r"'*?~!#]/;
 
@@ -27,8 +29,17 @@ export function validateVerifyCommand(command: string): VerifyValidation {
   if (!ALLOWED_EXECUTABLES.has(exe)) {
     return { ok: false, reason: `verifyCommand must start with one of: ${[...ALLOWED_EXECUTABLES].join(', ')}` };
   }
-  const flag = args.find(a => INLINE_CODE_FLAGS.has(a));
-  if (flag) return { ok: false, reason: `inline-code flag ${flag} is not allowed in verifyCommand; point it at a script or test file` };
+  let interpreter = exe;
+  if (exe === 'npx' || exe === 'npm' || exe === 'pnpm' || exe === 'yarn') {
+    const i = args.findIndex(a => !a.startsWith('-') && a !== 'exec' && INTERPRETERS.has(a));
+    if (i !== -1) interpreter = args[i];
+    const flag = args.find(a => RUNNER_SHELL_FLAGS.has(a));
+    if (flag) return { ok: false, reason: `shell flag ${flag} is not allowed in verifyCommand; point it at a script or test file` };
+  }
+  if (INTERPRETERS.has(interpreter)) {
+    const flag = args.find(a => INLINE_CODE_FLAGS.has(a));
+    if (flag) return { ok: false, reason: `inline-code flag ${flag} is not allowed in verifyCommand; point it at a script or test file` };
+  }
   return { ok: true, exe, args };
 }
 
