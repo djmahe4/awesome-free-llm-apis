@@ -35,21 +35,10 @@
 
 ## Contents
 
+- [Integrated MCP Server](#-integrated-mcp-server)
 - [Provider APIs](#provider-apis)
 - [Inference providers](#inference-providers)
-- [Agentic Infrastructure](#agentic-infrastructure)
 - [Glossary](#glossary)
-
-## Agentic Infrastructure
-
-This repository is powered by an integrated **MCP (Model Context Protocol)** server and a dual-agentic skill set designed for autonomous, cost-efficient research and development.
-
-### 🤖 Agentic Skills
-
-| Skill | Focus | Trigger |
-|-------|-------|---------|
-| [**`free-llm-apis`**](free-llm-apis/SKILL.md) | **Provider Discovery & Onboarding** | Use for finding the best free provider, obtaining API keys, and initial configuration. |
-| [**`free-llms`**](mcp-server/docs/skill/SKILL.md) | **Advanced Orchestration & Memory** | Use for complex project-scoped tasks, persistent workspace memory, and grounded research. |
 
 ### 🚀 Integrated MCP Server
 
