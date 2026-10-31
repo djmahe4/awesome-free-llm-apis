@@ -68,7 +68,7 @@ export class MemoryManager {
     let wiki = this.wikis.get(cacheKey);
     if (!wiki) {
       const customBaseDir = workspaceRoot ? path.join(workspaceRoot, '.free-llm-mcp', 'wiki') : undefined;
-      wiki = new WikiMemory(workspaceHash, customBaseDir);
+      wiki = new WikiMemory(workspaceHash, customBaseDir, workspaceRoot);
       this.wikis.set(cacheKey, wiki);
     }
     return wiki;

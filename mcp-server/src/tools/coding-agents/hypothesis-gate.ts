@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { TaskItem } from './types.js';
 import { loadCodingAgentsSettings } from './settings.js';
-import { serializeHypothesesMarkdown, validateHypotheses, type Hypothesis } from './hypotheses.js';
+import { parseHypothesesMarkdown, parseProbe, serializeHypothesesMarkdown, validateHypotheses, type Hypothesis } from './hypotheses.js';
 
 /**
  * The pre-edit gate: the plan's assumptions are written down as hypotheses, checked against the real files, and a
@@ -83,10 +83,32 @@ export interface GateOutcome {
   summary: string;
 }
 
+/**
+ * A person can add their own rows to hypotheses.md. Their ids start with "u" (u1, u2, ...); every other row belongs to
+ * the run that wrote it and is rebuilt from the goal each time. A person's row is kept and checked like any other,
+ * but the status they typed is never believed: the probe decides.
+ */
+const isHumanId = (id: string) => /^u\w*$/i.test(id);
+
+async function readHumanRows(workspaceRoot: string): Promise<Hypothesis[]> {
+  try {
+    const md = await fs.readFile(path.join(workspaceRoot, HYPOTHESES_FILE), 'utf-8');
+    return parseHypothesesMarkdown(md).filter(h => isHumanId(h.id)).map(h => ({ id: h.id, claim: h.claim, probe: h.probe, status: 'open' as const }));
+  } catch {
+    return [];
+  }
+}
+
 export async function runHypothesisGate(input: DeriveInput & { mode: GateMode; workspaceRoot: string }): Promise<GateOutcome> {
   if (input.mode === 'off') return { mode: 'off', hypotheses: [], refuted: [], blocked: false, summary: '' };
   const derived = deriveHypotheses(input);
-  const hypotheses = await validateHypotheses(derived, input.workspaceRoot, { files: input.files });
+  const taken = new Set(derived.map(h => h.probe));
+  const human = (await readHumanRows(input.workspaceRoot)).filter(h => !taken.has(h.probe));
+  const checked = await validateHypotheses([...derived, ...human], input.workspaceRoot, { files: input.files });
+  // A probe nobody can run proves nothing either way: leave the person's row open instead of calling it refuted.
+  const hypotheses = checked.map(h => isHumanId(h.id) && !parseProbe(h.probe)
+    ? { ...h, status: 'open' as const, evidence: `probe not recognised, so nothing was checked (use file:, defined:, symbol:, arity:, grep: or cite:)` }
+    : h);
   const refuted = hypotheses.filter(h => h.status === 'refuted');
   const blocked = input.mode === 'enforce' && refuted.length > 0;
   const lines = refuted.map(h => `- ${h.claim}: ${h.evidence}`);
@@ -94,8 +116,21 @@ export async function runHypothesisGate(input: DeriveInput & { mode: GateMode; w
   return { mode: input.mode, hypotheses, refuted, blocked, summary };
 }
 
+/** Lines a person wrote around the table (notes, reminders) are not part of any row; they are carried over. */
+async function readHumanNotes(file: string): Promise<string[]> {
+  try {
+    const md = await fs.readFile(file, 'utf-8');
+    return md.split(/\r?\n/).filter(l => l.trim() !== '' && !l.startsWith('|') && !l.startsWith('#'));
+  } catch {
+    return [];
+  }
+}
+
 /** Writes hypotheses.md next to tasks.md so a person (or the next resume) can read what was checked. */
 export async function writeHypothesesFile(workspaceRoot: string, goal: string, list: Hypothesis[]): Promise<void> {
   if (list.length === 0) return;
-  await fs.writeFile(path.join(workspaceRoot, HYPOTHESES_FILE), serializeHypothesesMarkdown(goal, list), 'utf-8');
+  const file = path.join(workspaceRoot, HYPOTHESES_FILE);
+  const notes = await readHumanNotes(file);
+  const body = serializeHypothesesMarkdown(goal, list);
+  await fs.writeFile(file, notes.length ? `${body}\n${notes.join('\n')}\n` : body, 'utf-8');
 }

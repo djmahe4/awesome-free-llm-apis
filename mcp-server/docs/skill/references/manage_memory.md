@@ -41,6 +41,8 @@ Markdown pages with frontmatter (`WikiMemory`, `src/memory/wiki.ts`), separate f
 
 ## DAG memory (nodes + edges)
 
+**Claims on wiki pages:** a wiki page can carry a claims table, the same rows as `hypotheses.md` (id, claim, probe, status, evidence), for example a row `c1`, "convertCurrency is defined", probe `defined:convertCurrency`. Every `wiki_write` re-runs the probes against the workspace and rewrites each status to what the probe found, so a status typed by hand does not stand. A page with a refuted claim is tagged `unverified`. `WIKI_CLAIM_VERIFICATION` sets the effect: `warn` (default) only tags; `enforce` also stops confidence rising on a page with a refuted claim, caps a page with no claims at 0.7, and creates the automatic ADR only for a page with at least one confirmed claim and none refuted; `off` disables it. An ADR written with `adr_write` is never affected, and a page you edit by hand is simply checked again at its next write.
+
 A per-workspace directed-acyclic node/edge graph (`DagMemory`, `src/memory/dag.ts`), separate from the wiki and key-value memory above. Reuses the same Ebbinghaus decay model as the rest of `MemoryManager` (`halfLifeDays`/`confidence`/`sourceCount`) — no separate decay formula.
 
 **Actions:** `node_add`, `node_link`, `node_list`, `node_get`, `node_review`, `graph_query`
