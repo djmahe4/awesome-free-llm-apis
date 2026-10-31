@@ -147,6 +147,8 @@ interface CodingAgentsResult {
 ```
 Statuses are `open`, `confirmed`, `refuted`. The verdict and evidence are computed from the files by the probe, never written by a model, and a status someone else writes into the file is ignored the next time it is checked. Probes: `file:<path>`, `defined:<name>` (defined in any scanned code file), `symbol:<name>@<path>` (TS/JS, Python, Go, Rust; a name only mentioned in a comment or string does not count), `arity:<name>@<path>=<n>` (parameter count; `self`/`cls`/`&self` not counted; a class, interface or constant has none), `grep:<regex>@<path>`, `cite:<path>:L<a>-L<b>#<hash>` (cited lines still hash as recorded). Paths outside the workspace and files over 2 MB are refuted with a reason.
 
+**Adding your own rows:** you can add rows to `hypotheses.md` by hand. Start the id with `u` (`u1`, `u2`) and give a probe; the next run keeps the row, checks it like any other assumption, and a refuted one blocks under `enforce`. Every other row belongs to the run that wrote it and is rebuilt from the goal. Notes you write outside the table are kept. A status you type is ignored (the probe decides), and a probe the checker cannot run leaves the row `open` with a note instead of being counted as true or false.
+
 **Blackboard task shape (`tasks.md`):**
 ```typescript
 interface TaskItem {

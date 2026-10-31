@@ -300,8 +300,12 @@ function splitRow(row: string): string[] {
   return cells.slice(1, -1).map(c => c.trim());
 }
 
+export function serializeHypothesisRow(h: Hypothesis): string {
+  return `| ${escCell(h.id)} | ${escCell(h.claim)} | \`${escCell(h.probe)}\` | ${h.status} | ${escCell(h.evidence ?? '')} |`;
+}
+
 export function serializeHypothesesMarkdown(goal: string, list: Hypothesis[]): string {
-  const rows = list.map(h => `| ${escCell(h.id)} | ${escCell(h.claim)} | \`${escCell(h.probe)}\` | ${h.status} | ${escCell(h.evidence ?? '')} |`);
+  const rows = list.map(serializeHypothesisRow);
   return [`# Hypotheses: ${goal.split(/\r?\n/)[0]}`, '', '| id | claim | probe | status | evidence |', '|----|-------|-------|--------|----------|', ...rows, ''].join('\n');
 }
 
