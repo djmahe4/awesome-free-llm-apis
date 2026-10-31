@@ -2,6 +2,7 @@ import { caTrace, caTraceReset } from './trace.js';
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
 import type { CodingAgentsInput, CodingAgentsResult, RepairAttempt } from './types.js';
 import { detectSpecialCasing } from './verify-guard.js';
+import { FILE_LEVEL_ENTRY } from './verify-command.js';
 
 /**
  * Bounded repair loop around one pipeline run.
@@ -51,6 +52,13 @@ export function filesImplicated(targets: string[], failedCases: string[], brief:
     return failedCases.length > 0 && base.length >= 3 && failedCases.every(c => word.test(c));
   });
   return hit.length > 0 && hit.length < targets.length ? hit : [];
+}
+
+/** A suite that never loads provides no evidence that any of its tests pass. */
+function failureScore(cases: string[]): number {
+  const fileOnly = cases.length > 0 && cases.every(c =>
+    FILE_LEVEL_ENTRY.test(c.replace(/^(.+?) \[ \1 \]$/, '$1')));
+  return fileOnly ? Infinity : cases.length;
 }
 
 function attemptOutcome(r: CodingAgentsResult): string {
@@ -139,7 +147,8 @@ export async function runWithRepairLoop(
         brief += `\n\nYour last edit hard-coded the input ${hard.map(h => `"${h}"`).join(', ')}. That is not a fix: find what makes the code accept or mishandle it in general, and change that.`;
       }
     }
-    const failing = result.verification?.failedCases?.length;
+    const cases = result.verification?.failedCases;
+    const failing = cases ? failureScore(cases) : undefined;
     if (brief && failing !== undefined) {
       const files = (result.patchPlan ?? [])
         .filter(p => typeof (p as any).fullPatchedContent === 'string')
@@ -149,8 +158,9 @@ export async function runWithRepairLoop(
       // The tree we started from is also a candidate: if it was closer to green than this attempt, the
       // next attempt repairs THAT (with the baseline's brief) instead of rewriting or building on a regression.
       const v = result.verification;
-      if (v?.baselineBrief && v.baselineFailedCases && v.baselineFailedCases.length < failing && v.baselineFailedCases.length < (best?.failing ?? Infinity) + (latestIsBest ? 1 : 0)) {
-        best = { failing: v.baselineFailedCases.length, brief: v.baselineBrief, files: [], isOriginal: true };
+      const baselineFailing = v?.baselineFailedCases ? failureScore(v.baselineFailedCases) : Infinity;
+      if (v?.baselineBrief && baselineFailing < failing && baselineFailing < (best?.failing ?? Infinity) + (latestIsBest ? 1 : 0)) {
+        best = { failing: baselineFailing, brief: v.baselineBrief, files: [], isOriginal: true };
         latestIsBest = false;
       }
     }

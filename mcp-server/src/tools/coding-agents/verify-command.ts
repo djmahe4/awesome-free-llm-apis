@@ -86,7 +86,7 @@ function killTree(pid: number | undefined): void {
 }
 
 /** A failed-case entry that names a whole test file (node:test, pytest) rather than one test. */
-const FILE_LEVEL_ENTRY = /[\\/]?[\w.-]+\.(test|spec)\.[cm]?[jt]sx?$|(^|[\\/])test_[\w-]+\.py$|[\w-]+_test\.(py|go)$/i;
+export const FILE_LEVEL_ENTRY = /[\\/]?[\w.-]+\.(test|spec)\.[cm]?[jt]sx?$|(^|[\\/])test_[\w-]+\.py$|[\w-]+_test\.(py|go)$/i;
 
 /**
  * Known pre-failing tests from .free-llm-mcp/coding-agents.json: they do not count. A check whose only
