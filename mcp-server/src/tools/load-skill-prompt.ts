@@ -1,3 +1,5 @@
+import { getMcpDir } from '../utils/mcp-home.js';
+import { resolveWithin } from '../utils/workspace-roots.js';
 import fetch from 'node-fetch';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -28,6 +30,7 @@ export interface LoadSkillPromptInput {
   type: 'load' | 'search' | 'list';
   keywords?: string[];
   name?: string;
+  /** @internal alias of `name`, still accepted from older callers; `name` is the documented field. */
   skill?: string;
   workspaceDir?: string;
   /** 'hermes' searches/loads the bundled external/hermes/ skill set instead of the agentic-awesome index. */
@@ -99,7 +102,7 @@ async function getBaseDir(workspaceDir?: string): Promise<string> {
   if (workspaceDir) {
     return resolveConfigDir(workspaceDir);
   }
-  return path.join(os.homedir(), '.free-llm-mcp');
+  return getMcpDir();
 }
 
 async function getLocalSkillsIndex(configDir: string): Promise<SkillIndexEntry[]> {
@@ -211,6 +214,20 @@ async function loadHermesSkillPrompt(input: LoadSkillPromptInput): Promise<LoadS
   return { success: false, error: 'Invalid type for source "hermes". Use "load", "search", or "list".' };
 }
 
+
+/** A skill id that is safe to use as ONE folder name under skills/ (null otherwise). */
+export function safeSkillSlug(id: unknown): string | null {
+  if (typeof id !== 'string') return null;
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(id) && !id.includes('..') ? id : null;
+}
+
+/** Resolves a remote file path inside a skill folder; null when it would land outside (or is not a plain relative path). */
+export function resolveSkillFile(skillDir: string, relativePath: string): string | null {
+  if (typeof relativePath !== 'string' || relativePath.length === 0 || relativePath.includes('\0')) return null;
+  if (/^[a-zA-Z]:/.test(relativePath) || path.isAbsolute(relativePath) || relativePath.startsWith('/') || relativePath.startsWith('\\')) return null;
+  return resolveWithin(skillDir, relativePath);
+}
+
 export async function loadSkillPrompt(input: LoadSkillPromptInput): Promise<LoadSkillPromptResult> {
   try {
     if (input.source === 'hermes') {
@@ -290,7 +307,12 @@ export async function loadSkillPrompt(input: LoadSkillPromptInput): Promise<Load
         return { success: true, skills: hermesResults.map(s => ({ name: s.name, description: s.description })) };
       }
 
-      const skillDir = path.join(configDir, 'skills', found.id || found.name || name);
+      // The id comes from a remote index: it becomes a folder name, so it must be a plain slug.
+      const slug = safeSkillSlug(found.id || found.name || name);
+      if (!slug) {
+        return { success: false, error: `Refusing to install skill: its id ${JSON.stringify(String(found.id || found.name || name).slice(0, 60))} is not a plain folder name.` };
+      }
+      const skillDir = path.join(configDir, 'skills', slug);
       await fs.mkdir(skillDir, { recursive: true });
 
       const skillPath = found.path.replace(/^\/+/, '');
@@ -312,7 +334,9 @@ export async function loadSkillPrompt(input: LoadSkillPromptInput): Promise<Load
           for (let i = 0; i < files.length; i++) {
             const file = files[i];
             const relativePath = file.path.replace(`${skillPath}/`, '');
-            const fullPath = path.join(skillDir, relativePath);
+            // Remote file paths are untrusted too: never write outside the skill folder.
+            const fullPath = resolveSkillFile(skillDir, relativePath);
+            if (!fullPath) throw new Error(`Refusing to write outside the skill folder: ${JSON.stringify(relativePath.slice(0, 80))}`);
             await fs.mkdir(path.dirname(fullPath), { recursive: true });
             await fs.writeFile(fullPath, file.content);
             RunRegistry.progress(runKey, relativePath, i + 1, files.length);

@@ -46,7 +46,7 @@ export function useCacheIsolation() {
 
         if (currentWsRoot) {
             try {
-                await fs.rm(currentWsRoot, { recursive: true, force: true });
+                await fs.rm(currentWsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
             } catch {}
         }
     });

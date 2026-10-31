@@ -75,6 +75,13 @@ function taskOutcomeFor(status: HarnessRun['status']): TaskItem['status'] {
   return status === 'complete' ? 'completed' : status === 'failed' ? 'failed' : 'pending';
 }
 
+/** A caller may lower the declared token budget, never raise it; anything non-integer or non-positive falls back to the declaration. */
+export function clampRunTokens(requested: unknown, declared: number): number {
+  if (typeof requested !== 'number' || !Number.isFinite(requested)) return declared;
+  const n = Math.floor(requested);
+  return n > 0 ? Math.min(n, declared) : declared;
+}
+
 export interface DeployInput {
   runId: string;
   harness?: string;
@@ -149,7 +156,7 @@ export async function gatedCall(
     // Bound strictly to this run+call+exact-args-hash — never re-matched by
     // tool name alone, and never satisfied by an approval granted for a
     // differently-hashed payload (e.g. a different goal on a later resume).
-    const approved = await store.findApprovedFor(run.runId, callId, argsHash);
+    const approved = await store.consumeApproval(run.runId, callId, argsHash);
     if (!approved) {
       const pending = (await store.listApprovals()).find(
         a => a.runId === run.runId && a.callId === callId && a.argsHash === argsHash && a.status === 'pending'
@@ -225,7 +232,7 @@ export async function gatedDetach(
   }
   if (decision.kind === 'needs_approval') {
     await store.expireStale(decl.harness.approval.timeoutMinutes);
-    const approved = await store.findApprovedFor(run.runId, callId, argsHash);
+    const approved = await store.consumeApproval(run.runId, callId, argsHash);
     if (!approved) {
       const pending = (await store.listApprovals()).find(
         a => a.runId === run.runId && a.callId === callId && a.argsHash === argsHash && a.status === 'pending'
@@ -772,7 +779,7 @@ async function runSteps(
   originalGoal: string,
   workspaceRoot: string | undefined,
   registryKey: string,
-  aborted: boolean,
+  isAborted: () => boolean,
   priorHandoff: Handoff | undefined,
   memoryContext?: string
 ): Promise<StepEngineResult> {
@@ -793,6 +800,14 @@ async function runSteps(
   }
 
   for (let i = startIndex; i < roles.length; i++) {
+    // persist progress at every step boundary, so run.json shows the work done so far, not only the end state
+    if (i > startIndex) await persistRun(store, run);
+    // abort() flips the registry controller at any time; a boolean read once at launch never saw it.
+    if (isAborted()) {
+      run.status = 'aborted';
+      await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'error', data: { message: 'run aborted before step ' + roles[i] } }).catch(() => {});
+      return { content: lastContent, lastRole, finalHandoff: handoff };
+    }
     // T5 — two views of the plan entry: stepId is the FULL plan id (what
     // tasks.md holds, so each lane cycle is its own task/cursor position),
     // role is the BASE name (what policy, handoffs, traces, budget.perRole
@@ -902,7 +917,7 @@ async function runSteps(
       }
       await beginTaskAttempt(store, originalGoal, stepId, `step ${callId}: attempting via browser_tool (navigate+extract) on ${url}`);
       callResult = await runScraperStep(store, run, decl, role, callId, url, registryKey);
-      stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
+      stepContent = applyResearchResult(run, role, callResult, goalTokens, isAborted()).content;
     } else if (role === 'pdf') {
       // P4b pdf escalation (previously deferred): its input is a pdf ref
       // extracted from the prior handoff, resolved via resolvePdfRef — a
@@ -935,7 +950,7 @@ async function runSteps(
         // that path and bypass endTaskAttempt's normal bookkeeping.
         return { response: resolved?.resolvedContent ?? '' };
       });
-      stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
+      stepContent = applyResearchResult(run, role, callResult, goalTokens, isAborted()).content;
     } else {
       const stepGoal = stepInputText(i, originalGoal, handoff, i === startIndex ? memoryContext : undefined);
       const memoryBlock = buildSessionMemoryPromptBlock(await recentSessionMemory(store.runDirPath));
@@ -971,11 +986,11 @@ async function runSteps(
       // approval/needs_budget already returned control to the human/budget
       // gate, they're not retried here) gets a bounded number of extra
       // attempts, each informed by past lessons for this exact role+tool.
-      stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
+      stepContent = applyResearchResult(run, role, callResult, goalTokens, isAborted()).content;
       const maxAttempts = Math.max(1, decl.limits?.maxAttemptsPerStep ?? 2);
       let attempt = 1;
       let statusAfterAttempt: HarnessRun['status'] = run.status;
-      while (statusAfterAttempt === 'failed' && !aborted && attempt < maxAttempts) {
+      while (statusAfterAttempt === 'failed' && !isAborted() && attempt < maxAttempts) {
         attempt++;
         const failure: StepFailure = { runId: run.runId, role, tool: dispatch.toolName, failureKind: 'empty_result', detail: run.error ?? '', attempt };
         const lessons = await recallLessons(store, run, decl, role, dispatch.toolName, workspaceRoot);
@@ -1002,7 +1017,7 @@ async function runSteps(
           retryDispatch.execute,
           retryDispatch.requestedTool
         );
-        stepContent = applyResearchResult(run, role, callResult, goalTokens, aborted).content;
+        stepContent = applyResearchResult(run, role, callResult, goalTokens, isAborted()).content;
         statusAfterAttempt = run.status;
 
         if (statusAfterAttempt === 'complete') {
@@ -1076,10 +1091,13 @@ function trackTopLevelTokens(run: HarnessRun, tokens: number): void {
  * "declaring nothing keeps old behavior" posture as the other P4e/P4f
  * additions.
  */
-function wallBudgetExceeded(run: HarnessRun, decl: HarnessDeclaration): boolean {
-  const maxWallMinutes = decl.harness.budget.maxWallMinutes;
+export function wallBudgetExceeded(run: HarnessRun, decl: HarnessDeclaration): boolean {
+  const maxWallMinutes = run.maxWallMinutes ?? decl.harness.budget.maxWallMinutes;
   if (!maxWallMinutes) return false;
-  return (Date.now() - run.createdAt) / 60000 > maxWallMinutes;
+  // Active time: waiting for a human (an approval, a budget pause) is not the run's time.
+  const now = Date.now();
+  const paused = (run.pausedMs ?? 0) + (run.pausedAt ? now - run.pausedAt : 0);
+  return (now - run.createdAt - paused) / 60000 > maxWallMinutes;
 }
 
 /**
@@ -1144,6 +1162,19 @@ function applyResearchResult(run: HarnessRun, role: string, callResult: GatedRes
 }
 
 /**
+ * Writes run.json. A disk error must not kill the run, but it must not vanish either: it is recorded in the
+ * trace so a run that stays 'running' on disk can be explained.
+ */
+async function persistRun(store: HarnessStore, run: HarnessRun): Promise<void> {
+  run.updatedAt = Date.now();
+  try {
+    await store.saveRun(run);
+  } catch (err: any) {
+    await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'error', data: { message: `run.json could not be written: ${err?.message || err}` } }).catch(() => {});
+  }
+}
+
+/**
  * No longer synthesizes a handoff here — runSteps already appended a real,
  * schema-validated one (or more, chained) per step as it ran. The old
  * version fabricated exactly one handoff at the very end with a hardcoded
@@ -1153,7 +1184,8 @@ function applyResearchResult(run: HarnessRun, role: string, callResult: GatedRes
  */
 async function finalizeRun(store: HarnessStore, run: HarnessRun, registryKey: string): Promise<void> {
   run.updatedAt = Date.now();
-  await store.saveRun(run).catch(() => {});
+  if ((run.status === 'paused_approval' || run.status === 'paused_budget') && !run.pausedAt) run.pausedAt = Date.now();
+  await persistRun(store, run);
   await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'run_end', data: { status: run.status } }).catch(() => {});
   // Report the actual terminal state, not just failed/not-failed — a
   // paused/aborted run previously reported as "finished successfully" to
@@ -1178,12 +1210,12 @@ async function finishStepsAndEnvelope(
   goal: string,
   workspaceRoot: string | undefined,
   registryKey: string,
-  aborted: boolean,
+  isAborted: () => boolean,
   priorHandoff: Handoff | undefined,
   memoryContext: string | undefined,
   recall: { recalledNodes: { id: string; content: string }[] } | undefined
 ): Promise<void> {
-  const { content, finalHandoff } = await runSteps(store, run, decl, roles, startIndex, goal, workspaceRoot, registryKey, aborted, priorHandoff, memoryContext);
+  const { content, finalHandoff } = await runSteps(store, run, decl, roles, startIndex, goal, workspaceRoot, registryKey, isAborted, priorHandoff, memoryContext);
   if (run.status === 'complete' && content) {
     await writeBackToMemory(store, run, decl, goal, content, recall?.recalledNodes ?? [], workspaceRoot);
     if (finalHandoff) await submitOpenQuestions(store, run, decl, goal, finalHandoff, workspaceRoot);
@@ -1237,7 +1269,7 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
     workspaceRoot: input.workspaceRoot,
     status: 'running',
     budget: {
-      maxTokens: input.maxTokens ?? decl.harness.budget.maxTokens,
+      maxTokens: clampRunTokens(input.maxTokens, decl.harness.budget.maxTokens),
       used: 0,
       reserved: 0,
       toolCalls: 0,
@@ -1245,7 +1277,7 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
-  await store.saveRun(run);
+  await store.createRun(run); // exclusive: a second deploy of this runId fails instead of overwriting it
   await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'run_start', data: { goal: input.goal, roles } });
   await initAllTasks(store, input.goal, roles);
 
@@ -1254,7 +1286,7 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
   (async () => {
     try {
       const recall = await recallMemoryContext(store, run, decl, input.goal, input.workspaceRoot, registryKey);
-      await finishStepsAndEnvelope(store, run, decl, roles, 0, input.goal, input.workspaceRoot, registryKey, runInfo.controller.signal.aborted, undefined, recall?.context, recall);
+      await finishStepsAndEnvelope(store, run, decl, roles, 0, input.goal, input.workspaceRoot, registryKey, () => runInfo.controller.signal.aborted, undefined, recall?.context, recall);
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
       run.status = 'failed';
@@ -1385,7 +1417,7 @@ async function resumeMonitoredRun(store: HarnessStore, run: HarnessRun): Promise
   const runInfo = RunRegistry.start(registryKey);
   (async () => {
     try {
-      await finishStepsAndEnvelope(store, run, decl, roles, pending.stepIndex + 1, run.goal, run.workspaceRoot, registryKey, runInfo.controller.signal.aborted, validated.handoff, undefined, undefined);
+      await finishStepsAndEnvelope(store, run, decl, roles, pending.stepIndex + 1, run.goal, run.workspaceRoot, registryKey, () => runInfo.controller.signal.aborted, validated.handoff, undefined, undefined);
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
       run.status = 'failed';
@@ -1406,16 +1438,20 @@ async function resumeMonitoredRun(store: HarnessStore, run: HarnessRun): Promise
  * a request previously had no effect because nothing ever re-invoked the
  * gated call afterward.
  */
-export async function resumeHarness(runId: string, workspaceRoot?: string): Promise<HarnessRun> {
+export async function resumeHarness(runId: string, workspaceRoot?: string, opts: { maxWallMinutes?: number } = {}): Promise<HarnessRun> {
+  if (opts.maxWallMinutes !== undefined && !(Number.isFinite(opts.maxWallMinutes) && opts.maxWallMinutes > 0 && opts.maxWallMinutes <= 1440)) {
+    throw new Error('maxWallMinutes must be a number of minutes between 0 (exclusive) and 1440.');
+  }
   const store = new HarnessStore(runId, workspaceRoot);
   const run = await store.loadRun();
   if (!run) throw new Error(`No run found for runId '${runId}'`);
   if (run.status === 'monitoring') {
     return resumeMonitoredRun(store, run);
   }
-  if (run.status !== 'paused_approval') {
-    throw new Error(`Run '${runId}' is not paused for approval (status: '${run.status}')`);
+  if (run.status !== 'paused_approval' && run.status !== 'paused_budget') {
+    throw new Error(`Run '${runId}' is not paused (status: '${run.status}')`);
   }
+  if (opts.maxWallMinutes !== undefined) run.maxWallMinutes = opts.maxWallMinutes;
 
   const decl = await loadHarnessDeclaration(run.declarationName, run.workspaceRoot);
   // Re-validated on resume too — a declaration edited between deploy and
@@ -1442,6 +1478,17 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
 
   const priorHandoff = await lastHandoff(store);
 
+  // Time spent paused is not the run's time: fold it in before judging the wall-clock budget.
+  if (run.pausedAt) {
+    run.pausedMs = (run.pausedMs ?? 0) + (Date.now() - run.pausedAt);
+    run.pausedAt = undefined;
+  }
+  // Only a run that PAUSED on its budget is refused here (resuming it unchanged would just pause again);
+  // an approval-paused run over budget resumes and pauses at the next step boundary, with a trace event.
+  if (run.status === 'paused_budget' && wallBudgetExceeded(run, decl)) {
+    throw new Error(`Run '${runId}' is still over its wall-clock budget (${run.maxWallMinutes ?? decl.harness.budget.maxWallMinutes} min). Resume with a larger maxWallMinutes to raise the cap.`);
+  }
+
   run.status = 'running';
   run.error = undefined;
   await store.saveRun(run);
@@ -1454,7 +1501,7 @@ export async function resumeHarness(runId: string, workspaceRoot?: string): Prom
       // continuing from a later step already had its chance at step 0's
       // memory context on the original deploy.
       const recall = startIndex === 0 ? await recallMemoryContext(store, run, decl, run.goal, run.workspaceRoot, registryKey) : undefined;
-      await finishStepsAndEnvelope(store, run, decl, roles, startIndex, run.goal, run.workspaceRoot, registryKey, runInfo.controller.signal.aborted, priorHandoff, recall?.context, recall);
+      await finishStepsAndEnvelope(store, run, decl, roles, startIndex, run.goal, run.workspaceRoot, registryKey, () => runInfo.controller.signal.aborted, priorHandoff, recall?.context, recall);
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
       run.status = 'failed';
@@ -1482,8 +1529,13 @@ export async function reorchestrateRole(input: ReorchestrateRoleInput): Promise<
   const store = new HarnessStore(input.runId, input.workspaceRoot);
   const run = await store.loadRun();
   if (!run) throw new Error(`No run found for runId '${input.runId}'`);
+  // A live run must not be restarted underneath itself (two loops writing one run); only finished or paused runs.
+  if (run.status === 'running') throw new Error(`Run '${input.runId}' is still running; abort it or wait before re-orchestrating a role.`);
 
   const decl = await loadHarnessDeclaration(run.declarationName, input.workspaceRoot);
+  if (!Object.prototype.hasOwnProperty.call(decl.roles, input.role.replace(/#.*$/, ''))) {
+    throw new Error(`Unknown role '${input.role}' for harness '${decl.harness.name}'.`);
+  }
   assertWorkspaceRootAllowed(decl, input.workspaceRoot);
   await verifyDeclarationIntegrity(run, store);
 
@@ -1517,7 +1569,7 @@ export async function reorchestrateRole(input: ReorchestrateRoleInput): Promise<
     try {
       const priorHandoff = await lastHandoff(store);
       const combinedGoal = input.followupContext ? `${run.goal}\n\n[Followup Instructions for ${input.role}]: ${input.followupContext}` : run.goal;
-      await finishStepsAndEnvelope(store, run, decl, roles, startIndex, combinedGoal, input.workspaceRoot, registryKey, runInfo.controller.signal.aborted, priorHandoff, undefined, undefined);
+      await finishStepsAndEnvelope(store, run, decl, roles, startIndex, combinedGoal, input.workspaceRoot, registryKey, () => runInfo.controller.signal.aborted, priorHandoff, undefined, undefined);
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
       run.status = 'failed';

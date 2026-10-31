@@ -33,10 +33,11 @@ const TOOLS = [
   {
     id: 'load_skill_prompt', label: 'load_skill_prompt', icon: '📥',
     tag: 'Skill Loading',
+    actionField: 'type',
     fields: [
       { id: 'type',         label: 'Action Type', type: 'select', options: ['load', 'search', 'list'] },
-      { id: 'name',         label: 'Skill Name', type: 'text', placeholder: 'tdd-workflow' },
-      { id: 'keywords',     label: 'Keywords (comma-separated for search)', type: 'text', placeholder: 'tdd, testing' },
+      { id: 'name',         label: 'Skill Name', type: 'text', placeholder: 'tdd-workflow', showFor: ['load'] },
+      { id: 'keywords',     label: 'Keywords (comma-separated for search)', type: 'text', placeholder: 'tdd, testing', showFor: ['search'] },
       { id: 'workspaceDir', label: 'Workspace Directory (optional)', type: 'text', placeholder: 'C:/path/to/workspace' },
       { id: 'source',       label: 'Source (optional)', type: 'select', options: ['', 'agentic-awesome', 'hermes'] },
       { id: 'sessionId',    label: 'Session ID (for background download polling)', type: 'text', placeholder: 'load-1' },
@@ -48,19 +49,31 @@ const TOOLS = [
     tag: 'Memory',
     fields: [
       { id: 'action',         label: 'Action', type: 'select', options: ['search','list','stats','clear','wiki_search','wiki_write','wiki_list','wiki_read','node_add','node_link','node_list','node_get','node_review','graph_query','adr_write','adr_list','eisenhower_add','eisenhower_list','eisenhower_complete','pomodoro_start','pomodoro_stop','pomodoro_list'] },
-      { id: 'query',          label: 'Query (for search / wiki_search)', type: 'text', placeholder: 'authentication patterns' },
-      { id: 'limit',          label: 'Limit (results)', type: 'number', placeholder: '5' },
-      { id: 'title',          label: 'Title (for wiki_write / wiki_read)', type: 'text', placeholder: 'Auth Overview' },
-      { id: 'content',        label: 'Content (for wiki_write)', type: 'textarea', placeholder: 'Page content...' },
-      { id: 'tags',           label: 'Tags (comma-separated; node_list filters by tags[0])', type: 'text', placeholder: 'auth, security' },
-      { id: 'links',          label: 'Links (comma-separated, for wiki_write)', type: 'text', placeholder: 'Related Page' },
-      { id: 'persona',        label: 'Persona (for wiki_search)', type: 'text', placeholder: 'coder' },
-      { id: 'namespace',      label: 'Namespace (for wiki_*)', type: 'text', placeholder: 'global-cyber-tools' },
-      { id: 'node',           label: 'Node JSON (for node_add)', type: 'textarea', placeholder: '{"type":"text","content":"auth uses JWT","tags":["auth"]}' },
-      { id: 'nodeId',         label: 'Node ID (for node_get)', type: 'text', placeholder: 'a1b2c3...' },
-      { id: 'from',           label: 'From Node ID (for node_link)', type: 'text', placeholder: 'a1b2c3...' },
-      { id: 'to',             label: 'To Node ID (for node_link)', type: 'text', placeholder: 'd4e5f6...' },
-      { id: 'relation',       label: 'Relation Label (for node_link)', type: 'text', placeholder: 'relates-to' },
+      { id: 'query',          label: 'Query', type: 'text', placeholder: 'authentication patterns', showFor: ['search','wiki_search'] },
+      { id: 'limit',          label: 'Limit (results)', type: 'number', placeholder: '5', showFor: ['search','wiki_search'] },
+      { id: 'title',          label: 'Title', type: 'text', placeholder: 'Auth Overview', showFor: ['wiki_write','wiki_read','adr_write'] },
+      { id: 'content',        label: 'Content', type: 'textarea', placeholder: 'Page content...', showFor: ['wiki_write','adr_write'] },
+      { id: 'tags',           label: 'Tags (comma-separated; node_list filters by tags[0])', type: 'text', placeholder: 'auth, security', showFor: ['wiki_write','adr_write','node_list','eisenhower_add'] },
+      { id: 'links',          label: 'Links (comma-separated)', type: 'text', placeholder: 'Related Page', showFor: ['wiki_write','adr_write'] },
+      { id: 'persona',        label: 'Persona', type: 'text', placeholder: 'coder', showFor: ['wiki_search'] },
+      { id: 'namespace',      label: 'Namespace (letters, digits, . - _)', type: 'text', placeholder: 'global-cyber-tools', showFor: ['wiki_search','wiki_write','wiki_list','wiki_read','adr_write','adr_list'] },
+      { id: 'node',           label: 'Node JSON', type: 'textarea', placeholder: '{"type":"text","content":"..."}', showFor: ['node_add'] },
+      { id: 'nodeId',         label: 'Node ID', type: 'text', placeholder: 'a1b2c3...', showFor: ['node_get','node_review'] },
+      { id: 'from',           label: 'From Node ID', type: 'text', placeholder: 'a1b2c3...', showFor: ['node_link'] },
+      { id: 'to',             label: 'To Node ID', type: 'text', placeholder: 'd4e5f6...', showFor: ['node_link'] },
+      { id: 'relation',       label: 'Relation Label', type: 'text', placeholder: 'relates-to', showFor: ['node_link'] },
+      { id: 'task',           label: 'Task', type: 'text', placeholder: 'Ship the release notes', showFor: ['eisenhower_add'] },
+      { id: 'urgent',         label: 'Urgent', type: 'toggle', showFor: ['eisenhower_add'] },
+      { id: 'important',      label: 'Important', type: 'toggle', showFor: ['eisenhower_add'] },
+      { id: 'autoClassify',   label: 'Let an LLM classify urgent/important (opt-in)', type: 'toggle', showFor: ['eisenhower_add'] },
+      { id: 'quadrant',       label: 'Quadrant', type: 'select', options: ['', 'do', 'schedule', 'delegate', 'delete'], showFor: ['eisenhower_list'] },
+      { id: 'includeCompleted', label: 'Include completed', type: 'toggle', showFor: ['eisenhower_list'] },
+      { id: 'taskId',         label: 'Task ID', type: 'text', placeholder: 'task id from eisenhower_list', showFor: ['eisenhower_complete'] },
+      { id: 'label',          label: 'Session label', type: 'text', placeholder: 'Write tests', showFor: ['pomodoro_start'] },
+      { id: 'durationMinutes', label: 'Duration (minutes)', type: 'number', placeholder: '25', showFor: ['pomodoro_start'] },
+      { id: 'sessionRefId',   label: 'Session ID', type: 'text', placeholder: 'id from pomodoro_start', showFor: ['pomodoro_stop'] },
+      { id: 'aborted',        label: 'Abandoned (not completed)', type: 'toggle', showFor: ['pomodoro_stop'] },
+      { id: 'pomodoroLimit',  label: 'How many recent sessions', type: 'number', placeholder: '20', showFor: ['pomodoro_list'] },
     ]
   },
   {
@@ -75,8 +88,10 @@ const TOOLS = [
     tag: 'Web Scraping',
     fields: [
       { id: 'action', label: 'Action', type: 'select', options: ['navigate', 'snapshot', 'click', 'scroll', 'wait', 'evaluate', 'network', 'api_replay', 'extract', 'deep_scrape', 'screenshot', 'checkpoint', 'session', 'scrape'] },
-      { id: 'url', label: 'Target URL', type: 'text', placeholder: 'https://example.com' },
-      { id: 'userInstructions', label: 'Extraction Instructions', type: 'textarea', placeholder: 'Scrape page headlines and stats' },
+      { id: 'url', label: 'Target URL', type: 'text', placeholder: 'https://example.com', showFor: ['navigate', 'scrape'] },
+      { id: 'userInstructions', label: 'Extraction Instructions', type: 'textarea', placeholder: 'Scrape page headlines and stats', showFor: ['scrape'] },
+      { id: 'outputDir', label: 'Output Directory (optional)', type: 'text', placeholder: 'browser-output', showFor: ['screenshot', 'extract', 'api_replay', 'deep_scrape', 'checkpoint', 'scrape'] },
+      { id: 'params', label: 'Action params JSON (click: {"by":"uid","value":"..."}; scroll: {"target":"page"}; wait: {"until":"dom-stable"}; evaluate: {"function":"..."}; network/checkpoint/session: {"op":"..."})', type: 'textarea', placeholder: '{"by":"uid","value":"1_2"}' },
       { id: 'sessionId', label: 'Session ID', type: 'text', placeholder: 'browser_session_1' }
     ]
   },
@@ -85,22 +100,22 @@ const TOOLS = [
     tag: 'Cyber Security',
     fields: [
       { id: 'action', label: 'Action', type: 'select', options: ['osint', 'osint_status', 'list_tools', 'get_tool', 'register_tool', 'wiki_lookup', 'learn', 'coach', 'save_graph', 'load_graph', 'tool_memory', 'run_action', 'resolve_tool'] },
-      { id: 'prompt', label: 'Question (for resolve_tool)', type: 'textarea', placeholder: 'what libraries does hexstrike-ai depend on?' },
-      { id: 'source', label: 'Source (for resolve_tool)', type: 'select', options: ['', 'github', 'docker', 'apt'] },
-      { id: 'choice', label: 'Reply to follow-up (for resolve_tool)', type: 'text', placeholder: 'docker' },
-      { id: 'target', label: 'Target (for osint)', type: 'text', placeholder: 'example.com or johndoe' },
-      { id: 'osintType', label: 'OSINT Type (for osint)', type: 'select', options: ['all', 'domain', 'ip', 'username'] },
-      { id: 'autoSearch', label: 'Auto Search Recon Dorks (osint)', type: 'select', options: ['false', 'true'] },
-      { id: 'allowPrivateIps', label: 'Allow Private / Internal IPs (SSRF Bypass)', type: 'select', options: ['false', 'true'] },
-      { id: 'toolName', label: 'Tool Name', type: 'text', placeholder: 'sqlmap' },
-      { id: 'githubUrl', label: 'GitHub URL (for register)', type: 'text', placeholder: 'https://github.com/sqlmapproject/sqlmap' },
+      { id: 'prompt', label: 'Question (for resolve_tool)', type: 'textarea', placeholder: 'what libraries does hexstrike-ai depend on?', showFor: ['resolve_tool'] },
+      { id: 'source', label: 'Source (for resolve_tool)', type: 'select', options: ['', 'github', 'docker', 'apt'], showFor: ['resolve_tool'] },
+      { id: 'choice', label: 'Reply to follow-up (for resolve_tool)', type: 'text', placeholder: 'docker', showFor: ['resolve_tool'] },
+      { id: 'target', label: 'Target (for osint)', type: 'text', placeholder: 'example.com or johndoe', showFor: ['osint', 'osint_status', 'run_action'] },
+      { id: 'osintType', label: 'OSINT Type (for osint)', type: 'select', options: ['all', 'domain', 'ip', 'username'], showFor: ['osint'] },
+      { id: 'autoSearch', label: 'Auto Search Recon Dorks (osint)', type: 'select', options: ['false', 'true'], showFor: ['osint'] },
+      { id: 'allowPrivateIps', label: 'Allow Private / Internal IPs (SSRF Bypass)', type: 'select', options: ['false', 'true'], showFor: ['osint'] },
+      { id: 'toolName', label: 'Tool Name', type: 'text', placeholder: 'sqlmap', showFor: ['get_tool', 'register_tool', 'wiki_lookup', 'tool_memory', 'learn', 'coach', 'resolve_tool'] },
+      { id: 'githubUrl', label: 'GitHub URL (for register)', type: 'text', placeholder: 'https://github.com/sqlmapproject/sqlmap', showFor: ['register_tool'] },
       { id: 'sessionId', label: 'Session / CTF ID', type: 'text', placeholder: 'ctf-challenge-1' },
-      { id: 'goal', label: 'Goal (for learn)', type: 'textarea', placeholder: 'enumerate services on a lab host with nmap' },
-      { id: 'level', label: 'Level (for learn)', type: 'select', options: ['', 'beginner', 'intermediate', 'advanced'] },
-      { id: 'observation', label: 'Observation (for coach)', type: 'textarea', placeholder: 'nmap showed port 80 open' },
-      { id: 'graphNode', label: 'Graph Node JSON (for save_graph)', type: 'textarea', placeholder: '{"id":"hyp-1","label":"try SQLi on login form","type":"hypothesis","from":"root"}' },
-      { id: 'memoryOp', label: 'Memory Op (for tool_memory)', type: 'select', options: ['', 'read', 'write'] },
-      { id: 'note', label: 'Note (for tool_memory write)', type: 'textarea', placeholder: '-sV -p- for a full service scan on lab targets' }
+      { id: 'goal', label: 'Goal (for learn)', type: 'textarea', placeholder: 'enumerate services on a lab host with nmap', showFor: ['learn', 'coach'] },
+      { id: 'level', label: 'Level (for learn)', type: 'select', options: ['', 'beginner', 'intermediate', 'advanced'], showFor: ['learn', 'coach'] },
+      { id: 'observation', label: 'Observation (for coach)', type: 'textarea', placeholder: 'nmap showed port 80 open', showFor: ['coach'] },
+      { id: 'graphNode', label: 'Graph Node JSON (for save_graph)', type: 'textarea', placeholder: '{"id":"hyp-1","label":"try SQLi on login form","type":"hypothesis","from":"root"}', showFor: ['save_graph'] },
+      { id: 'memoryOp', label: 'Memory Op (for tool_memory)', type: 'select', options: ['', 'read', 'write'], showFor: ['tool_memory'] },
+      { id: 'note', label: 'Note (for tool_memory write)', type: 'textarea', placeholder: '-sV -p- for a full service scan on lab targets', showFor: ['tool_memory'] }
     ]
   },
   {
@@ -146,18 +161,21 @@ const TOOLS = [
     id: 'coding_agents', label: 'coding_agents', icon: '🤖',
     tag: 'Autonomous Multi-File Coding',
     fields: [
-      { id: 'goal', label: 'Refactoring / Coding Goal', type: 'textarea', placeholder: 'Add rate limiting to express endpoints' },
+      { id: 'goal', label: 'Refactoring / Coding Goal', type: 'textarea', placeholder: 'Add rate limiting to express endpoints', showFor: ['', 'plan', 'execute', 'resume'] },
       { id: 'workspaceRoot', label: 'Workspace Root (optional)', type: 'text', placeholder: 'C:/path/to/workspace' },
-      { id: 'dryRun', label: 'Dry Run Mode (simulate only)', type: 'toggle', default: true },
-      { id: 'topKFiles', label: 'Candidate Files Count (RAG)', type: 'number', placeholder: '5' },
+      { id: 'dryRun', label: 'Dry Run Mode (simulate only)', type: 'toggle', default: true, showFor: ['', 'execute', 'resume'] },
+      { id: 'topKFiles', label: 'Candidate Files Count (RAG)', type: 'number', placeholder: '5', showFor: ['', 'plan', 'execute'] },
       { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'coding-session-1' },
       { id: 'action', label: 'Action', type: 'select', options: ['', 'plan', 'execute', 'resume', 'status', 'abort'] },
-      { id: 'pauseOnTaskPlan', label: 'Pause On Task Plan', type: 'toggle' },
-      { id: 'targetFiles', label: 'Target Files (comma-separated)', type: 'text', placeholder: 'src/foo.ts, src/bar.ts' },
-      { id: 'verifyLspDiagnostics', label: 'Verify LSP Diagnostics', type: 'toggle', default: true },
-      { id: 'astEditOps', label: 'AST Edit Ops JSON (optional)', type: 'textarea', placeholder: '[{"pat":"old($$A)","out":"new($$A)"}]' },
-      { id: 'resolve', label: 'Resolve JSON (optional)', type: 'textarea', placeholder: '{"action":"apply"}' },
-      { id: 'lspAction', label: 'LSP Action JSON (optional)', type: 'textarea', placeholder: '{"action":"diagnostics"}' },
+      { id: 'pauseOnTaskPlan', label: 'Pause On Task Plan', type: 'toggle', showFor: ['', 'execute'] },
+      { id: 'verifyCommand', label: 'Verify Command (rolls back on regression)', type: 'text', placeholder: 'npx vitest run tests/a.test.ts', showFor: ['', 'execute', 'resume'] },
+      { id: 'feedback', label: 'Feedback / Repair Brief (retry)', type: 'textarea', placeholder: 'paste result.verification.repairBrief from the previous attempt', showFor: ['', 'execute', 'resume'] },
+      { id: 'verifyReport', label: 'Verify Report JSON (your own test run)', type: 'textarea', placeholder: '{"exitCode":1,"output":"..."}', showFor: ['', 'execute', 'resume'] },
+      { id: 'targetFiles', label: 'Target Files (comma-separated)', type: 'text', placeholder: 'src/foo.ts, src/bar.ts', showFor: ['', 'plan', 'execute', 'resume'] },
+      { id: 'verifyLspDiagnostics', label: 'Verify LSP Diagnostics', type: 'toggle', default: true, showFor: ['', 'execute'] },
+      { id: 'astEditOps', label: 'AST Edit Ops JSON (optional)', type: 'textarea', placeholder: '[{"pat":"old($$A)","out":"new($$A)"}]', showFor: ['', 'execute', 'resume'] },
+      { id: 'resolve', label: 'Resolve JSON (optional)', type: 'textarea', placeholder: '{"action":"apply"}', showFor: ['', 'execute', 'resume'] },
+      { id: 'lspAction', label: 'LSP Action JSON (optional)', type: 'textarea', placeholder: '{"action":"diagnostics"}', showFor: ['', 'execute'] },
     ]
   },
   {
@@ -177,29 +195,33 @@ const TOOLS = [
     tag: 'Multi-Agent Harness',
     fields: [
       { id: 'action', label: 'Action', type: 'select', options: ['deploy', 'resume', 'rerun', 'reorchestrate', 'status', 'approvals', 'approve', 'reject', 'trace', 'tasks', 'abort'] },
-      { id: 'goal', label: 'Goal (for deploy)', type: 'textarea', placeholder: 'Audit authentication flow and harden session tokens' },
-      { id: 'runId', label: 'Run ID', type: 'text', placeholder: 'Run UUID (leave blank for new deploy)' },
-      { id: 'harness', label: 'Harness Template', type: 'text', placeholder: 'research-analysis' },
-      { id: 'role', label: 'Role Name (for rerun)', type: 'text', placeholder: 'security-reviewer' },
-      { id: 'followupContext', label: 'Followup Steering Context (for rerun)', type: 'textarea', placeholder: 'Focus strictly on JWT cookie scoping' },
-      { id: 'approvalId', label: 'Approval ID (for approve/reject)', type: 'text', placeholder: 'appr-123' },
+      { id: 'goal', label: 'Goal', type: 'textarea', placeholder: 'Audit authentication flow and harden session tokens', showFor: ['deploy'] },
+      { id: 'runId', label: 'Run ID', type: 'text', placeholder: 'Run UUID (leave blank for a new deploy)' },
+      { id: 'harness', label: 'Harness Template', type: 'text', placeholder: 'research-analysis', showFor: ['deploy'] },
+      { id: 'role', label: 'Role Name', type: 'text', placeholder: 'security-reviewer', showFor: ['rerun','reorchestrate'] },
+      { id: 'followupContext', label: 'Followup Steering Context', type: 'textarea', placeholder: 'Focus strictly on JWT cookie scoping', showFor: ['rerun','reorchestrate'] },
+      { id: 'approvalId', label: 'Approval ID', type: 'text', placeholder: 'appr-123', showFor: ['approve','reject'] },
+      { id: 'note', label: 'Note (optional)', type: 'text', placeholder: 'why', showFor: ['approve','reject'] },
       { id: 'workspace_root', label: 'Workspace Root (optional)', type: 'text', placeholder: 'C:/path/to/project' },
-      { id: 'maxTokens', label: 'Max Tokens (optional)', type: 'number', placeholder: '60000' }
+      { id: 'maxTokens', label: 'Max Tokens (optional)', type: 'number', placeholder: '60000', showFor: ['deploy'] },
+      { id: 'maxWallMinutes', label: 'Raise wall-clock cap (minutes)', type: 'number', placeholder: '120', showFor: ['resume'] },
+      { id: 'limit', label: 'Events to return', type: 'number', placeholder: '200', showFor: ['trace'] }
     ]
   },
   {
     id: 'movie_tool', label: 'movie_tool', icon: '🎬',
     tag: 'Vibe Movie Engine',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['init_project', 'get_timeline', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'apply_effect', 'undo_effect', 'compile_timeline'] },
+      { id: 'action', label: 'Action', type: 'select', options: ['init_project', 'get_timeline', 'propose_slots', 'add_artifact', 'approve_artifact', 'reroll_artifact', 'generate_assets', 'generate_story', 'update_artifact_bounds', 'apply_effect', 'undo_effect', 'compile_timeline'] },
       { id: 'projectId', label: 'Project ID', type: 'text', placeholder: 'proj_cyberpunk_01' },
-      { id: 'premise', label: 'Premise / Prompt', type: 'textarea', placeholder: 'Cyberpunk rainy alleyway with neon signs' },
-      { id: 'track', label: 'Track Lane', type: 'select', options: ['video', 'vfx', 'bgm', 'bgm_drums', 'bgm_bass', 'bgm_melody', 'vocal', 'song', 'script', 'dialogue'] },
-      { id: 'start_ms', label: 'Start Time (ms)', type: 'number', placeholder: '0' },
-      { id: 'end_ms', label: 'End Time (ms)', type: 'number', placeholder: '5000' },
-      { id: 'label', label: 'Artifact Label', type: 'text', placeholder: 'Opening Cut' },
-      { id: 'artifact_path', label: 'File Path / URL', type: 'text', placeholder: 'projects/default/video.mp4' },
-      { id: 'artifactId', label: 'Artifact ID (for approve/reroll/effects)', type: 'text', placeholder: 'art_123' }
+      { id: 'premise', label: 'Premise / Prompt', type: 'textarea', placeholder: 'Cyberpunk rainy alleyway with neon signs', showFor: ['init_project', 'propose_slots', 'generate_story'] },
+      { id: 'prompt', label: 'Prompt (generate_assets / generate_story)', type: 'textarea', placeholder: 'Neon rain on an empty street, slow dolly in', showFor: ['generate_assets', 'generate_story'] },
+      { id: 'track', label: 'Track Lane', type: 'select', options: ['video', 'vfx', 'bgm', 'bgm_drums', 'bgm_bass', 'bgm_melody', 'vocal', 'song', 'script', 'dialogue'], showFor: ['generate_assets', 'add_artifact', 'propose_slots', 'apply_effect'] },
+      { id: 'start_ms', label: 'Start Time (ms)', type: 'number', placeholder: '0', showFor: ['add_artifact', 'update_artifact_bounds'] },
+      { id: 'end_ms', label: 'End Time (ms)', type: 'number', placeholder: '5000', showFor: ['add_artifact', 'update_artifact_bounds'] },
+      { id: 'label', label: 'Artifact Label', type: 'text', placeholder: 'Opening Cut', showFor: ['add_artifact'] },
+      { id: 'artifact_path', label: 'File Path / URL', type: 'text', placeholder: 'projects/default/video.mp4', showFor: ['add_artifact', 'generate_assets'] },
+      { id: 'artifactId', label: 'Artifact ID (for approve/reroll/effects)', type: 'text', placeholder: 'art_123', showFor: ['reroll_artifact', 'approve_artifact', 'apply_effect', 'undo_effect', 'update_artifact_bounds'] }
     ]
   }
 ];
@@ -595,6 +617,20 @@ function renderToolForm(tool) {
 
     pgForm.appendChild(wrap);
   });
+
+  // Show only the inputs that apply to the chosen action (fields without showFor are always shown).
+  const actionId = tool.actionField || 'action';
+  const applyVisibility = () => {
+    const actionEl = document.getElementById(`pg-field-${actionId}`);
+    const action = actionEl ? actionEl.value : '';
+    tool.fields.forEach(f => {
+      const w = document.getElementById(`field-wrap-${f.id}`);
+      if (w) w.style.display = fieldVisibleFor(f, action) ? '' : 'none';
+    });
+  };
+  const chosen = document.getElementById(`pg-field-${actionId}`);
+  if (chosen) chosen.addEventListener('change', applyVisibility);
+  applyVisibility();
 }
 
 function collectParams(tool) {
@@ -602,9 +638,14 @@ function collectParams(tool) {
   const ws = pgWorkspace.value.trim();
   if (ws) params.workspace_root = ws;
 
+  const actionEl = document.getElementById(`pg-field-${tool.actionField || 'action'}`);
+  const currentAction = actionEl ? actionEl.value : '';
+
   tool.fields.forEach(f => {
     const el = document.getElementById(`pg-field-${f.id}`);
     if (!el) return;
+    // an input that does not apply to the chosen action is not sent (it may hold a stale value)
+    if (!fieldVisibleFor(f, currentAction)) return;
 
     if (f.type === 'toggle')       params[f.id] = el.checked;
     else if (f.type === 'number' && f.id === 'temperature') params[f.id] = el.value ? parseFloat(el.value) : undefined;
@@ -619,7 +660,7 @@ function collectParams(tool) {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
     } else if (f.id === 'files') {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
-    } else if (f.id === 'graphNode' || f.id === 'gates' || f.id === 'script_instructions' || f.id === 'metadata') {
+    } else if (f.id === 'params' || f.id === 'graphNode' || f.id === 'gates' || f.id === 'script_instructions' || f.id === 'metadata') {
       const raw = el.value.trim();
       if (raw) {
         try { params[f.id] = JSON.parse(raw); } catch { params[f.id] = raw; }

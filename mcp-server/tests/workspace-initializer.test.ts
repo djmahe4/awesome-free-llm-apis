@@ -14,13 +14,13 @@ describe('WorkspaceInitializer (Phase A)', () => {
     const backupHomedir = os.homedir();
 
     beforeEach(async () => {
-        await fs.rm(testRoot, { recursive: true, force: true });
+        await fs.rm(testRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         await fs.mkdir(testDir, { recursive: true });
         vi.restoreAllMocks();
     });
 
     afterEach(async () => {
-        await fs.rm(testRoot, { recursive: true, force: true });
+        await fs.rm(testRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         vi.restoreAllMocks();
     });
 
@@ -84,13 +84,18 @@ describe('WorkspaceInitializer (Phase A)', () => {
 
         const customHome = path.join(testDir, 'custom_home');
         await fs.mkdir(customHome, { recursive: true });
-        vi.spyOn(os, 'homedir').mockReturnValue(customHome);
+        // the fallback lives under the MCP home, which FREE_LLM_MCP_HOME overrides (the suite sandbox sets it)
+        const savedHome = process.env.FREE_LLM_MCP_HOME;
+        process.env.FREE_LLM_MCP_HOME = customHome;
+        try {
+            const result = await initWorkspace(testDir);
+            expect(result).toBe(true);
 
-        const result = await initWorkspace(testDir);
-        expect(result).toBe(true);
-
-        const fallbackPath = path.join(customHome, '.free-llm-mcp', 'agents-config.json');
-        expect(existsSync(fallbackPath)).toBe(true);
+            const fallbackPath = path.join(customHome, '.free-llm-mcp', 'agents-config.json');
+            expect(existsSync(fallbackPath)).toBe(true);
+        } finally {
+            process.env.FREE_LLM_MCP_HOME = savedHome;
+        }
     });
 
     it('logs one-time creation message on stderr', async () => {

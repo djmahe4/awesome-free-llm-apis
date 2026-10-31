@@ -80,11 +80,11 @@ describe('T8 cyber_tool run_action — project bridge dispatch', () => {
 
   afterAll(async () => {
     delete process.env.BRIDGE_WORKSPACE_ROOTS;
-    await fs.rm(ws, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => {});
   });
 
   beforeEach(async () => {
-    await fs.rm(path.join(ws, '.free-llm-mcp'), { recursive: true, force: true }).catch(() => {});
+    await fs.rm(path.join(ws, '.free-llm-mcp'), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => {});
   });
 
   it('spawns the single declared bridge (auto-select) and returns its parsed JSON finding', async () => {
@@ -386,9 +386,9 @@ describe('T8 harness gating — declaration cyberTools list', () => {
     expect(evaluate(decl, 'analyst', 'cyber_tool', 'run_action', { bridge: 'katana' }).kind).toBe('allow');
   });
 
-  it('auto-resolves the single listed bridge when none is named', () => {
+  it('requires the bridge to be named even when exactly one is listed', () => {
     const decl = baseDecl({ cyberTools: ['katana'] });
-    expect(evaluate(decl, 'analyst', 'cyber_tool', 'run_action', {}).kind).toBe('allow');
+    expect(evaluate(decl, 'analyst', 'cyber_tool', 'run_action', {}).kind).toBe('needs_approval');
   });
 
   it('needs approval for a bridge outside the cyberTools list', () => {

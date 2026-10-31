@@ -1,3 +1,4 @@
+import { caTrace } from '../tools/coding-agents/trace.js';
 import fetch from 'node-fetch';
 import { getModelInfo } from '../services/llmfit.js';
 
@@ -19,6 +20,8 @@ import { getModelInfo } from '../services/llmfit.js';
 export interface OllamaLocalMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** Base64-encoded images (no data: prefix) for vision models, e.g. screenshots. */
+  images?: string[];
 }
 
 export interface OllamaLocalChatResult {
@@ -26,6 +29,44 @@ export interface OllamaLocalChatResult {
   content: string;
   promptTokens: number;
   completionTokens: number;
+  /** num_ctx actually sent to Ollama. */
+  numCtx?: number;
+  /**
+   * Ollama silently drops the head of a prompt that does not fit num_ctx. When the
+   * evaluated prompt filled the window we cannot tell what was cut, so callers must
+   * treat the reply as unreliable.
+   */
+  promptTruncated?: boolean;
+  /** The reply stopped at num_predict (done_reason "length"), so it may end mid-edit. */
+  outputTruncated?: boolean;
+}
+
+/** Fraction of num_ctx at which an evaluated prompt is treated as truncated. */
+const TRUNCATION_RATIO = 0.97;
+
+export function isPromptTruncated(promptTokens: number, numCtx: number): boolean {
+  return numCtx > 0 && promptTokens > 0 && promptTokens >= numCtx * TRUNCATION_RATIO;
+}
+
+/**
+ * Context size for a request: prompt estimate (~3 chars per token, which suits
+ * symbol-dense code better than the prose-oriented 4) plus room for the reply,
+ * never below 2048 and never above what the model supports.
+ */
+export function estimateNumCtx(messages: OllamaLocalMessage[], maxTokens: number | undefined, maxSupported: number): number {
+  const promptChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+  const needed = Math.ceil(promptChars / 3) + (maxTokens ?? 4096);
+  return Math.min(Math.max(2048, needed), maxSupported);
+}
+
+async function resolveNumCtx(model: string, messages: OllamaLocalMessage[], maxTokens: number | undefined): Promise<number> {
+  const envCtx = parseInt(process.env.OLLAMA_CONTEXT_LENGTH || '', 10);
+  let maxSupported = 32768;
+  try {
+    maxSupported = (await getModelInfo(model))?.contextLength ?? 32768;
+  } catch { /* keep default */ }
+  const sized = estimateNumCtx(messages, maxTokens, maxSupported);
+  return !isNaN(envCtx) && envCtx > 0 ? Math.max(envCtx, sized) : sized;
 }
 
 function getBaseUrl(): string {
@@ -110,34 +151,33 @@ export function rankCandidateModels(availableModels: string[]): string[] {
   return [...preferred, ...rest];
 }
 
-export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number; numCtx?: number }): Promise<OllamaLocalChatResult> {
+const thinkingSupport = new Map<string, boolean>();
+
+/** Whether a local model reports the 'thinking' capability (Ollama /api/show); cached, false when unknown. */
+export async function modelSupportsThinking(model: string): Promise<boolean> {
+  const known = thinkingSupport.get(model);
+  if (known !== undefined) return known;
+  let yes = false;
+  try {
+    const res = await fetch(`${getBaseUrl()}/api/show`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+    if (res.ok) yes = ((await res.json() as { capabilities?: string[] }).capabilities ?? []).includes('thinking');
+  } catch { /* unknown: treat as not thinking */ }
+  thinkingSupport.set(model, yes);
+  return yes;
+}
+
+export async function chatLocal(model: string, messages: OllamaLocalMessage[], options?: { temperature?: number; maxTokens?: number; numCtx?: number; keepAlive?: string | number; think?: boolean; signal?: AbortSignal }): Promise<OllamaLocalChatResult> {
   const url = `${getBaseUrl()}/api/chat`;
   const timeoutMs = computeChatTimeoutMs(messages);
+  // The caller's signal (e.g. a coding_agents abort) cancels the request in flight; before this an abort
+  // waited for the whole generation (up to minutes on a 7B).
+  if (options?.signal?.aborted) throw new Error(`Ollama local request for '${model}' was aborted by the caller.`);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onCallerAbort = () => controller.abort();
+  options?.signal?.addEventListener('abort', onCallerAbort, { once: true });
 
-  let numCtx = options?.numCtx;
-  if (!numCtx) {
-    const promptChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
-    const estimatedPromptTokens = Math.ceil(promptChars / 3.5);
-    const headroom = options?.maxTokens ?? 4096;
-    const needed = estimatedPromptTokens + headroom;
-
-    if (process.env.OLLAMA_CONTEXT_LENGTH) {
-      const envCtx = parseInt(process.env.OLLAMA_CONTEXT_LENGTH, 10);
-      if (!isNaN(envCtx) && envCtx > 0) numCtx = Math.max(envCtx, needed);
-    }
-
-    if (!numCtx) {
-      try {
-        const fitInfo = await getModelInfo(model);
-        const maxSupported = fitInfo?.contextLength ?? 32768;
-        numCtx = Math.min(Math.max(2048, needed), maxSupported);
-      } catch {
-        numCtx = Math.min(Math.max(2048, needed), 32768);
-      }
-    }
-  }
+  const numCtx = options?.numCtx || await resolveNumCtx(model, messages, options?.maxTokens);
 
   let response;
   try {
@@ -148,6 +188,11 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
         model,
         messages,
         stream: false,
+        // 0 unloads the model right after the reply, so a staged pipeline (vision model, then code
+        // model) never has both resident in VRAM at once.
+        ...(options?.keepAlive !== undefined ? { keep_alive: options.keepAlive } : {}),
+        // false switches a thinking model's hidden reasoning off; other models ignore it.
+        ...(options?.think !== undefined ? { think: options.think } : {}),
         options: {
           temperature: options?.temperature,
           num_predict: options?.maxTokens,
@@ -158,11 +203,13 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
     });
   } catch (err: any) {
     if (err.name === 'AbortError') {
+      if (options?.signal?.aborted) throw new Error(`Ollama local request for '${model}' was aborted by the caller.`);
       throw new Error(`Ollama local model '${model}' did not respond within ${timeoutMs}ms (scaled to prompt size).`);
     }
     throw err;
   } finally {
     clearTimeout(timer);
+    options?.signal?.removeEventListener('abort', onCallerAbort);
   }
   if (!response.ok) {
     const text = await response.text().catch(() => '');
@@ -173,12 +220,23 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
     message: { role: string; content: string };
     prompt_eval_count?: number;
     eval_count?: number;
+    done_reason?: string;
+    total_duration?: number;
+    load_duration?: number;
+    prompt_eval_duration?: number;
+    eval_duration?: number;
   };
+  const ns = (v?: number) => ((v ?? 0) / 1e9).toFixed(1);
+  caTrace('ollama', `model=${model} ctx=${numCtx} total=${ns(data.total_duration)}s load=${ns(data.load_duration)}s prompt=${data.prompt_eval_count ?? 0}tok/${ns(data.prompt_eval_duration)}s gen=${data.eval_count ?? 0}tok/${ns(data.eval_duration)}s`);
+  const promptTokens = data.prompt_eval_count ?? 0;
   return {
     model: data.model,
     content: parseJsonlContent(data.message?.content || ''),
-    promptTokens: data.prompt_eval_count ?? 0,
+    promptTokens,
     completionTokens: data.eval_count ?? 0,
+    numCtx,
+    promptTruncated: isPromptTruncated(promptTokens, numCtx),
+    outputTruncated: data.done_reason === 'length',
   };
 }
 
@@ -225,14 +283,8 @@ export async function* chatLocalStream(
     else sig.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
-  let numCtx = options?.numCtx;
-  if (!numCtx) {
-    const promptChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
-    const estimatedPromptTokens = Math.ceil(promptChars / 3.5);
-    const headroom = options?.maxTokens ?? 4096;
-    const needed = estimatedPromptTokens + headroom;
-    numCtx = Math.min(Math.max(2048, needed), 32768);
-  }
+  // Same sizing as chatLocal (it used to skip OLLAMA_CONTEXT_LENGTH and the model's real limit).
+  const numCtx = options?.numCtx || await resolveNumCtx(model, messages, options?.maxTokens);
 
   let response;
   try {

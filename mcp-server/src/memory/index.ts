@@ -68,7 +68,7 @@ export class MemoryManager {
     let wiki = this.wikis.get(cacheKey);
     if (!wiki) {
       const customBaseDir = workspaceRoot ? path.join(workspaceRoot, '.free-llm-mcp', 'wiki') : undefined;
-      wiki = new WikiMemory(workspaceHash, customBaseDir);
+      wiki = new WikiMemory(workspaceHash, customBaseDir, workspaceRoot);
       this.wikis.set(cacheKey, wiki);
     }
     return wiki;
@@ -245,6 +245,29 @@ export class MemoryManager {
     }
 
     return uniqueResults;
+  }
+
+  /**
+   * Vector hits with where they came from: `{ content, contentHash, path, timestamp }`. `search` returns bare
+   * content (its callers and tests depend on that), which loses the path and hash a caller needs to dedupe by
+   * hash, order code first, or re-check the file on disk before using the hit.
+   */
+  async searchWithProvenance(workspaceHash: string, query: string, limit = 5): Promise<Array<{ content: string; contentHash: string; path?: string; timestamp: number }>> {
+    try {
+      const matches = await vectorStore.search(workspaceHash, query, limit);
+      const seen = new Set<string>();
+      const out: Array<{ content: string; contentHash: string; path?: string; timestamp: number }> = [];
+      for (const m of matches) {
+        if (m.contentHash && seen.has(m.contentHash)) continue;
+        if (m.contentHash) seen.add(m.contentHash);
+        const p = (m as any).metadata?.path;
+        out.push({ content: m.content, contentHash: m.contentHash, path: typeof p === 'string' ? p : undefined, timestamp: m.timestamp });
+      }
+      return out;
+    } catch (err) {
+      console.error(`[MemoryManager] Provenance search failed: ${err}`);
+      return [];
+    }
   }
 
   async semanticSearch(workspaceHash: string, query: string): Promise<unknown[]> {

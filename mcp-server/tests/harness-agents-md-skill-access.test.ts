@@ -18,7 +18,7 @@ describe('AGENTS.md skill-access merge into harness declaration', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('injects an execute_skill/skillTags constraint rule for a role AGENTS.md declares', async () => {

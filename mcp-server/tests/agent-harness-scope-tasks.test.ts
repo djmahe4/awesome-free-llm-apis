@@ -77,7 +77,7 @@ describe('harness runner — workspace scoping enforcement (integration)', () =>
   });
 
   afterEach(async () => {
-    await fs.remove(tmpProjectDir);
+    await fs.rm(tmpProjectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('deploy refuses a workspace_root outside the declared allowlist', async () => {
@@ -108,7 +108,7 @@ describe('harness runner — tasks.md blackboard (integration)', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpProjectDir);
+    await fs.rm(tmpProjectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('creates a tasks.md entry for the selected role and marks it completed on success', async () => {

@@ -62,7 +62,6 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'liquid/lfm-2.5-2.6b:free': { capability: 0.80, contextWindow: 32000 },
     'cohere/north-mini-code:free': { capability: 0.84, contextWindow: 128000, isCoder: true },
     'dots-studio/dots-3-note-preview:free': { capability: 0.88, contextWindow: 512000, isVision: true, isReasoning: true },
-    'DeepSeek-V4-Flash-0731': { capability: 0.90, contextWindow: 128000, isReasoning: true, isCoder: true },
 
     // A-Tier & Multimodal Models
     'Qwen/Qwen3.8-Flash-Next': { capability: 0.92, contextWindow: 131072, isVision: true, isReasoning: true },
@@ -141,7 +140,8 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     // Ollama Cloud active models
     'nemotron-3-ultra': { capability: 0.90, contextWindow: 128000 },
     'nemotron-3-super': { capability: 0.88, contextWindow: 128000 },
-    'nemotron-3-nano:30b': { capability: 0.80, contextWindow: 32000 },
+    // Nemotron 3 Nano 30B-A3B: MMLU-Pro 78.3, LiveCodeBench v6 68.3, SWE-bench (OpenHands) 38.8 (NVIDIA-reported)
+    'nemotron-3-nano:30b': { capability: 0.82, contextWindow: 1000000 },
     'minimax-m3': { capability: 0.90, contextWindow: 128000 },
 
     // NVIDIA NIM active & free models
@@ -152,7 +152,6 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'meta/muse-glimmer-30b': { capability: 0.92, contextWindow: 128000, isVision: true, isReasoning: true },
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': { capability: 0.90, contextWindow: 128000, isVision: true, isReasoning: true },
     'nvidia/nemotron-3-nano-30b-a3b': { capability: 0.82, contextWindow: 128000 },
-    'nvidia/nemotron-3-super-120b-a12b:free': { capability: 0.88, contextWindow: 128000, isReasoning: true },
     'nvidia/nemotron-3-ultra-550b-a55b': { capability: 0.88, contextWindow: 300000, isReasoning: true },
     'nvidia/nemotron-3-ultra-550b-a55b:free': { capability: 0.88, contextWindow: 300000, isReasoning: true },
     'nvidia/llama-3.3-nemotron-super-49b-v1': { capability: 0.90, contextWindow: 128000 },
@@ -167,6 +166,17 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'moonshotai/kimi-k3': { capability: 0.92, contextWindow: 128000, isReasoning: true },
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free': { capability: 0.90, contextWindow: 256000, isVision: true, isReasoning: true },
     'minimax-m2.7': { capability: 0.85, contextWindow: 128000 },
+    // Refreshed 2026-10 from upstream data.json. Scores are on this file's relative scale; benchmark numbers are
+    // vendor/self-reported unless noted, so treat them as a prior and let live success rates adjust.
+    // Reflection Beam (501B-A23B): SWE-bench Verified 80.9, Terminal-Bench 2.1 80.1, SWE-bench Pro v2-Hard 77.2 (self-reported); 1M ctx on OpenRouter.
+    'reflection/beam-free': { capability: 0.93, contextWindow: 1048576, isReasoning: true, isCoder: true },
+    // TeleAI Xing4.0-29B-A4B: AIME2026 90.0, IFBench 69.7, Tau3-Bench 64.6, SWE-bench Verified 75.0 (model card / MindStudio); 256K ctx.
+    'XingChenAGI/Xing4.0-29B': { capability: 0.88, contextWindow: 262144, isReasoning: true, isCoder: true },
+    'xingchen-agi/xing4.0-29b-a4b:free': { capability: 0.88, contextWindow: 262144, isReasoning: true, isCoder: true },
+    // NVIDIA Nemotron 3.5 Super VL: GPQA-Diamond 89.5, CharXiv-RQ 80.8, MathVision 78.2, Terminal-Bench 2.1 ~61-67 (NVIDIA-reported; sources disagree). Same tier as the 120B-A12B entry above.
+    'nvidia/nemotron-3.5-super-vl:free': { capability: 0.93, contextWindow: 1000000, isVision: true, isReasoning: true },
+    // Recursive Flint (40B-A2.5B, Apache-2.0): SWE-bench Verified 74.2, Terminal-Bench 2.1 54.9 (self-reported, unverified).
+    'recursive/flint-v1.0:free': { capability: 0.87, contextWindow: 131072, isCoder: true },
     'nvidia/nemotron-3-super-120b-a12b': { capability: 0.93, contextWindow: 1000000, isReasoning: true },
     'nvidia/ising-calibration-1-35b-a3b': { capability: 0.86, contextWindow: 64000, isVision: true },
     'nvidia/ising-calibration-1.5-31b': { capability: 0.90, contextWindow: 128000, isVision: true, isReasoning: true },
@@ -205,6 +215,25 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'hexgrad/kokoro-82m': { capability: 0.90, contextWindow: 32000, isAudio: true },
     'qwen/qwen3-tts-flash': { capability: 0.88, contextWindow: 32000, isAudio: true },
     'alibaba/wan-2.2-fast': { capability: 0.88, contextWindow: 32000, isVideo: true },
+
+    // Gonka Broker Models (Decentralized Network Gateway)
+    'zai-org/GLM-5.3-Flash': { capability: 0.93, contextWindow: 400000, isReasoning: true },
+    'MiniMaxAI/MiniMax-M2.7': { capability: 0.92, contextWindow: 200000, isReasoning: true },
+    'deepseek-ai/DeepSeek-V4-Flash-0731': { capability: 0.92, contextWindow: 400000, isReasoning: true },
+
+    // OVHcloud AI Endpoints (EU Sovereign Anonymous 2 RPM & Authenticated Tier)
+    'Qwen3.5-397B-A17B': { capability: 0.96, contextWindow: 262144, isVision: true, isReasoning: true, isCoder: true },
+    'gpt-oss-120b': { capability: 0.94, contextWindow: 131072, isReasoning: true },
+    'gpt-oss-20b': { capability: 0.78, contextWindow: 131072, isReasoning: true },
+    'Meta-Llama-3_3-70B-Instruct': { capability: 0.88, contextWindow: 131072 },
+    'Qwen3.8-27B': { capability: 0.90, contextWindow: 262144, isVision: true, isCoder: true },
+    'Qwen3.6-27B': { capability: 0.88, contextWindow: 262144, isVision: true },
+    'Qwen3.5-9B': { capability: 0.80, contextWindow: 262144, isVision: true },
+    'Qwen2.5-VL-72B-Instruct': { capability: 0.90, contextWindow: 32768, isVision: true },
+    'Mistral-Small-3.2-24B-Instruct-2506': { capability: 0.84, contextWindow: 128000, isVision: true },
+    'Mistral-Nemo-Instruct-2407': { capability: 0.80, contextWindow: 118000 },
+    'bge-m3': { capability: 0.85, contextWindow: 8192 },
+    'Qwen3-Embedding-8B': { capability: 0.86, contextWindow: 32768 },
 };
 
 /**

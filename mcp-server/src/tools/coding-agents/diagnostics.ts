@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { type DiagnosticResult } from './types.js';
@@ -9,6 +11,15 @@ import { type DiagnosticResult } from './types.js';
 //   Go     → go vet -json (static analysis)
 //   Rust   → rustc --error-format json (compiler errors)
 //   TS/JS  → ts-morph getPreEmitDiagnostics (syntactic + semantic)
+
+/** A checker that hit its time limit did not find the code clean; say so instead of returning nothing. */
+function timedOut(result: { error?: Error & { code?: string } }): boolean {
+  return result.error?.code === 'ETIMEDOUT';
+}
+
+function timeoutNotice(filePath: string, tool: string, seconds: number): DiagnosticResult {
+  return { filePath, message: `${tool} timed out after ${seconds}s; this file was not checked`, severity: 'warning', source: 'subprocess' };
+}
 
 export function getPythonCmd(): string | null {
   for (const cmd of ['python', 'python3']) {
@@ -42,6 +53,7 @@ except Exception as e:
     windowsHide: true,
   });
 
+  if (timedOut(result)) return [timeoutNotice(filePath, 'python syntax check', 10)];
   if (result.error || !result.stdout) return [];
 
   try {
@@ -68,6 +80,7 @@ export function runGoVetCheck(filePath: string, workspaceRoot: string): Diagnost
   });
 
   const diags: DiagnosticResult[] = [];
+  if (timedOut(result)) return [timeoutNotice(filePath, 'go vet', 30)];
   if (result.error || result.status === 0) return diags;
 
   const stderr = result.stderr?.toString() || '';
@@ -88,17 +101,23 @@ export function runGoVetCheck(filePath: string, workspaceRoot: string): Diagnost
 }
 
 export function runRustcCheck(filePath: string, content: string): DiagnosticResult[] {
-  // Write to a temp file — rustc requires a real file path
-  const tmpFile = `${filePath}.oagent.tmp.rs`;
+  // rustc needs a real file. It goes in the OS temp dir, never next to the user's source, and the
+  // module uses real ESM imports: a require() here threw inside an ES module and every Rust edit was
+  // reported clean.
+  const tmpFile = path.join(os.tmpdir(), `oagent-${process.pid}-${Date.now()}-${path.basename(filePath).replace(/[^\w.-]/g, '_')}.rs`);
   try {
-    require('fs').writeFileSync(tmpFile, content, 'utf-8');
-    const result = spawnSync('rustc', ['--edition', '2021', '--error-format', 'json', tmpFile], {
+    fs.writeFileSync(tmpFile, content, 'utf-8');
+    // metadata only, written to the temp dir: no binary lands in the current directory
+    const outFile = `${tmpFile}.rmeta`;
+    const result = spawnSync('rustc', ['--edition', '2021', '--error-format', 'json', '--emit=metadata', '-o', outFile, tmpFile], {
       encoding: 'utf-8',
       timeout: 30_000,
     });
-    require('fs').unlinkSync(tmpFile);
+    fs.rmSync(tmpFile, { force: true });
+    fs.rmSync(outFile, { force: true });
 
     const diags: DiagnosticResult[] = [];
+    if (timedOut(result)) return [timeoutNotice(filePath, 'rustc', 30)];
     const lines = (result.stderr || '').split('\n').filter(Boolean);
     for (const line of lines) {
       try {
@@ -118,7 +137,7 @@ export function runRustcCheck(filePath: string, content: string): DiagnosticResu
     }
     return diags;
   } catch {
-    try { require('fs').unlinkSync(tmpFile); } catch { /* ignore */ }
+    fs.rmSync(tmpFile, { force: true });
     return [];
   }
 }
@@ -209,4 +228,3 @@ export async function extractTsMorphSymbols(
     return [];
   }
 }
-

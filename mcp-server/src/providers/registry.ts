@@ -15,6 +15,8 @@ import { KiloCodeProvider } from './kilocode.js';
 import { ModelScopeProvider } from './modelscope.js';
 import { PollinationsProvider } from './pollinations.js';
 import { AionLabsProvider } from './aionlabs.js';
+import { GonkaProvider } from './gonka.js';
+import { OVHcloudProvider } from './ovhcloud.js';
 import type { Provider, ProviderModel } from './types.js';
 
 export class ProviderRegistry {
@@ -42,7 +44,9 @@ export class ProviderRegistry {
       new KiloCodeProvider(),
       new ModelScopeProvider(),
       new PollinationsProvider(),
-      new AionLabsProvider()
+      new AionLabsProvider(),
+      new GonkaProvider(),
+      new OVHcloudProvider()
     ];
     for (const p of allProviders) {
       this.providers.set(p.id, p);

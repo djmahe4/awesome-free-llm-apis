@@ -24,7 +24,9 @@ const assembled = partials
   .join('');
 
 const existing = fs.readFileSync(targetPath, 'utf-8');
-const inSync = assembled === existing;
+// line endings depend on core.autocrlf on the machine; only the content decides whether the page is stale
+const lf = (t: string) => t.replace(/\r\n/g, '\n');
+const inSync = lf(assembled) === lf(existing);
 
 if (process.argv.includes('--check')) {
   if (!inSync) {

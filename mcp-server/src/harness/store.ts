@@ -85,6 +85,17 @@ export class HarnessStore {
     });
   }
 
+  /** First write of a run: fails when the run id is already taken, so two deploys cannot clobber each other. */
+  async createRun(run: HarnessRun): Promise<void> {
+    await ensureDir(this.dir);
+    try {
+      await fs.writeFile(this.runPath, JSON.stringify(run, null, 2), { encoding: 'utf-8', flag: 'wx' });
+    } catch (err: any) {
+      if (err?.code === 'EEXIST') throw new Error(`Run '${run.runId}' already exists; use a new runId, or resume/abort the existing run.`);
+      throw err;
+    }
+  }
+
   async loadRun(): Promise<HarnessRun | null> {
     try {
       return JSON.parse(await fs.readFile(this.runPath, 'utf-8')) as HarnessRun;
@@ -161,7 +172,20 @@ export class HarnessStore {
 
   async findApprovedFor(runId: string, callId: string, argsHash: string): Promise<ApprovalRequest | null> {
     const list = await this.loadApprovalsUnsafe();
-    return list.find(a => a.runId === runId && a.callId === callId && a.argsHash === argsHash && a.status === 'approved') ?? null;
+    return list.find(a => a.runId === runId && a.callId === callId && a.argsHash === argsHash && a.status === 'approved' && !a.usedAt) ?? null;
+  }
+
+  /**
+   * Spends an approval: atomically finds an unused approved entry for exactly this run+call+args and marks it used,
+   * so one human decision authorises one execution (a rerun or a second identical call must be approved again).
+   */
+  async consumeApproval(runId: string, callId: string, argsHash: string): Promise<ApprovalRequest | null> {
+    return this.mutateApprovals(list => {
+      const req = list.find(a => a.runId === runId && a.callId === callId && a.argsHash === argsHash && a.status === 'approved' && !a.usedAt);
+      if (!req) return null;
+      req.usedAt = Date.now();
+      return req;
+    });
   }
 
   async appendTrace(event: Omit<TraceEvent, 'seq' | 'ts'>): Promise<void> {

@@ -15,6 +15,6 @@ process.env.VECTOR_STORAGE_ROOT = path.join(testSandboxDir, 'vector-indices');
 
 afterAll(async () => {
     try {
-        await fs.remove(testSandboxDir);
+        await fs.rm(testSandboxDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     } catch {}
 });

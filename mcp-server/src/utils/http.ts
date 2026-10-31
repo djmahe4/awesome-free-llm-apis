@@ -107,6 +107,21 @@ function describeNetworkError(e: any, timeoutMs: number): string {
 }
 
 const MAX_TEXT_BYTES = 512 * 1024;
+/**
+ * Parse ceiling for a JSON body (default 25 MB, HTTP_MAX_JSON_BYTES overrides). Big but legitimate answers, such
+ * as a large repository's file tree (several MB), must still parse; callers that put JSON into a model's context
+ * shrink it themselves (src/utils/json-reduce.ts) instead of losing the whole response here.
+ */
+const maxJsonBytes = (): number => {
+  const n = Number(process.env.HTTP_MAX_JSON_BYTES);
+  return Number.isFinite(n) && n > 0 ? n : 25 * 1024 * 1024;
+};
+
+/** GitHub signals its limits with 403 (quota: remaining 0, or a message; secondary limit: Retry-After), not only 429. */
+function isRateLimit403(status: number, rateLimit: RateLimitInfo | undefined, h: { get(name: string): string | null }, body: string): boolean {
+  if (status !== 403) return false;
+  return rateLimit?.remaining === 0 || h.get('retry-after') !== null || /rate limit/i.test(body.slice(0, 300));
+}
 
 async function httpRequest<T>(url: string, opts: HttpOptions, captureText: boolean): Promise<HttpResult<T>> {
   const {
@@ -126,11 +141,15 @@ async function httpRequest<T>(url: string, opts: HttpOptions, captureText: boole
       result = { url, status: res.status, ok: res.status >= 200 && res.status < 300, attempts: attempt, rateLimit: parseRateLimit(res.headers, t) };
       if (captureText) {
         result.text = body.slice(0, MAX_TEXT_BYTES);
+      } else if (body.length > maxJsonBytes()) {
+        result.ok = false;
+        result.error = `response body too large (${body.length} characters; limit ${maxJsonBytes()} - raise HTTP_MAX_JSON_BYTES if you need it)`;
+        result.textSnippet = body.slice(0, 200);
       } else {
         try { result.json = JSON.parse(body) as T; }
         catch { result.textSnippet = body.slice(0, 200); }
       }
-      if (res.status === 429) {
+      if (res.status === 429 || isRateLimit403(res.status, result.rateLimit, res.headers, body)) {
         serverWaitMs = retryAfterMs(res.headers, t)
           ?? (result.rateLimit?.resetAtEpochS !== undefined ? Math.max(0, result.rateLimit.resetAtEpochS * 1000 - t) : undefined);
         if (serverWaitMs !== undefined) result.retryAfterMs = serverWaitMs;
@@ -140,11 +159,12 @@ async function httpRequest<T>(url: string, opts: HttpOptions, captureText: boole
     }
     last = result;
 
-    const retryable = result.status === 0 || result.status === 429 || (result.status >= 500 && result.status !== 501);
+    const limited = result.status === 429 || (result.status === 403 && result.retryAfterMs !== undefined);
+    const retryable = result.status === 0 || limited || (result.status >= 500 && result.status !== 501);
     if (!retryable || attempt > retries) return result;
 
     let wait = backoffMs * 2 ** (attempt - 1);
-    if (result.status === 429) {
+    if (limited) {
       wait = serverWaitMs ?? wait;
       if (wait > maxWaitMs) return result; // the server wants longer than we will wait: surface it, don't hammer
     }

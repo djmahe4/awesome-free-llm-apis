@@ -1,6 +1,6 @@
+import { getMcpDir } from '../src/utils/mcp-home.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'node:path';
-import os from 'node:os';
 import fsp from 'node:fs/promises';
 import { createExpressApp } from '../src/server.js';
 import type { AddressInfo } from 'node:net';
@@ -8,7 +8,7 @@ import type { Server } from 'node:http';
 
 describe('GET & POST /api/chat-log/:sessionId & /api/tool tool call visibility', () => {
   const testSessionId = `test-tool-vis-${Date.now()}`;
-  const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+  const projectsBase = path.join(getMcpDir(), 'projects');
   const sessionDir = path.join(projectsBase, testSessionId);
 
   let app: ReturnType<typeof createExpressApp>;
@@ -26,7 +26,7 @@ describe('GET & POST /api/chat-log/:sessionId & /api/tool tool call visibility',
   afterEach(async () => {
     server?.close();
     try {
-      await fsp.rm(sessionDir, { recursive: true, force: true });
+      await fsp.rm(sessionDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     } catch {}
   });
 

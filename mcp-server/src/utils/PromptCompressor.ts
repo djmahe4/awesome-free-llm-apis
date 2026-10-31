@@ -99,10 +99,12 @@ export class PromptCompressor {
 
             try {
                 const compResult = await this.contextManager.compress(context, targetTokens, sharedSummarizer);
-                context.request.messages = compResult.messages;
-                estimatedTokens = this.executor.calculateTokens(context.request.messages);
-                context.estimatedTokens = estimatedTokens;
-                contextCompressed = true;
+                if (compResult.compressedTokens < compResult.originalTokens || compResult.messages.length !== context.request.messages.length) {
+                    context.request.messages = compResult.messages;
+                    estimatedTokens = compResult.compressedTokens;
+                    context.estimatedTokens = estimatedTokens;
+                    contextCompressed = true;
+                }
             } catch (err: any) {
                 const truncated = this.contextManager.truncateOldest(context.request.messages, targetTokens);
                 context.request.messages = truncated.messages;

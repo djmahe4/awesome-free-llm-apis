@@ -12,7 +12,7 @@ describe('AgenticMiddleware - crashed subtask becomes a recoverable HITL pause',
     afterEach(async () => {
         vi.restoreAllMocks();
         try {
-            await fs.remove(projectDir);
+            await fs.rm(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         } catch {}
     });
 

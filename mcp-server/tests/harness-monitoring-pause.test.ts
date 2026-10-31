@@ -46,7 +46,7 @@ describe('monitoring pause + resume (integration)', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('deploy attaches and pauses the run as monitoring, without waiting for the scan to finish', async () => {

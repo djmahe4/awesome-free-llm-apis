@@ -23,7 +23,7 @@ describe('Brainstormed Verification Scenarios (Phases 1-3)', () => {
     });
 
     afterEach(async () => {
-        await fsp.rm(tempDir, { recursive: true, force: true });
+        await fsp.rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         vi.restoreAllMocks();
     });
 

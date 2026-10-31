@@ -87,8 +87,8 @@ describe('harness declaration registry (T2)', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(ws);
-    await fs.remove(outside);
+    await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(outside, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('trackDeclaration records the workspace declaration in registry.json with a real sha256', async () => {
@@ -270,7 +270,7 @@ describe('harness declaration registry (T2)', () => {
       const store = new HarnessStore('t2-unit', ws);
       const run = syntheticRun({ declarationPath: declPath, declarationSha256: sha256Hex(GATE_DECL_YAML) });
       await store.saveRun(run);
-      await fs.remove(declPath);
+      await fs.rm(declPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 
       await expect(verifyDeclarationIntegrity(run, store)).resolves.toBe(false);
       const tamper = await readTamperTraces(ws, 't2-unit');

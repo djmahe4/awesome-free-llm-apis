@@ -252,6 +252,7 @@ Autonomous multi-file refactoring and feature implementation engine implementing
 - **Automatic Wiring Discovery**: Auto-detects parent barrel files (`index.ts`) and consumer modules when creating new target files.
 - **Multi-Tier AST Rewriting**: In-memory `ts-morph` compiler AST for TS/JS, `@ast-grep/cli` (tree-sitter) for Python/Rust/Go/C/HTML/CSS, and safe token regex for plain text.
 - **Refusal Guard**: Rejects canned refusal messages, logging actionable failure diagnostics.
+- **Assumption Gate**: Before editing, the goal's named code and target files are checked against the workspace (no model involved) and recorded in `hypotheses.md`; `hypothesisGate` in `.free-llm-mcp/coding-agents.json` is `off`, `warn` (default) or `enforce` (stop before any edit).
 - Full reference in [coding_agents.md](references/coding_agents.md).
 
 ---
@@ -356,13 +357,15 @@ preferred persona: coder
 >
 > nvidia       (13 models)
 > pollinations (9 models)
-> openrouter   (8 models)
-> kilocode     (6 models)
+> openrouter   (9 models)
+> kilocode     (8 models)
 > cloudflare   (4 models)
 > huggingface  (4 models)
+> gonka        (3 models)
+> ovhcloud     (3 models)
 > modelscope   (3 models)
+> siliconflow  (1 model)
 > cohere       (1 model)
 > gemini       (1 model)
 > groq         (1 model)
-> llm7         (1 model)
 > ```

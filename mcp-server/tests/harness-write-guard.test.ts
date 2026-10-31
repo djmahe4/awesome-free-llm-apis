@@ -68,7 +68,7 @@ describe('coding_agents apply — T7 hard-deny write guard', () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     if (ws) {
-      await fs.remove(ws);
+      await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       ws = undefined;
     }
   });

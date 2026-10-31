@@ -11,7 +11,7 @@ describe('runMovieTool', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(TEST_DIR);
+    await fs.rm(TEST_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('rejects init_project without projectId or premise', async () => {

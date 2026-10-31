@@ -51,6 +51,6 @@ describe('Pausable/Resumable Scraping Session Checkpoint Tests', () => {
         expect(checkpointsList[0].status).toBe('PAUSED');
 
         // Cleanup test dir
-        await fs.rm(outputDir, { recursive: true, force: true });
+        await fs.rm(outputDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
 });

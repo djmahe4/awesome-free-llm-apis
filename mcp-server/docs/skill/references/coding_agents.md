@@ -10,6 +10,9 @@ interface CodingAgentsInput {
   targetFiles?: string[];                           // Explicit target files list (bypasses auto-scan and ts-morph for non-code)
   action?: 'plan' | 'execute' | 'resume' | 'status' | 'abort'; // Execution + DAG tasks.md + background-run control
   pauseOnTaskPlan?: boolean;                        // Same effect as action:'plan' — create tasks.md DAG and pause (default false)
+  verifyReport?: { exitCode: number; output: string; command?: string }; // output of a check YOU ran (after the agent changed tests it never runs, or a withheld edit); failure => result.verification.repairBrief
+  feedback?: string;                                // repairBrief from a failed attempt, appended to the goal for the retry
+  verifyCommand?: string;                           // e.g. 'npx vitest run tests/a.test.ts'. Run before and after an apply; passed-before + fails-after => automatic rollback, failing output in result.verification.outputTail. Allowlisted runners, no shell syntax.
   dryRun?: boolean;                                 // If true, returns diff preview synchronously without mutating disk (default true)
   topKFiles?: number;                               // Max candidate files to rank via VectorStore RAG (default 5)
   sessionId?: string;                               // Session id for audit logging, CAS snapshot caching, tasks.md resume, and the background run key for status/abort
@@ -19,8 +22,42 @@ interface CodingAgentsInput {
     action: 'apply' | 'rollback';                   // Transactional commit or rollback action
     checkpointId?: string;                          // Target checkpoint for rollback
   };
+  // ── repair loop and generation (all optional) ──
+  maxRepairAttempts?: number;                       // retries after a failed check or blocking review (default 4, max 5; AST edits never retry)
+  samples?: number;                                 // independent first-round candidates from the original file, judged by verifyCommand (default 3 with a verifyCommand, max 5, 1 disables)
+  maxDurationMs?: number;                           // wall-clock budget for the whole repair loop (default 300000 = 5 min); ends with outcome 'timed_out'
+  review?: boolean;                                 // independent review of the diff before apply (default on; never runs when a verifyCommand exists)
+  temperature?: number;                             // sampling temperature (default 0); the repair loop raises it on retries
+  rewrite?: boolean;                                // regenerate a small file instead of patching it (set by the repair loop when many cases fail)
+  model?: string;                                   // pin an installed local model, e.g. 'hf.co/empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF:Q4_K_M'; overrides llmfit, the router and the VRAM budget
+  think?: 'off' | 'auto' | 'on';                    // reasoning for thinking models (default 'off'; 'auto' keeps it with reply-budget headroom)
+  allowCloudFallback?: boolean;                     // let a failed local edit fall back to free cloud models (sends the file and goal to a third-party provider). Default false
+  relatedFiles?: string[];                          // part of the change but not edited in this call (shown as API surface); set by the repair loop when it narrows a retry
 }
 ```
+
+**Workspace settings — `<workspaceRoot>/.free-llm-mcp/coding-agents.json`** (optional; agent patches can never write this file):
+```jsonc
+{
+  // failing tests that do not count when judging a check: exact name, substring, or "/regex/flags".
+  // A check whose only failures are listed is green; result.verification lists what was skipped.
+  "skipFailingTests": ["flaky network call", "/^legacy snapshot \\d+$/", "test_needs_gpu"],
+  // off by default: a failed local edit never goes to a cloud model unless this (or the call) allows it
+  "allowCloudFallback": false,
+  // what a refuted assumption in the plan does: "off" (not checked), "warn" (default: reported as a warning diagnostic),
+  // "enforce" (the run stops before any edit). CODING_AGENTS_HYPOTHESIS_GATE overrides it.
+  "hypothesisGate": "warn",
+  // off by default: lets cmd:/test: rows you wrote in hypotheses.md run an allowlisted command (same allowlist as verifyCommand)
+  "hypothesisExec": false,
+  // off by default (costs model calls): the model proposes extra assumptions to check, and in enforce mode corrects a refuted goal once
+  "hypothesisModel": false
+}
+```
+
+**Assumption check (hypotheses):** before editing, coding_agents lists what the goal and plan assume and checks each against the workspace, with no model involved: every target file should exist, and every code name the goal mentions in backticks or as `name()` should be defined in some file (unless the goal says to add or create it). The result is in `result.hypotheses` and `hypotheses.md` next to `tasks.md` (claim, probe, status, evidence). With `hypothesisGate: "enforce"` a refuted assumption returns `status:"paused"` and a `Blocked before editing` summary instead of an edit; correct the goal or plan and call again. Probe kinds available to the checker: `file:`, `defined:`, `symbol:`, `arity:`, `grep:`, `cite:`, and the command probes `cmd:<exit code>@<command>` (the command exits with that code) and `test:<command>` (the command passes). Command probes run only for rows you wrote yourself, only with `hypothesisExec: true` in the settings file, and only for the commands `verifyCommand` allows (no shell syntax); otherwise the row stays `open` and nothing runs. Wiki claims and model proposals never run commands.
+Use it for known pre-failing, flaky or environment-dependent tests, so they don't keep every check red and send the repair loop chasing them.
+
+**Tracing (environment):** `CODING_AGENTS_TRACE=1` prints one stderr line per stage with elapsed time and Ollama's load / prompt / generation split; `CODING_AGENTS_TRACE_DIR=<dir>` also saves every rejected model reply there.
 
 **Execution model — synchronous vs. background:**
 `dryRun:true` (the default), `action:'plan'`/`pauseOnTaskPlan:true`, and `resolve.action:'rollback'` are all **synchronous** — you get a full result on that call.
@@ -46,6 +83,15 @@ This mirrors `use_free_llm`'s `run`/`continue`/`status`/`abort` pattern (`RunReg
 ```typescript
 interface CodingAgentsResult {
   status?: 'applied' | 'rollback' | 'dry_run' | 'paused' | 'running';
+  pipelineStage: 'enumerate' | 'locate' | 'anchor' | 'edit' | 'verify' | 'completed'; // last stage reached
+  anchors: Array<{ filePath: string; hashTag: string; lineCount: number; capturedAt: number }>; // hashTag is [PATH#SHA8], e.g. src/server.ts#a1b2c3d4, taken before editing
+  content?: string;              // the result rendered as Markdown for display
+  markdown?: string;             // same text as content
+  astRewritesCount?: number;     // structural (AST) rewrites applied
+  wiringContext?: string[];      // snippets from the barrels/consumers behind wiringFiles
+  restored?: boolean;            // resolve/undo_file: the previous version was written back
+  remainingDepth?: number;       // undo_file: history entries left (0 = drained)
+  fileHistory?: Array<string | null>; // file_history: newest-first versions (null = the file did not exist before that apply)
   message?: string;              // Progress/ack text when status is 'running'
   patchSummary?: string;
   patchPlan?: LineAnchoredPatch[];
@@ -54,6 +100,9 @@ interface CodingAgentsResult {
   wiringFiles?: string[];        // Automatically discovered barrels/consumers for new files
   tasksPlan?: TaskItem[];        // DAG tasks with completed/pending states
   tasksFile?: string;            // Created tasks.md
+  hypotheses?: Array<{ id: string; claim: string; probe: string; status: 'open' | 'confirmed' | 'refuted'; evidence?: string }>; // the plan's assumptions and what the workspace said about each
+  hypothesesFile?: string;       // 'hypotheses.md', written next to tasks.md when there are any
+  replannedGoal?: string;        // the corrected goal, when hypothesisModel is on and enforce found a refuted assumption
   isPaused?: boolean;
   applied: boolean;
   checkpointId?: string;
@@ -61,8 +110,51 @@ interface CodingAgentsResult {
   modelUsed?: string;
   usedFallbackModel?: boolean;
   error?: string;
+  verification?: {               // present when a verifyCommand or verifyReport took part
+    command: string;
+    status: 'passed' | 'regressed' | 'not_green' | 'needs_user' | 'user_passed' | 'user_failed';
+    ok: boolean; baselineOk: boolean; exitCode: number | null; timedOut: boolean;
+    outputTail: string;
+    failedCases?: string[];      // failing test names (node:test, vitest/jest, pytest, TAP)
+    repairBrief?: string;        // debugger brief for the next attempt
+    skippedFailures?: string[];  // failures ignored via skipFailingTests
+  };
+  repair?: {                     // how the automatic repair loop ended
+    outcome: 'converged' | 'not_converged' | 'stuck' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
+    attemptCount: number;
+    attempts: Array<{ attempt: number; outcome: string; failing?: number; rewrite?: boolean; brief?: string }>;
+  };
+  review?: { verdict: 'ok' | 'concerns' | 'blocked' | 'skipped'; findings: Array<{ blocking: boolean; text: string }> };
+  rollbackBrief?: string;        // compiler messages of an edit that was rolled back for a syntax error
 }
 ```
+
+**Repair loop** (`src/tools/coding-agents/repair-loop.ts`, needs a `verifyCommand`):
+- The tests named in `verifyCommand` are shown to the model read-only as the specification; the agent never edits or runs a test it wrote (such edits are withheld and you run them, reporting back with `verifyReport`).
+- First round: `samples` independent candidates from the original file; the closest one (fewest failing cases) is repaired next. The original tree counts as a candidate too.
+- Each retry gets a debugger brief: failing case names, assertion lines, stack frames in the edited files, plus targeted hints (a hard-coded test input, a numeric mismatch that suggests checking what a call returns, or a member read but never assigned such as `this.currency` / `self.currency`).
+- More hints in the brief: a function called with different argument counts in one edited file (a half-finished signature change), and Python `takes N positional arguments but M were given` / `unexpected keyword argument`, which spell out "add the parameter to the definition".
+- **Rejected before the check runs:** an edit that adds a second definition of an existing name (the later one wins; traced as the cause of a six-attempt stall) or an import that does not resolve is turned back into a retry with the reason, in the same attempt.
+- **Localized retries:** a patch-in-place retry edits only the files the failure points at (a failing test named after the file, or a stack frame inside it); the other files stay as reference. A rewrite (many failing cases) starts again from the original and covers every file.
+- Ends with `converged`, `not_converged` (budget spent), `stuck` (same failure even at the hottest temperature), `needs_user`, `error`, `aborted` or `timed_out`. If it never went green, the original files are restored.
+- `abort` stops the loop after the attempt in flight and restores the original tree.
+
+**Multi-file changes:** each file is edited in its own call; every prompt names the one file to edit and shows the other files' API surface (declaration/export lines), edited ones in their new form. Surfaces are language-aware: JS/TS, Python (`def`/`class`), Go (`func`/`type`), Rust (`fn`/`struct`/`impl`).
+
+**Assumption blackboard (`hypotheses.md`)**, written next to `tasks.md` by the `plan` action and by every run that has something to check:
+```
+# Hypotheses: make `fetchUser` cache its result
+
+| id | claim | probe | status | evidence |
+|----|-------|-------|--------|----------|
+| h1 | planned target src/currency.ts exists | `file:src/currency.ts` | confirmed | src/currency.ts exists |
+| h2 | `fetchUser`, which the goal refers to, is defined in the workspace | `defined:fetchUser` | refuted | fetchUser is not defined in any of the 2 files searched |
+```
+Statuses are `open`, `confirmed`, `refuted`. The verdict and evidence are computed from the files by the probe, never written by a model, and a status someone else writes into the file is ignored the next time it is checked. Probes: `file:<path>`, `defined:<name>` (defined in any scanned code file), `symbol:<name>@<path>` (TS/JS, Python, Go, Rust; a name only mentioned in a comment or string does not count), `arity:<name>@<path>=<n>` (parameter count; `self`/`cls`/`&self` not counted; a class, interface or constant has none), `grep:<regex>@<path>`, `cite:<path>:L<a>-L<b>#<hash>` (cited lines still hash as recorded). Paths outside the workspace and files over 2 MB are refuted with a reason.
+
+**Model layer (`hypothesisModel: true`):** the model may propose up to six more assumptions, each a claim plus one of the non-command probes above (ids `m1`, `m2`); any status it writes is ignored and the probe decides. A refuted model row is reported as a warning but never blocks, because it is the model's guess at how to test something (in a live run, a case-sensitive grep the model wrote refuted a true fact). A proposal is rejected, and listed in the gate outcome, when it is not a runnable probe, runs a command, or is a pattern that matches almost anything. When `hypothesisGate` is `enforce` and an assumption is refuted, the model is asked once to correct the goal using the refuting evidence; it is also given the names that do exist and share a word with a missing one (for `fetchUser`, `getUser`), and only the first line of its answer is used, with an exact repeat collapsed; the corrected goal goes through the same checks, and if it still fails the run stops as before. A successful correction is returned as `replannedGoal` and used for the rest of the run. There is never a second round, and `warn` and `off` make no extra model call.
+
+**Adding your own rows:** you can add rows to `hypotheses.md` by hand. Start the id with `u` (`u1`, `u2`) and give a probe; the next run keeps the row, checks it like any other assumption, and a refuted one blocks under `enforce`. Every other row belongs to the run that wrote it and is rebuilt from the goal. Notes you write outside the table are kept. A status you type is ignored (the probe decides), and a probe the checker cannot run leaves the row `open` with a note instead of being counted as true or false.
 
 **Blackboard task shape (`tasks.md`):**
 ```typescript
@@ -90,9 +182,11 @@ interface TaskItem {
    - **Blackboard, not just a checkbox**: every resume attempt appends a log line to that task — files touched, model used, `applied` outcome, diagnostic count, or the failure reason — this is the durable AI-agent ↔ `local_llm_patch` interaction history, not a transient in-memory thing. A resume that fails to produce a real patch (generation failure, or the hallucinated-replacement guard in Step 6) leaves the task **`pending`** (not `completed`) with the failure appended to its log, so the *next* `resume` retries the *same* task instead of silently moving on to the next one. Only a genuinely successful apply marks it `completed`.
    - The file's original goal header (`# Tasks Plan: ...`) is preserved across resumes regardless of what `goal` string a given resume call passes.
    - Poll a background run (see **Execution model** above) with `action: 'status'`; cancel one with `action: 'abort'`.
+   - The same call also checks the plan's assumptions (see **Assumption check** above) and writes `hypotheses.md`; a refuted one is added to `diagnostics` (`source: 'hypothesis'`) and named in `patchSummary`, so the plan can be corrected before `resume`.
 2. **Enumerate & Filter**:
    - Auto-scan strictly skips non-code directories (`docs/`, `documentation/`, `site/`, `wiki/`, `specs/`) and `.md` files to prevent false-positive RAG keyword matching.
    - Explicit `targetFiles` overrides allow targeting any file (including `.md`, `.html`, `.css`), safely bypassing TypeScript compiler passes.
+   - **Assumption gate** (right after enumerate, before locate or any model call): the goal's backticked names and the target files are checked against these files. `hypothesisGate: "warn"` (default) adds warning diagnostics (`source: 'hypothesis'`); `"enforce"` returns `status: 'paused'` with a `Blocked before editing` summary and edits nothing; `"off"` skips it. A name the goal asks to add, create or implement is not expected to exist yet.
 3. **Automatic Wiring Discovery**:
    - When targeting non-existent files, `ContextGatherer` scans for parent barrel files (`index.ts`) and caller modules to recommend exact wiring targets.
 4. **Anchor**:
@@ -106,13 +200,14 @@ interface TaskItem {
    Every strategy below can independently fail and falls through to the next; the first that produces a guard-passing result wins. Injects active task, its planner `context` (if resumed from a DAG task), and the DAG checklist into prompt context throughout. Strictly intercepts canned refusals (e.g. `I'm sorry, but I can't assist with that request.`) at every stage, preserves the full failure message without slicing, logs an error diagnostic, and guides the user to resume with `action: "resume"` or `astEditOps`.
 
    1. **SEARCH/REPLACE (local model)** — tried first. The model is shown the file (or a ~120-line window for large non-module files, via `extractWindowForInstruction`) as read-only context and asked to emit only `<<<<<<< SEARCH` / `=======` / `>>>>>>> REPLACE` blocks — never full content. Unchanged text never passes through the model, so it structurally can't be collapsed, duplicated, or hallucinated the way full-content strategies can. Blocks are matched against the **full current file** by content (not the shown window) via `applySearchReplaceBlocks`, with three tiers of matching leniency (exact line match, then whitespace-trimmed line match) before a block is rejected as ambiguous or not-found. A block whose own SEARCH/REPLACE text contains a stray `<<<<<<<`/`=======`/`>>>>>>>` marker line (a tangled/malformed model response) is rejected outright rather than spliced into the file. For TS/JS files, an **error-delta gate** (`searchReplaceRegressesTsErrors`) runs the in-memory `ts-morph` checker before and after the whole batch and rejects it atomically if applying it would *increase* the real compiler error count — a batch of individually-plausible blocks can still combine into a worse-than-before file (observed live: fixing one method's signature without simultaneously updating its call sites turned 8 errors into 18), so acceptance is all-or-nothing per batch, not per block.
-   2. **SEARCH/REPLACE (cloud fallback)** — same mechanism as above via `useFreeLLM`, tried if the local attempt produces no usable blocks.
-   3. **Full-content / windowed-splice (local model)** — the older strategy, kept as a second attempt for models that won't follow the SEARCH/REPLACE format. Full file for small files; a ~120-line window (same `extractWindowForInstruction`) spliced back for large non-module files. Two extra guards here that SEARCH/REPLACE doesn't need: **window content-fidelity** (`windowReplyIsSuspicious`, multiset line-overlap comparison — catches a reply that collapses or duplicates the excerpt while keeping a plausible-looking total line count, which a naive line-count check misses) and the **hallucination guard** below.
-   4. **Full-content / windowed-splice (cloud fallback)** — same as (3) via `useFreeLLM`, tried last.
+      The parser accepts what small models actually write: a block closed by a second `=======` or a bare `>>>>>>>`. If the model returns the whole edited excerpt instead of blocks (common for qwen2.5-coder:7b), the edit is recovered by diffing the excerpt against the original; SEARCH text always comes from the original, and lines dropped at the excerpt's edges are ignored. A REPLACE copied with the wrong indentation is shifted to the matched block's indentation. For an additive goal, a line that comes back changed (a new parameter) counts as modified, not dropped. The TS error-delta gate ignores errors caused only by the in-memory checker's missing environment (unresolved modules, node globals); instead, every import the edit **adds** is resolved against the real workspace (relative JS/TS files, installed packages, local Python modules), and a wrong one becomes the retry reason with the closest real file. If a reply cannot be used, SEARCH/REPLACE is retried once with the reason, before any slower strategy.
+   2. **SEARCH/REPLACE (cloud fallback, opt-in)** — same mechanism as above via `useFreeLLM`, tried if the local attempt produces no usable blocks **and** `allowCloudFallback` is on (on the call or in the workspace settings). It sends the file to a third-party provider, so it is off by default; when off, the diagnostic says the fallback was skipped.
+   3. **Full-content / windowed-splice (local model)** — the older strategy, kept as a second attempt for models that won't follow the SEARCH/REPLACE format. Full file for small files; a ~120-line window (same `extractWindowForInstruction`) spliced back for large non-module files. **Skipped for modules over 300 lines**: regenerating them is the slowest path (minutes on a 7B) and the one that drops or renames code; the repair loop retries instead. The reply budget is sized from the excerpt (1024–8192 tokens), not a fixed cap. Two extra guards here that SEARCH/REPLACE doesn't need: **window content-fidelity** (`windowReplyIsSuspicious`, multiset line-overlap comparison — catches a reply that collapses or duplicates the excerpt while keeping a plausible-looking total line count, which a naive line-count check misses) and the **hallucination guard** below.
+   4. **Full-content / windowed-splice (cloud fallback, opt-in)** — same as (3) via `useFreeLLM`, tried last, only with `allowCloudFallback`.
 
    **Hallucination guard** (strategies 3–4, existing files only): if the LLM's "successful" output shares none of the original file's declared top-level symbols (or, for symbol-free files like CSS/HTML/classic scripts, less than half its original lines), the result is treated as an unrelated replacement — reverted to the original content, not applied, and logged the same way as a generation failure. Also rejects a stray leading `` ``` `` fence marker, and any *increase* in literal ASCII `...` occurrences vs. the original (real source in this repo only ever uses the single Unicode `…` character for genuine ellipsis text — a model eliding unchanged content with a literal three-dot placeholder is a reliable truncation signal independent of overall line-overlap).
 
-   **Model candidate ranking** (`rankCandidateModels`, `src/providers/ollama-local.ts`): coding-pattern models (`qwen*-coder`, `deepseek-coder`, `codellama`, `devstral`) are ranked first; vision-language models (`vision`, `llava`, `*vl:*` naming) are excluded from the candidate pool entirely, not just deprioritized — this pipeline never sends image content, and a vision model entering the fallback pool for a strict text-format request has been observed to degenerate into a repetition loop instead of producing usable output.
+   **Model candidate ranking** (`codeEditCandidates`, `src/tools/local-llm-patch.ts`): capability-aware order from the model router (code-specialised first); a pinned `model` goes first. Vision-language models (`vision`, `llava`, `*vl:*` naming) are excluded from the candidate pool entirely, not just deprioritized — this pipeline never sends image content, and in traced runs a VL fallback never produced a usable edit, only an extra model swap. Thinking models get `think:false` by default (in a 3-run cross-file comparison thinking had the same pass rate and was 4–7× slower); with `think:'auto'` they keep reasoning, get +3072 reply tokens of headroom, and a reply whose reasoning used the whole budget is retried once without thinking.
 
    When a SEARCH/REPLACE or full-content result is falling back to the next strategy, the reason is folded into the eventual diagnostic message (chained, not a separate diagnostic entry) so the escalation path is visible without needing to inspect logs.
 7. **Polyglot Compiler Diagnostics & Verification**:
@@ -120,4 +215,3 @@ interface TaskItem {
 8. **Transactional Commit / Rollback**:
    - Pre-creates Content-Addressable Storage (CAS) snapshots and writes atomic `.tmp` files. Supports instant single-call rollback via `resolve: { action: 'rollback', checkpointId }`.
    - **Automatic post-apply rollback**: if the diagnostics from Step 7 include a real syntax-level error (not the isolated per-file checker's known-noisy semantic ones, e.g. unresolved imports) after an apply, the checkpoint is restored automatically — including deleting any brand-new file the checkpoint can't restore — instead of leaving broken code on disk.
-

@@ -75,7 +75,7 @@ describe('CodingAgentsHandler — OMP Multi-File Atomic Update & CAS Rollback', 
   });
 
   afterEach(async () => {
-    if (ws) await fs.remove(ws);
+    if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('performs atomic multi-file apply and automatically captures a pre-apply CAS checkpoint', async () => {

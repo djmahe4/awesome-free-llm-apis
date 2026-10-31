@@ -12,6 +12,30 @@ on:
   workflow_dispatch:
 
 jobs:
+  validate:
+    name: Validate data.json & README
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Validate data.json
+        run: node scripts/validate-data.js
+      - name: README generates from data.json
+        run: node scripts/generate-readme.js
+      - name: Sources and links still match data.json
+        run: |
+          git fetch -q origin main || true
+          changed="$(git diff --name-only origin/main...HEAD 2>/dev/null || true)"
+          if echo "$changed" | grep -qx sources.json; then
+            node scripts/check-sources.js --out /tmp/sources-report.json --strict || true
+          elif echo "$changed" | grep -qx data.json; then
+            node scripts/check-sources.js --out /tmp/sources-report.json --consistent || true
+          fi
+
   test:
     name: Build & Test MCP Server (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -28,22 +52,25 @@ jobs:
         working-directory: mcp-server
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: mcp-server/package-lock.json
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
+        env:
+          # onnxruntime-node downloads CUDA binaries from a Microsoft host at install time; this runner is CPU-only and the download times out intermittently
+          ONNXRUNTIME_NODE_INSTALL: skip
 
       - name: Build
         run: npm run build
@@ -51,9 +78,12 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Grounding evaluation (planted hallucinations)
+        run: npm run eval:grounding
+
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest' && always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: mcp-server/coverage/

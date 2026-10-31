@@ -12,7 +12,7 @@ describe('Embedded snippet nodes in the repository graph', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('adds a code node + references edge for each jsCode field in an n8n workflow export', async () => {
@@ -59,7 +59,7 @@ describe('Heuristic cross-file invokes edges', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('adds an invokes edge when a caller imports and calls an exported function', async () => {
@@ -122,7 +122,7 @@ describe('Same-family invokes edges between embedded snippets', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('wires a low-confidence invokes edge between two jsCode snippets in the same workflow file', async () => {

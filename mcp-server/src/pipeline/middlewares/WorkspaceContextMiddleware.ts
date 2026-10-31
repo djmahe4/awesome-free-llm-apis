@@ -456,7 +456,21 @@ export class WorkspaceContextMiddleware implements Middleware {
             if (memoryNamespace) {
                 try {
                     const queryForMemory = userContent + (grepResults.length > 0 ? ' ' + grepResults.join(' ').slice(0, 500) : '');
-                    const memoryResults = await memoryManager.search(memoryNamespace, queryForMemory);
+                    let memoryResults: any[] = await memoryManager.searchWithProvenance(memoryNamespace, queryForMemory);
+
+                    // Re-check indexed files against disk: an entry for a file edited or deleted since indexing
+                    // would feed old content into the prompt as if it were current.
+                    if (Array.isArray(memoryResults) && context.workspaceRoot) {
+                        const { keepFreshEvidence } = await import('../../memory/evidence.js');
+                        const asEvidence = (memoryResults as any[]).map(m => ({ m, ev: { path: m?.path, contentHash: m?.contentHash ?? '', source: 'vector' as const, retrievedAt: m?.timestamp ?? 0, text: '' } }));
+                        const checkable = asEvidence.filter(x => x.ev.path && x.ev.contentHash);
+                        const { dropped } = await keepFreshEvidence(checkable.map(x => x.ev), context.workspaceRoot);
+                        if (dropped.length > 0) {
+                            const dropPaths = new Set(dropped.map(d => d.evidence.path));
+                            memoryResults = (memoryResults as any[]).filter(m => !(m?.path && dropPaths.has(m.path) && m?.contentHash));
+                            console.debug(`[WorkspaceContext] Dropped ${dropped.length} stale memory entr${dropped.length === 1 ? 'y' : 'ies'}: ${dropped.map(d => `${d.evidence.path} (${d.reason})`).join(', ')}`);
+                        }
+                    }
 
                 if (Array.isArray(memoryResults) && memoryResults.length > 0) {
                     // Priority function consistent with ContextGatherer
@@ -472,8 +486,8 @@ export class WorkspaceContextMiddleware implements Middleware {
 
                     // Sort memory results by priority before picking top 5
                     const prioritizedMemory = [...memoryResults].sort((a, b) => {
-                        const pathA = (a as any).metadata?.path;
-                        const pathB = (b as any).metadata?.path;
+                        const pathA = (a as any).path ?? (a as any).metadata?.path;
+                        const pathB = (b as any).path ?? (b as any).metadata?.path;
                         const prioA = getPriority(pathA);
                         const prioB = getPriority(pathB);
                         if (prioA !== prioB) return prioA - prioB;

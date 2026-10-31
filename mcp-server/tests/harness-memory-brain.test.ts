@@ -51,7 +51,7 @@ describe('harness brain — recall + write-back + reinforcement (integration)', 
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('injects relevant recalled memory into the first step prompt, and writes back + reinforces a cited node', async () => {

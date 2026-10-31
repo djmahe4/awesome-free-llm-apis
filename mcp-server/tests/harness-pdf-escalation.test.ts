@@ -52,7 +52,7 @@ describe('pdf escalation (integration)', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(tmpDir);
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('escalates to a pdf step when confidence is low and a pdf:// ref is present, resolving via resolvePdfRef', async () => {

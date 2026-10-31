@@ -40,7 +40,7 @@ describe('CodingAgentsHandler — anchor tag format [PATH#SHA8]', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(ws);
+    await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('produces [relPath#sha8] anchor tags matching actual file content hash', async () => {
@@ -92,7 +92,7 @@ describe('CodingAgentsHandler — astEditOps pattern replacement', () => {
     });
   });
 
-  afterEach(async () => { await fs.remove(ws); });
+  afterEach(async () => { await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   it('replaces $$$ARGS pattern matches in file content (HIGH #1 regex fix)', async () => {
     const result = await CodingAgentsHandler({
@@ -154,7 +154,7 @@ describe('CodingAgentsHandler — astEditOps pattern replacement', () => {
 describe('CodingAgentsHandler — resolve action tracking', () => {
   let ws: string;
 
-  afterEach(async () => { if (ws) await fs.remove(ws); });
+  afterEach(async () => { if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   it('applied=false in dryRun mode even with resolve.apply', async () => {
     ws = await makeTmpWorkspace({ 'src/index.ts': 'const x = 1;' });
@@ -189,7 +189,7 @@ describe('CodingAgentsHandler — resolve action tracking', () => {
 describe('CodingAgentsHandler — multi-file workspace', () => {
   let ws: string;
 
-  afterEach(async () => { if (ws) await fs.remove(ws); });
+  afterEach(async () => { if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   it('returns multiple anchors for multi-file workspace matching the goal', async () => {
     ws = await makeTmpWorkspace({
@@ -216,7 +216,7 @@ describe('CodingAgentsHandler — multi-file workspace', () => {
 describe('CodingAgentsHandler — LSP diagnostics (ts-morph)', () => {
   let ws: string;
 
-  afterEach(async () => { if (ws) await fs.remove(ws); });
+  afterEach(async () => { if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   it('captures valid TypeScript snippet without errors', async () => {
     ws = await makeTmpWorkspace({
@@ -368,7 +368,7 @@ describe('CodingAgentsHandler — issue fixes', () => {
       'src/math.ts': 'export function calc() { return sum(a, b); }',
     });
   });
-  afterEach(async () => { if (ws) await fs.remove(ws); vi.restoreAllMocks(); });
+  afterEach(async () => { if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); vi.restoreAllMocks(); });
 
   it('handles multi-wildcard patterns that are mostly structural delimiters', async () => {
     const result = await CodingAgentsHandler({
@@ -460,7 +460,7 @@ describe('CodingAgentsHandler — DAG tasks.md, docs filtering & AST validation'
   let ws: string;
 
   afterEach(async () => {
-    if (ws) await fs.remove(ws);
+    if (ws) await fs.rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     vi.restoreAllMocks();
   });
 

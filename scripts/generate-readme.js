@@ -7,6 +7,8 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const data = JSON.parse(fs.readFileSync(path.join(ROOT, 'data.json'), 'utf8'));
 
+const OKAPI_URL = 'https://okapi.bot/go/awesome-free-llm-apis';
+
 const HEADER = `<h1 align="center">
 \t<a href="https://github.com/mnfst/awesome-free-llm-apis">
 \t\t<img src="media/awesome-free-llm-apis.png" width="500" alt="Awesome Free LLM APIs">
@@ -23,18 +25,24 @@ const HEADER = `<h1 align="center">
 
 <p align="center"><sub>All endpoints are OpenAI SDK-compatible unless noted. Each link points to the provider's API key page.</sub></p>
 
+<p align="center"><sub>All of those free LLM APIs are available at <a href="https://manifest.build">manifest.build</a> - make reliable agents.</sub></p>
+
 <hr>
 
+<h3 align="center">Sponsors</h3>
+
 <p align="center">
-\t<a href="https://manifest.build">
+\t<a href="${OKAPI_URL}">
 \t\t<picture>
-\t\t\t<source media="(prefers-color-scheme: dark)" srcset="media/manifest-logo-dark.png">
-\t\t\t<img src="media/manifest-logo-light.png" width="240" alt="Manifest">
+\t\t\t<source media="(prefers-color-scheme: dark)" srcset="media/okapi-logo-dark.svg">
+\t\t\t<img src="media/okapi-logo-light.svg" width="180" alt="Okapi">
 \t\t</picture>
 \t</a>
+\t<br>
+\t<sub>Free API watcher. No more breaking changes.</sub>
 </p>
 
-<p align="center"><em>All of those free LLM APIs are available at <a href="https://manifest.build">manifest.build</a> - make reliable agents.</em></p>`;
+<hr>`;
 
 function alignTable(header, rows) {
 	const widths = header.map((cell, i) => {
@@ -91,14 +99,31 @@ const footnoteLines = data.footnotes
 	.map(f => `[^${f.id}]: ${f.text}`)
 	.join('\n');
 
+const mcpServerSection = [
+	'### 🚀 Integrated MCP Server',
+	'',
+	'The [`mcp-server`](mcp-server/) directory contains an enterprise-grade MCP server (`@mcp:free-llm-apis`) exposing 15 zero-cost tools:',
+	'- **Universal Chat Pipeline (`use_free_llm`)**: Deterministic quantum-inspired model routing across 70+ free models with automatic failover and background DAG subtask execution.',
+	'- **Search Grounding (`SearchRouterMiddleware`)**: Free multi-provider web search fallback (`Parallel AI` &rarr; `TinyFish` &rarr; `Tavily` &rarr; `DuckDuckGo MCP` &rarr; `Jina AI` &rarr; `SearXNG`) with persistent circuit breaker tracking.',
+	'- **Autonomous Multi-Agent Harness (`agent_harness`)**: Declarative agent workflows, file ownership locks, reasoning scope isolation, and human-in-the-loop approvals.',
+	'- **Persistent Workspace Memory & Wiki (`manage_memory`)**: Content-addressed vector storage, automatic ADR harvesting, and persistent health tracking rooted to your project workspace.',
+	'- **Refactoring & Diagnostics**: OMP-style multi-file refactoring (`coding_agents`), offline local model patching (`local_llm_patch`), multi-hypothesis reasoning (`quantum_tool`), real browser automation (`browser_tool`), and visual UI regression testing (`vision_tool`).',
+	'',
+	'> [!TIP]',
+	'> To enable full agentic capabilities in your IDE (Claude Desktop, Cursor, Windsurf), follow the [MCP Setup Guide](mcp-server/docs/setup.md) and [Client Configurations](mcp-server/README.md#client-configurations).',
+].join('\n');
+
 const parts = [
 	HEADER,
 	'',
 	'## Contents',
 	'',
+	'- [Integrated MCP Server](#-integrated-mcp-server)',
 	'- [Provider APIs](#provider-apis)',
 	'- [Inference providers](#inference-providers)',
 	'- [Glossary](#glossary)',
+	'',
+	mcpServerSection,
 	'',
 	'## Provider APIs',
 	'',

@@ -39,7 +39,7 @@ describe('/api/wiki/* hybrid post-quantum lease endpoints', () => {
   afterEach(async () => {
     server?.close();
     try {
-      await fsp.rm(workspaceDir, { recursive: true, force: true });
+      await fsp.rm(workspaceDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     } catch {}
   });
 

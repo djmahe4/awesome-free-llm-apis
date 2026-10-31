@@ -125,8 +125,8 @@ describe('maybeIndexPdfIntoWiki — RAG pipeline', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
-    await fs.rm(wikiDir, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => {});
+    await fs.rm(wikiDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => {});
     vi.restoreAllMocks();
   });
 

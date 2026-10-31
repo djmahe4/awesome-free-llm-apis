@@ -51,7 +51,7 @@ describe('gatedDetach (unit)', () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'monitor-test-'));
     currentDecl = makeDecl();
   });
-  afterEach(async () => { await fs.remove(tmpDir); });
+  afterEach(async () => { await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   it('returns immediately with a monitorId without awaiting the underlying process, and registers it', async () => {
     const { gatedDetach } = await import('../src/harness/runner.js');
@@ -125,7 +125,7 @@ describe('monitor_tool — poll/stop (integration)', () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'monitor-tool-test-'));
     currentDecl = makeDecl();
   });
-  afterEach(async () => { await fs.remove(tmpDir); });
+  afterEach(async () => { await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   it('poll reflects progress reported by the underlying process', async () => {
     const { gatedDetach } = await import('../src/harness/runner.js');

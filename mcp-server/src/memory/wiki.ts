@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import os from 'os';
 import { promises as fs } from 'fs';
 import { existsSync, readdirSync } from 'fs';
 import path from 'path';
 import { withFileLock } from '../utils/file-lock.js';
 import { wikiConfig } from '../config/wiki-config.js';
+import { checkPageClaims, claimMode, UNVERIFIED_TAG, UNCHECKED_CONFIDENCE_CAP } from './wiki-claims.js';
 
 // See long-term.ts/vector.ts for the same rationale.
 const LOCK_WAIT_MS = 30000;
@@ -39,7 +41,11 @@ const DECISION_PATTERNS = [
 ];
 
 function getFilename(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9_-]/g, '_') + '.md';
+  if (!title || !title.trim()) throw new Error('wiki page title must not be empty');
+  const name = title.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  // nothing readable left (e.g. "???" vs "!!!"): name it by a hash of the title so pages do not overwrite each other
+  if (!/[a-z0-9]/.test(name)) return `page_${createHash('sha1').update(title).digest('hex').slice(0, 12)}.md`;
+  return name + '.md';
 }
 
 const FRONTMATTER_BLOCK_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
@@ -143,7 +149,15 @@ async function safeUnlink(filePath: string, retries = 5, delay = 10): Promise<vo
 export class WikiMemory {
   private wikiDir: string;
 
-  constructor(workspaceHash: string, customBaseDir?: string) {
+  /** Workspace the page claims are checked against. Without it pages are written exactly as before. */
+  private sourceRoot?: string;
+
+  constructor(workspaceHash: string, customBaseDir?: string, sourceRoot?: string) {
+    this.sourceRoot = sourceRoot;
+    // the hash/namespace becomes a directory name: it must not be able to walk out of the wiki folder
+    if (!workspaceHash || /[\/\u0000]/.test(workspaceHash) || workspaceHash === '.' || workspaceHash.includes('..')) {
+      throw new Error(`invalid workspace hash / namespace: ${JSON.stringify(workspaceHash).slice(0, 80)}`);
+    }
     const homeBase = process.env.FREE_LLM_MCP_HOME || os.homedir();
     const base = customBaseDir || path.join(homeBase, '.free-llm-mcp', 'wiki');
     this.wikiDir = path.join(base, workspaceHash);
@@ -370,9 +384,27 @@ export class WikiMemory {
       const existing = await this.read(title);
       let confidence = existing ? Math.min(1.0, existing.confidence + 0.15) : 0.5;
 
+      // Claims on the page are re-checked against the source on every write (see wiki-claims.ts).
+      let mayCreateAdr = true;
+      const mode = this.sourceRoot ? claimMode() : 'off';
+      if (mode !== 'off' && this.sourceRoot) {
+        const check = await checkPageClaims(content, this.sourceRoot);
+        content = check.content;
+        tags = check.verdict === 'unverified' ? [...new Set([...tags, UNVERIFIED_TAG])] : tags.filter(t => t !== UNVERIFIED_TAG);
+        if (mode === 'enforce') {
+          if (check.verdict === 'unverified') {
+            confidence = existing ? Math.max(0, existing.confidence - 0.15) : 0.4;
+            mayCreateAdr = false;
+          } else if (check.verdict === 'no-claims') {
+            confidence = Math.min(confidence, Math.max(existing?.confidence ?? 0, UNCHECKED_CONFIDENCE_CAP));
+            mayCreateAdr = false;
+          }
+        }
+      }
+
       // Check if decision pattern is detected to auto-trigger ADR
       let adr_ref = existing?.adr_ref;
-      if (confidence >= 0.85 && !adr_ref) {
+      if (mayCreateAdr && confidence >= 0.85 && !adr_ref) {
         const hasDecisionPattern = DECISION_PATTERNS.some(pat => pat.test(content));
         if (hasDecisionPattern) {
           adr_ref = await this.createADR(title, content);

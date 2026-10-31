@@ -1,3 +1,4 @@
+import { callTimeoutMs, BrowserCallTimeout, isTransientError } from './limits.js';
 import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,7 +38,9 @@ export class DomStateFingerprinter {
         const normalized = snapshotText
             .split('\n')
             .map(l => l.trim())
-            .filter(l => !l.includes('timestamp') && !l.includes('ms'))
+            // volatile lines only: a timestamp or a duration like "120ms" / "1.5 ms" (the substring "ms" alone also
+            // matched items, forms, terms and programs, so changes in those lines went unseen)
+            .filter(l => !/timestamp/i.test(l) && !/\b\d+(\.\d+)?\s?ms\b/i.test(l))
             .join('\n');
         return crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 16);
     }
@@ -80,10 +83,19 @@ export class BrowserSession {
         this.lastUsedAt = Date.now();
     }
 
+    /** One DevTools call, bounded by BROWSER_CALL_TIMEOUT_MS (default 60 s) so a hung Chrome cannot block forever. */
+    private callWithTimeout(name: string, args: Record<string, any>): Promise<any> {
+        const ms = callTimeoutMs();
+        let timer: ReturnType<typeof setTimeout>;
+        const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new BrowserCallTimeout(name, ms)), ms); });
+        return Promise.race([this.client.callTool({ name, arguments: args }), timeout]).finally(() => clearTimeout(timer));
+    }
+
     async call(name: string, args: Record<string, any> = {}, opts: { retries?: number } = {}): Promise<any> {
         this.touch();
-        const res = await withRetry(() => this.client.callTool({ name, arguments: args }), {
+        const res = await withRetry(() => this.callWithTimeout(name, args), {
             attempts: opts.retries ?? 3,
+            retryOn: isTransientError,
         });
         // chrome-devtools-mcp reports tool failures via `isError` without throwing —
         // e.g. "Could not find Google Chrome executable". Without this check

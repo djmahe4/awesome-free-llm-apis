@@ -3,6 +3,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { extractServerActions, extractPlaygroundActions, extractQuickstartActionRows, findActionDrift } from './action-sync.js';
+import { findUndocumentedKeys, findNewDocGaps, findClosedDocGaps, type DocGaps } from './doc-sync.js';
+import { computeGaps, findNewGaps, findClosedGaps, type Gaps } from './param-gaps.js';
+import { findTempHygieneProblems, findRetrylessRemovals } from './test-hygiene.js';
+import { handlerForTool, findHandlerSource, handlerInputType, findTypeSource, interfaceFields, findInputDrift, branchArgReads, browserParamDrift } from './input-sync.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -270,10 +274,66 @@ async function main() {
     }
   }
 
+  // Gaps already on record are tolerated (the baseline can only shrink); a new one fails the commit.
+  {
+    const baselinePath = path.join(__dirname, 'param-gaps.baseline.json');
+    const current = computeGaps(mcpToolProperties, playgroundFields, quickstartParams, registeredTools);
+    if (process.env.UPDATE_PARAM_BASELINE === '1') {
+      fs.writeFileSync(baselinePath, JSON.stringify(current, null, 2) + String.fromCharCode(10), 'utf-8');
+      console.log(`✓ Wrote ${path.relative(mcpDir, baselinePath)}`);
+    }
+    const baseline: Gaps = fs.existsSync(baselinePath) ? JSON.parse(fs.readFileSync(baselinePath, 'utf-8')) : {};
+    const added = findNewGaps(current, baseline);
+    if (added.length > 0) {
+      for (const g of added) console.error(`✗ New frontend gap ${g}`);
+      console.error('  Add the input to the playground (dashboard/js/04-playground-form.js) and the Quickstart table, or run with UPDATE_PARAM_BASELINE=1 to record it as a known gap.');
+      process.exit(1);
+    }
+    for (const c of findClosedGaps(current, baseline)) console.warn(`ℹ Gap closed, regenerate the baseline (UPDATE_PARAM_BASELINE=1): ${c}`);
+  }
+
   if (driftWarnings === 0) {
     console.log('✓ 100% parameter schema alignment across MCP server, playground, and quickstart.');
   } else {
     console.log(`ℹ Schema check completed with ${driftWarnings} parameter variance notices (documented variances).`);
+  }
+
+  // 3a. Input-type drift (hard fail): for every tool, follow the handler src/mcp/index.ts calls to the
+  // module it is imported from, read the handler's input type, and require every caller-facing field in
+  // the MCP inputSchema (fields meant for in-process callers carry `@internal` in their JSDoc). Handlers
+  // without an object input type are checked by the args their dispatch branch reads; browser_tool by its
+  // zod params against what each handler reads (or src/browser/unsupported.ts refuses).
+  {
+    const indexFile = mcpIndexPath;
+    const serverRoot = path.resolve(path.dirname(mcpIndexPath), '..', '..');
+    const inputProblems: string[] = [];
+    for (const tool of registeredTools) {
+      const props = mcpToolProperties[tool] || [];
+      const h = handlerForTool(mcpContent, tool);
+      const modFile = h ? path.resolve(path.dirname(indexFile), h.module).replace(/\.js$/, '.ts') : null;
+      const hs = modFile && fs.existsSync(modFile) ? findHandlerSource(modFile, h!.fn) : null;
+      const type = hs ? handlerInputType(hs.src, h!.fn) : null;
+      const ts = type ? findTypeSource(hs!.file, type) : null;
+      const fields = ts ? interfaceFields(ts.src, type!) : null;
+      if (fields) {
+        inputProblems.push(...findInputDrift(tool, fields, props));
+      } else {
+        for (const a of branchArgReads(mcpContent, tool)) {
+          if (!props.includes(a)) inputProblems.push(`${tool}: arg '${a}' read in its dispatch branch is missing from the MCP inputSchema`);
+        }
+      }
+    }
+    inputProblems.push(...browserParamDrift(
+      fs.readFileSync(path.join(serverRoot, 'src/browser/actionSchemas.ts'), 'utf8'),
+      fs.readFileSync(path.join(serverRoot, 'src/browser/dispatch.ts'), 'utf8'),
+      fs.readFileSync(path.join(serverRoot, 'src/browser/unsupported.ts'), 'utf8'),
+    ));
+    if (inputProblems.length > 0) {
+      for (const p of inputProblems) console.error(`✗ Input drift ${p}`);
+      console.error('  Add the field to the tool\'s inputSchema in src/mcp/index.ts, or mark it @internal in the input type if MCP callers must not set it.');
+      process.exit(1);
+    }
+    console.log('✓ Every caller-facing input field of every tool handler is in its MCP inputSchema.');
   }
 
   // 3b. Action enums must be reachable from the playground and listed in the Quickstart (hard fail)
@@ -502,6 +562,53 @@ async function main() {
       console.warn(`⚠ Notice: npm audit check skipped (network offline or endpoint unreachable).`);
     }
   }
+
+  // 6b. Reference docs must mention every key of the result and settings types they describe (ratchet: existing
+  // gaps are in doc-gaps.baseline.json and can only shrink; UPDATE_DOC_BASELINE=1 regenerates it).
+  {
+    const checks = [
+      { type: 'CodingAgentsResult', src: 'src/tools/coding-agents/types.ts', doc: 'docs/skill/references/coding_agents.md' },
+      { type: 'CodingAgentsSettings', src: 'src/tools/coding-agents/settings.ts', doc: 'docs/skill/references/coding_agents.md' },
+    ];
+    const current: DocGaps = {};
+    for (const c of checks) {
+      current[c.type] = findUndocumentedKeys(fs.readFileSync(path.join(mcpDir, c.src), 'utf-8'), c.type, fs.readFileSync(path.join(mcpDir, c.doc), 'utf-8'));
+    }
+    const docBaselinePath = path.join(__dirname, 'doc-gaps.baseline.json');
+    if (process.env.UPDATE_DOC_BASELINE === '1') {
+      fs.writeFileSync(docBaselinePath, JSON.stringify(current, null, 2) + String.fromCharCode(10), 'utf-8');
+      console.log(`✓ Wrote ${path.relative(mcpDir, docBaselinePath)}`);
+    }
+    const docBaseline: DocGaps = fs.existsSync(docBaselinePath) ? JSON.parse(fs.readFileSync(docBaselinePath, 'utf-8')) : {};
+    const undocumented = findNewDocGaps(current, docBaseline);
+    if (undocumented.length > 0) {
+      for (const u of undocumented) console.error(`✗ Undocumented ${u}`);
+      console.error('  Describe the new field in the reference doc named in verify-precommit.ts (docs/skill/references/), or run with UPDATE_DOC_BASELINE=1 to record it as a known gap.');
+      process.exit(1);
+    }
+    for (const c of findClosedDocGaps(current, docBaseline)) console.warn(`ℹ Documented now, regenerate the baseline (UPDATE_DOC_BASELINE=1): ${c}`);
+    console.log('✓ New result and settings fields are described in the coding_agents reference.');
+  }
+
+  // 7. Test hygiene: temp files a test creates must be removed again
+  console.log('\n7. Verifying tests clean up the temp files they create...');
+  const testFiles: { path: string; content: string }[] = [];
+  const walkTests = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walkTests(full);
+      else if (entry.name.endsWith('.ts')) testFiles.push({ path: path.relative(mcpDir, full), content: fs.readFileSync(full, 'utf-8') });
+    }
+  };
+  walkTests(path.join(mcpDir, 'tests'));
+  const leaks = findTempHygieneProblems(testFiles);
+  if (leaks.length > 0) {
+    console.error('✗ Tests that leave temp files behind:');
+    for (const l of leaks) console.error(`  - ${l.file}: ${l.problem}`);
+    process.exit(1);
+  }
+  for (const w of findRetrylessRemovals(testFiles)) console.warn(`⚠ ${w.file}: ${w.problem}`);
+  console.log('✓ Every test that writes to the temp directory removes it.');
 
   console.log('\n=== All Pre-Commit Checks Passed Successfully ===');
 }

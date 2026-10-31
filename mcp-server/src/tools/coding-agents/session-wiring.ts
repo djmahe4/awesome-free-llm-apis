@@ -1,3 +1,4 @@
+import { BoundedMap } from '../../utils/bounded-map.js';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import fs from 'fs-extra';
@@ -101,7 +102,11 @@ export async function scanCodeFiles(dir: string, maxFiles = 100): Promise<string
 // use_free_llm's run/continue/status/abort pattern (RunRegistry.ts). dry_run
 // previews, plan creation, and rollback stay synchronous — they're fast and
 // callers expect an immediate result.
-export const codingAgentsResultsCache = new Map<string, CodingAgentsResult>();
+export { BoundedMap } from '../../utils/bounded-map.js';
+
+// Bounded: each result holds the full patched content of every file in the run, and a long-running
+// dashboard used to keep all of them for its lifetime.
+export const codingAgentsResultsCache = new BoundedMap<string, CodingAgentsResult>(50);
 
 export function withMarkdown(result: CodingAgentsResult): CodingAgentsResult {
   result.content = formatCodingAgentsMarkdown(result);
@@ -135,7 +140,7 @@ export function stableWorkspaceSessionId(workspaceRoot?: string): string {
  */
 type SessionAlias = { root: string; canonical: string };
 
-export const sessionAliases = new Map<string, SessionAlias>();
+export const sessionAliases = new BoundedMap<string, SessionAlias>(500);
 
 export function aliasServesCall(
   alias: SessionAlias | undefined,
@@ -146,4 +151,3 @@ export function aliasServesCall(
   if (input.workspaceRoot && input.workspaceRoot.trim() !== '') return alias.root === resolvedRoot;
   return input.action === 'status' || input.action === 'abort';
 }
-

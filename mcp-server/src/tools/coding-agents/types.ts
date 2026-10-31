@@ -30,7 +30,7 @@ export interface DiagnosticResult {
   message: string;
   severity: 'error' | 'warning' | 'info';
   code?: number;
-  source?: 'omp-lsp' | 'ast-syntactic' | 'semantic' | 'subprocess' | 'json-syntax' | 'llm-patch';
+  source?: 'omp-lsp' | 'ast-syntactic' | 'semantic' | 'subprocess' | 'json-syntax' | 'llm-patch' | 'verify-command' | 'hypothesis';
 }
 
 export interface LspActionRequest {
@@ -86,8 +86,55 @@ export interface CodingAgentsInput {
   lspAction?: LspActionRequest;
   astEditOps?: AstEditOp[];
   resolve?: ResolveAction;
+  /**
+   * Behavioural check run before and after an apply (e.g. `npx vitest run tests/a.test.ts`). A patch
+   * that makes a previously passing check fail is rolled back. Allowlisted runners only, no shell
+   * syntax; see tools/coding-agents/verify-command.ts.
+   */
+  verifyCommand?: string;
+  /**
+   * Output of a check the USER ran themselves (used when an edit was withheld because it touches tests,
+   * scripts or hooks). A failure comes back as a debugger brief; nothing on disk changes.
+   */
+  verifyReport?: { exitCode: number; output: string; command?: string };
+  /** Debugger brief from a previous failed attempt; appended to the goal for the retry. */
+  feedback?: string;
+  /** Independent candidate attempts drawn from the original file before repairing the closest one (default 3 when a verifyCommand is given; 1 disables; max 5). */
+  samples?: number;
+  /** Regenerate the (small) file from the requirements instead of patching it; set by the repair loop when many cases fail. */
+  /** @internal set by the repair loop. */
+  rewrite?: boolean;
+  /** Sampling temperature for generation (default 0). The repair loop raises it on retries so a repeat is not identical. */
+  temperature?: number;
+  /** Files that belong to this change but are not edited in this call; their API surface is shown as reference. Set by the repair loop when it narrows a retry. */
+  /** @internal set by the repair loop. */
+  relatedFiles?: string[];
+  /** Let a failed local edit fall back to free cloud models, which sends the file and goal to a third-party provider (default false; also settable in .free-llm-mcp/coding-agents.json). */
+  allowCloudFallback?: boolean;
+  /** Installed local model to use (e.g. a bigger one for a cross-file change). Overrides the automatic choice and the VRAM budget. */
+  model?: string;
+  /** Reasoning for thinking models: off (default), auto, on. See local_llm_patch. */
+  think?: 'auto' | 'on' | 'off';
+  /** Wall-clock budget for the whole repair loop in ms (default 5 minutes). */
+  maxDurationMs?: number;
+  /** Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry). */
+  maxRepairAttempts?: number;
+  /** Independent review of the proposed diff before apply (default on; false disables it). */
+  review?: boolean;
   action?: 'plan' | 'execute' | 'resume' | 'status' | 'abort';
   pauseOnTaskPlan?: boolean;
+}
+
+export interface RepairAttempt {
+  attempt: number;
+  /** verification status, review_blocked, applied, proposed or error. */
+  outcome: string;
+  /** The brief that was fed to the next attempt (truncated). */
+  brief?: string;
+  /** Failing cases after this attempt (progress between attempts). */
+  failing?: number;
+  /** The attempt regenerated the file instead of patching it. */
+  rewrite?: boolean;
 }
 
 export interface CodingAgentsResult {
@@ -104,6 +151,44 @@ export interface CodingAgentsResult {
   message?: string;
   checkpointId?: string;
   restoredFiles?: string[];
+  /** Set when an apply was rolled back because the edit did not parse: the compiler messages as feedback for a retry. */
+  rollbackBrief?: string;
+  /** Independent reviewer's verdict on the proposed diff. */
+  review?: {
+    verdict: 'ok' | 'concerns' | 'blocked' | 'skipped';
+    findings: Array<{ blocking: boolean; text: string }>;
+    brief?: string;
+    model?: string;
+  };
+  /** How the automatic repair loop ended (present when a check or review took part). */
+  repair?: {
+    outcome: 'converged' | 'not_converged' | 'stuck' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
+    attemptCount: number;
+    attempts: RepairAttempt[];
+  };
+  /** Outcome of verifyCommand around an apply (absent when none was given or nothing was applied). */
+  verification?: {
+    command: string;
+    /** passed | regressed (passed before, fails after: rolled back) | not_green (was failing before and still fails: test-first work, kept so the next attempt can build on it) | needs_user (edit withheld) | user_passed | user_failed */
+    status?: 'passed' | 'regressed' | 'not_green' | 'needs_user' | 'user_passed' | 'user_failed';
+    /** Why an edit was withheld (needs_user). */
+    reasons?: string[];
+    /** Debugger-persona brief built from the failing output, ready to pass back as `feedback`. */
+    repairBrief?: string;
+    /** The check passed after the edit. */
+    ok: boolean;
+    /** The check passed BEFORE the edit; when false the check is informational, not a gate. */
+    baselineOk: boolean;
+    exitCode: number | null;
+    timedOut: boolean;
+    outputTail: string;
+    /** Failing case names from the whole run. */
+    failedCases?: string[];
+    /** Failing cases BEFORE the edit (the baseline run), and the debugger brief built from them. */
+    baselineFailedCases?: string[];
+    baselineBrief?: string;
+    durationMs: number;
+  };
   /** undo_file: whether the previous version was restored to disk. */
   restored?: boolean;
   /** undo_file: history entries left after this pop (0 = drained). */
@@ -115,6 +200,11 @@ export interface CodingAgentsResult {
   content?: string;
   error?: string;
   tasksPlan?: TaskItem[];
+  /** The plan's assumptions and what the workspace said about each (also written to hypotheses.md). */
+  hypotheses?: Array<{ id: string; claim: string; probe: string; status: 'open' | 'confirmed' | 'refuted'; evidence?: string }>;
+  hypothesesFile?: string;
+  /** Set when the gate (enforce) found a refuted assumption and the model supplied one corrected goal that the run then used. */
+  replannedGoal?: string;
   tasksFile?: string;
   isPaused?: boolean;
   modelUsed?: string;
@@ -199,4 +289,3 @@ export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
 
   return lines.join('\n');
 }
-

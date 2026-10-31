@@ -53,6 +53,12 @@ export class TextRouterMiddleware implements Middleware {
     public static readonly taskRouteMap: Record<TaskType, string[]> = {
         [TaskType.Reasoning]: [
             'deepseek-ai/DeepSeek-R1',
+            'Qwen3.5-397B-A17B',
+            'zai-org/GLM-5.3-Flash',
+            'MiniMaxAI/MiniMax-M2.7',
+            'deepseek-ai/DeepSeek-V4-Flash-0731',
+            'gpt-oss-120b',
+            'gpt-oss-20b',
             'liquid/lfm2.5-1.2b-thinking:free',
             'microsoft/phi-4',
             'command-a-plus-05-2026',
@@ -66,7 +72,10 @@ export class TextRouterMiddleware implements Middleware {
             'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
             'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
             'dots-studio/dots-3-note-preview:free',
-            'DeepSeek-V4-Flash-0731',
+            'reflection/beam-free',
+            'xingchen-agi/xing4.0-29b-a4b:free',
+            'nvidia/nemotron-3.5-super-vl:free',
+            'XingChenAGI/Xing4.0-29B',
             'google/diffusiongemma-26b-a4b-it',
             'Qwen/Qwen2.5-Coder-7B-Instruct',
             'google/gemma-4-26b-a4b-it:free',
@@ -77,7 +86,6 @@ export class TextRouterMiddleware implements Middleware {
             'gemma-4-26b-a4b-it',
             'google/gemma-4-26B-A4B-it',
             'nvidia/nemotron-3-super-120b-a12b',
-            'nvidia/nemotron-3-super-120b-a12b:free',
             'nvidia/nemotron-3-ultra-550b-a55b',
             'nvidia/nemotron-3-ultra-550b-a55b:free',
             'nvidia/llama-3.3-nemotron-super-49b-v1',
@@ -107,12 +115,19 @@ export class TextRouterMiddleware implements Middleware {
             '@cf/qwen/qwen3.8-27b',
         ],
         [TaskType.Coding]: [
+            'Qwen3.5-397B-A17B',
+            'Qwen3.8-27B',
+            'zai-org/GLM-5.3-Flash',
+            'gpt-oss-120b',
             'qwen/qwen3-coder-480b-a35b:free',
             'qwen/qwen3.8-flash',
             'poolside/laguna-s-2.1',
             'poolside/laguna-s-2.1:free',
             'cohere/north-mini-code:free',
-            'DeepSeek-V4-Flash-0731',
+            'recursive/flint-v1.0:free',
+            'reflection/beam-free',
+            'xingchen-agi/xing4.0-29b-a4b:free',
+            'XingChenAGI/Xing4.0-29B',
             'Qwen/Qwen3.8-Flash-Next',
             'Qwen/Qwen2.5-Coder-7B-Instruct',
             'nvidia/nemotron-3.5-lightning-30b-a3b',
@@ -165,6 +180,8 @@ export class TextRouterMiddleware implements Middleware {
         ],
         [TaskType.Vision]: Object.keys(MODEL_METADATA).filter(m => isVisionSupported(m)),
         [TaskType.Classification]: [
+            'Meta-Llama-3_3-70B-Instruct',
+            'Mistral-Nemo-Instruct-2407',
             'google/gemma-4-31b-it:free',
             'google/gemma-4-31B-it',
             'google/gemma-3-27b-it',
@@ -182,7 +199,6 @@ export class TextRouterMiddleware implements Middleware {
             'glm-4.5-flash',
             'zai-org/GLM-5.2',
             'deepseek-ai/DeepSeek-V4-Flash',
-            'DeepSeek-V4-Flash-0731',
             '@cf/zai-org/glm-4.7-flash',
             'zai-org/GLM-4.7-Flash',
             'ministral-8b-2512',
@@ -192,6 +208,8 @@ export class TextRouterMiddleware implements Middleware {
             'community/AkshayCoder48/stepfun-step-3.7-flash-free',
         ],
         [TaskType.UserIntent]: [
+            'Meta-Llama-3_3-70B-Instruct',
+            'Mistral-Nemo-Instruct-2407',
             'google/gemma-4-31b-it:free',
             'google/gemma-4-31b-it',
             'google/gemma-4-31B-it',
@@ -207,7 +225,6 @@ export class TextRouterMiddleware implements Middleware {
             'glm-4.5-flash',
             'zai-org/GLM-5.2',
             'deepseek-ai/DeepSeek-V4-Flash',
-            'DeepSeek-V4-Flash-0731',
             '@cf/zai-org/glm-4.7-flash',
             'zai-org/GLM-4.7-Flash',
             'ministral-8b-2512',
@@ -224,10 +241,8 @@ export class TextRouterMiddleware implements Middleware {
             'google/gemma-3-27b-it',
             'gemma-4-31b-it',
             'nvidia/nemotron-3-super-120b-a12b',
-            'nvidia/nemotron-3-super-120b-a12b:free',
             'nvidia/llama-3.3-nemotron-super-49b-v1',
             'dots-studio/dots-3-note-preview:free',
-            'DeepSeek-V4-Flash-0731',
             'arcee-ai/trinity-large-preview:free',
             'Qwen/Qwen2.5-72B-Instruct',
             'command-r-plus-08-2024',
@@ -267,7 +282,6 @@ export class TextRouterMiddleware implements Middleware {
             'glm-4.5-flash',
             'zai-org/GLM-5',
             'deepseek-ai/DeepSeek-V4-Flash',
-            'DeepSeek-V4-Flash-0731',
             'zai-org/GLM-4.7-Flash',
             'ministral-14b-2512',
             'ministral-8b-2512',
@@ -292,7 +306,6 @@ export class TextRouterMiddleware implements Middleware {
             'meta-llama/Llama-3.3-70B-Instruct',
             'zai-org/GLM-5.2',
             'deepseek-ai/DeepSeek-V4-Flash',
-            'DeepSeek-V4-Flash-0731',
         ],
         [TaskType.Moderation]: [
             'google/gemma-4-31b-it:free',
@@ -313,16 +326,28 @@ export class TextRouterMiddleware implements Middleware {
             'zai-org/GLM-4.7-Flash',
         ],
         [TaskType.Cyber]: [
+            'medismera/Qwen3.8-27B-OBLITERATED-Mythos-Class-Agentic',
+            'Meta-Llama-3_3-70B-Instruct',
+            'Mistral-Nemo-Instruct-2407',
             'deepseek-ai/DeepSeek-R1',
+            'Qwen3.5-397B-A17B',
+            'zai-org/GLM-5.3-Flash',
+            'MiniMaxAI/MiniMax-M2.7',
+            'deepseek-ai/DeepSeek-V4-Flash-0731',
+            'gpt-oss-120b',
+            'gpt-oss-20b',
             'deepseek-ai/DeepSeek-V4-Pro',
             'nvidia/nemotron-3.5-lightning-30b-a3b',
             'nvidia/nemotron-3.5-lightning:free',
             'nvidia/nemotron-3.5-super-vl-120b-a12b',
             'stepfun-ai/step-5-preview',
             'empero-ai/Qwythos-9B-Claude-Mythos-5-1M',
+            'Qwen3.5-397B-A17B',
+            'Qwen3.8-27B',
+            'zai-org/GLM-5.3-Flash',
+            'gpt-oss-120b',
             'qwen/qwen3-coder-480b-a35b:free',
             'dots-studio/dots-3-note-preview:free',
-            'DeepSeek-V4-Flash-0731',
             'moonshotai/kimi-k3',
             'deepseek-ai/deepseek-coder-6.7b-instruct',
             'gemma4:31b',
@@ -332,10 +357,18 @@ export class TextRouterMiddleware implements Middleware {
             '@cf/openai/gpt-oss-120b',
         ],
         [TaskType.Chat]: [
+            'Meta-Llama-3_3-70B-Instruct',
+            'Mistral-Nemo-Instruct-2407',
             'qwen/qwen3.8-flash',
             'meta/llama-4-scout',
             'mistralai/mistral-small-3.2',
             'deepseek-ai/DeepSeek-R1',
+            'Qwen3.5-397B-A17B',
+            'zai-org/GLM-5.3-Flash',
+            'MiniMaxAI/MiniMax-M2.7',
+            'deepseek-ai/DeepSeek-V4-Flash-0731',
+            'gpt-oss-120b',
+            'gpt-oss-20b',
             'deepseek-ai/DeepSeek-V3',
             'nvidia/nemotron-3.5-lightning-30b-a3b',
             'nvidia/nemotron-3.5-lightning:free',
@@ -346,11 +379,9 @@ export class TextRouterMiddleware implements Middleware {
             'liquid/lfm-2.5-2.6b:free',
             'dots-studio/dots-3-note-preview:free',
             'cohere/north-mini-code:free',
-            'DeepSeek-V4-Flash-0731',
             'Qwen/Qwen2.5-7B-Instruct',
             'meta-llama/Llama-3.1-8B-Instruct',
             'nvidia/nemotron-3-super-120b-a12b',
-            'nvidia/nemotron-3-super-120b-a12b:free',
             'nvidia/nemotron-3-nano-30b-a3b',
             'nvidia/nemotron-mini-4b-instruct',
             'nvidia/nemotron-mini-4b-instruct:free',
@@ -432,6 +463,12 @@ export class TextRouterMiddleware implements Middleware {
             'gemini-3.1-flash-lite',
             'openai/gpt-oss-120b',
             'deepseek-ai/DeepSeek-R1',
+            'Qwen3.5-397B-A17B',
+            'zai-org/GLM-5.3-Flash',
+            'MiniMaxAI/MiniMax-M2.7',
+            'deepseek-ai/DeepSeek-V4-Flash-0731',
+            'gpt-oss-120b',
+            'gpt-oss-20b',
         ],
         [TaskType.Roleplaying]: [
             'aion-labs/aion-3.5',
@@ -575,6 +612,20 @@ export class TextRouterMiddleware implements Middleware {
             finalTierModels = finalTierModels.filter(m => !isRoleplayingModel(m));
         }
 
+        const requestedProvider = (context.request as any).provider;
+        if (requestedProvider) {
+            const targetProv = availableProviders.find(p => p.id === requestedProvider);
+            if (targetProv) {
+                const provModelIds = targetProv.models.map(m => m.id);
+                if ((context.request as any).fallback === false) {
+                    finalTierModels = provModelIds;
+                } else {
+                    finalTierModels = [...new Set([...provModelIds, ...finalTierModels])];
+                }
+                console.debug(`[Router] Prioritizing requested provider [${requestedProvider}] models: ${provModelIds.join(', ')}`);
+            }
+        }
+
         if (context.request.google_search) {
             const geminiModels = finalTierModels.filter(m => m.toLowerCase().includes('gemini'));
             const otherModels = finalTierModels.filter(m => !m.toLowerCase().includes('gemini'));
@@ -662,6 +713,9 @@ export class TextRouterMiddleware implements Middleware {
         .sort((a, b) => confused ? a.score - b.score : b.score - a.score);
 
         finalTierModels = scoredCandidates.slice(0, 15).map(c => c.modelId);
+        if (finalTierModels.length === 0) {
+            finalTierModels = availableProviders.flatMap(p => p.models.map(m => m.id));
+        }
 
         if (requestedModel === 'any') {
             const allAvailableModels = availableProviders.flatMap(p => p.models.map(m => m.id));
@@ -920,7 +974,7 @@ export class TextRouterMiddleware implements Middleware {
                         // nothing in this formula ever asked whether the prompt needed it.
                         // Cap at a "chat-sufficient" ceiling so cheap/fast models compete
                         // evenly; genuinely-classified Reasoning/Coding keep full cap above.
-                        alignment = Math.min(cap, 0.6);
+                        alignment = estimatedTokens > 8000 ? cap : Math.min(cap, 0.6);
                         break;
                     default:
                         alignment = cap;

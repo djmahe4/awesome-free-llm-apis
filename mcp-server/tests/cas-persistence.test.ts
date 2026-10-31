@@ -42,7 +42,7 @@ describe('ContentAddressableStore — disk persistence (R2)', () => {
   });
 
   afterEach(async () => {
-    if (baseDir) await fs.remove(baseDir);
+    if (baseDir) await fs.rm(baseDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     delete process.env.CAS_TTL_MS;
   });
 

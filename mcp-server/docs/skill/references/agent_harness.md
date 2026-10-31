@@ -55,6 +55,8 @@ Selectively re-runs a specific agent role from a completed or paused run without
 
 ### 3. `status` & `approvals`
 Audit active status, current step, and human-in-the-loop approval gates.
+
+An approval authorises ONE execution of the exact call (run + callId + argsHash). A rerun, or a second identical call, needs a new approval. `approvals` still lists entries when the run's declaration can no longer be loaded (it adds a `warning`). `resume` on a run still waiting on a monitored process returns a `note` saying nothing advanced. `deploy` validates `goal` (non-empty text, up to 20000 characters), `maxTokens` (positive number) and `harness` (text) before creating anything. Set `HARNESS_RESTRICT_ROOTS=1` to limit runs whose declaration has no `allowedWorkspaceRoots` to the server working directory plus `WORKSPACE_ROOTS`.
 ```json
 {
   "action": "status",

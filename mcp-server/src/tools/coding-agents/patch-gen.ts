@@ -4,6 +4,10 @@ import { type DiagnosticResult } from './types.js';
 import { runTsMorphCheck } from './diagnostics.js';
 import { extractCodeBlock } from './tasks.js';
 
+// Large enough that one declaration of the named symbol beats a dense run of plain mentions
+// (a 13-line neighborhood of mentions weighs about 5 x 13 = 65).
+const DECLARATION_BONUS = 100;
+
 export function extractWindowForInstruction(
   content: string,
   instruction: string,
@@ -12,13 +16,32 @@ export function extractWindowForInstruction(
   const lines = content.split(/\r?\n/);
   if (lines.length <= windowSize) return null;
 
-  const terms = (instruction.match(/\b[a-zA-Z][a-zA-Z0-9_-]{4,}\b/g) ?? [])
-    .map(t => t.toLowerCase());
-  const uniqueTerms = [...new Set(terms)].slice(0, 12);
+  const rawTerms = instruction.match(/\b[a-zA-Z][a-zA-Z0-9_-]{4,}\b/g) ?? [];
+  // An identifier-looking term (camelCase, PascalCase, snake_case) names a symbol; plain words
+  // like "method" or "change" occur everywhere and must not outvote it.
+  const isIdentifier = (t: string) => /[a-z][A-Z]|^[A-Z][a-z]+[A-Z]|_/.test(t);
+  const seen = new Set<string>();
+  const weighted: Array<{ term: string; weight: number; ident: boolean }> = [];
+  for (const raw of rawTerms) {
+    const term = raw.toLowerCase();
+    if (seen.has(term)) continue;
+    seen.add(term);
+    const ident = isIdentifier(raw);
+    weighted.push({ term, weight: ident ? 4 : 1, ident });
+  }
+  const uniqueTerms = weighted.slice(0, 12);
+  const declRe = /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:abstract\s+)?(?:class|function|interface|type|enum|def|const|let|struct|fn)\b/;
 
   const perLineScore = lines.map(line => {
     const lower = line.toLowerCase();
-    return uniqueTerms.filter(t => lower.includes(t)).length;
+    let score = 0;
+    for (const { term, weight, ident } of uniqueTerms) {
+      if (!lower.includes(term)) continue;
+      score += weight;
+      // The line that DECLARES the named symbol is where the edit belongs.
+      if (ident && declRe.test(line)) score += DECLARATION_BONUS;
+    }
+    return score;
   });
 
   // A single keyword-dense line (e.g. one ternary chaining status/complete/
@@ -32,14 +55,25 @@ export function extractWindowForInstruction(
   // thing it could see — applied cleanly (real text, no TS regression),
   // reported success, and silently missed the actual requested change.
   const neighborhood = 6;
-  let bestScore = -1;
-  let bestLine = Math.floor(lines.length / 2);
+  let bestScore = 0;
+  let bestLine = -1;
   for (let i = 0; i < lines.length; i++) {
     let windowScore = 0;
     for (let j = Math.max(0, i - neighborhood); j <= Math.min(lines.length - 1, i + neighborhood); j++) {
       windowScore += perLineScore[j];
     }
     if (windowScore > bestScore) { bestScore = windowScore; bestLine = i; }
+  }
+
+  // Nothing in the file matches (typical for "add X": X does not exist yet). The old code then
+  // kept the first zero-score line, i.e. the file HEAD, which is the wrong place to add code.
+  // New code goes after the module's last top-level declaration, so anchor there.
+  if (bestLine < 0) {
+    let lastDecl = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (/^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:abstract\s+)?(?:class|function|interface|type|enum|def|struct|fn)\b/.test(lines[i])) { lastDecl = i; break; }
+    }
+    bestLine = lastDecl >= 0 ? lastDecl : lines.length - 1;
   }
 
   const half = Math.floor(windowSize / 2);
@@ -106,6 +140,15 @@ export function windowReplyIsSuspicious(originalWindowLines: string[], replyLine
 interface SearchReplaceBlock { search: string; replace: string }
 
 export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
+  return parseSearchReplaceBlocksDetailed(text).blocks;
+}
+
+/**
+ * Like parseSearchReplaceBlocks, but also reports a block that was started and never
+ * closed with a REPLACE marker (typically a reply cut off at the output limit). Such a
+ * block is not applied, but callers must be able to tell it was lost.
+ */
+export function parseSearchReplaceBlocksDetailed(text: string): { blocks: SearchReplaceBlock[]; incomplete: number } {
   const blocks: SearchReplaceBlock[] = [];
   const lines = text.split(/\r?\n/);
   let state: 'OUTSIDE' | 'IN_SEARCH' | 'IN_REPLACE' = 'OUTSIDE';
@@ -114,7 +157,9 @@ export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
 
   const isSearchMarker = (l: string) => /^<{5,}\s*SEARCH\s*$/i.test(l.trim());
   const isDividerMarker = (l: string) => /^={5,}\s*$/i.test(l.trim());
-  const isReplaceMarker = (l: string) => /^>{5,}\s*REPLACE\s*$/i.test(l.trim());
+  // A bare ">>>>>>>" closes a block too, and so does a second "=======": qwen2.5-coder:7b writes the
+  // latter, and rejecting that reply cost a 126 s whole-file regeneration per attempt (traced live).
+  const isReplaceMarker = (l: string) => /^>{5,}\s*(REPLACE)?\s*$/i.test(l.trim()) || isDividerMarker(l);
 
   for (const line of lines) {
     if (state === 'OUTSIDE') {
@@ -153,7 +198,97 @@ export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
     }
   }
 
-  return blocks;
+  return { blocks, incomplete: state === 'OUTSIDE' ? 0 : 1 };
+}
+
+/** "// Add this import", "// Insert this line": the model annotating its own edit, never wanted in the file. */
+const EDIT_ECHO_COMMENT = /\s+\/\/\s*(add|added|insert|inserted|new|change|changed|update|updated)\s+(this|here|the)\b.*$/i;
+/** Edits closer than this many unchanged lines are merged into one block, so their contexts never overlap. */
+const MERGE_GAP = 4;
+
+/**
+ * Asked for SEARCH/REPLACE, a small model often returns the whole edited excerpt in a code fence instead
+ * (traced live with qwen2.5-coder:7b). The edit inside is frequently right, so recover it: diff the
+ * excerpt against the original and emit one block per changed hunk. SEARCH comes from the ORIGINAL with
+ * a little context, so lines the model copied wrongly outside a hunk can never reach the file.
+ * Deletion-only hunks at the very start or end are the model dropping the excerpt's edge lines and are
+ * ignored. A copy that shares under 60% of the original's lines is a rewrite, not an edit: nothing.
+ */
+export function editsFromRewrittenExcerpt(original: string, reply: string): { blocks: SearchReplaceBlock[] } {
+  const none = { blocks: [] as SearchReplaceBlock[] };
+  if (/^<{5,}\s*SEARCH/m.test(reply)) return none;
+  const fenced = reply.match(/```[\w+-]*\r?\n([\s\S]*?)\r?\n```/);
+  if (!fenced) return none;
+  const a = original.split(/\r?\n/);
+  const b = fenced[1].split(/\r?\n/).map(l => l.replace(EDIT_ECHO_COMMENT, ''));
+  const n = a.length, m = b.length;
+  if (n === 0 || m === 0 || n * m > 4_000_000) return none;
+
+  // Longest common subsequence over lines (excerpts are ~150 lines, so the table is small).
+  const w = m + 1;
+  const dp = new Uint32Array((n + 1) * w);
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i * w + j] = a[i] === b[j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+    }
+  }
+  if (dp[0] < n * 0.6) return none;
+
+  type Hunk = { start: number; end: number; ins: string[] }; // replaces a[start, end) with ins
+  const hunks: Hunk[] = [];
+  let i = 0, j = 0, cur: Hunk | null = null;
+  const flush = () => { if (cur) { hunks.push(cur); cur = null; } };
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) { flush(); i++; j++; continue; }
+    if (!cur) cur = { start: i, end: i, ins: [] };
+    if (j < m && (i >= n || dp[i * w + j + 1] >= dp[(i + 1) * w + j])) { cur.ins.push(b[j]); j++; }
+    else { i++; cur.end = i; }
+  }
+  flush();
+
+  // Lines missing at the excerpt's edges were dropped by the copy, not deleted on purpose: keep them,
+  // also when the dropped edge shares a hunk with a real change next to it.
+  for (const h of hunks) {
+    // Only the excess: a hunk that replaces k lines with fewer has dropped the rest at the edge.
+    if (h.end === n) while (h.end - h.start > h.ins.length) h.end--;
+    if (h.start === 0) while (h.end - h.start > h.ins.length) h.start++;
+  }
+  const kept = hunks.filter(h => !(h.ins.length === 0 && h.start === h.end));
+  // Merge hunks separated by only a few unchanged lines.
+  const merged: Hunk[] = [];
+  for (const h of kept) {
+    const prev = merged[merged.length - 1];
+    if (prev && h.start - prev.end < MERGE_GAP) {
+      prev.ins = [...prev.ins, ...a.slice(prev.end, h.start), ...h.ins];
+      prev.end = h.end;
+    } else merged.push({ ...h, ins: [...h.ins] });
+  }
+
+  const occurrences = (needle: string[]) => {
+    let count = 0;
+    for (let s = 0; s + needle.length <= n; s++) {
+      let ok = true;
+      for (let t = 0; t < needle.length; t++) if (a[s + t] !== needle[t]) { ok = false; break; }
+      if (ok && ++count > 1) break;
+    }
+    return count;
+  };
+
+  const blocks: SearchReplaceBlock[] = [];
+  for (const h of merged) {
+    // Grow context until the SEARCH text is unique in the original (and never empty).
+    for (let ctx = 1; ctx <= 6; ctx++) {
+      const before = a.slice(Math.max(0, h.start - ctx), h.start);
+      const after = a.slice(h.end, Math.min(n, h.end + ctx));
+      const search = [...before, ...a.slice(h.start, h.end), ...after];
+      if (search.join('').trim() === '') continue;
+      if (occurrences(search) === 1 || ctx === 6) {
+        blocks.push({ search: search.join('\n'), replace: [...before, ...h.ins, ...after].join('\n') });
+        break;
+      }
+    }
+  }
+  return { blocks };
 }
 
 /**
@@ -201,6 +336,50 @@ const STRAY_MARKER_RE = /^(?:<{5,}|={5,}|>{5,})\s*(?:SEARCH|REPLACE)?\s*$/m;
 // failure mode worth a dedicated tolerant tier rather than just failing.
 const LINE_NUMBER_PREFIX_RE = /^\s*L\d+:\s?/;
 
+// Tolerant projections, modelled on OpenCode's replacer chain and Codex's seek_sequence: small models
+// mangle quotes, dashes, spacing and indentation far more often than they get the code wrong.
+const normalizeUnicode = (l: string) => l
+  .replace(/[\u2018\u2019\u201a\u201b]/g, "'")
+  .replace(/[\u201c\u201d\u201e\u201f]/g, '"')
+  .replace(/[\u2010-\u2015\u2212]/g, '-')
+  .replace(/[\u00a0\u2002-\u200a\u202f\u205f\u3000]/g, ' ');
+const collapseSpaces = (l: string) => normalizeUnicode(l).trim().replace(/\s+/g, ' ');
+
+/** Character-bigram Dice similarity of two lines after normalization (0..1). */
+function lineSimilarity(a: string, b: string): number {
+  const x = collapseSpaces(a);
+  const y = collapseSpaces(b);
+  if (x === y) return 1;
+  if (x.length < 2 || y.length < 2) return 0;
+  const grams = (s: string) => { const m = new Map<string, number>(); for (let i = 0; i < s.length - 1; i++) { const g = s.slice(i, i + 2); m.set(g, (m.get(g) ?? 0) + 1); } return m; };
+  const gx = grams(x);
+  const gy = grams(y);
+  let overlap = 0;
+  for (const [g, c] of gx) overlap += Math.min(c, gy.get(g) ?? 0);
+  return (2 * overlap) / (x.length - 1 + y.length - 1);
+}
+
+/** Minimum average similarity of the MIDDLE lines for a first/last-line anchored match. */
+const ANCHOR_MIDDLE_MIN = 0.6;
+
+/**
+ * The real file lines most similar to a failed SEARCH, with line numbers, so the retry can copy
+ * exact text (Cline-style: a failed match is answered with what the file actually says).
+ */
+export function closestLines(workingLines: string[], searchLines: string[], maxLines = 6): string {
+  const wanted = searchLines.map(l => l.trim()).filter(Boolean).slice(0, 3);
+  if (wanted.length === 0) return '';
+  const scored: Array<{ i: number; score: number }> = [];
+  for (let i = 0; i < workingLines.length; i++) {
+    if (!workingLines[i].trim()) continue;
+    const score = Math.max(...wanted.map(w => lineSimilarity(workingLines[i], w)));
+    if (score >= 0.55) scored.push({ i, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.i - b.i);
+  const top = scored.slice(0, maxLines).sort((a, b) => a.i - b.i);
+  return top.map(t => `L${t.i + 1}: ${workingLines[t.i].slice(0, 200)}`).join('\n');
+}
+
 export function findLineBlockMatch(
   workingLines: string[],
   searchLines: string[]
@@ -232,12 +411,75 @@ export function findLineBlockMatch(
     if (lineNumberStripped.length > 0) return { index: lineNumberStripped[0], ambiguous: lineNumberStripped.length > 1, usedLineNumberStrip: true };
   }
 
+  // Quotes, dashes and non-breaking spaces; internal whitespace runs collapsed.
+  const collapsed = tryTier(collapseSpaces);
+  if (collapsed.length > 0) return { index: collapsed[0], ambiguous: collapsed.length > 1, usedLineNumberStrip: false };
+
+  // First and last line match exactly (after normalization) and the lines in between are close
+  // enough. Needs >= 3 lines; two equally good candidates are ambiguous, never guessed.
+  if (searchLines.length >= 3) {
+    const n = searchLines.length;
+    const first = collapseSpaces(searchLines[0]);
+    const last = collapseSpaces(searchLines[n - 1]);
+    const good: number[] = [];
+    for (let i = 0; i + n <= workingLines.length; i++) {
+      if (collapseSpaces(workingLines[i]) !== first || collapseSpaces(workingLines[i + n - 1]) !== last) continue;
+      let sum = 0;
+      for (let j = 1; j < n - 1; j++) sum += lineSimilarity(workingLines[i + j], searchLines[j]);
+      if (sum / (n - 2) >= ANCHOR_MIDDLE_MIN) good.push(i);
+    }
+    if (good.length > 0) return { index: good[0], ambiguous: good.length > 1, usedLineNumberStrip: false };
+  }
+
   return { index: -1, ambiguous: false, usedLineNumberStrip: false };
+}
+
+export interface ApplyOptions {
+  /**
+   * The instruction only ADDS code. Every non-blank SEARCH line must then survive in REPLACE
+   * (trimmed comparison); a small model that "adds" by rewriting the anchor deletes working code.
+   */
+  additive?: boolean;
+  /** Treat an empty SEARCH as "append to the end of the file" instead of an error. */
+  allowAppend?: boolean;
+}
+
+const ADD_WORDS = /\b(add|insert|append|introduce|implement|create|new)\b/i;
+const CHANGE_WORDS = /\b(remove|delete|replace|rename|change|fix|rewrite|refactor|modify|update|swap|drop|move)\b/i;
+
+/** True for instructions that only add code (so REPLACE must keep its SEARCH anchor). */
+export function isAdditiveInstruction(instruction: string): boolean {
+  return ADD_WORDS.test(instruction) && !CHANGE_WORDS.test(instruction);
+}
+
+/**
+ * The matcher tolerates indentation differences, so a block the model copied 4 spaces too deep still
+ * matches; without this its REPLACE would land 4 spaces too deep too. Shift REPLACE by the same delta,
+ * but only for a uniform, spaces-only delta; anything else is left as written.
+ */
+export function reindentReplace(searchLines: string[], fileLines: string[], replaceLines: string[]): string[] {
+  const lead = (l: string) => l.match(/^[ 	]*/)![0];
+  let delta: number | null = null;
+  for (let i = 0; i < searchLines.length; i++) {
+    const s = searchLines[i], f = fileLines[i] ?? '';
+    if (!s.trim()) continue;
+    const ls = lead(s), lf = lead(f);
+    if (ls.includes('	') || lf.includes('	')) return replaceLines;
+    const d = lf.length - ls.length;
+    if (delta === null) delta = d;
+    else if (d !== delta) return replaceLines;
+  }
+  if (!delta) return replaceLines;
+  if (delta > 0) return replaceLines.map(l => (l.trim() ? ' '.repeat(delta!) + l : l));
+  const cut = -delta;
+  if (replaceLines.some(l => l.trim() && !l.startsWith(' '.repeat(cut)))) return replaceLines;
+  return replaceLines.map(l => (l.trim() ? l.slice(cut) : l));
 }
 
 export function applySearchReplaceBlocks(
   content: string,
-  blocks: SearchReplaceBlock[]
+  blocks: SearchReplaceBlock[],
+  options: ApplyOptions = {}
 ): { content: string; appliedCount: number; failures: string[] } {
   // CRLF-agnostic by construction (each line's own ending is discarded by
   // the split), and rejoined with whichever ending the original file
@@ -251,7 +493,16 @@ export function applySearchReplaceBlocks(
 
   for (const { search, replace } of blocks) {
     if (!search) {
-      failures.push('Empty SEARCH block (nothing to match)');
+      if (options.allowAppend || content.trim() === '') {
+        // New or empty file, or an explicit append: the text goes at the end.
+        const addition = replace.split(/\r?\n/);
+        const base = workingLines.length === 1 && workingLines[0] === '' ? [] : workingLines;
+        const trimmed = base.length > 0 && base[base.length - 1] === '' ? base.slice(0, -1) : base;
+        workingLines = [...trimmed, ...addition, ...(base.length > 0 && base[base.length - 1] === '' ? [''] : [])];
+        appliedCount++;
+        continue;
+      }
+      failures.push('Empty SEARCH block: include one or more existing lines as the anchor in SEARCH, and repeat them in REPLACE together with the new lines');
       continue;
     }
     if (STRAY_MARKER_RE.test(search) || STRAY_MARKER_RE.test(replace)) {
@@ -261,7 +512,8 @@ export function applySearchReplaceBlocks(
     const searchLines = search.split(/\r?\n/);
     const { index, ambiguous, usedLineNumberStrip } = findLineBlockMatch(workingLines, searchLines);
     if (index === -1) {
-      failures.push(`SEARCH text not found (even with whitespace-tolerant matching): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
+      const near = closestLines(workingLines, searchLines);
+      failures.push(`SEARCH text not found (even with whitespace-tolerant matching): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}${near ? `. The file actually contains these similar lines, copy them exactly:\n${near}` : ''}`);
     } else if (ambiguous) {
       failures.push(`SEARCH text matched multiple times (ambiguous, must be unique): ${JSON.stringify(search.slice(0, 80))}${search.length > 80 ? '…' : ''}`);
     } else {
@@ -271,9 +523,26 @@ export function applySearchReplaceBlocks(
       // strip it there as well, or the "fix" would insert that literal
       // presentation-only text into the real file.
       const replaceLines = (usedLineNumberStrip ? replace.replace(new RegExp(LINE_NUMBER_PREFIX_RE.source, 'gm'), '') : replace).split(/\r?\n/);
+      if (options.additive) {
+        const kept = new Set(replaceLines.map(l => l.trim()).filter(Boolean));
+        // A line that reappears changed (same start, e.g. a new parameter) was modified, not dropped:
+        // "Add currency support" legitimately turns formatPrice(cents) into formatPrice(cents, currency).
+        const modified = (l: string) => replaceLines.some(r => {
+          const t = r.trim();
+          let k = 0;
+          while (k < l.length && k < t.length && l[k] === t[k]) k++;
+          return k >= Math.max(12, Math.floor(l.length * 0.6));
+        });
+        const dropped = searchLines.map(l => l.trim()).filter(l => l && !kept.has(l) && !modified(l));
+        if (dropped.length > 0) {
+          failures.push(`anchor not retained: REPLACE dropped existing line(s) ${JSON.stringify(dropped[0].slice(0, 60))}${dropped.length > 1 ? ` (+${dropped.length - 1} more)` : ''} but the instruction only adds code; repeat the SEARCH lines in REPLACE and add the new lines after them`);
+          continue;
+        }
+      }
+      const placed = reindentReplace(searchLines, workingLines.slice(index, index + searchLines.length), replaceLines);
       workingLines = [
         ...workingLines.slice(0, index),
-        ...replaceLines,
+        ...placed,
         ...workingLines.slice(index + searchLines.length),
       ];
       appliedCount++;
@@ -295,13 +564,21 @@ export function applySearchReplaceBlocks(
  * Non-TS/JS files skip this (no ts-morph checker available) and rely solely
  * on the guards above.
  */
+/** TS diagnostics caused only by the in-memory check's missing environment: unresolved modules (2307, 2792),
+ *  missing declaration files (7016) and node globals without @types/node (2580, 2591, 2584). */
+const ENVIRONMENT_ONLY_TS_CODES = new Set([2307, 2792, 7016, 2580, 2591, 2584]);
+
 export async function searchReplaceRegressesTsErrors(
   filePath: string,
   beforeContent: string,
   afterContent: string
 ): Promise<boolean> {
   if (!/\.(ts|tsx|js|jsx|mjs|cjs)$/i.test(filePath)) return false;
-  const countErrors = (diags: DiagnosticResult[]) => diags.filter(d => d.severity === 'error').length;
+  // The in-memory project has no node_modules, no @types/node and no sibling files, so every import and
+  // every node global is an error there. Counting those made any edit that adds an import look like a
+  // regression and threw correct edits away. Only errors in the code itself count.
+  const countErrors = (diags: DiagnosticResult[]) =>
+    diags.filter(d => d.severity === 'error' && !ENVIRONMENT_ONLY_TS_CODES.has(d.code ?? -1)).length;
   const [before, after] = await Promise.all([
     runTsMorphCheck(filePath, beforeContent),
     runTsMorphCheck(filePath, afterContent),
@@ -326,6 +603,10 @@ export function looksLikeHallucinatedReplacement(originalContent: string, patche
   // which this failure mode can otherwise still clear on a large file.
   const countEllipsis = (s: string) => (s.match(/(?<!\.)\.{3}(?!\.)/g) || []).length;
   if (countEllipsis(patchedContent) > countEllipsis(originalContent)) return true;
+  // A full-file reply that keeps a landmark or two but is a fraction of the original has dropped real code
+  // (observed live: 711 lines replaced by 102). Targeted edits go through SEARCH/REPLACE, never this path.
+  const lineCount = (s: string) => s.split(/\r?\n/).length;
+  if (lineCount(originalContent) >= 100 && lineCount(patchedContent) < lineCount(originalContent) * 0.4) return true;
   // `export` is only legal at module top level in TS/JS — never inside a
   // function or class method body — so requiring it (rather than making it
   // optional) restricts anchors to real public symbols and excludes generic
@@ -428,12 +709,13 @@ export async function generateSearchReplacePatch(
     return { content: currentContent, appliedCount: 0, failures: [], hardFailure: `Model refused request ("${raw.trim().slice(0, 200)}")` };
   }
 
-  const blocks = parseSearchReplaceBlocks(raw);
+  const { blocks, incomplete } = parseSearchReplaceBlocksDetailed(raw);
   if (blocks.length === 0) {
     return { content: currentContent, appliedCount: 0, failures: [], hardFailure: 'No SEARCH/REPLACE blocks found in response' };
   }
 
-  const { content, appliedCount, failures } = applySearchReplaceBlocks(currentContent, blocks);
+  const { content, appliedCount, failures } = applySearchReplaceBlocks(currentContent, blocks, { additive: isAdditiveInstruction(instruction) });
+  if (incomplete > 0) failures.push(`${incomplete} block(s) were cut off before the REPLACE marker and were not applied`);
   return { content, appliedCount, failures };
 }
 
@@ -549,3 +831,18 @@ export async function generateCodePatchWithCloudLLM(
   }
 }
 
+/**
+ * True when a proposed file equals the original (ignoring CR and trailing blank lines). A model can
+ * return the original text unchanged, and dryRun:true never runs a model at all; neither should be
+ * presented as a proposed patch.
+ */
+export function isNoopPatch(before: string[], after: string[]): boolean {
+  const norm = (ls: string[]) => {
+    const out = ls.map(l => l.replace(/\r$/, ''));
+    while (out.length > 0 && out[out.length - 1] === '') out.pop();
+    return out;
+  };
+  const a = norm(before);
+  const b = norm(after);
+  return a.length === b.length && a.every((l, i) => l === b[i]);
+}

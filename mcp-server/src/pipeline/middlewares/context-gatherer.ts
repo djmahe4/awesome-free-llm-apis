@@ -1,3 +1,4 @@
+import { jaccardSimilarity } from '../../utils/log-compaction.js';
 import { spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
@@ -51,6 +52,8 @@ interface CacheEntry {
 }
 
 import os from 'os';
+import { anyChangedSince, filesCitedIn } from '../../memory/evidence.js';
+import { rerankEnabled, rerankFiles } from './rerank.js';
 
 const contextCache = new LRUCache<string, CacheEntry>({
     max: 500,
@@ -94,7 +97,12 @@ export class ContextGatherer {
         // Check cache
         const queryHash = crypto.createHash('md5').update(query).digest('hex');
         const cacheKey = `${wsHash}:${branch}:${queryHash}`;
-        const cached = contextCache.get(cacheKey);
+        let cached = contextCache.get(cacheKey);
+        // A result is only as fresh as the files it quotes: drop it when any of them changed since it was cached.
+        if (cached && await anyChangedSince(filesCitedIn(cached.results), workspaceRoot, cached.timestamp)) {
+          contextCache.delete(cacheKey);
+          cached = undefined;
+        }
         if (cached && cached.branch === branch) {
             const grepElapsedMs = Date.now() - grepStartMs;
             const sessionId = options.sessionId;
@@ -378,12 +386,15 @@ export class ContextGatherer {
                     return 3; // Docs and others
                 };
 
-                sortedFiles = Array.from(grouped.keys()).sort((a, b) => {
-                    const prioA = getPriority(a);
-                    const prioB = getPriority(b);
-                    if (prioA !== prioB) return prioA - prioB;
-                    return a.localeCompare(b); // Fallback to alphabetical
-                });
+                sortedFiles = rerankEnabled()
+                    // specific matches first: a file holding the goal's rare terms beats files sharing only its common words
+                    ? rerankFiles(Array.from(grouped, ([file, lines]) => ({ file, lines })), finalTerms, getPriority)
+                    : Array.from(grouped.keys()).sort((a, b) => {
+                        const prioA = getPriority(a);
+                        const prioB = getPriority(b);
+                        if (prioA !== prioB) return prioA - prioB;
+                        return a.localeCompare(b); // Fallback to alphabetical
+                    });
                 // `limit` is meant to bound the OUTPUT (how many files' snippets a
                 // caller wants injected into a prompt), not just how many candidate
                 // files get ranked — candidateLimit (limit*3, at least 25) is a
@@ -468,25 +479,10 @@ export class ContextGatherer {
                         }
                         flushCurrentBlock();
 
-                        // Helper Jaccard similarity function with word-digit normalization
-                        const calculateJaccard = (s1: string, s2: string): number => {
-                            // Preserve markdown headers (#, ##, ###) and embedded code snippet fields
-                            if (s1.trim().startsWith('#') || s2.trim().startsWith('#')) {
-                                return 0;
-                            }
-                            if (containsEmbeddedCodeField(s1) || containsEmbeddedCodeField(s2)) {
-                                return 0;
-                            }
-                            const norm1 = s1.replace(/[a-zA-Z0-9]*\d+[a-zA-Z0-9]*/g, '#');
-                            const norm2 = s2.replace(/[a-zA-Z0-9]*\d+[a-zA-Z0-9]*/g, '#');
-                            const tokenize = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9_#]+/g) || []);
-                            const set1 = tokenize(norm1);
-                            const set2 = tokenize(norm2);
-                            if (set1.size === 0 && set2.size === 0) return 1;
-                            const intersection = new Set([...set1].filter(x => set2.has(x)));
-                            const union = new Set([...set1, ...set2]);
-                            return intersection.size / union.size;
-                        };
+                        // Similarity lives in utils/log-compaction.ts (shared with the coding_agents repair
+                        // brief); embedded code fields (jsCode, ...) are preserved, never collapsed.
+                        const calculateJaccard = (s1: string, s2: string): number =>
+                            jaccardSimilarity(s1, s2, containsEmbeddedCodeField);
 
                         // 2. Collapse middle blocks semantically
                         let i = 0;

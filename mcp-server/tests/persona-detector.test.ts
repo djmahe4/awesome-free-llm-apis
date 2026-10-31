@@ -10,12 +10,12 @@ describe('PersonaDetector (Phase D)', () => {
     const tempDir = path.join(os.tmpdir(), `free-llm-mcp-persona-test-${Date.now()}`);
 
     beforeEach(async () => {
-        await fs.rm(tempDir, { recursive: true, force: true });
+        await fs.rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         await fs.mkdir(tempDir, { recursive: true });
     });
 
     afterEach(async () => {
-        await fs.rm(tempDir, { recursive: true, force: true });
+        await fs.rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
 
     it('detects coder persona from coding keywords', () => {

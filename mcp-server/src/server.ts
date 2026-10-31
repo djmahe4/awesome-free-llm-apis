@@ -26,6 +26,7 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error(`[CRITICAL] Unhandled Rejection at: ${promise}, reason: ${reason}`);
 });
 
+import { getMcpDir } from './utils/mcp-home.js';
 import dns from 'dns';
 try {
   dns.setDefaultResultOrder('ipv4first');
@@ -278,7 +279,7 @@ export function createExpressApp(): express.Express {
 
       app.post('/api/user-config', async (req, res) => {
         try {
-          const { username, optOutTelemetry } = req.body;
+          const { username, optOutTelemetry } = req.body ?? {};
 
           if (username !== undefined) {
             if (typeof username !== 'string' || username.length < 3 || username.length > 20 || !/^[a-zA-Z0-9_-]+$/.test(username)) {
@@ -413,7 +414,11 @@ export function createExpressApp(): express.Express {
 
       app.post('/api/validate-provider', async (req, res) => {
         try {
-          const { providerId } = req.body;
+          const { providerId } = req.body ?? {};
+          if (typeof providerId !== 'string' || !providerId) {
+            res.status(400).json({ error: 'providerId is required' });
+            return;
+          }
           const result = await validateProvider(providerId);
           res.json(result);
         } catch (err) {
@@ -554,35 +559,8 @@ export function createExpressApp(): express.Express {
               break;
             }
             case 'manage_memory':
-              result = await manageMemory({
-                action: params.action,
-                workspace_root: params.workspace_root,
-                query: params.query,
-                limit: params.limit,
-                title: params.title,
-                content: params.content,
-                tags: params.tags,
-                links: params.links,
-                persona: params.persona,
-                namespace: params.namespace,
-                node: params.node,
-                nodeId: params.nodeId,
-                from: params.from,
-                to: params.to,
-                relation: params.relation,
-                task: params.task,
-                urgent: params.urgent,
-                important: params.important,
-                quadrant: params.quadrant,
-                includeCompleted: params.includeCompleted,
-                taskId: params.taskId,
-                sessionRefId: params.sessionRefId,
-                label: params.label,
-                durationMinutes: params.durationMinutes,
-                aborted: params.aborted,
-                pomodoroLimit: params.pomodoroLimit,
-                autoClassify: params.autoClassify,
-              });
+              // forward every field: a hand-kept whitelist silently dropped any input added to manage_memory later
+                result = await manageMemory(params as any);
               break;
             case 'index_workspace':
               result = await indexWorkspace({
@@ -685,21 +663,14 @@ export function createExpressApp(): express.Express {
       app.post('/api/coding_agents', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
-          const { goal, workspaceRoot, dryRun, topKFiles, sessionId, verifyLspDiagnostics, resolve } = req.body || {};
-          if (!goal) {
-            res.status(400).json({ error: 'goal is required' });
+          const { normalizeCodingAgentsHttpInput } = await import('./tools/coding-agents/http-input.js');
+          const normalized = normalizeCodingAgentsHttpInput(req.body ?? {}, process.cwd());
+          if ('error' in normalized) {
+            res.status(400).json({ error: normalized.error });
             return;
           }
           const { CodingAgentsHandler } = await import('./tools/coding-agents.js');
-          const result = await CodingAgentsHandler({
-            goal,
-            workspaceRoot: workspaceRoot ?? process.cwd(),
-            dryRun: dryRun ?? true,
-            topKFiles: topKFiles ?? 5,
-            sessionId,
-            verifyLspDiagnostics: verifyLspDiagnostics ?? true,
-            resolve
-          });
+          const result = await CodingAgentsHandler(normalized.input);
           res.json(result);
         } catch (err: any) {
           res.status(500).json({ error: err?.message || String(err) });
@@ -845,7 +816,7 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const { dispatchBrowserAction } = await import('./browser/dispatch.js');
-          const result = await dispatchBrowserAction(req.body);
+          const result = await dispatchBrowserAction(req.body ?? {});
           res.status(result.success ? 200 : 502).json(result);
         } catch (err: any) {
           res.status(500).json({ error: String(err?.message || err) });
@@ -856,7 +827,7 @@ export function createExpressApp(): express.Express {
       app.post('/api/cyber_tool', express.json({ limit: '10mb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
-          const result = await cyberTool(req.body);
+          const result = await cyberTool(req.body ?? {});
           res.json(result);
         } catch (err: any) {
           res.status(500).json({ error: String(err?.message || err) });
@@ -882,7 +853,7 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const { quantumTool } = await import('./tools/quantum-tool.js');
-          const result = await quantumTool(req.body);
+          const result = await quantumTool(req.body ?? {});
           res.status(result.success ? 200 : 400).json(result);
         } catch (err: any) {
           res.status(500).json({ error: String(err?.message || err) });
@@ -913,7 +884,7 @@ export function createExpressApp(): express.Express {
             return res.json(sessionsCache.data);
           }
 
-          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectsBase = path.join(getMcpDir(), 'projects');
           try { await fsp.access(projectsBase); } catch { return res.json({ sessions: [] }); }
 
           // Denylist: strictly exclude all test/benchmark/fixture/vitest/mock directories that pollute the dashboard
@@ -1020,7 +991,7 @@ export function createExpressApp(): express.Express {
           const suffix = Math.random().toString(36).substring(2, 7);
           const sessionId = `${baseHash}-${suffix}`;
 
-          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectsBase = path.join(getMcpDir(), 'projects');
           const projectDir = path.resolve(projectsBase, sessionId);
           await fsp.mkdir(projectDir, { recursive: true });
 
@@ -1052,7 +1023,7 @@ export function createExpressApp(): express.Express {
             return res.status(400).json({ error: 'Name is required' });
           }
 
-          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectsBase = path.join(getMcpDir(), 'projects');
           const projectDir = path.resolve(projectsBase, sessionId);
           await fsp.mkdir(projectDir, { recursive: true });
           await fsp.writeFile(path.join(projectDir, 'name.txt'), name.trim(), 'utf-8');
@@ -1074,7 +1045,7 @@ export function createExpressApp(): express.Express {
             return;
           }
           // Step 2: Resolve and verify the resulting path is a direct child of projects/
-          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectsBase = path.join(getMcpDir(), 'projects');
           const projectDir = path.resolve(projectsBase, sessionId);
           if (path.dirname(projectDir) !== projectsBase) {
             res.status(400).json({ error: 'Invalid sessionId' });
@@ -1322,7 +1293,7 @@ export function createExpressApp(): express.Express {
           if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
             return res.status(400).json({ error: 'Invalid sessionId' });
           }
-          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectsBase = path.join(getMcpDir(), 'projects');
           const dirPath = path.resolve(projectsBase, sessionId);
           // Path traversal guard: must stay within projectsBase
           if (!dirPath.startsWith(path.resolve(projectsBase) + path.sep) && dirPath !== path.resolve(projectsBase, '__no_ws__')) {
@@ -1872,7 +1843,7 @@ export function createExpressApp(): express.Express {
           if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
             return res.status(400).json({ error: 'Invalid sessionId' });
           }
-          const projectsBase = path.join(os.homedir(), '.free-llm-mcp', 'projects');
+          const projectsBase = path.join(getMcpDir(), 'projects');
           const dir = path.resolve(projectsBase, sessionId);
           const logPath = path.join(dir, 'chat-logs.json');
           const legacyLogPath = path.join(dir, 'chat-log.json');
@@ -2134,8 +2105,9 @@ async function main() {
         }
         process.exit(0);
       };
-      process.on('SIGTERM', stdioShutdown);
-      process.on('SIGINT', stdioShutdown);
+      // SIGINT/SIGTERM, and the host closing stdin (how an MCP host normally ends a stdio server)
+      const { installShutdownHooks } = await import('./utils/shutdown-hooks.js');
+      installShutdownHooks(stdioShutdown);
     }
   } catch (err: any) {
     console.error(`[FATAL] Startup failed: ${err.message}`);

@@ -1,19 +1,19 @@
+import { getMcpDir } from '../src/utils/mcp-home.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
-import os from 'os';
 import fs from 'fs-extra';
 import { extractIntelligentTitle, logChatTurn } from '../src/utils/ChatLogger.js';
 
 describe('Intelligent Conversation Naming & Session Management (TDD)', () => {
   const testSessionId = 'test-session-title-123';
-  const testProjectDir = path.join(os.homedir(), '.free-llm-mcp', 'projects', testSessionId);
+  const testProjectDir = path.join(getMcpDir(), 'projects', testSessionId);
 
   beforeEach(async () => {
-    await fs.remove(testProjectDir);
+    await fs.rm(testProjectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   afterEach(async () => {
-    await fs.remove(testProjectDir);
+    await fs.rm(testProjectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   describe('extractIntelligentTitle', () => {

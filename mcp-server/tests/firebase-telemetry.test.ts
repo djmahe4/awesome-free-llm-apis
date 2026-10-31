@@ -8,6 +8,27 @@ import { encrypt, decrypt } from '../src/utils/encryption.js';
 import { initFirebase, syncStats, logErrorTelemetry, getLeaderboard, getUserStats, logSearchQuery, getRecentSearchLogs } from '../src/utils/firebase.js';
 import { PersistenceManager, PersistentUsage, persistence } from '../src/utils/PersistenceManager.js';
 
+// vi.mock is hoisted to the top of the file whatever its position, so it is written here; the users the mock
+// returns are set by the one test that needs them.
+const firestoreMock = vi.hoisted(() => ({ users: [] as any[] }));
+vi.mock('firebase/firestore', async (importOriginal) => {
+    const original: any = await importOriginal();
+    return {
+        ...original,
+        getDocs: vi.fn().mockImplementation(async () => ({ forEach: (cb: any) => firestoreMock.users.forEach(u => cb(u)) })),
+        getDoc: vi.fn().mockResolvedValue({
+            exists: () => true,
+            id: 'user-123',
+            data: () => ({ username: 'my-user', lifetimeTokens: 5 })
+        }),
+        doc: vi.fn(),
+        query: vi.fn(),
+        collection: vi.fn(),
+        orderBy: vi.fn(),
+        limit: vi.fn()
+    };
+});
+
 describe('Firebase & Telemetry Encryption Phase 0 Tests', () => {
     const testDir = path.join(os.tmpdir(), 'mcp-firebase-test-' + Date.now());
     const testFile = path.join(testDir, 'usage_stats.json');
@@ -18,7 +39,7 @@ describe('Firebase & Telemetry Encryption Phase 0 Tests', () => {
     });
 
     afterEach(async () => {
-        await fs.remove(testDir);
+        await fs.rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         vi.unstubAllEnvs();
         vi.restoreAllMocks();
     });
@@ -44,8 +65,10 @@ describe('Firebase & Telemetry Encryption Phase 0 Tests', () => {
             const original = JSON.stringify({ secret: 'my-stats' });
             const encryptedStr = await encrypt(original);
             const encryptedObj = JSON.parse(encryptedStr);
-            // Tamper the encrypted data
-            encryptedObj.data = encryptedObj.data.substring(0, encryptedObj.data.length - 2) + '00';
+            // Tamper the encrypted data: flip every bit of the last byte, so the data always changes
+            // (replacing it with a fixed value left it unchanged one run in 256)
+            const last = parseInt(encryptedObj.data.slice(-2), 16);
+            encryptedObj.data = encryptedObj.data.slice(0, -2) + (last ^ 0xff).toString(16).padStart(2, '0');
             const tamperedStr = JSON.stringify(encryptedObj);
 
             await expect(decrypt(tamperedStr)).rejects.toThrow();
@@ -230,26 +253,8 @@ describe('Firebase & Telemetry Encryption Phase 0 Tests', () => {
                 data: () => ({ username: `user-${i + 1}`, lifetimeTokens: 1000 - i * 10 })
             }));
 
-            // Spy / mock firestore calls
-            vi.mock('firebase/firestore', async (importOriginal) => {
-                const original: any = await importOriginal();
-                return {
-                    ...original,
-                    getDocs: vi.fn().mockResolvedValue({
-                        forEach: (cb: any) => mockUsers.forEach(u => cb(u))
-                    }),
-                    getDoc: vi.fn().mockResolvedValue({
-                        exists: () => true,
-                        id: 'user-123',
-                        data: () => ({ username: 'my-user', lifetimeTokens: 5 })
-                    }),
-                    doc: vi.fn(),
-                    query: vi.fn(),
-                    collection: vi.fn(),
-                    orderBy: vi.fn(),
-                    limit: vi.fn()
-                };
-            });
+            // the firestore mock is declared at the top of the file; hand it this test's users
+            firestoreMock.users = mockUsers;
 
             // We must force isOffline = false in firebase.ts to run the database logic
             // Since we mocked firestore functions, we can temporarily mock isOffline to false or set up db

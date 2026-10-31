@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { CyberToolsRegistry } from '../utils/CyberToolsRegistry.js';
 import { buildToolProfile, type ToolProfile } from '../utils/groundingEvidence.js';
 import { DockerHubClient } from '../utils/DockerHubClient.js';
@@ -46,14 +47,19 @@ const MAX_SESSIONS = 200;
 const sessions = new Map<string, SessionState>();
 
 export function resetResolveSessions(): void { sessions.clear(); }
+export function resolveSessionIds(): string[] { return [...sessions.keys()]; }
 
 function getSession(id: string): SessionState {
   const now = Date.now();
   for (const [k, v] of sessions) if (now - v.touched > SESSION_TTL_MS) sessions.delete(k);
   while (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value as string);
   let s = sessions.get(id);
-  if (!s) { s = { confirmed: {}, touched: now }; sessions.set(id, s); }
+  if (!s) s = { confirmed: {}, touched: now };
   s.touched = now;
+  // delete + set moves the session to the end of the Map, so the eviction above (oldest first) is really
+  // least-recently-used; touching it used to leave it in place, which made this a FIFO
+  sessions.delete(id);
+  sessions.set(id, s);
   return s;
 }
 
@@ -128,8 +134,25 @@ async function groundApt(profile: ToolProfile, d: ResolveDeps): Promise<SourceOu
 const ground = (src: SourceName, p: ToolProfile, intent: Intent, d: ResolveDeps) =>
   src === 'github' ? groundGithub(p, intent, d) : src === 'docker' ? groundDocker(p, d) : groundApt(p, d);
 
+/**
+ * A caller without a sessionId gets a private one: sharing a single default state meant one caller's pending
+ * question was answered by another. It is kept only when a follow-up is needed, and then handed back so the
+ * caller can continue; an explicit sessionId behaves as before.
+ */
 export async function resolveTool(input: ResolveToolInput, deps: ResolveDeps = defaultDeps()): Promise<Record<string, unknown>> {
-  const state = getSession(input.sessionId || 'resolve_tool_session');
+  const explicit = Boolean(input.sessionId);
+  const id = input.sessionId || `resolve_${crypto.randomUUID().slice(0, 12)}`;
+  const result = await resolveToolInner({ ...input, sessionId: id }, deps);
+  if (!explicit) {
+    if (result.status === 'question') return { ...result, sessionId: id, note: 'Pass this sessionId with your answer (choice) to continue.' };
+    sessions.delete(id);
+    return { ...result, sessionId: id };
+  }
+  return result.status === 'question' ? { ...result, sessionId: id } : result;
+}
+
+async function resolveToolInner(input: ResolveToolInput, deps: ResolveDeps): Promise<Record<string, unknown>> {
+  const state = getSession(input.sessionId as string);
   const registryRaw = await deps.loadRegistry();
   const registry: Record<string, { url: string }> = {};
   for (const [name, e] of Object.entries(registryRaw)) if (!CyberToolsRegistry.isTestDebris(name, e.url)) registry[name] = e;

@@ -1,3 +1,4 @@
+import { getMcpDir } from './mcp-home.js';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'fs-extra';
@@ -12,7 +13,7 @@ import fs from 'fs-extra';
  */
 export function resolveConfigDir(startDir: string): string {
   if (!startDir) {
-    return path.join(os.homedir(), '.free-llm-mcp');
+    return getMcpDir();
   }
 
   const normStart = path.resolve(startDir);

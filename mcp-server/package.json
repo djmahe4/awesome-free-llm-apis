@@ -1,6 +1,6 @@
 {
   "name": "free-llm-mcp-server",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "type": "module",
   "description": "MCP server for free LLM APIs",
   "bin": {
@@ -18,6 +18,7 @@
     "smoke-test": "tsx --env-file=.env scripts/verification/smoke-test.ts",
     "smoke-test:searxng": "tsx --env-file=.env scripts/verification/searxng-smoke-test.ts",
     "smoke-test:vision": "tsx --env-file=.env scripts/verification/vision-smoke-test.ts",
+    "eval:grounding": "tsx scripts/smoke/ca_eval.ts",
     "smoke:suite": "tsx --env-file=.env scripts/smoke/run-smoke-suite.ts",
     "samples": "tsx --env-file=.env benchmarks/generate-live-samples.ts",
     "dashboard": "tsx --env-file=.env src/server.ts --sse",
@@ -33,16 +34,16 @@
     "@huggingface/transformers": "^4.3.1",
     "@modelcontextprotocol/sdk": "^1.24.3",
     "@noble/post-quantum": "^0.7.1",
-    "@types/multer": "^2.2.0",
+    "@types/multer": "^2.3.0",
     "cohere-ai": "^7.21.0",
     "cors": "^2.8.6",
-    "express": "^4.21.2",
+    "express": "^5.3.0",
     "firebase": "^12.14.0",
     "fs-extra": "^11.3.4",
-    "helmet": "^8.1.0",
+    "helmet": "^8.3.0",
     "ignore": "^7.0.5",
     "js-tiktoken": "^1.0.21",
-    "lru-cache": "^11.0.0",
+    "lru-cache": "^11.5.3",
     "multer": "^2.2.0",
     "node-fetch": "^3.3.2",
     "node-localstorage": "^3.0.5",
@@ -51,9 +52,12 @@
     "remark-parse": "^11.0.0",
     "ts-morph": "^28.0.0",
     "unist-util-visit": "^5.1.0",
-    "vectra": "^0.12.3",
+    "vectra": "^0.15.0",
     "yaml": "^2.8.3",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
+  },
+  "engines": {
+    "node": ">=22.12"
   },
   "overrides": {
     "ip-address": "^10.2.0",
@@ -62,20 +66,22 @@
     "fast-uri": "^3.1.6",
     "qs": "^6.16.0",
     "yaml": "^2.8.3",
-    "@grpc/grpc-js": "^1.14.6"
+    "@grpc/grpc-js": "^1.14.6",
+    "minimatch": "^11.0.1"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.45.3",
-    "@emnapi/core": "1.9.1",
-    "@emnapi/runtime": "1.9.1",
+    "@emnapi/core": "1.11.3",
+    "@emnapi/runtime": "1.11.3",
     "@types/cors": "^2.8.19",
-    "@types/express": "^4.17.21",
+    "@types/express": "^5.0.6",
     "@types/fs-extra": "^11.0.4",
-    "@types/node": "^20.12.0",
-    "@vitest/coverage-v8": "^4.1.2",
-    "tsx": "^4.19.0",
+    "@types/node": "^22.20.5",
+    "@vitest/coverage-v8": "^5.0.5",
+    "tsx": "^4.23.15",
     "typescript": "^5.4.5",
-    "vitest": "^4.1.2"
+    "vite": "^7.3.7",
+    "vitest": "^5.0.5"
   },
   "optionalDependencies": {
     "playwright": "^1.60.0"
