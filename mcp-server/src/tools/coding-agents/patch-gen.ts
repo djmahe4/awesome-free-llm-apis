@@ -458,6 +458,11 @@ export function isAdditiveInstruction(instruction: string): boolean {
   return ADD_WORDS.test(instruction) && !CHANGE_WORDS.test(instruction);
 }
 
+/** True when the instruction says the new code goes at the end of the file, so an empty SEARCH may append. */
+export function isEndOfFileInstruction(instruction: string): boolean {
+  return /\b(?:at the (?:very )?end of|to the end of|append(?:ed|s)?)\b/i.test(instruction);
+}
+
 /**
  * The matcher tolerates indentation differences, so a block the model copied 4 spaces too deep still
  * matches; without this its REPLACE would land 4 spaces too deep too. Shift REPLACE by the same delta,
@@ -482,7 +487,13 @@ export function reindentReplace(searchLines: string[], fileLines: string[], repl
   return replaceLines.map(l => (l.trim() ? l.slice(cut) : l));
 }
 
-export function applySearchReplaceBlocks(
+/** A comment-only SEARCH that is not in the file is a placeholder for "nothing to match": the model means append. */
+function isPlaceholderSearch(search: string, workingLines: string[]): boolean {
+  const lines = search.split(/\r?\n/).filter(l => l.trim() !== '');
+  if (lines.length === 0) return false;
+  if (!lines.every(l => /^\s*(?:\/\/|#|\/\*|\*)/.test(l))) return false;
+  return findLineBlockMatch(workingLines, search.split(/\r?\n/)).index === -1;
+}export function applySearchReplaceBlocks(
   content: string,
   blocks: SearchReplaceBlock[],
   options: ApplyOptions = {}
@@ -498,7 +509,7 @@ export function applySearchReplaceBlocks(
   const failures: string[] = [];
 
   for (const { search, replace } of blocks) {
-    if (!search || workingLines.every(l => l.trim() === '')) {
+    if (!search || workingLines.every(l => l.trim() === '') || (options.allowAppend && isPlaceholderSearch(search, workingLines))) {
       if (options.allowAppend || content.trim() === '') {
         // New or empty file, or an explicit append: the text goes at the end.
         const addition = replace.split(/\r?\n/);
@@ -720,7 +731,7 @@ export async function generateSearchReplacePatch(
     return { content: currentContent, appliedCount: 0, failures: [], hardFailure: 'No SEARCH/REPLACE blocks found in response' };
   }
 
-  const { content, appliedCount, failures } = applySearchReplaceBlocks(currentContent, blocks, { additive: isAdditiveInstruction(instruction) });
+  const { content, appliedCount, failures } = applySearchReplaceBlocks(currentContent, blocks, { additive: isAdditiveInstruction(instruction), allowAppend: isEndOfFileInstruction(instruction) });
   if (incomplete > 0) failures.push(`${incomplete} block(s) were cut off before the REPLACE marker and were not applied`);
   return { content, appliedCount, failures };
 }

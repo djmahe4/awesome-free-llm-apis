@@ -282,8 +282,10 @@ describe('Pipeline Orchestration', () => {
 
         // Should have THOUGHTS
         expect(msg.content).toContain('THOUGHTS: Thinking about the bracket fix');
-        // Should have the cleaned result (no newline before '{')
-        expect(msg.content).toMatch(/bracket fix\{/);
+        // The leading and trailing newlines of the JSON reply are cleaned. The thoughts stay a separate paragraph:
+        // the squeeze only applies to a reply that is entirely JSON, so it no longer glues them to the answer (#124).
+        expect(msg.content).toMatch(/bracket fix\n{2,}\{/);
+        expect(msg.content.endsWith('}')).toBe(true);
         expect(msg.content).toContain('"result": "ok"');
         // Original thinking field should be deleted
         expect(msg.thinking).toBeUndefined();

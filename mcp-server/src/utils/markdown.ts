@@ -19,3 +19,16 @@ export function toMarkdownResponse(raw: string): string {
 
   return text;
 }
+export function squeezeJsonReply(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) return '';
+
+  try {
+    JSON.parse(trimmed);
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      return trimmed.replace(/\n+(?=[{\[])/g, '').replace(/([}\]])\n+/g, '$1');
+    }
+  } catch {}
+
+  return trimmed;
+}

@@ -6,6 +6,7 @@ import { getMessageContent, prependToMessageContent, appendToMessageContent, isU
 import { TaskClassifier } from '../../utils/TaskClassifier.js';
 import { calculateModelWeightedMaxTokens } from '../../utils/model-tokens.js';
 import { ProviderRegistry } from '../../providers/registry.js';
+import { squeezeJsonReply } from '../../utils/markdown.js';
 import { ChatResponse, Message } from '../../providers/types.js';
 import {
     getModelCapability,
@@ -871,17 +872,11 @@ export class TextRouterMiddleware implements Middleware {
                     }
 
                     if (typeof msg.content === 'string') {
-                        msg.content = msg.content
-                            .replace(/\n+(?=[{\[])/g, '')
-                            .replace(/([}\]])\n+/g, '$1')
-                            .trim();
+                        msg.content = squeezeJsonReply(msg.content);
                     } else if (Array.isArray(msg.content)) {
                         msg.content.forEach((p: any) => {
                             if (p.text) {
-                                p.text = p.text
-                                    .replace(/\n+(?=[{\[])/g, '')
-                                    .replace(/([}\]])\n+/g, '$1')
-                                    .trim();
+                                p.text = squeezeJsonReply(p.text);
                             }
                         });
                     }
@@ -917,10 +912,7 @@ export class TextRouterMiddleware implements Middleware {
                                 delete msg.reasoning;
                             }
                             if (typeof msg.content === 'string') {
-                                msg.content = msg.content
-                                    .replace(/\n+(?=[{\[])/g, '')
-                                    .replace(/([}\]])\n+/g, '$1')
-                                    .trim();
+                                msg.content = squeezeJsonReply(msg.content);
                             }
                         }
                         context.response = res ?? undefined;
