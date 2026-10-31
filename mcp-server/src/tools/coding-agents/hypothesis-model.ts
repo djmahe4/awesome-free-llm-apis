@@ -52,16 +52,29 @@ export function modelProposer(workspaceRoot: string, sessionId: string, llm?: Ll
   };
 }
 
+/** "goal.goal.goal." -> "goal." (a live model repeated its answer five times on one line). */
+export function collapseRepeats(text: string): string {
+  const t = text.trim();
+  for (let k = 10; k >= 2; k--) {
+    if (t.length % k !== 0) continue;
+    const unit = t.slice(0, t.length / k);
+    if (unit.repeat(k) === t) return unit.trim();
+  }
+  return t;
+}
+
 export function modelReviser(workspaceRoot: string, sessionId: string, llm?: Llm): Reviser {
-  return async ({ goal, refuted }) => {
+  return async ({ goal, refuted, similar }) => {
     const call = llm ?? await defaultLlm();
     const prompt = [
       'The workspace contradicts these assumptions in the goal below. Rewrite the goal so it matches what the workspace actually contains.',
-      'Change only what the evidence requires. Return ONLY the corrected goal text, no commentary.',
+      'Change only what the evidence requires. Where a name does not exist, use one of the similar names that do exist if it fits, otherwise describe the target by its file.',
+      'Return ONLY the corrected goal as a single line, with no explanation. Do not mention the names that do not exist.',
       '## Refuted assumptions',
       refuted.map(h => `- ${h.claim}: ${h.evidence}`).join('\n'),
+      Object.keys(similar ?? {}).length ? '## Similar names that do exist\n' + Object.entries(similar).map(([n, s]) => `- ${n}: ${s.join(', ')}`).join('\n') : '',
       `## Goal\n${goal}`,
-    ].join('\n\n');
+    ].filter(Boolean).join('\n\n');
     const res = await call({
       messages: [
         { role: 'system', content: 'You correct a coding goal using evidence from the workspace. Output the corrected goal only.' },
@@ -69,6 +82,9 @@ export function modelReviser(workspaceRoot: string, sessionId: string, llm?: Llm
       ],
       taskType: 'reasoning', workspace_root: workspaceRoot, sessionId, isOnePass: true, skipIndexing: true,
     });
-    return textOf(res).trim().replace(/^```[a-z]*\s*|\s*```$/g, '').trim();
+    // a goal is one line: anything after the first line is commentary
+    const first = textOf(res).replace(/```[a-z]*/g, '').split(/\r?\n/).map(l => l.trim()).find(Boolean) ?? '';
+    // a corrected goal is about as long as the goal it corrects; much longer means the model kept talking
+    return collapseRepeats(first.replace(/^["']|["']$/g, '')).slice(0, Math.max(200, goal.length * 3));
   };
 }
