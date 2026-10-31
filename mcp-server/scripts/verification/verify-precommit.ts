@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { extractServerActions, extractPlaygroundActions, extractQuickstartActionRows, findActionDrift } from './action-sync.js';
+import { findUndocumentedKeys, findNewDocGaps, findClosedDocGaps, type DocGaps } from './doc-sync.js';
 import { computeGaps, findNewGaps, findClosedGaps, type Gaps } from './param-gaps.js';
 import { findTempHygieneProblems, findRetrylessRemovals } from './test-hygiene.js';
 import { handlerForTool, findHandlerSource, handlerInputType, findTypeSource, interfaceFields, findInputDrift, branchArgReads, browserParamDrift } from './input-sync.js';
@@ -560,6 +561,33 @@ async function main() {
     } else {
       console.warn(`⚠ Notice: npm audit check skipped (network offline or endpoint unreachable).`);
     }
+  }
+
+  // 6b. Reference docs must mention every key of the result and settings types they describe (ratchet: existing
+  // gaps are in doc-gaps.baseline.json and can only shrink; UPDATE_DOC_BASELINE=1 regenerates it).
+  {
+    const checks = [
+      { type: 'CodingAgentsResult', src: 'src/tools/coding-agents/types.ts', doc: 'docs/skill/references/coding_agents.md' },
+      { type: 'CodingAgentsSettings', src: 'src/tools/coding-agents/settings.ts', doc: 'docs/skill/references/coding_agents.md' },
+    ];
+    const current: DocGaps = {};
+    for (const c of checks) {
+      current[c.type] = findUndocumentedKeys(fs.readFileSync(path.join(mcpDir, c.src), 'utf-8'), c.type, fs.readFileSync(path.join(mcpDir, c.doc), 'utf-8'));
+    }
+    const docBaselinePath = path.join(__dirname, 'doc-gaps.baseline.json');
+    if (process.env.UPDATE_DOC_BASELINE === '1') {
+      fs.writeFileSync(docBaselinePath, JSON.stringify(current, null, 2) + String.fromCharCode(10), 'utf-8');
+      console.log(`✓ Wrote ${path.relative(mcpDir, docBaselinePath)}`);
+    }
+    const docBaseline: DocGaps = fs.existsSync(docBaselinePath) ? JSON.parse(fs.readFileSync(docBaselinePath, 'utf-8')) : {};
+    const undocumented = findNewDocGaps(current, docBaseline);
+    if (undocumented.length > 0) {
+      for (const u of undocumented) console.error(`✗ Undocumented ${u}`);
+      console.error('  Describe the new field in the reference doc named in verify-precommit.ts (docs/skill/references/), or run with UPDATE_DOC_BASELINE=1 to record it as a known gap.');
+      process.exit(1);
+    }
+    for (const c of findClosedDocGaps(current, docBaseline)) console.warn(`ℹ Documented now, regenerate the baseline (UPDATE_DOC_BASELINE=1): ${c}`);
+    console.log('✓ New result and settings fields are described in the coding_agents reference.');
   }
 
   // 7. Test hygiene: temp files a test creates must be removed again
