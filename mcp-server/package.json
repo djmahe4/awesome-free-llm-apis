@@ -51,7 +51,7 @@
     "remark": "^15.0.1",
     "remark-parse": "^11.0.0",
     "ts-morph": "^28.0.0",
-    "unist-util-visit": "^5.1.0",
+    "unist-util-visit": "^5.2.0",
     "vectra": "^0.15.0",
     "yaml": "^2.8.3",
     "zod": "^4.6.7"
