@@ -53,6 +53,7 @@ interface CacheEntry {
 
 import os from 'os';
 import { anyChangedSince, filesCitedIn } from '../../memory/evidence.js';
+import { rerankEnabled, rerankFiles } from './rerank.js';
 
 const contextCache = new LRUCache<string, CacheEntry>({
     max: 500,
@@ -385,12 +386,15 @@ export class ContextGatherer {
                     return 3; // Docs and others
                 };
 
-                sortedFiles = Array.from(grouped.keys()).sort((a, b) => {
-                    const prioA = getPriority(a);
-                    const prioB = getPriority(b);
-                    if (prioA !== prioB) return prioA - prioB;
-                    return a.localeCompare(b); // Fallback to alphabetical
-                });
+                sortedFiles = rerankEnabled()
+                    // specific matches first: a file holding the goal's rare terms beats files sharing only its common words
+                    ? rerankFiles(Array.from(grouped, ([file, lines]) => ({ file, lines })), finalTerms, getPriority)
+                    : Array.from(grouped.keys()).sort((a, b) => {
+                        const prioA = getPriority(a);
+                        const prioB = getPriority(b);
+                        if (prioA !== prioB) return prioA - prioB;
+                        return a.localeCompare(b); // Fallback to alphabetical
+                    });
                 // `limit` is meant to bound the OUTPUT (how many files' snippets a
                 // caller wants injected into a prompt), not just how many candidate
                 // files get ranked — candidateLimit (limit*3, at least 25) is a
