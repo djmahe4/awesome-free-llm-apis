@@ -43,6 +43,8 @@ console.log('dropped:', dropped.map(d => `${d.evidence.path} (${d.reason})`));
 
 const droppedPaths = Object.fromEntries(dropped.map(d => [d.evidence.path, d.reason]));
 const pass = droppedPaths['src/currency.ts'] === 'stale' && droppedPaths['src/legacy.ts'] === 'missing' && !kept.some(k => k.path === 'src/currency.ts' || k.path === 'src/legacy.ts');
+console.log(droppedPaths['src/currency.ts'] === 'stale' ? 'ok   edited file dropped as stale' : 'FAIL edited file kept');
+console.log(droppedPaths['src/legacy.ts'] === 'missing' ? 'ok   deleted file dropped as missing' : 'FAIL deleted file kept');
 console.log(pass ? 'PASS: stale and missing evidence kept out of the prompt' : 'FAIL: stale evidence would have reached the prompt');
 
 await fs.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

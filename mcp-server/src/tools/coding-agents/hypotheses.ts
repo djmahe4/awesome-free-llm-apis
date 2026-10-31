@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { validateVerifyCommand, runVerifyCommand } from './verify-command.js';
 
 /**
  * Hypotheses: the assumptions a plan rests on, each with a mechanical probe against the real files.
@@ -27,9 +28,12 @@ export type Probe =
   | { kind: 'symbol'; name: string; path: string }
   | { kind: 'arity'; name: string; path: string; expected: number }
   | { kind: 'grep'; pattern: string; path: string }
-  | { kind: 'cite'; path: string; from: number; to: number; hash: string };
+  | { kind: 'cite'; path: string; from: number; to: number; hash: string }
+  | { kind: 'cmd'; expected: number; command: string }
+  | { kind: 'test'; command: string };
 
-export interface ProbeResult { status: 'confirmed' | 'refuted'; evidence: string }
+/** open: the probe was not run (command probes are switched off), so it says nothing either way. */
+export interface ProbeResult { status: 'confirmed' | 'refuted' | 'open'; evidence: string }
 
 const IDENT = /^[A-Za-z_$][\w$]*$/;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -69,6 +73,13 @@ export function parseProbe(text: string): Probe | null {
     const m = rest.match(/^(.+):L(\d+)-L(\d+)#([0-9a-f]{4,64})$/);
     return m ? { kind: 'cite', path: m[1], from: Number(m[2]), to: Number(m[3]), hash: m[4] } : null;
   }
+
+  if (kind === 'cmd') {
+    const m = rest.match(/^(\d{1,3})@(.+)$/);
+    return m && m[2].trim() ? { kind: 'cmd', expected: Number(m[1]), command: m[2].trim() } : null;
+  }
+
+  if (kind === 'test') return { kind: 'test', command: rest.trim() };
 
   return null;
 }
@@ -205,11 +216,30 @@ const clip = (s: string) => (s.length > 120 ? `${s.slice(0, 117)}...` : s);
 export interface ProbeContext {
   /** Workspace-relative code files a `defined:` probe may search. */
   files?: string[];
+  /** Lets cmd: and test: probes run an allowlisted command. Off unless the caller says so; see hypothesisExec in settings. */
+  allowExec?: boolean;
 }
 
 export async function runProbe(probeText: string, workspaceRoot: string, ctx: ProbeContext = {}): Promise<ProbeResult> {
   const probe = parseProbe(probeText);
   if (!probe) return { status: 'refuted', evidence: `unrecognised probe "${clip(String(probeText))}" (use file:, defined:, symbol:, arity:, grep: or cite:)` };
+
+  if (probe.kind === 'cmd' || probe.kind === 'test') {
+    if (!ctx.allowExec) return { status: 'open', evidence: 'command probes are switched off here (hypothesisExec in .free-llm-mcp/coding-agents.json), so the command was not run' };
+    const v = validateVerifyCommand(probe.command);
+    if (!v.ok) return { status: 'refuted', evidence: `command not allowed: ${v.reason}` };
+    const run = await runVerifyCommand(probe.command, workspaceRoot);
+    if (run.timedOut) return { status: 'refuted', evidence: `${clip(probe.command)} timed out` };
+    const tail = clip(run.outputTail.trim().split(/\r?\n/).filter(Boolean).slice(-2).join(' | '));
+    if (probe.kind === 'cmd') {
+      return run.exitCode === probe.expected
+        ? { status: 'confirmed', evidence: `${clip(probe.command)} exited ${run.exitCode}` }
+        : { status: 'refuted', evidence: `${clip(probe.command)} exited ${run.exitCode}, not ${probe.expected}${tail ? ': ' + tail : ''}` };
+    }
+    return run.exitCode === 0
+      ? { status: 'confirmed', evidence: `${clip(probe.command)} passed` }
+      : { status: 'refuted', evidence: `${clip(probe.command)} failed (exit ${run.exitCode})${tail ? ': ' + tail : ''}` };
+  }
 
   if (probe.kind === 'file') {
     const r = await readText(workspaceRoot, probe.path);

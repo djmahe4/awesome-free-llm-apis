@@ -44,8 +44,10 @@ describe('Firebase & Telemetry Encryption Phase 0 Tests', () => {
             const original = JSON.stringify({ secret: 'my-stats' });
             const encryptedStr = await encrypt(original);
             const encryptedObj = JSON.parse(encryptedStr);
-            // Tamper the encrypted data
-            encryptedObj.data = encryptedObj.data.substring(0, encryptedObj.data.length - 2) + '00';
+            // Tamper the encrypted data: flip every bit of the last byte, so the data always changes
+            // (replacing it with a fixed value left it unchanged one run in 256)
+            const last = parseInt(encryptedObj.data.slice(-2), 16);
+            encryptedObj.data = encryptedObj.data.slice(0, -2) + (last ^ 0xff).toString(16).padStart(2, '0');
             const tamperedStr = JSON.stringify(encryptedObj);
 
             await expect(decrypt(tamperedStr)).rejects.toThrow();

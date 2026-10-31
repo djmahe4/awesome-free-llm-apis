@@ -65,3 +65,5 @@ mcp-server/models/
 *.onnx
 *.bin
 mcp-server/projects/
+mcp-server/scripts/smoke/results/latest.json
+mcp-server/scripts/smoke/results/history.jsonl
