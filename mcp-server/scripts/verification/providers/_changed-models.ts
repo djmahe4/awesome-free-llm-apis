@@ -161,6 +161,29 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
   },
   // gonka-broker: new upstream provider (2026-10-23) - MiniMaxAI/MiniMax-M2.7, deepseek-ai/DeepSeek-V4-Flash-0731,
   // zai-org/GLM-5.3-Flash, BAAI/bge-m3 (embeddings); no local provider adapter yet.
+  gonka: {
+    added: [
+      'zai-org/GLM-5.3-Flash',
+      'MiniMaxAI/MiniMax-M2.7',
+      'deepseek-ai/DeepSeek-V4-Flash-0731',
+    ],
+    removed: [],
+  },
+  ovhcloud: {
+    added: [
+      'Qwen3.5-397B-A17B',
+      'gpt-oss-120b',
+      'gpt-oss-20b',
+      'Meta-Llama-3_3-70B-Instruct',
+      'Qwen3.8-27B',
+      'Qwen3.6-27B',
+      'Qwen3.5-9B',
+      'Qwen2.5-VL-72B-Instruct',
+      'Mistral-Small-3.2-24B-Instruct-2506',
+      'Mistral-Nemo-Instruct-2407',
+    ],
+    removed: [],
+  },
   zhipu: {
     added: [],
     removed: [],

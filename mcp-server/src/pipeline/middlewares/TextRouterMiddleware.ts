@@ -53,6 +53,12 @@ export class TextRouterMiddleware implements Middleware {
     public static readonly taskRouteMap: Record<TaskType, string[]> = {
         [TaskType.Reasoning]: [
             'deepseek-ai/DeepSeek-R1',
+            'Qwen3.5-397B-A17B',
+            'zai-org/GLM-5.3-Flash',
+            'MiniMaxAI/MiniMax-M2.7',
+            'deepseek-ai/DeepSeek-V4-Flash-0731',
+            'gpt-oss-120b',
+            'gpt-oss-20b',
             'liquid/lfm2.5-1.2b-thinking:free',
             'microsoft/phi-4',
             'command-a-plus-05-2026',
@@ -109,6 +115,10 @@ export class TextRouterMiddleware implements Middleware {
             '@cf/qwen/qwen3.8-27b',
         ],
         [TaskType.Coding]: [
+            'Qwen3.5-397B-A17B',
+            'Qwen3.8-27B',
+            'zai-org/GLM-5.3-Flash',
+            'gpt-oss-120b',
             'qwen/qwen3-coder-480b-a35b:free',
             'qwen/qwen3.8-flash',
             'poolside/laguna-s-2.1',
@@ -170,6 +180,8 @@ export class TextRouterMiddleware implements Middleware {
         ],
         [TaskType.Vision]: Object.keys(MODEL_METADATA).filter(m => isVisionSupported(m)),
         [TaskType.Classification]: [
+            'Meta-Llama-3_3-70B-Instruct',
+            'Mistral-Nemo-Instruct-2407',
             'google/gemma-4-31b-it:free',
             'google/gemma-4-31B-it',
             'google/gemma-3-27b-it',
@@ -196,6 +208,8 @@ export class TextRouterMiddleware implements Middleware {
             'community/AkshayCoder48/stepfun-step-3.7-flash-free',
         ],
         [TaskType.UserIntent]: [
+            'Meta-Llama-3_3-70B-Instruct',
+            'Mistral-Nemo-Instruct-2407',
             'google/gemma-4-31b-it:free',
             'google/gemma-4-31b-it',
             'google/gemma-4-31B-it',
@@ -312,13 +326,26 @@ export class TextRouterMiddleware implements Middleware {
             'zai-org/GLM-4.7-Flash',
         ],
         [TaskType.Cyber]: [
+            'medismera/Qwen3.8-27B-OBLITERATED-Mythos-Class-Agentic',
+            'Meta-Llama-3_3-70B-Instruct',
+            'Mistral-Nemo-Instruct-2407',
             'deepseek-ai/DeepSeek-R1',
+            'Qwen3.5-397B-A17B',
+            'zai-org/GLM-5.3-Flash',
+            'MiniMaxAI/MiniMax-M2.7',
+            'deepseek-ai/DeepSeek-V4-Flash-0731',
+            'gpt-oss-120b',
+            'gpt-oss-20b',
             'deepseek-ai/DeepSeek-V4-Pro',
             'nvidia/nemotron-3.5-lightning-30b-a3b',
             'nvidia/nemotron-3.5-lightning:free',
             'nvidia/nemotron-3.5-super-vl-120b-a12b',
             'stepfun-ai/step-5-preview',
             'empero-ai/Qwythos-9B-Claude-Mythos-5-1M',
+            'Qwen3.5-397B-A17B',
+            'Qwen3.8-27B',
+            'zai-org/GLM-5.3-Flash',
+            'gpt-oss-120b',
             'qwen/qwen3-coder-480b-a35b:free',
             'dots-studio/dots-3-note-preview:free',
             'moonshotai/kimi-k3',
@@ -330,10 +357,18 @@ export class TextRouterMiddleware implements Middleware {
             '@cf/openai/gpt-oss-120b',
         ],
         [TaskType.Chat]: [
+            'Meta-Llama-3_3-70B-Instruct',
+            'Mistral-Nemo-Instruct-2407',
             'qwen/qwen3.8-flash',
             'meta/llama-4-scout',
             'mistralai/mistral-small-3.2',
             'deepseek-ai/DeepSeek-R1',
+            'Qwen3.5-397B-A17B',
+            'zai-org/GLM-5.3-Flash',
+            'MiniMaxAI/MiniMax-M2.7',
+            'deepseek-ai/DeepSeek-V4-Flash-0731',
+            'gpt-oss-120b',
+            'gpt-oss-20b',
             'deepseek-ai/DeepSeek-V3',
             'nvidia/nemotron-3.5-lightning-30b-a3b',
             'nvidia/nemotron-3.5-lightning:free',
@@ -428,6 +463,12 @@ export class TextRouterMiddleware implements Middleware {
             'gemini-3.1-flash-lite',
             'openai/gpt-oss-120b',
             'deepseek-ai/DeepSeek-R1',
+            'Qwen3.5-397B-A17B',
+            'zai-org/GLM-5.3-Flash',
+            'MiniMaxAI/MiniMax-M2.7',
+            'deepseek-ai/DeepSeek-V4-Flash-0731',
+            'gpt-oss-120b',
+            'gpt-oss-20b',
         ],
         [TaskType.Roleplaying]: [
             'aion-labs/aion-3.5',
@@ -569,6 +610,20 @@ export class TextRouterMiddleware implements Middleware {
         // Strict isolation: roleplaying models are dedicated for movie_tool / Roleplaying task only
         if (taskType !== TaskType.Roleplaying) {
             finalTierModels = finalTierModels.filter(m => !isRoleplayingModel(m));
+        }
+
+        const requestedProvider = (context.request as any).provider;
+        if (requestedProvider) {
+            const targetProv = availableProviders.find(p => p.id === requestedProvider);
+            if (targetProv) {
+                const provModelIds = targetProv.models.map(m => m.id);
+                if ((context.request as any).fallback === false) {
+                    finalTierModels = provModelIds;
+                } else {
+                    finalTierModels = [...new Set([...provModelIds, ...finalTierModels])];
+                }
+                console.debug(`[Router] Prioritizing requested provider [${requestedProvider}] models: ${provModelIds.join(', ')}`);
+            }
         }
 
         if (context.request.google_search) {

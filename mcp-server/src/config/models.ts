@@ -215,6 +215,25 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'hexgrad/kokoro-82m': { capability: 0.90, contextWindow: 32000, isAudio: true },
     'qwen/qwen3-tts-flash': { capability: 0.88, contextWindow: 32000, isAudio: true },
     'alibaba/wan-2.2-fast': { capability: 0.88, contextWindow: 32000, isVideo: true },
+
+    // Gonka Broker Models (Decentralized Network Gateway)
+    'zai-org/GLM-5.3-Flash': { capability: 0.93, contextWindow: 400000, isReasoning: true },
+    'MiniMaxAI/MiniMax-M2.7': { capability: 0.92, contextWindow: 200000, isReasoning: true },
+    'deepseek-ai/DeepSeek-V4-Flash-0731': { capability: 0.92, contextWindow: 400000, isReasoning: true },
+
+    // OVHcloud AI Endpoints (EU Sovereign Anonymous 2 RPM & Authenticated Tier)
+    'Qwen3.5-397B-A17B': { capability: 0.96, contextWindow: 262144, isVision: true, isReasoning: true, isCoder: true },
+    'gpt-oss-120b': { capability: 0.94, contextWindow: 131072, isReasoning: true },
+    'gpt-oss-20b': { capability: 0.78, contextWindow: 131072, isReasoning: true },
+    'Meta-Llama-3_3-70B-Instruct': { capability: 0.88, contextWindow: 131072 },
+    'Qwen3.8-27B': { capability: 0.90, contextWindow: 262144, isVision: true, isCoder: true },
+    'Qwen3.6-27B': { capability: 0.88, contextWindow: 262144, isVision: true },
+    'Qwen3.5-9B': { capability: 0.80, contextWindow: 262144, isVision: true },
+    'Qwen2.5-VL-72B-Instruct': { capability: 0.90, contextWindow: 32768, isVision: true },
+    'Mistral-Small-3.2-24B-Instruct-2506': { capability: 0.84, contextWindow: 128000, isVision: true },
+    'Mistral-Nemo-Instruct-2407': { capability: 0.80, contextWindow: 118000 },
+    'bge-m3': { capability: 0.85, contextWindow: 8192 },
+    'Qwen3-Embedding-8B': { capability: 0.86, contextWindow: 32768 },
 };
 
 /**

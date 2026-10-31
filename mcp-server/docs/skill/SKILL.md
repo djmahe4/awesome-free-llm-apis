@@ -361,6 +361,8 @@ preferred persona: coder
 > kilocode     (8 models)
 > cloudflare   (4 models)
 > huggingface  (4 models)
+> gonka        (3 models)
+> ovhcloud     (3 models)
 > modelscope   (3 models)
 > siliconflow  (1 model)
 > cohere       (1 model)
