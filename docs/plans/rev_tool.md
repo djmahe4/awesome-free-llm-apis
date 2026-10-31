@@ -108,7 +108,11 @@ Turns one image into N frames (24-120) along a camera path (pan, dolly, zoom, sm
 
 Camera schema (backend-agnostic, kept from v1): azimuth, elevation, distance, fov, pan, roll, plus a duration and frame count. Output is labelled "pseudo-3D parallax". Depth Anything V2 Base and Large (CC-BY-NC) are never downloaded by default.
 
-Opt-in only, never default: AnyAngle / Qwen-Image-2.1 (needs a GPU above 6 GB, Qwen Research License, bleeding-edge diffusers). Refused: video-diffusion models, Flash3D, Splatter Image, MINE, Marigold, Stable Virtual Camera.
+Opt-in only, never default: AnyAngle / Qwen-Image-2.1 (needs a GPU above 6 GB( we can use quantized versions like `abenzerps/Qwen-Image-2.1-Uncensored-Quantized` loaded locally ollama via hf or other smaller models on permission from user, suggestion via llmfit ), Qwen Research License, bleeding-edge diffusers). Refused: video-diffusion models, Flash3D, Splatter Image, MINE, Marigold, Stable Virtual Camera.
+
+## 5.3 Ai presenter workflow validation
+
+ref: execute_skill and 'lanshu-create-ai-presenter-video' skill load as plugin and run with the `movie_tool` extensions. The skill is not bundled; it is a reference for the user to validate the workflow. The skill's README and Quickstart are updated to show the new `movie_tool` actions.
 
 ## 6. Test strategy (TDD, red first)
 
@@ -133,6 +137,8 @@ All branches are cut from `v1.1.2`, merged back when green, one concern each.
 | 6 | `feat/movie-stems` | `separate_stems`, `smooth_stems`, cache, subprocess hardening |
 | 7 | `feat/movie-animate-still` | `animate_still` (depth, mask, layers, warp, interpolation, ffmpeg) |
 | 8 | `feat/reverse-native-providers` | `analyze_binary` / `analyze_website` once phases 1-3 are stable |
+| 9 | `feat/harness-and-agent-validation` | agent harness tool run capability validation and ai agents integration support reterospection to follow up the agent thoughts properly without computational overhead[eg, passing thoughts during subtask keyword trigger or plan artifact review+coding agents setup(not execution, rather tasks.md allignment) via the coding_agents, antigravity one already added] (claude,antigravity,opencode etc). Coding agents with a collapsible dag memory would be a good option for this setup. |
+| 10 | `feat/validate-subtool-schema` | in the frontend dashboard the subtools have different schema requirements based on which the other inputs could be hidden, which needs to be handled in the UI. Also tools and subtool workflows should be properly docuumented in the 'mcp-server/docs' outside of the 'skills/' |
 
 Each phase updates `src/mcp/index.ts`, the dashboard playground and Quickstart, and `docs/skill/references/`, because the pre-commit check now fails when an action is missing from the frontend.
 
