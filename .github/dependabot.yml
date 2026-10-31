@@ -13,9 +13,3 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     versioning-strategy: increase
-
-  # Maintain dependencies for the Dockerfile
-  - package-ecosystem: "docker"
-    directory: "/mcp-server"
-    schedule:
-      interval: "weekly"

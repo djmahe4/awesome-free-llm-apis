@@ -1,5 +1,71 @@
 # Changelog
 
+## v1.1.2 – Grounded coding_agents, Hardened Browser/Harness/Cyber/Skills, Per-Action Dashboard Inputs, JSON Context Reduction & Provider Updates (October 2026)
+
+### 🚀 Highlights
+
+- **Grounded `coding_agents`: checking the plan against the code before editing** (`src/tools/coding-agents/hypotheses.ts`, `hypothesis-gate.ts`, `hypothesis-model.ts`, `src/memory/evidence.ts`, `src/memory/wiki-claims.ts`, `src/pipeline/middlewares/rerank.ts`):
+  - **Evidence provenance.** Vector hits keep the file path, content hash and index time (`memoryManager.searchWithProvenance`). Entries for files edited or deleted since indexing are dropped before they reach a prompt, and the grep/graph context cache is discarded when a file it quotes (including `RELATED FILE` graph snippets) changed.
+  - **Hypotheses and probes.** The assumptions a goal makes (target files exist, named functions are defined) are written to `hypotheses.md` next to `tasks.md` and checked mechanically with `file:`, `defined:`, `symbol:`, `arity:`, `grep:`, `cite:`, `cmd:` and `test:` probes. The status is computed from the files; a status a person or a model writes is ignored.
+  - **Hypothesis gate.** `hypothesisGate` in `.free-llm-mcp/coding-agents.json` (or `CODING_AGENTS_HYPOTHESIS_GATE`) is `off`, `warn` (default) or `enforce`. In `enforce`, a refuted assumption returns `status: "paused"` with `Blocked before editing` before any model call or edit. The `plan` action runs the same check.
+  - **Optional model layer** (`hypothesisModel`, off by default): the model proposes extra assumptions (claim and probe only, never commands) and, in `enforce`, corrects a refuted goal once, using the names that do exist. A refuted model-proposed row is reported but never blocks. Returned as `replannedGoal`.
+  - **People can edit the blackboard.** Rows with an id starting `u` and notes around the table survive the next run and are re-checked; a typed status is never believed. `cmd:`/`test:` rows run only when `hypothesisExec` is set, for the commands `verifyCommand` allows.
+  - **Wiki claims.** A wiki page can carry a claims table that is re-checked on every write; pages with a refuted claim are tagged `unverified`. `WIKI_CLAIM_VERIFICATION=enforce` stops confidence rising and automatic ADRs without a confirmed claim (default `warn` only tags).
+  - **Rerank before the file cap.** Grep candidates are scored by how rare the goal's terms are across them, so the file holding a distinctive name is no longer cut off by thirty files sharing common words. `CONTEXT_RERANK=off` restores the previous order.
+  - **Continuous evaluation.** `npm run eval:grounding` runs eight fixtures that plant hallucinations and check they are caught (wrong symbol, invented file, wrong argument count, stale cache, stale wiki claim, distractors, human edits, the model layer with a mocked model, and gate off versus on) and fails if a fixture fails or loses checks, if the catch rate falls, or if the false-block rate rises. CI runs it after the tests.
+
+- **`coding_agents` edit quality** (measured on live runs, several marked trial in their commits):
+  - Bounded repair loop with reviewer and tests-as-spec, `verifyCommand` gate that rolls back edits that break a passing check, n-candidate first round where the tests pick among independent samples, repair briefs that name the failing file, call-arity and unassigned-member problems (TypeScript, Python, Go, Rust), rejection of an edit that adds a second definition of an existing name, `skipFailingTests` setting, and thinking off by default for code edits.
+  - Capability-aware local model router (vision, code, embedding) with an `llmfit` hook, now bounded by `CODING_AGENTS_LLMFIT_MS` so a cold probe cannot stall a run; timed-out checkers are reported instead of looking clean.
+
+- **Dashboard playground shows only the inputs an action uses** (`dashboard/js/00-field-visibility.js`, `04-playground-form.js`): per-action `showFor` for `manage_memory`, `agent_harness`, `browser_tool`, `cyber_tool`, `movie_tool` and `coding_agents`, backed by 58 checked claims about the handlers. This exposed and fixed gaps: `movie_tool update_artifact_bounds` was missing from the schema enum, playground and Quickstart; `movie_tool generate_assets` needed a `prompt` field; `browser_tool` could not send `params` or `outputDir`; `movie_tool.md` documented actions that do not exist.
+
+- **Context reduction for large JSON** (`src/utils/json-reduce.ts`): oversized JSON responses are reduced to fit the context (keeping the fields the question needs) instead of being refused or cut off. `HTTP_MAX_JSON_BYTES` bounds what is parsed (default 25 MB).
+
+### 🔒 Security and reliability
+
+- Skills cannot read or write outside their folder; OSINT targets use the shared SSRF guard; `local_llm_patch` stays inside `workspace_root`; `register_tool` and tool names are validated and registry writes are locked and atomic; remaining state paths follow `FREE_LLM_MCP_HOME`; npm advisories cleared (including a `minimatch` override that keeps `ts-morph` at 28).
+- `manage_memory` namespaces that could escape the wiki folder are rejected, and all parameters are forwarded.
+- `agent_harness`: policy requires named bridges and always gates code-editing tools; approvals are single-use and validate the run; the wall budget counts active time; paused runs resume; abort stops a running run; optional `HARNESS_RESTRICT_ROOTS` boundary.
+- `browser_tool`: unsafe URLs are refused before Chrome is launched; output paths stay inside allowed roots; `evaluate` is limited (`BROWSER_ALLOW_EVALUATE`); call timeouts and retries; one launch per session; block detection needs a wall rather than a mention; advertised-but-unimplemented options are refused. `BROWSER_ALLOW_HOSTS` and `BROWSER_ALLOW_PRIVATE` control local targets.
+- `cyber_tool`: a failed model call leaves a DAG node pending, failed wiki saves are reported, `resolve_tool` sessions are bounded, OSINT cache is bounded with parallel DNS, GitHub token and rate-limit handling.
+- Wiki page names no longer collide for punctuation-only titles.
+
+### ⚠️ Requirements and dependency changes
+
+- **Node.js 22.12 or later is now required** (`engines.node` in `package.json`). `vitest` 5 and `vectra` already needed it, and CI now runs on Node 22.
+- **Express 5.** The HTTP server moved from Express 4 to 5. Express 5 leaves `req.body` undefined when a request has no body, so the handlers that destructured it now default to `{}`, and `POST /api/validate-provider` without a `providerId` returns 400 instead of a 500 error. No routes use the removed wildcard or optional-parameter syntax.
+- **Dependency updates:** `vitest` and `@vitest/coverage-v8` 5.0.5 (with `vite` 7 as an explicit dev dependency, because installs use `--legacy-peer-deps`), `@types/node` 22, `@types/express` 5, `tsx` 4.23, `lru-cache` 11.5, `helmet` 8.3, `@types/multer` 2.3, `@emnapi/core` and `@emnapi/runtime` 1.11.3. `zod` 4 was already in place.
+- **The Dockerfile and `docker-compose.yml` are removed.** The server is run locally next to the client, and the container files were not part of any documented setup. The SearXNG helper that starts a container with the `docker` command is unchanged.
+- GitHub Actions: `checkout`, `setup-node`, `setup-python` and `upload-artifact` moved to v7 in the workflows that run on pull requests (`ci.yml`, `validate-data.yml`).
+
+### 🧪 Tooling
+
+- Pre-commit now also checks: every tool-handler input is in its MCP schema, dashboard parameter gaps (ratchet), reference docs describe every result and settings key (ratchet), and tests that create temp directories remove them. Windows CI no longer fails on `ENOTEMPTY`.
+- CI skips the `onnxruntime-node` CUDA download on the CPU-only runner; the dashboard drift check compares content, not line endings.
+
+### 🌐 Providers
+
+- Added Gonka Broker and OVHcloud AI Endpoints; SiliconFlow region via `SILICONFLOW_BASE_URL`; upstream model changes registered with benchmark-referenced scores; `data.json` validated on pull requests; README regenerated from `data.json`.
+
+### Notes
+
+- New settings are all off or at the previous behaviour by default except `hypothesisGate`, which defaults to `warn` (reports, never stops a run).
+
+### Next updates (v1.1.3 and later)
+
+Planned in `docs/plans/rev_tool.md` (each phase is its own branch, cut after this release):
+
+- **`reverse_tool`**, starting with the proxy to the pinned `rea-agents` package (handshake, tool allowlist, output cap, tree-kill, threat-model tests), then JavaScript and artifact analysis, GitHub release-asset scanning, GGUF inspection (`inspect_gguf`, `extract_layer`, `analyze_layer`) and `probe_memorization`. Authorization framing (`ctf` / `lab` / `consent`) applies to analysis of third-party artifacts.
+- **`movie_tool`**: `separate_stems` and `smooth_stems` (Demucs only), then `animate_still` (depth-based parallax). Every feature keeps a 6 GB VRAM ceiling with a CPU fallback, and memory figures are published only after they are measured.
+- **`agent_harness`**: capability validation for tool runs and a lightweight way to follow agent thoughts during subtasks without extra compute.
+
+Follow-ups to this release:
+
+- **Reranking**: a minimum-score cut-off and an optional model judge pass, added only after the evaluation suite shows they help.
+- **Grounding evaluation**: the gate catch-rate set is small and written by us; a larger set built from real failed runs, and a measurement of how often the model corrects a goal correctly (one provider, one goal so far).
+- **Dependencies**: the open Dependabot major bumps (`zod` 4, `vitest` 5, Node 26 base image, `actions/setup-python` 7) will be rebased onto the new `main` and taken one at a time.
+
 ## v1.1.1 – Multi-Lane Movie Generation Pipeline, Multi-Agent Harness, DAG Subtask Blackboard, Cyber URL Autoloading, Hybrid PQC Wiki & Modular Dashboard (October 2026)
 
 ### 🚀 Highlights
