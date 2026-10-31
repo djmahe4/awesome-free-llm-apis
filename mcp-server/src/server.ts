@@ -279,7 +279,7 @@ export function createExpressApp(): express.Express {
 
       app.post('/api/user-config', async (req, res) => {
         try {
-          const { username, optOutTelemetry } = req.body;
+          const { username, optOutTelemetry } = req.body ?? {};
 
           if (username !== undefined) {
             if (typeof username !== 'string' || username.length < 3 || username.length > 20 || !/^[a-zA-Z0-9_-]+$/.test(username)) {
@@ -414,7 +414,11 @@ export function createExpressApp(): express.Express {
 
       app.post('/api/validate-provider', async (req, res) => {
         try {
-          const { providerId } = req.body;
+          const { providerId } = req.body ?? {};
+          if (typeof providerId !== 'string' || !providerId) {
+            res.status(400).json({ error: 'providerId is required' });
+            return;
+          }
           const result = await validateProvider(providerId);
           res.json(result);
         } catch (err) {
@@ -660,7 +664,7 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const { normalizeCodingAgentsHttpInput } = await import('./tools/coding-agents/http-input.js');
-          const normalized = normalizeCodingAgentsHttpInput(req.body, process.cwd());
+          const normalized = normalizeCodingAgentsHttpInput(req.body ?? {}, process.cwd());
           if ('error' in normalized) {
             res.status(400).json({ error: normalized.error });
             return;
@@ -812,7 +816,7 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const { dispatchBrowserAction } = await import('./browser/dispatch.js');
-          const result = await dispatchBrowserAction(req.body);
+          const result = await dispatchBrowserAction(req.body ?? {});
           res.status(result.success ? 200 : 502).json(result);
         } catch (err: any) {
           res.status(500).json({ error: String(err?.message || err) });
@@ -823,7 +827,7 @@ export function createExpressApp(): express.Express {
       app.post('/api/cyber_tool', express.json({ limit: '10mb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
-          const result = await cyberTool(req.body);
+          const result = await cyberTool(req.body ?? {});
           res.json(result);
         } catch (err: any) {
           res.status(500).json({ error: String(err?.message || err) });
@@ -849,7 +853,7 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           const { quantumTool } = await import('./tools/quantum-tool.js');
-          const result = await quantumTool(req.body);
+          const result = await quantumTool(req.body ?? {});
           res.status(result.success ? 200 : 400).json(result);
         } catch (err: any) {
           res.status(500).json({ error: String(err?.message || err) });

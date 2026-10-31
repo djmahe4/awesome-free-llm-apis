@@ -31,6 +31,14 @@
 - `cyber_tool`: a failed model call leaves a DAG node pending, failed wiki saves are reported, `resolve_tool` sessions are bounded, OSINT cache is bounded with parallel DNS, GitHub token and rate-limit handling.
 - Wiki page names no longer collide for punctuation-only titles.
 
+### ⚠️ Requirements and dependency changes
+
+- **Node.js 22.12 or later is now required** (`engines.node` in `package.json`). `vitest` 5 and `vectra` already needed it, and CI now runs on Node 22.
+- **Express 5.** The HTTP server moved from Express 4 to 5. Express 5 leaves `req.body` undefined when a request has no body, so the handlers that destructured it now default to `{}`, and `POST /api/validate-provider` without a `providerId` returns 400 instead of a 500 error. No routes use the removed wildcard or optional-parameter syntax.
+- **Dependency updates:** `vitest` and `@vitest/coverage-v8` 5.0.5 (with `vite` 7 as an explicit dev dependency, because installs use `--legacy-peer-deps`), `@types/node` 22, `@types/express` 5, `tsx` 4.23, `lru-cache` 11.5, `helmet` 8.3, `@types/multer` 2.3, `@emnapi/core` and `@emnapi/runtime` 1.11.3. `zod` 4 was already in place.
+- **The Dockerfile and `docker-compose.yml` are removed.** The server is run locally next to the client, and the container files were not part of any documented setup. The SearXNG helper that starts a container with the `docker` command is unchanged.
+- GitHub Actions: `checkout`, `setup-node`, `setup-python` and `upload-artifact` moved to v7 in the workflows that run on pull requests (`ci.yml`, `validate-data.yml`).
+
 ### 🧪 Tooling
 
 - Pre-commit now also checks: every tool-handler input is in its MCP schema, dashboard parameter gaps (ratchet), reference docs describe every result and settings key (ratchet), and tests that create temp directories remove them. Windows CI no longer fails on `ENOTEMPTY`.
@@ -44,7 +52,7 @@
 
 - New settings are all off or at the previous behaviour by default except `hypothesisGate`, which defaults to `warn` (reports, never stops a run).
 
-### 🔭 Next (v1.1.3 and later)
+### Next updates (v1.1.3 and later)
 
 Planned in `docs/plans/rev_tool.md` (each phase is its own branch, cut after this release):
 
