@@ -203,3 +203,31 @@ describe('#128: a test file that did not load is not a near miss', () => {
         expect(inputs[2].rewrite).not.toBe(true);
     });
 });
+
+describe('a cloud-first attempt that finds the cloud empty falls back to the local model', () => {
+    const emptyPatchError = (): CodingAgentsResult => ({ ...red(['x']), applied: false, error: 'Refusing to write empty patch for src/a.ts — content was blank' } as CodingAgentsResult);
+
+    it('clears preferCloud once and carries on instead of ending with error', async () => {
+        let calls = 0;
+        const inputs: CodingAgentsInput[] = [];
+        const r = await runWithRepairLoop({ ...input, preferCloud: true, allowCloudFallback: true, maxRepairAttempts: 3 }, 's', undefined, async (i) => {
+            inputs.push(i);
+            return calls++ === 0 ? emptyPatchError() : red(['still failing']);
+        }, async () => []);
+        expect(inputs.length).toBeGreaterThanOrEqual(2);
+        expect(inputs[1].preferCloud).toBeFalsy();
+        expect(r.repair?.outcome).not.toBe('error');
+    });
+    it('an error on an attempt that did not prefer the cloud still ends the run', async () => {
+        let calls = 0;
+        const r = await runWithRepairLoop(input, 's', undefined, async () => { calls++; return emptyPatchError(); }, async () => []);
+        expect(calls).toBe(1);
+        expect(r.repair?.outcome).toBe('error');
+    });
+    it('the fallback happens once; a second error ends the run', async () => {
+        let calls = 0;
+        const r = await runWithRepairLoop({ ...input, preferCloud: true, allowCloudFallback: true }, 's', undefined, async () => { calls++; return emptyPatchError(); }, async () => []);
+        expect(calls).toBe(2);
+        expect(r.repair?.outcome).toBe('error');
+    });
+});

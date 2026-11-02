@@ -117,6 +117,7 @@ export async function runWithRepairLoop(
   // After a cycle the local model has shown it repeats itself; with cloud fallback allowed, the rest goes to the cloud model.
   const cloudAllowed = input.allowCloudFallback ?? (input.workspaceRoot ? loadCodingAgentsSettings(input.workspaceRoot).allowCloudFallback : false);
   let escalated = false;
+  let cloudFellBack = false;
 
   // Narrow a patch-in-place retry to the files the failure implicates; the rest stay as reference.
   const narrowTo = (cases: string[], brief: string): Partial<CodingAgentsInput> => {
@@ -178,7 +179,17 @@ export async function runWithRepairLoop(
       ...(brief ? { brief: brief.slice(0, 600) } : {}),
     });
 
-    if (result.error) { outcome = 'error'; break; }
+    if (result.error) {
+      if (current.preferCloud && !cloudFellBack) {
+        cloudFellBack = true;
+        escalated = false;
+        input = { ...input, preferCloud: false };
+        current = { ...input, temperature: current.temperature };
+        continue;
+      }
+      outcome = 'error';
+      break;
+    }
     if (result.verification?.status === 'needs_user') { outcome = 'needs_user'; break; }
     if (!brief) { outcome = 'converged'; break; }
     if (run?.controller.signal.aborted) { outcome = 'aborted'; break; }
