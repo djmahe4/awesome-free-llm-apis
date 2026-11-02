@@ -1,4 +1,5 @@
 import { missingLiterals, workOrderNote, triageDeviation, type TriageAction, type TriageCause, type TriageResult } from './work-order.js';
+import { staleLiterals } from './work-order.js';
 
 export interface WorkOrderCheckInput {
   goal: string;
@@ -22,7 +23,7 @@ type Triage = (facts: { goal: string; missing: string[]; brief: string }) => Pro
  * When the goal supplied exact text and the edit lacks it: puts that text in front of the next brief, asks triage
  * what to do, and says whether the next attempt should switch between the local and the cloud model.
  */
-export async function checkWorkOrder(input: WorkOrderCheckInput, triage: Triage = facts => triageDeviation(facts)): Promise<WorkOrderCheck> {
+export async function checkWorkOrder(input: WorkOrderCheckInput, triage: Triage = async facts => process.env.CODING_AGENTS_TRIAGE_MODEL ? triageDeviation(facts) : { cause: 'not_copied', action: 'reroute', source: 'rule' }): Promise<WorkOrderCheck> {
   const contents = input.patchPlan.map(p => p.fullPatchedContent).filter((c): c is string => typeof c === 'string');
   if (contents.length === 0) return { brief: input.brief };
   const missing = missingLiterals(input.goal, contents);
@@ -42,6 +43,8 @@ export function unfinishedBrief(goal: string, patchPlan: Array<{ fullPatchedCont
   const contents = patchPlan.map(p => p.fullPatchedContent).filter((c): c is string => typeof c === 'string');
   if (contents.length === 0) return undefined;
   const missing = missingLiterals(goal, contents);
+  const stale = staleLiterals(goal, contents);
+  if (stale.length > 0) return ['The goal said to replace this text and it is still in the file:', ...stale, ...(missing.length > 0 ? ['', workOrderNote(missing)] : [])].join('\n');
   if (missing.length === 0) return undefined;
   return workOrderNote(missing);
 }

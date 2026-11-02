@@ -64,6 +64,16 @@ export function workOrderNote(missing: string[]): string {
   return ['The goal supplied this exact text; copy it character for character:', ...missing].join('\n');
 }
 
+/** The text a goal says to replace that is still in the files, unless the new text contains it. */
+export function staleLiterals(goal: string, contents: string[]): string[] {
+  const match = goal.match(/\breplace\b[\s\S]*?\bwith\b/i);
+  if (!match) return [];
+  if (/do not|don't/i.test(goal.slice(Math.max(0, (match.index ?? 0) - 12), match.index ?? 0))) return [];
+  const required = requiredLiterals(goal);
+  const old = [...match[0].matchAll(/\u0060([^\u0060]+)\u0060/g)].map(m => m[1].trim()).filter(s => s.length >= 8);
+  return old.filter(text => !required.some(r => r.includes(text)) && contents.some(c => c.includes(text)));
+}
+
 /** Asks a local Ollama model for a JSON reply. Throws on an HTTP error. */
 export async function localTriageAsk(prompt: string): Promise<string> {
   const base = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';

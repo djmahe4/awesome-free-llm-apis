@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { type TaskItem } from './types.js';
 
+import { splitSteps } from './goal-steps.js';
+
 function decomposeGoalToTasks(goal: string): TaskItem[] {
   const lines = goal.split('\n').map(l => l.trim()).filter(Boolean);
   const listMarker = /^\s*(?:\d+[.)\-]|[-*])\s+/;
@@ -16,7 +18,8 @@ function decomposeGoalToTasks(goal: string): TaskItem[] {
     const clean = line.replace(listMarker, '').trim();
     if (clean) items.push(clean);
   }
-  const taskStrings = items.length >= 2 ? items : [goal];
+  const steps = splitSteps(goal);
+  const taskStrings = items.length >= 2 ? items : (steps.length > 0 ? steps : [goal]);
   return taskStrings.map((task, idx) => ({
     id: `task-${idx + 1}`,
     task,

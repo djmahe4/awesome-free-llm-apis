@@ -5,6 +5,8 @@ import { detectSpecialCasing } from './verify-guard.js';
 import { resetVerifyCache } from './verify-cache.js';
 import { loadCodingAgentsSettings } from './settings.js';
 import { alreadyAdded } from './work-order.js';
+import { runSteps, splitSteps } from './goal-steps.js';
+import { classifyMistake, recordMistake, remediationsFor } from './mistakes.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { checkWorkOrder, noChangeBrief, unfinishedBrief, type WorkOrderCheck } from './work-order-decision.js';
@@ -93,6 +95,10 @@ export async function runWithRepairLoop(
   restoreFiles?: RestoreFiles,
   workOrder: typeof checkWorkOrder = checkWorkOrder,
 ): Promise<CodingAgentsResult> {
+  const steps = input.edits ? [] : splitSteps(input.goal);
+  if (steps.length > 0) {
+    return runSteps(input, steps, step => runWithRepairLoop(step, sessionId, run, runner, rollback, restoreFiles, workOrder), rollback);
+  }
   // Deterministic AST edits cannot be "re-generated", so there is nothing to repair by retrying.
   const retriable = !(input.astEditOps && input.astEditOps.length > 0);
   const repairBudget = retriable ? Math.min(MAX_REPAIR_ATTEMPTS, Math.max(0, input.maxRepairAttempts ?? DEFAULT_REPAIR_ATTEMPTS)) : 0;
@@ -138,6 +144,9 @@ export async function runWithRepairLoop(
       return { sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: input.targetFiles, anchors: [], patchPlan: [], patchSummary: '', diagnostics: [], applied: false, message: 'The lines this goal adds are already in the target files, so nothing was changed.' };
     }
   }
+  // A known mistake on these files opens the first attempt's brief (#149).
+  const known = input.workspaceRoot && input.targetFiles?.length ? await remediationsFor(input.workspaceRoot, input.targetFiles).catch(() => []) : [];
+  if (known.length > 0) current = { ...current, feedback: [...known, ...(current.feedback ? [current.feedback] : [])].join('\n') };
   for (let n = 1; ; n++) {
     if (run?.controller.signal.aborted && n === 1) {
       result = { sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: [], anchors: [], patchPlan: [], patchSummary: '', diagnostics: [], applied: false };
@@ -178,6 +187,9 @@ export async function runWithRepairLoop(
     const failedCases = result.verification?.failedCases;
     const namedFailures = failedCases?.filter(c => !SUITE_LEVEL_CASE.test(c)).length;
     const failing = failedCases === undefined ? undefined : (namedFailures === 0 && failedCases.length > 0 ? 999 : namedFailures);
+    if (result.symbolLoss?.length) {
+      brief = 'Your last edit removed ' + result.symbolLoss.join(', ') + ', which the goal does not mention. Keep every existing declaration.' + (brief ? '\n\n' + brief : '');
+    }
     if (brief && failing !== undefined) {
       const files = (result.patchPlan ?? [])
         .filter(p => typeof (p as any).fullPatchedContent === 'string')
@@ -326,6 +338,9 @@ export async function runWithRepairLoop(
   } else if (outcome === 'timed_out') {
     result.message = `The time budget ran out after ${attempts.length} attempt(s).`;
   }
+
+  const mistake = classifyMistake({ outcome, symbolLoss: result.symbolLoss });
+  if (mistake && input.workspaceRoot && input.targetFiles?.length) await recordMistake(input.workspaceRoot, mistake, input.targetFiles).catch(() => undefined);
 
   // Only attach the record when the loop mattered (a check or a review took part).
   if (input.verifyCommand || result.review || attempts.length > 1) {

@@ -19,6 +19,8 @@ import {
 } from './patch-gen.js';
 import type { CodingAgentsInput, CodingAgentsResult, TaskItem } from './types.js';
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
+import { applyAnchored } from './anchored-edit.js';
+import { anchoredWindow, applyEdits } from './anchored-edit.js';
 
 /** Everything the per-file generation step reads from the run (extracted from runCodingAgentsPipeline). */
 export interface FilePatchContext {
@@ -51,6 +53,16 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
   let failed = false;
     let appliedPatch = false;
     let lastFailureReason: string | undefined;
+
+    // A goal that quotes an anchor line and supplies the lines to add needs no model (#148).
+    const fileEdits = input.edits?.filter(e => e.file.replace(/\\/g, '/') === relPath.replace(/\\/g, '/'));
+    const anchored = input.edits ? (fileEdits?.length ? applyEdits(patchedContent, fileEdits) : { status: 'already_done' as const }) : applyAnchored(patchedContent, activeGoal);
+    if (anchored.status === 'applied') return { patchedContent: anchored.content, failed: false };
+    if (anchored.status === 'already_done') return { patchedContent, failed: false };
+    if (anchored.status === 'no_anchor' || anchored.status === 'ambiguous') {
+      result.diagnostics.push({ filePath: relPath, message: anchored.status === 'ambiguous' ? `The anchor line in the goal matches ${anchored.indexes.length} lines (lines ${anchored.indexes.map(i => i + 1).join(', ')}); quote the whole line or more of it so it matches one.` : 'The anchor line in the goal was not found in the file; check that it is quoted exactly.', severity: 'error', source: 'llm-patch' });
+      return { patchedContent, failed: true };
+    }
 
     // Compose DAG task context string if tasks exist
     const tasksContext = loadedTasks
@@ -88,11 +100,12 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
         // and refusal-detection code as the full-content path below —
         // including the same test/mock seam.
         const lineCount = patchedContent.split(/\r?\n/).length;
-        const windowInfo = lineCount > 150 ? extractWindowForInstruction(patchedContent, augmentedInstruction, 150) : null;
+        const wideWindow = lineCount > 150 ? extractWindowForInstruction(patchedContent, augmentedInstruction, 150) : null;
         // One informed retry: a SEARCH/REPLACE call costs ~5 s; the fallback below regenerates the
         // file (~125 s for 600 lines on a 7B, traced live) and is riskier. Tell the model why its
         // first reply could not be used and ask again in the same format.
         for (let srTry = 0; srTry < 2 && !appliedPatch; srTry++) {
+        const windowInfo = lineCount > 150 ? (anchoredWindow(patchedContent, activeGoal, srTry) ?? wideWindow) : null;
         caTrace('local search-replace', `${relPath}${srTry ? ' (retry)' : ''}`);
         const srInstruction = srTry === 0 ? augmentedInstruction : `${augmentedInstruction}\n\nYour previous SEARCH/REPLACE reply could not be used: ${lastFailureReason}. Reply again with corrected SEARCH/REPLACE blocks: copy every SEARCH line exactly from the excerpt, and put new imports with the other imports at the top of the file.`;
         const srLlmResult = await localLlmPatch({
@@ -318,7 +331,10 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
       }
     }
 
-    if (!appliedPatch && cloudAllowed) {
+    // A large module is not regenerated in the cloud either: that path drops or renames code (#148).
+    const largeModule = !rewriteSmallFile && patchedContent.split(/\r?\n/).length > 300 && /^\s*export\s+/m.test(patchedContent);
+    if (!appliedPatch && cloudAllowed && largeModule) caTrace('cloud full-file fallback skipped (large module)', relPath);
+    if (!appliedPatch && cloudAllowed && !largeModule) {
       const localReason = lastFailureReason;
       caTrace('cloud full-file fallback', relPath);
       const { patch: cloudPatch, failureReason } = await generateCodePatchWithCloudLLM(
