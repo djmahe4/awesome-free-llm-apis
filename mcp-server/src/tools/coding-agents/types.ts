@@ -137,6 +137,8 @@ export interface RepairAttempt {
   failing?: number;
   /** The attempt regenerated the file instead of patching it. */
   rewrite?: boolean;
+  /** Why the edit lacked the text the goal supplied, as decided by the work-order check. */
+  triage?: string;
 }
 
 export interface CodingAgentsResult {

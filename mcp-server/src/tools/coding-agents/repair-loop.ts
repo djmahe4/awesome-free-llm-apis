@@ -4,6 +4,7 @@ import { formatCodingAgentsMarkdown, type CodingAgentsInput, type CodingAgentsRe
 import { detectSpecialCasing } from './verify-guard.js';
 import { resetVerifyCache } from './verify-cache.js';
 import { loadCodingAgentsSettings } from './settings.js';
+import { checkWorkOrder, type WorkOrderCheck } from './work-order-decision.js';
 
 /** The failing set as an identity: case names without their durations, sorted. Empty when nothing is known. */
 const failingSignature = (cases: string[] | undefined) =>
@@ -87,6 +88,7 @@ export async function runWithRepairLoop(
   runner: Runner,
   rollback?: Rollback,
   restoreFiles?: RestoreFiles,
+  workOrder: typeof checkWorkOrder = checkWorkOrder,
 ): Promise<CodingAgentsResult> {
   // Deterministic AST edits cannot be "re-generated", so there is nothing to repair by retrying.
   const retriable = !(input.astEditOps && input.astEditOps.length > 0);
@@ -153,6 +155,12 @@ export async function runWithRepairLoop(
         brief += `\n\nYour last edit hard-coded the input ${hard.map(h => `"${h}"`).join(', ')}. That is not a fix: find what makes the code accept or mishandle it in general, and change that.`;
       }
     }
+    let check: WorkOrderCheck | undefined;
+    if (brief) {
+      check = await workOrder({ goal: input.goal, patchPlan: (result.patchPlan ?? []) as Array<{ fullPatchedContent?: unknown }>, brief, cloudAllowed, preferCloud: !!current.preferCloud });
+      brief = check.brief;
+      if (check.preferCloud !== undefined) { input = { ...input, preferCloud: check.preferCloud }; escalated = check.preferCloud; }
+    }
     const SUITE_LEVEL_CASE = /^\S+\.(?:test|spec)\.[cm]?[jt]sx?(?:\s*\[.*\])?$/i;
     const failedCases = result.verification?.failedCases;
     const namedFailures = failedCases?.filter(c => !SUITE_LEVEL_CASE.test(c)).length;
@@ -173,6 +181,7 @@ export async function runWithRepairLoop(
     }
     attempts.push({
       attempt: n,
+      ...(check?.cause ? { triage: check.cause } : {}),
       outcome: attemptOutcome(result),
       ...(result.verification?.failedCases ? { failing: result.verification.failedCases.length } : {}),
       ...(current.rewrite ? { rewrite: true } : {}),
@@ -192,6 +201,7 @@ export async function runWithRepairLoop(
     }
     if (result.verification?.status === 'needs_user') { outcome = 'needs_user'; break; }
     if (!brief) { outcome = 'converged'; break; }
+    if (check?.action === 'stop') { outcome = 'stuck'; break; }
     if (run?.controller.signal.aborted) { outcome = 'aborted'; break; }
     if (Date.now() >= deadline) { outcome = 'timed_out'; break; }
     if (n > budget) { outcome = 'not_converged'; break; }
