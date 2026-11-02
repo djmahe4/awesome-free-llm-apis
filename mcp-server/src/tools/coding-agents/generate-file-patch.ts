@@ -19,6 +19,7 @@ import {
 } from './patch-gen.js';
 import type { CodingAgentsInput, CodingAgentsResult, TaskItem } from './types.js';
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
+import { applyAnchored } from './anchored-edit.js';
 
 /** Everything the per-file generation step reads from the run (extracted from runCodingAgentsPipeline). */
 export interface FilePatchContext {
@@ -51,6 +52,15 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
   let failed = false;
     let appliedPatch = false;
     let lastFailureReason: string | undefined;
+
+    // A goal that quotes an anchor line and supplies the lines to add needs no model (#148).
+    const anchored = applyAnchored(patchedContent, activeGoal);
+    if (anchored.status === 'applied') return { patchedContent: anchored.content, failed: false };
+    if (anchored.status === 'already_done') return { patchedContent, failed: false };
+    if (anchored.status === 'no_anchor' || anchored.status === 'ambiguous') {
+      result.diagnostics.push({ filePath: relPath, message: anchored.status === 'ambiguous' ? `The anchor line in the goal matches ${anchored.indexes.length} lines (lines ${anchored.indexes.map(i => i + 1).join(', ')}); quote the whole line or more of it so it matches one.` : 'The anchor line in the goal was not found in the file; check that it is quoted exactly.', severity: 'error', source: 'llm-patch' });
+      return { patchedContent, failed: true };
+    }
 
     // Compose DAG task context string if tasks exist
     const tasksContext = loadedTasks
