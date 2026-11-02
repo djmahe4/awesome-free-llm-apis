@@ -24,6 +24,7 @@ interface CodingAgentsInput {
   };
   // ── repair loop and generation (all optional) ──
   maxRepairAttempts?: number;                       // retries after a failed check or blocking review (default 4, max 5; AST edits never retry)
+  edits?: Array<{ file: string; anchor: string; anchorIsPrefix?: boolean; position: 'before' | 'after' | 'replace'; lines: string[] }>;  // exact changes as data, applied by script with no model call; list each file in targetFiles too
   requireRed?: boolean;                             // a green check that was already green before the edit is reported as unverified (default false)
   hasPostConditions?: boolean;                      // you check the result with your own probes, so an already-green check still counts under requireRed
   samples?: number;                                 // independent first-round candidates from the original file, judged by verifyCommand (default 3 with a verifyCommand, max 5, 1 disables)
@@ -86,7 +87,7 @@ This mirrors `use_free_llm`'s `run`/`continue`/`status`/`abort` pattern (`RunReg
 **Output:**
 ```typescript
 interface CodingAgentsResult {
-  status?: 'applied' | 'rollback' | 'dry_run' | 'paused' | 'running';
+  status?: 'applied' | 'rollback' | 'dry_run' | 'proposed' | 'paused' | 'running';  // proposed: dryRun was false but no resolve was given, so the edit was not applied
   pipelineStage: 'enumerate' | 'locate' | 'anchor' | 'edit' | 'verify' | 'completed'; // last stage reached
   anchors: Array<{ filePath: string; hashTag: string; lineCount: number; capturedAt: number }>; // hashTag is [PATH#SHA8], e.g. src/server.ts#a1b2c3d4, taken before editing
   content?: string;              // the result rendered as Markdown for display

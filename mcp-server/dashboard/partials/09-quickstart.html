@@ -109,6 +109,7 @@
               <tr><td><code>astEditOps</code></td><td>array&lt;{pat, out}&gt;</td><td></td><td>OMP-style <code>$$$VAR</code> structural AST rewriting operations</td></tr>
               <tr><td><code>verifyLspDiagnostics</code></td><td>boolean</td><td></td><td>Run polyglot LSP pre-emit diagnostics (ts-morph, Python AST, go vet, rustc)</td></tr>
               <tr><td><code>resolve</code></td><td>{action: 'apply' | 'discard'}</td><td></td><td>Commit staged patch plan with atomic CAS checkpoint or rollback</td></tr>
+              <tr><td><code>edits</code></td><td>array&lt;{file, anchor, anchorIsPrefix, position, lines}&gt;</td><td></td><td>Exact changes as data, applied by script with no model call. List each file in <code>targetFiles</code> too</td></tr>
               <tr><td><code>requireRed</code></td><td>boolean</td><td></td><td>Report a green check as <code>unverified</code> when it was already green before the edit (default: false)</td></tr>
               <tr><td><code>hasPostConditions</code></td><td>boolean</td><td></td><td>Set when you verify the result with your own probes, so an already-green check still counts under <code>requireRed</code></td></tr>
             </tbody>

@@ -122,6 +122,8 @@ export interface CodingAgentsInput {
   maxDurationMs?: number;
   /** Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry). */
   maxRepairAttempts?: number;
+  /** Exact changes as data: applied by script, with no model call. */
+  edits?: import('./anchored-edit.js').AnchoredEdit[];
   /** Report a green check as unverified when it was already green before the edit. */
   requireRed?: boolean;
   /** The caller supplied post-condition probes, so a check that was already green still counts. */
@@ -156,7 +158,7 @@ export interface CodingAgentsResult {
   patchSummary: string;
   diagnostics: DiagnosticResult[];
   applied: boolean;
-  status?: 'applied' | 'rollback' | 'dry_run' | 'paused' | 'running' | 'undo_file' | 'file_history';
+  status?: 'applied' | 'rollback' | 'dry_run' | 'proposed' | 'paused' | 'running' | 'undo_file' | 'file_history';
   message?: string;
   checkpointId?: string;
   restoredFiles?: string[];

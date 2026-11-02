@@ -83,6 +83,23 @@ export function applyAnchored(content: string, goal: string): AnchoredResult {
   return { status: 'applied', content: lines.join(eol) };
 }
 
+export interface AnchoredEdit { file: string; anchor: string; anchorIsPrefix?: boolean; position: AnchorPosition | 'replace'; lines: string[] }
+/** Applies edits in order, all or nothing: a missing or ambiguous anchor changes nothing. */
+export function applyEdits(content: string, edits: AnchoredEdit[]): AnchoredResult {
+  const eol = content.includes('\r\n') ? '\r\n' : '\n';
+  const lines = content.split(/\r?\n/);
+  let changed = false;
+  for (const edit of edits) {
+    const match = findAnchor(lines.join('\n'), edit.anchor, !!edit.anchorIsPrefix);
+    const present = edit.lines.every(line => lines.includes(line));
+    if (present && (edit.position !== 'replace' || match.status === 'none')) continue;
+    if (match.status === 'none') return { status: 'no_anchor' };
+    if (match.status === 'many') return { status: 'ambiguous', indexes: match.indexes };
+    lines.splice(edit.position === 'after' ? match.index + 1 : match.index, edit.position === 'replace' ? 1 : 0, ...edit.lines);
+    changed = true;
+  }
+  return changed ? { status: 'applied', content: lines.join(eol) } : { status: 'already_done' };
+}
 /** size lines of content centred on the line at index, kept inside the file; endIdx is exclusive. */
 export function anchorWindow(content: string, index: number, size: number): { text: string; startIdx: number; endIdx: number } {
   const lines = content.split(/\r?\n/);

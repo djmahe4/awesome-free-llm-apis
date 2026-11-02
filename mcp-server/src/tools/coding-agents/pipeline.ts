@@ -184,7 +184,10 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     if (result.status !== 'paused' && result.status !== 'undo_file' && result.status !== 'file_history') {
       result.status = (result.restoredFiles && result.restoredFiles.length > 0)
         ? 'rollback'
-        : (result.applied ? 'applied' : 'dry_run');
+        : (result.applied ? 'applied' : (input.dryRun === false ? 'proposed' : 'dry_run'));
+      if (result.status === 'proposed' && !result.message) {
+        result.message = "The edit is proposed but not applied: dryRun is false and no resolve was given. Call again with resolve: { action: 'apply' } to apply it.";
+      }
     }
     result.content = formatCodingAgentsMarkdown(result);
     result.markdown = result.content;

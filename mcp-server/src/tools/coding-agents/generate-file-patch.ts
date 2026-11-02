@@ -20,6 +20,7 @@ import {
 import type { CodingAgentsInput, CodingAgentsResult, TaskItem } from './types.js';
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
 import { applyAnchored } from './anchored-edit.js';
+import { applyEdits } from './anchored-edit.js';
 
 /** Everything the per-file generation step reads from the run (extracted from runCodingAgentsPipeline). */
 export interface FilePatchContext {
@@ -54,7 +55,8 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
     let lastFailureReason: string | undefined;
 
     // A goal that quotes an anchor line and supplies the lines to add needs no model (#148).
-    const anchored = applyAnchored(patchedContent, activeGoal);
+    const fileEdits = input.edits?.filter(e => e.file.replace(/\\/g, '/') === relPath.replace(/\\/g, '/'));
+    const anchored = input.edits ? (fileEdits?.length ? applyEdits(patchedContent, fileEdits) : { status: 'already_done' as const }) : applyAnchored(patchedContent, activeGoal);
     if (anchored.status === 'applied') return { patchedContent: anchored.content, failed: false };
     if (anchored.status === 'already_done') return { patchedContent, failed: false };
     if (anchored.status === 'no_anchor' || anchored.status === 'ambiguous') {
