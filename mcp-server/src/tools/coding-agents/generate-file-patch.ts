@@ -20,7 +20,7 @@ import {
 import type { CodingAgentsInput, CodingAgentsResult, TaskItem } from './types.js';
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
 import { applyAnchored } from './anchored-edit.js';
-import { applyEdits } from './anchored-edit.js';
+import { anchoredWindow, applyEdits } from './anchored-edit.js';
 
 /** Everything the per-file generation step reads from the run (extracted from runCodingAgentsPipeline). */
 export interface FilePatchContext {
@@ -100,11 +100,12 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
         // and refusal-detection code as the full-content path below —
         // including the same test/mock seam.
         const lineCount = patchedContent.split(/\r?\n/).length;
-        const windowInfo = lineCount > 150 ? extractWindowForInstruction(patchedContent, augmentedInstruction, 150) : null;
+        const wideWindow = lineCount > 150 ? extractWindowForInstruction(patchedContent, augmentedInstruction, 150) : null;
         // One informed retry: a SEARCH/REPLACE call costs ~5 s; the fallback below regenerates the
         // file (~125 s for 600 lines on a 7B, traced live) and is riskier. Tell the model why its
         // first reply could not be used and ask again in the same format.
         for (let srTry = 0; srTry < 2 && !appliedPatch; srTry++) {
+        const windowInfo = lineCount > 150 ? (anchoredWindow(patchedContent, activeGoal, srTry) ?? wideWindow) : null;
         caTrace('local search-replace', `${relPath}${srTry ? ' (retry)' : ''}`);
         const srInstruction = srTry === 0 ? augmentedInstruction : `${augmentedInstruction}\n\nYour previous SEARCH/REPLACE reply could not be used: ${lastFailureReason}. Reply again with corrected SEARCH/REPLACE blocks: copy every SEARCH line exactly from the excerpt, and put new imports with the other imports at the top of the file.`;
         const srLlmResult = await localLlmPatch({

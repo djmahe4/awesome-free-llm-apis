@@ -83,6 +83,20 @@ export function applyAnchored(content: string, goal: string): AnchoredResult {
   return { status: 'applied', content: lines.join(eol) };
 }
 
+/** A window around the one line a goal quotes: 20 lines on the first try, 60 on the retry. Null when no quote picks one line. */
+export function anchoredWindow(content: string, goal: string, attempt: number): { window: string; startIdx: number; endIdx: number; lineCount: number } | null {
+  const lines = content.split(/\r?\n/);
+  for (const span of goal.matchAll(/\u0060([^\u0060]+)\u0060/g)) {
+    const quote = span[1].trim();
+    if (quote.length < 8) continue;
+    const hits = lines.flatMap((line, i) => (line.includes(quote) ? [i] : []));
+    if (hits.length !== 1) return null;
+    const { text, startIdx, endIdx } = anchorWindow(content, hits[0], attempt === 0 ? 20 : 60);
+    return { window: text, startIdx, endIdx, lineCount: lines.length };
+  }
+  return null;
+}
+
 export interface AnchoredEdit { file: string; anchor: string; anchorIsPrefix?: boolean; position: AnchorPosition | 'replace'; lines: string[] }
 /** Applies edits in order, all or nothing: a missing or ambiguous anchor changes nothing. */
 export function applyEdits(content: string, edits: AnchoredEdit[]): AnchoredResult {
