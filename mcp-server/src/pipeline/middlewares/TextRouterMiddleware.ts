@@ -780,6 +780,8 @@ export class TextRouterMiddleware implements Middleware {
             for (const { provider } of scoredProviders) {
                 if (triedProviders.has(provider.id)) continue;
                 triedProviders.add(provider.id);
+                if (this.executor.isModelDisabled(provider.id, modelId)) continue;
+                if (this.executor.isProviderBlocked(provider.id)) continue;
 
                 const stats = this.executor.getProviderStats()[provider.id] as any;
                 if (stats?.circuitOpen) {
@@ -856,7 +858,7 @@ export class TextRouterMiddleware implements Middleware {
                         primaryError = err;
                     }
                     allErrors.push(`${provider.id}/${modelId}: ${err.message}`);
-                    this.executor.recordProviderFailure(provider.id, err.status || 500);
+                    this.executor.recordProviderFailure(provider.id, err.status || 500, String(err.message ?? ''), modelId);
                 }
             }
 

@@ -47,7 +47,9 @@ describe('IntelligentRouterMiddleware Strategic Repro', () => {
             isProviderCircuitOpen: vi.fn().mockReturnValue(false),
             getProviderStats: vi.fn().mockReturnValue({}),
             recordProviderSuccess: vi.fn(),
-            recordProviderFailure: vi.fn()
+            recordProviderFailure: vi.fn(),
+            isModelDisabled: vi.fn().mockReturnValue(false),
+            isProviderBlocked: vi.fn().mockReturnValue(false)
         };
         middleware = new IntelligentRouterMiddleware(mockExecutor as any);
     });

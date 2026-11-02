@@ -8,6 +8,7 @@ import { getMessageContent, prependToMessageContent } from './MessageUtils.js';
 import { Sanitizer } from './Sanitizer.js';
 import { calculateModelWeightedMaxTokens } from './model-tokens.js';
 import { providerLockManager } from './ProviderLockManager.js';
+import { FailureLedger } from './provider-failures.js';
 
 export interface TokenTrackingInfo {
     remainingTokens?: number;
@@ -55,6 +56,8 @@ export class LLMExecutor {
         lastSuccess?: number;
     }> = new Map();
 
+    private failures = new FailureLedger();
+
     public isProviderCircuitOpen(providerId: string): boolean {
         const cb = this.providerCircuits.get(providerId);
         if (!cb) return false;
@@ -62,7 +65,18 @@ export class LLMExecutor {
         return Date.now() < cb.cooldownUntil;
     }
 
-    public recordProviderFailure(providerId: string, status?: number): void {
+    public isModelDisabled(providerId: string, modelId: string): boolean {
+        return this.failures.isModelDisabled(providerId, modelId);
+    }
+
+    public isProviderBlocked(providerId: string): boolean {
+        return this.failures.isProviderBlocked(providerId);
+    }
+
+    public recordProviderFailure(providerId: string, status?: number, message = '', modelId = ''): void {
+        const kind = this.failures.record(providerId, modelId, status, message);
+        if (kind === 'model_gone') return;
+
         let cb = this.providerCircuits.get(providerId);
         if (!cb) {
             cb = { failures: 0, lastFailure: 0, cooldownUntil: 0, totalErrors: 0 };
@@ -79,9 +93,17 @@ export class LLMExecutor {
             cb.cooldownUntil = Date.now() + waitTime;
             console.error(`[LLMExecutor] Circuit OPEN for ${providerId} (status ${status}) after ${cb.failures} failures. Cooling down ${waitTime / 1000}s.`);
         }
+
+        if (kind === 'auth') {
+            cb.cooldownUntil = Date.now() + 30 * 60_000;
+            console.error(`[LLMExecutor] ${providerId} refused our credentials (status ${status}); skipping it for 30 minutes.`);
+            return;
+        }
     }
 
     public recordProviderSuccess(providerId: string): void {
+        this.failures.recordSuccess(providerId);
+
         const cb = this.providerCircuits.get(providerId);
         if (cb) {
             cb.failures = 0;
@@ -582,7 +604,7 @@ export class LLMExecutor {
                     this.refundTokens(providerId, totalWithCompletion);
                 }
 
-                this.recordProviderFailure(providerId, err.status);
+                this.recordProviderFailure(providerId, err.status, String(err.message ?? ''), modelId);
                 throw err;
             }
         }
@@ -752,7 +774,7 @@ export class LLMExecutor {
                                 return res;
                             }
                         } catch (err: any) {
-                            this.recordProviderFailure(p.id, err.status || 500);
+                            this.recordProviderFailure(p.id, err.status || 500, String(err.message ?? ''), modelId);
                             continue;
                         }
                     }
@@ -779,7 +801,7 @@ export class LLMExecutor {
                             return res;
                         }
                     } catch (err: any) {
-                        this.recordProviderFailure(p.id, err.status || 500);
+                        this.recordProviderFailure(p.id, err.status || 500, String(err.message ?? ''), fallbackModel);
                         continue;
                     }
                 }

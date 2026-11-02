@@ -148,6 +148,7 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'nvidia/nemotron-3.5-lightning-30b-a3b': { capability: 0.92, contextWindow: 128000, isCoder: true, isReasoning: true },
     'nvidia/nemotron-3.5-lightning:free': { capability: 0.92, contextWindow: 128000, isCoder: true, isReasoning: true },
     'nvidia/nemotron-3.5-super-vl-120b-a12b': { capability: 0.93, contextWindow: 128000, isVision: true, isReasoning: true },
+    'mistralai/mistral-large-4-1t-a52b': { capability: 0.94, contextWindow: 128000, isVision: true, isReasoning: true },
     'stepfun-ai/step-5-preview': { capability: 0.92, contextWindow: 128000, isVision: true, isReasoning: true },
     'meta/muse-glimmer-30b': { capability: 0.92, contextWindow: 128000, isVision: true, isReasoning: true },
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': { capability: 0.90, contextWindow: 128000, isVision: true, isReasoning: true },
