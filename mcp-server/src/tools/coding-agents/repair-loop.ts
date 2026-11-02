@@ -178,6 +178,9 @@ export async function runWithRepairLoop(
     const failedCases = result.verification?.failedCases;
     const namedFailures = failedCases?.filter(c => !SUITE_LEVEL_CASE.test(c)).length;
     const failing = failedCases === undefined ? undefined : (namedFailures === 0 && failedCases.length > 0 ? 999 : namedFailures);
+    if (result.symbolLoss?.length) {
+      brief = 'Your last edit removed ' + result.symbolLoss.join(', ') + ', which the goal does not mention. Keep every existing declaration.' + (brief ? '\n\n' + brief : '');
+    }
     if (brief && failing !== undefined) {
       const files = (result.patchPlan ?? [])
         .filter(p => typeof (p as any).fullPatchedContent === 'string')

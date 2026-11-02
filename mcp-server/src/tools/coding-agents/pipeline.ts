@@ -6,6 +6,7 @@ import { cachedVerify } from './verify-cache.js';
 import { exportGaps } from './required-exports.js';
 import { reviewPatch } from './reviewer.js';
 import { runWithRepairLoop } from './repair-loop.js';
+import { lostSymbols } from './symbol-loss.js';
 import path from 'node:path';
 import fs from 'fs-extra';
 import { VectorStore, DocumentNode } from '../../memory/VectorStore.js';
@@ -529,7 +530,14 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           input, result, relPath, fullPath, workspaceRoot, sessionId, run, resolvedModel, originalContent, activeGoal,
           loadedTasks, nextPendingTask, changeFiles, runContents, editedInRun,
         });
-        patchedContent = generated.patchedContent;
+        const lost = lostSymbols(relPath, originalContent, generated.patchedContent, input.goal);
+        if (lost.length > 0) {
+          result.symbolLoss = [...(result.symbolLoss ?? []), ...lost];
+          result.diagnostics.push({ filePath: relPath, message: 'The edit removed ' + lost.join(', ') + ', which the goal does not mention, so it was not written.', severity: 'error', source: 'llm-patch' });
+          taskHadFailure = true;
+        } else {
+          patchedContent = generated.patchedContent;
+        }
         if (generated.failed) taskHadFailure = true;
       }
 

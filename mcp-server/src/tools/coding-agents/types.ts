@@ -162,6 +162,7 @@ export interface CodingAgentsResult {
   restoredFiles?: string[];
   /** Set when an apply was rolled back because the edit did not parse: the compiler messages as feedback for a retry. */
   rollbackBrief?: string;
+  symbolLoss?: string[];
   /** Independent reviewer's verdict on the proposed diff. */
   review?: {
     verdict: 'ok' | 'concerns' | 'blocked' | 'skipped';

@@ -124,12 +124,13 @@ interface CodingAgentsResult {
     skippedFailures?: string[];  // failures ignored via skipFailingTests
   };
   repair?: {                     // how the automatic repair loop ended
-    outcome: 'converged' | 'not_converged' | 'stuck' | 'cycling' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
+    outcome: 'converged' | 'unverified' | 'not_converged' | 'stuck' | 'cycling' | 'needs_user' | 'error' | 'aborted' | 'timed_out';  // unverified: requireRed was set and the check was already green before the edit
     attemptCount: number;
-    attempts: Array<{ attempt: number; outcome: string; failing?: number; rewrite?: boolean; brief?: string }>;
+    attempts: Array<{ attempt: number; outcome: string; failing?: number; rewrite?: boolean; brief?: string; triage?: string }>;  // triage: why an edit lacked the text the goal supplied
   };
   review?: { verdict: 'ok' | 'concerns' | 'blocked' | 'skipped'; findings: Array<{ blocking: boolean; text: string }> };
   rollbackBrief?: string;        // compiler messages of an edit that was rolled back for a syntax error
+  symbolLoss?: string[];         // top-level names an edit removed although the goal does not mention them; such an edit is not written
 }
 ```
 
