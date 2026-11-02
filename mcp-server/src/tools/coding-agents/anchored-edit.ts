@@ -43,8 +43,15 @@ function addedLines(goal: string): string[] | undefined {
   return chain ? [...chain[0].matchAll(/\u0060([^\u0060]+)\u0060/g)].map(s => s[1]) : undefined;
 }
 
+/** True when the goal asks for one edit: one anchor clause, one add request, and no Edit or Step list. */
+function isSingleEdit(goal: string): boolean {
+  const count = (re: RegExp) => (goal.match(re) ?? []).length;
+  return count(/\b(?:after|before|above|below)\s+the\s+line\b/gi) === 1 && count(/\badd\b/gi) === 1 && !/\b(?:edit|step)\s*\d/i.test(goal);
+}
+
 /** What an anchored goal asks for, or undefined when it has no anchor or no lines to add. */
 export function parseAnchoredGoal(goal: string): AnchoredGoal | undefined {
+  if (!isSingleEdit(goal)) return undefined;
   const clause = anchorClause(goal);
   const lines = addedLines(goal);
   return clause && lines && lines.length > 0 ? { ...clause, lines } : undefined;

@@ -37,6 +37,22 @@ describe('parseAnchoredGoal', () => {
     });
 });
 
+describe('a goal with more than one edit is not an anchored edit', () => {
+    it('two anchor clauses', () => {
+        expect(parseAnchoredGoal('Directly after the line `export const one = 1;` add the line `export const a = 1;`. Directly after the line `export const two = 2;` add the line `export const b = 2;`.')).toBeUndefined();
+    });
+    it('two add requests with one anchor', () => {
+        expect(parseAnchoredGoal('Directly after the line `export const one = 1;` add the line `export const a = 1;`, and add the line `export const b = 2;` at the top of the file.')).toBeUndefined();
+    });
+    it('an Edit 1 / Edit 2 or Step list', () => {
+        expect(parseAnchoredGoal('EDIT 1: directly after the line `export const one = 1;` add the line `export const a = 1;`. EDIT 2: change `two` to `three`.')).toBeUndefined();
+        expect(parseAnchoredGoal('Step 1: directly after the line `export const one = 1;` add the line `export const a = 1;`. Step 2: rename two.')).toBeUndefined();
+    });
+    it('applyAnchored leaves such a goal to the model', () => {
+        expect(applyAnchored(FILE, 'EDIT 1: directly after the line `export const one = 1;` add the line `export const a = 1;`. EDIT 2: rename two.')).toEqual({ status: 'not_applicable' });
+    });
+});
+
 describe('findAnchor', () => {
     it('finds one match, by whole line or by prefix', () => {
         expect(findAnchor(FILE, 'export const one = 1;', false)).toEqual({ status: 'one', index: 1 });
