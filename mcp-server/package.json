@@ -30,7 +30,7 @@
     "assemble:index": "tsx scripts/assemble-index.ts"
   },
   "dependencies": {
-    "@gradio/client": "^2.7.0",
+    "@gradio/client": "^2.7.2",
     "@huggingface/transformers": "^4.3.1",
     "@modelcontextprotocol/sdk": "^1.24.3",
     "@noble/post-quantum": "^0.7.1",
