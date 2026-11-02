@@ -6,6 +6,7 @@ import { resetVerifyCache } from './verify-cache.js';
 import { loadCodingAgentsSettings } from './settings.js';
 import { alreadyAdded } from './work-order.js';
 import { runSteps, splitSteps } from './goal-steps.js';
+import { classifyMistake, recordMistake, remediationsFor } from './mistakes.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { checkWorkOrder, noChangeBrief, unfinishedBrief, type WorkOrderCheck } from './work-order-decision.js';
@@ -143,6 +144,9 @@ export async function runWithRepairLoop(
       return { sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: input.targetFiles, anchors: [], patchPlan: [], patchSummary: '', diagnostics: [], applied: false, message: 'The lines this goal adds are already in the target files, so nothing was changed.' };
     }
   }
+  // A known mistake on these files opens the first attempt's brief (#149).
+  const known = input.workspaceRoot && input.targetFiles?.length ? await remediationsFor(input.workspaceRoot, input.targetFiles).catch(() => []) : [];
+  if (known.length > 0) current = { ...current, feedback: [...known, ...(current.feedback ? [current.feedback] : [])].join('\n') };
   for (let n = 1; ; n++) {
     if (run?.controller.signal.aborted && n === 1) {
       result = { sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: [], anchors: [], patchPlan: [], patchSummary: '', diagnostics: [], applied: false };
@@ -334,6 +338,9 @@ export async function runWithRepairLoop(
   } else if (outcome === 'timed_out') {
     result.message = `The time budget ran out after ${attempts.length} attempt(s).`;
   }
+
+  const mistake = classifyMistake({ outcome, symbolLoss: result.symbolLoss });
+  if (mistake && input.workspaceRoot && input.targetFiles?.length) await recordMistake(input.workspaceRoot, mistake, input.targetFiles).catch(() => undefined);
 
   // Only attach the record when the loop mattered (a check or a review took part).
   if (input.verifyCommand || result.review || attempts.length > 1) {
