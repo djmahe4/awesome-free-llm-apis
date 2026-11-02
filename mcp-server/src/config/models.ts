@@ -51,12 +51,12 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'codestral-latest': { capability: 0.88, contextWindow: 128000, isCoder: true },
     'poolside/laguna-s-2.1:free': { capability: 0.85, contextWindow: 128000, isCoder: true, isReasoning: true },
     'poolside/laguna-s-2.1': { capability: 0.85, contextWindow: 128000, isCoder: true, isReasoning: true },
-    'qwen/qwen3.8-flash': { capability: 0.90, contextWindow: 1000000, isCoder: true, isReasoning: true, isVision: true },
-    'qwen/qwen3.7-flash': { capability: 0.82, contextWindow: 1000000, isReasoning: true, isVision: true },
+    'qwen/qwen3.8-flash': { capability: 0.90, contextWindow: 500000, isCoder: true, isReasoning: true, isVision: true },
+    'qwen/qwen3.7-flash': { capability: 0.82, contextWindow: 500000, isReasoning: true, isVision: true },
     'meta/llama-4-scout': { capability: 0.85, contextWindow: 131072, isVision: true },
     'mistralai/mistral-small-3.2': { capability: 0.82, contextWindow: 128000 },
     'inclusionai/ling-3.0-flash-vl': { capability: 0.84, contextWindow: 131072, isVision: true },
-    'google/gemini-2.5-flash-lite:search': { capability: 0.85, contextWindow: 1048576 },
+    'google/gemini-2.5-flash-lite:search': { capability: 0.85, contextWindow: 548576 },
     'openai/gpt-5.4-nano': { capability: 0.80, contextWindow: 400000 },
     'kilo-auto/free': { capability: 0.85, contextWindow: 128000, isCoder: true },
     'liquid/lfm-2.5-2.6b:free': { capability: 0.80, contextWindow: 32000 },
@@ -141,7 +141,7 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'nemotron-3-ultra': { capability: 0.90, contextWindow: 128000 },
     'nemotron-3-super': { capability: 0.88, contextWindow: 128000 },
     // Nemotron 3 Nano 30B-A3B: MMLU-Pro 78.3, LiveCodeBench v6 68.3, SWE-bench (OpenHands) 38.8 (NVIDIA-reported)
-    'nemotron-3-nano:30b': { capability: 0.82, contextWindow: 1000000 },
+    'nemotron-3-nano:30b': { capability: 0.82, contextWindow: 30000 },
     'minimax-m3': { capability: 0.90, contextWindow: 128000 },
 
     // NVIDIA NIM active & free models
@@ -168,13 +168,13 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'minimax-m2.7': { capability: 0.85, contextWindow: 128000 },
     // Refreshed 2026-10 from upstream data.json. Scores are on this file's relative scale; benchmark numbers are
     // vendor/self-reported unless noted, so treat them as a prior and let live success rates adjust.
-    // Reflection Beam (501B-A23B): SWE-bench Verified 80.9, Terminal-Bench 2.1 80.1, SWE-bench Pro v2-Hard 77.2 (self-reported); 1M ctx on OpenRouter.
-    'reflection/beam-free': { capability: 0.93, contextWindow: 1048576, isReasoning: true, isCoder: true },
+    // Reflection Beam (501B-A23B): SWE-bench Verified 80.9, Terminal-Bench 2.1 80.1, SWE-bench Pro v2-Hard 77.2 (self-reported); 1M ctx on OpenRouter; budgeted at half because free routes do not serve that much.
+    'reflection/beam-free': { capability: 0.93, contextWindow: 524288, isReasoning: true, isCoder: true },
     // TeleAI Xing4.0-29B-A4B: AIME2026 90.0, IFBench 69.7, Tau3-Bench 64.6, SWE-bench Verified 75.0 (model card / MindStudio); 256K ctx.
     'XingChenAGI/Xing4.0-29B': { capability: 0.88, contextWindow: 262144, isReasoning: true, isCoder: true },
     'xingchen-agi/xing4.0-29b-a4b:free': { capability: 0.88, contextWindow: 262144, isReasoning: true, isCoder: true },
     // NVIDIA Nemotron 3.5 Super VL: GPQA-Diamond 89.5, CharXiv-RQ 80.8, MathVision 78.2, Terminal-Bench 2.1 ~61-67 (NVIDIA-reported; sources disagree). Same tier as the 120B-A12B entry above.
-    'nvidia/nemotron-3.5-super-vl:free': { capability: 0.93, contextWindow: 1000000, isVision: true, isReasoning: true },
+    'nvidia/nemotron-3.5-super-vl:free': { capability: 0.93, contextWindow: 500000, isVision: true, isReasoning: true },
     // Recursive Flint (40B-A2.5B, Apache-2.0): SWE-bench Verified 74.2, Terminal-Bench 2.1 54.9 (self-reported, unverified).
     'recursive/flint-v1.0:free': { capability: 0.87, contextWindow: 131072, isCoder: true },
     'nvidia/nemotron-3-super-120b-a12b': { capability: 0.93, contextWindow: 1000000, isReasoning: true },
