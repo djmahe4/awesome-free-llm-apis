@@ -53,6 +53,12 @@ export function missingLiterals(goal: string, contents: string[]): string[] {
   return requiredLiterals(goal).filter(literal => !contents.some(content => content.includes(literal)));
 }
 
+/** Tells whether a goal that only adds lines is already done: every line it supplies is in some file. */
+export function alreadyAdded(goal: string, contents: string[]): boolean {
+  const added = addedLiterals(goal);
+  return !!added && added.length > 0 && added.every(line => contents.some(c => c.includes(line)));
+}
+
 /** The line that opens the next brief. */
 export function workOrderNote(missing: string[]): string {
   return ['The goal supplied this exact text; copy it character for character:', ...missing].join('\n');

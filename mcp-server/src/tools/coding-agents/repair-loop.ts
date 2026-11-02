@@ -4,7 +4,10 @@ import { formatCodingAgentsMarkdown, type CodingAgentsInput, type CodingAgentsRe
 import { detectSpecialCasing } from './verify-guard.js';
 import { resetVerifyCache } from './verify-cache.js';
 import { loadCodingAgentsSettings } from './settings.js';
-import { checkWorkOrder, unfinishedBrief, type WorkOrderCheck } from './work-order-decision.js';
+import { alreadyAdded } from './work-order.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { checkWorkOrder, noChangeBrief, unfinishedBrief, type WorkOrderCheck } from './work-order-decision.js';
 
 /** The failing set as an identity: case names without their durations, sorted. Empty when nothing is known. */
 const failingSignature = (cases: string[] | undefined) =>
@@ -128,6 +131,13 @@ export async function runWithRepairLoop(
     return hit.length > 0 ? { targetFiles: hit, relatedFiles: input.targetFiles.filter(f => !hit.includes(f)) } : {};
   };
 
+  if (input.workspaceRoot && input.targetFiles?.length) {
+    const root = input.workspaceRoot;
+    const contents = await Promise.all(input.targetFiles.map(f => fs.readFile(path.resolve(root, f), 'utf-8').catch(() => '')));
+    if (alreadyAdded(input.goal, contents)) {
+      return { sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: input.targetFiles, anchors: [], patchPlan: [], patchSummary: '', diagnostics: [], applied: false, message: 'The lines this goal adds are already in the target files, so nothing was changed.' };
+    }
+  }
   for (let n = 1; ; n++) {
     if (run?.controller.signal.aborted && n === 1) {
       result = { sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: [], anchors: [], patchPlan: [], patchSummary: '', diagnostics: [], applied: false };
@@ -163,6 +173,7 @@ export async function runWithRepairLoop(
       if (check.preferCloud !== undefined) { input = { ...input, preferCloud: check.preferCloud }; escalated = check.preferCloud; }
     }
     if (unfinished) brief = unfinished;
+    if (!brief && result.applied && !result.error) brief = noChangeBrief((result.patchPlan ?? []) as Array<{ unchanged?: boolean }>);
     const SUITE_LEVEL_CASE = /^\S+\.(?:test|spec)\.[cm]?[jt]sx?(?:\s*\[.*\])?$/i;
     const failedCases = result.verification?.failedCases;
     const namedFailures = failedCases?.filter(c => !SUITE_LEVEL_CASE.test(c)).length;
@@ -202,7 +213,7 @@ export async function runWithRepairLoop(
       break;
     }
     if (result.verification?.status === 'needs_user') { outcome = 'needs_user'; break; }
-    if (!brief) { outcome = 'converged'; break; }
+    if (!brief) { outcome = input.requireRed && !input.hasPostConditions && result.verification?.baselineOk === true ? 'unverified' : 'converged'; break; }
     if (check?.action === 'stop') { outcome = 'stuck'; break; }
     if (run?.controller.signal.aborted) { outcome = 'aborted'; break; }
     if (Date.now() >= deadline) { outcome = 'timed_out'; break; }
@@ -308,6 +319,8 @@ export async function runWithRepairLoop(
       : outcome === 'timed_out'
         ? `The time budget ran out after ${attempts.length} attempt(s) and the check was still red, so the original files were restored. Raise maxDurationMs or narrow the goal.`
         : `The check never went green after ${attempts.length} attempt(s), so the original files were restored. The last proposal is in patchSummary; result.verification.repairBrief says what was still failing.`;
+  } else if (outcome === 'unverified') {
+    result.message = 'The check already passed before the edit (it did not fail before), so it does not prove the edit does what the goal asks. The edit is applied; add post-conditions or a failing test first.';
   } else if (outcome === 'aborted') {
     result.message = `Aborted after ${attempts.length} attempt(s).`;
   } else if (outcome === 'timed_out') {

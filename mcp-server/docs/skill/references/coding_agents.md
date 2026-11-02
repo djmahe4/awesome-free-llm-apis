@@ -24,6 +24,8 @@ interface CodingAgentsInput {
   };
   // ── repair loop and generation (all optional) ──
   maxRepairAttempts?: number;                       // retries after a failed check or blocking review (default 4, max 5; AST edits never retry)
+  requireRed?: boolean;                             // a green check that was already green before the edit is reported as unverified (default false)
+  hasPostConditions?: boolean;                      // you check the result with your own probes, so an already-green check still counts under requireRed
   samples?: number;                                 // independent first-round candidates from the original file, judged by verifyCommand (default 3 with a verifyCommand, max 5, 1 disables)
   maxDurationMs?: number;                           // wall-clock budget for the whole repair loop (default 300000 = 5 min); ends with outcome 'timed_out'
   review?: boolean;                                 // independent review of the diff before apply (default on; never runs when a verifyCommand exists)

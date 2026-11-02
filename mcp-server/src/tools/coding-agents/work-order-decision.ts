@@ -45,3 +45,8 @@ export function unfinishedBrief(goal: string, patchPlan: Array<{ fullPatchedCont
   if (missing.length === 0) return undefined;
   return workOrderNote(missing);
 }
+// #145: repeating a goal that only adds lines must not add them again.
+// #146: an edit that changes nothing is not converged, whatever the check says.
+export function noChangeBrief(patchPlan: Array<{ unchanged?: boolean }>): string | undefined {
+    return patchPlan.length > 0 && patchPlan.every(p => p.unchanged === true) ? 'Your last edit changed nothing in the file. Make the change the goal asks for.' : undefined;
+}
