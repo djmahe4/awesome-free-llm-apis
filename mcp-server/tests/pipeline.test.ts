@@ -282,10 +282,39 @@ describe('Pipeline Orchestration', () => {
 
         // Should have THOUGHTS
         expect(msg.content).toContain('THOUGHTS: Thinking about the bracket fix');
-        // Should have the cleaned result (no newline before '{')
-        expect(msg.content).toMatch(/bracket fix\{/);
+        // The leading and trailing newlines of the JSON reply are cleaned. The thoughts stay a separate paragraph:
+        // the squeeze only applies to a reply that is entirely JSON, so it no longer glues them to the answer (#124).
+        expect(msg.content).toMatch(/bracket fix\n{2,}\{/);
+        expect(msg.content.endsWith('}')).toBe(true);
         expect(msg.content).toContain('"result": "ok"');
         // Original thinking field should be deleted
         expect(msg.thinking).toBeUndefined();
+    });
+});
+
+// Issue #132: a program that parses the answer must not get the model's reasoning pasted in front of it.
+describe('THOUGHTS are only added for callers that did not ask for the answer alone', () => {
+    async function run(explicitOnePass: boolean | undefined) {
+        const executor = new LLMExecutor();
+        vi.spyOn(executor, 'tryProvider').mockImplementation(async (_context, _providerId, modelId) => ({
+            id: 'test', object: 'chat.completion', created: Date.now(), model: modelId,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'export const a = 1;', thinking: 'The user wants a constant.' } as any, finish_reason: 'stop' }],
+        } as ChatResponse));
+        const registry = ProviderRegistry.getInstance();
+        const gemini = registry.getProvider('gemini')!;
+        vi.spyOn(registry, 'getAvailableProviders').mockReturnValue([gemini]);
+        vi.spyOn(registry, 'getProviderForModel').mockReturnValue(gemini);
+        const router = new IntelligentRouterMiddleware(executor);
+        const context: PipelineContext = { request: { model: 'gemini-exp-1206', messages: [{ role: 'user', content: 'test' }] }, explicitOnePass } as PipelineContext;
+        await router.execute(context, vi.fn());
+        return String((context.response as any).choices[0].message.content);
+    }
+
+    it('adds them by default', async () => {
+        expect(await run(undefined)).toContain('THOUGHTS: The user wants a constant.');
+    });
+    it('leaves them out when the caller asked for the answer alone', async () => {
+        const content = await run(true);
+        expect(content).toBe('export const a = 1;');
     });
 });

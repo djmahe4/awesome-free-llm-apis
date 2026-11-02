@@ -67,3 +67,22 @@ describe('cloud replies are saved to the trace directory', () => {
         expect(dumps()).toEqual([]);
     });
 });
+
+// Issue #131: the loop raises the temperature on every retry so a retry is not a repeat, but the cloud call did not pass
+// it on, so identical retry prompts were answered from the response cache.
+describe('the cloud call carries the attempt\'s temperature', () => {
+    const lastRequest = () => model.reply.mock.calls.at(-1)![0] as { temperature?: number };
+
+    it('sends the temperature of the attempt', async () => {
+        model.reply.mockClear();
+        model.reply.mockResolvedValue(SEARCH_REPLACE);
+        await generateFilePatch(context({ temperature: 0.4 }));
+        expect(lastRequest().temperature).toBe(0.4);
+    });
+    it('sends none when the attempt has none', async () => {
+        model.reply.mockClear();
+        model.reply.mockResolvedValue(SEARCH_REPLACE);
+        await generateFilePatch(context());
+        expect(lastRequest().temperature).toBeUndefined();
+    });
+});

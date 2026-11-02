@@ -169,6 +169,8 @@ const TOOLS = [
       { id: 'action', label: 'Action', type: 'select', options: ['', 'plan', 'execute', 'resume', 'status', 'abort'] },
       { id: 'pauseOnTaskPlan', label: 'Pause On Task Plan', type: 'toggle', showFor: ['', 'execute'] },
       { id: 'verifyCommand', label: 'Verify Command (rolls back on regression)', type: 'text', placeholder: 'npx vitest run tests/a.test.ts', showFor: ['', 'execute', 'resume'] },
+      { id: 'requireRed', label: 'Require Red (an already-green check is unverified)', type: 'toggle', showFor: ['', 'execute', 'resume'] },
+      { id: 'hasPostConditions', label: 'Has Post-Conditions (own probes check the result)', type: 'toggle', showFor: ['', 'execute', 'resume'] },
       { id: 'feedback', label: 'Feedback / Repair Brief (retry)', type: 'textarea', placeholder: 'paste result.verification.repairBrief from the previous attempt', showFor: ['', 'execute', 'resume'] },
       { id: 'verifyReport', label: 'Verify Report JSON (your own test run)', type: 'textarea', placeholder: '{"exitCode":1,"output":"..."}', showFor: ['', 'execute', 'resume'] },
       { id: 'targetFiles', label: 'Target Files (comma-separated)', type: 'text', placeholder: 'src/foo.ts, src/bar.ts', showFor: ['', 'plan', 'execute', 'resume'] },

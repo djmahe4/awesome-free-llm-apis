@@ -21,6 +21,7 @@ export class NvidiaProvider extends BaseProvider {
     { id: 'google/gemma-4-31b-it', name: 'Gemma 4 31B Instruct' },
     { id: 'nvidia/nemotron-3-ultra-550b-a55b', name: 'Nemotron 3 Ultra 550B' },
     { id: 'nvidia/nemotron-3-super-120b-a12b', name: 'Nemotron 3 Super 120B' },
+    { id: 'mistralai/mistral-large-4-1t-a52b', name: 'Mistral Large 4 (Vision/Reasoning)' },
     { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning', name: 'Nemotron 3 Nano Omni (Vision/Audio)' },
     { id: 'nvidia/ising-calibration-1-35b-a3b', name: 'Ising Calibration 1 35B (Quantum VLM)' },
     { id: 'nvidia/ising-calibration-1.5-31b', name: 'Ising Calibration 1.5 31B (Quantum VLM)' },

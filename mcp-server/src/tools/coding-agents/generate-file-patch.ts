@@ -4,12 +4,13 @@ import { caTrace, caTraceDump } from './trace.js';
 import { crossFileContext } from './cross-file.js';
 import { newImportProblems } from './import-check.js';
 import { loadCodingAgentsSettings, SETTINGS_FILE } from './settings.js';
-import { readVerifyTestContext } from './verify-guard.js';
+import { readVerifyTestContext, searchComesFromTests } from './verify-guard.js';
 import {
   extractWindowForInstruction,
   parseSearchReplaceBlocksDetailed,
   applySearchReplaceBlocks,
   isAdditiveInstruction,
+  isEndOfFileInstruction,
   searchReplaceRegressesTsErrors,
   looksLikeHallucinatedReplacement,
   generateSearchReplacePatch,
@@ -64,7 +65,8 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
       : goalForFile;
     // The tests the verifyCommand runs are the specification: show them (read-only).
     const testContext = input.verifyCommand ? await readVerifyTestContext(input.verifyCommand, workspaceRoot) : '';
-    const augmentedInstruction = testContext ? `${baseInstruction}\n\n${testContext}` : baseInstruction;
+    const endOfFileHint = isEndOfFileInstruction(activeGoal) ? ' To add code at the end of the file, leave the SEARCH part empty and put the new code in REPLACE.' : '';
+    const augmentedInstruction = testContext ? `${baseInstruction}${endOfFileHint}\n\n${testContext}` : baseInstruction + endOfFileHint;
 
     // Try SEARCH/REPLACE first, local model then cloud — see
     // generateSearchReplacePatch: unchanged content never passes through
@@ -116,7 +118,8 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
             // Apply against the FULL current content by exact text match —
             // independent of whatever window was shown to the model, so
             // there's no line-offset bookkeeping to get wrong.
-            const { content, appliedCount, failures } = applySearchReplaceBlocks(patchedContent, blocks, { additive: isAdditiveInstruction(activeGoal) });
+            const { content, appliedCount, failures } = applySearchReplaceBlocks(patchedContent, blocks, { additive: isAdditiveInstruction(activeGoal), allowAppend: isEndOfFileInstruction(activeGoal) });
+            if (appliedCount === 0 && testContext && blocks.some(b => searchComesFromTests(b.search, testContext))) failures.unshift(`your SEARCH text is copied from the read-only test file shown as the specification, not from ${relPath}, the file you must edit`);
             if (incomplete > 0) failures.push(`${incomplete} block(s) were cut off before the REPLACE marker and were not applied`);
             const regressed = appliedCount > 0 && await searchReplaceRegressesTsErrors(relPath, patchedContent, content);
             // New imports must resolve in the REAL workspace (the in-memory TS gate ignores unresolved modules).
@@ -285,6 +288,7 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
               sessionId,
               isOnePass: true,
               skipIndexing: true,
+              temperature: input.temperature,
             });
             const reply = res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
             caTraceDump('cloud-sr-' + relPath, reply);

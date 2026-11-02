@@ -6,6 +6,7 @@ import { getMessageContent, prependToMessageContent, appendToMessageContent, isU
 import { TaskClassifier } from '../../utils/TaskClassifier.js';
 import { calculateModelWeightedMaxTokens } from '../../utils/model-tokens.js';
 import { ProviderRegistry } from '../../providers/registry.js';
+import { squeezeJsonReply } from '../../utils/markdown.js';
 import { ChatResponse, Message } from '../../providers/types.js';
 import {
     getModelCapability,
@@ -779,6 +780,8 @@ export class TextRouterMiddleware implements Middleware {
             for (const { provider } of scoredProviders) {
                 if (triedProviders.has(provider.id)) continue;
                 triedProviders.add(provider.id);
+                if (this.executor.isModelDisabled(provider.id, modelId)) continue;
+                if (this.executor.isProviderBlocked(provider.id)) continue;
 
                 const stats = this.executor.getProviderStats()[provider.id] as any;
                 if (stats?.circuitOpen) {
@@ -855,33 +858,27 @@ export class TextRouterMiddleware implements Middleware {
                         primaryError = err;
                     }
                     allErrors.push(`${provider.id}/${modelId}: ${err.message}`);
-                    this.executor.recordProviderFailure(provider.id, err.status || 500);
+                    this.executor.recordProviderFailure(provider.id, err.status || 500, String(err.message ?? ''), modelId);
                 }
             }
 
             if (successfulResponse && successfulProviderId) {
                 const res = successfulResponse as ChatResponse;
+
                 if (res.choices && res.choices[0]?.message) {
                     const msg = res.choices[0].message as any;
                     const thoughts = (msg.thinking || msg.reasoning || '').toString().trim();
-                    if (thoughts) {
+                    if (thoughts && !context.explicitOnePass) {
                         prependToMessageContent(msg, `THOUGHTS: ${thoughts}\n\n`);
                         delete msg.thinking;
                         delete msg.reasoning;
                     }
-
                     if (typeof msg.content === 'string') {
-                        msg.content = msg.content
-                            .replace(/\n+(?=[{\[])/g, '')
-                            .replace(/([}\]])\n+/g, '$1')
-                            .trim();
+                        msg.content = squeezeJsonReply(msg.content);
                     } else if (Array.isArray(msg.content)) {
                         msg.content.forEach((p: any) => {
                             if (p.text) {
-                                p.text = p.text
-                                    .replace(/\n+(?=[{\[])/g, '')
-                                    .replace(/([}\]])\n+/g, '$1')
-                                    .trim();
+                                p.text = squeezeJsonReply(p.text);
                             }
                         });
                     }
@@ -911,16 +908,13 @@ export class TextRouterMiddleware implements Middleware {
                         if (res.choices && res.choices[0]?.message) {
                             const msg = res.choices[0].message as any;
                             const thoughts = (msg.thinking || msg.reasoning || '').toString().trim();
-                            if (thoughts) {
+                            if (thoughts && !context.explicitOnePass) {
                                 prependToMessageContent(msg, `THOUGHTS: ${thoughts}\n\n`);
                                 delete msg.thinking;
                                 delete msg.reasoning;
                             }
                             if (typeof msg.content === 'string') {
-                                msg.content = msg.content
-                                    .replace(/\n+(?=[{\[])/g, '')
-                                    .replace(/([}\]])\n+/g, '$1')
-                                    .trim();
+                                msg.content = squeezeJsonReply(msg.content);
                             }
                         }
                         context.response = res ?? undefined;

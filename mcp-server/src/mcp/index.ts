@@ -767,6 +767,8 @@ export async function createMCPServer(): Promise<Server> {
             allowCloudFallback: { type: 'boolean', description: 'Let a failed local edit fall back to free cloud models. This sends the file and goal to a third-party provider, so it is off by default (also settable in <workspace>/.free-llm-mcp/coding-agents.json).' },
             samples: { type: 'number', description: 'Independent first-round candidates from the original file, judged by verifyCommand (default 3 with a verifyCommand, max 5, 1 disables).' },
             maxRepairAttempts: { type: 'number', description: 'Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry).' },
+            requireRed: { type: 'boolean', description: 'Report a green check as unverified (not converged) when it was already green before the edit, because such a check proves nothing about the edit. Default false.' },
+            hasPostConditions: { type: 'boolean', description: 'Set when you check the result with probes of your own, so a check that was already green still counts under requireRed.' },
             maxDurationMs: { type: 'number', description: 'Wall-clock budget for the whole repair loop in ms (default 300000). Ends with repair.outcome timed_out and restores the original files if the check is still red.' },
             review: { type: 'boolean', description: 'Independent review of the diff before apply (default true; never runs when a verifyCommand is given, the tests judge then).' },
             temperature: { type: 'number', description: 'Sampling temperature for generation (default 0). The repair loop raises it on retries.' },

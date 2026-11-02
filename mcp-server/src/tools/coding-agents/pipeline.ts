@@ -596,6 +596,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         originalSnippet: origSnippet,
         replacementSnippet: replSnippet,
         fullPatchedContent: patchedContent, // full content for diagnostics & writes
+        unchanged: fileExists && patchedContent === originalContent,
         unifiedDiff,
         isNewFile: !fileExists,
       });

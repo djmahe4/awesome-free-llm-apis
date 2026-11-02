@@ -409,6 +409,13 @@ export function buildRepairBrief(i: RepairBriefInput): string {
   return text.length > BRIEF_CAP ? `${text.slice(0, BRIEF_CAP)}\n... (brief truncated)` : text;
 }
 
+/** True when a substantial line of a SEARCH block is a line of the read-only tests shown as the specification, i.e. the model copied from the tests instead of the file it must edit. */
+export function searchComesFromTests(search: string, testContext: string): boolean {
+  if (!testContext) return false;
+  const testLines = new Set(testContext.split(/\r?\n/).map(l => l.trim()).filter(l => l.length >= 12));
+  return search.split(/\r?\n/).map(l => l.trim()).some(l => l.length >= 12 && testLines.has(l));
+}
+
 const TEST_CTX_PER_FILE = 5000;
 const TEST_CTX_TOTAL = 6500;
 
@@ -443,7 +450,8 @@ export async function readVerifyTestContext(command: string, workspaceRoot: stri
  * after every edit; the pipeline already computes these diagnostics, they just never reached the retry.
  */
 export function buildSyntaxBrief(diagnostics: Array<{ filePath: string; line?: number; message: string; severity?: string }>): string {
-  const errors = diagnostics.filter(d => d.severity === 'error');
+  const all = diagnostics.filter(d => d.severity === 'error');
+  const errors = all.filter(d => !/Cannot find (?:name|module)\b|or its corresponding type declarations|install type definitions/i.test(d.message));
   if (errors.length === 0) return '';
   const shown = errors.slice(0, 10).map(d => `${d.filePath}${d.line ? `:${d.line}` : ''} ${d.message.split('\n')[0].slice(0, 200)}`);
   const more = errors.length > shown.length ? `\n(+${errors.length - shown.length} more)` : '';
@@ -451,7 +459,8 @@ export function buildSyntaxBrief(diagnostics: Array<{ filePath: string; line?: n
     'Your last edit was rolled back: the file does not parse (syntax errors).',
     `Errors:\n${shown.join('\n')}${more}`,
     'Rules: return a corrected edit that is valid code. Do not run commands or tests; the user runs them.',
-  ].join('\n');
+    all.length > errors.length ? `${all.length - errors.length} unresolved import or module resolution error(s) from the isolated check were left out; they are not caused by your edit.` : '',
+  ].filter(Boolean).join('\n');
 }
 
 /** Appends a debugger brief to the goal for a retry. */

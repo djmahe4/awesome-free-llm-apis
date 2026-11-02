@@ -15,6 +15,7 @@ export interface LineAnchoredPatch {
   originalSnippet: string;   // preview (first 10 lines)
   replacementSnippet: string; // preview (first 10 lines)
   fullPatchedContent: string; // full content used for diagnostics & writes
+  unchanged?: boolean;       // the edit left the existing file exactly as it was
   unifiedDiff: string;
   symbols?: string[];
   /** True if this file didn't exist before this run — used by the post-apply
@@ -121,6 +122,10 @@ export interface CodingAgentsInput {
   maxDurationMs?: number;
   /** Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry). */
   maxRepairAttempts?: number;
+  /** Report a green check as unverified when it was already green before the edit. */
+  requireRed?: boolean;
+  /** The caller supplied post-condition probes, so a check that was already green still counts. */
+  hasPostConditions?: boolean;
   /** Independent review of the proposed diff before apply (default on; false disables it). */
   review?: boolean;
   action?: 'plan' | 'execute' | 'resume' | 'status' | 'abort';
@@ -137,6 +142,8 @@ export interface RepairAttempt {
   failing?: number;
   /** The attempt regenerated the file instead of patching it. */
   rewrite?: boolean;
+  /** Why the edit lacked the text the goal supplied, as decided by the work-order check. */
+  triage?: string;
 }
 
 export interface CodingAgentsResult {
@@ -164,7 +171,7 @@ export interface CodingAgentsResult {
   };
   /** How the automatic repair loop ended (present when a check or review took part). */
   repair?: {
-    outcome: 'converged' | 'not_converged' | 'stuck' | 'cycling' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
+    outcome: 'converged' | 'unverified' | 'not_converged' | 'stuck' | 'cycling' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
     attemptCount: number;
     attempts: RepairAttempt[];
   };
