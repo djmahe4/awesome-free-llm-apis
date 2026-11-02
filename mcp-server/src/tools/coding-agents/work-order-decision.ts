@@ -32,3 +32,16 @@ export async function checkWorkOrder(input: WorkOrderCheckInput, triage: Triage 
   if (decision.action === 'reroute' && input.cloudAllowed) result.preferCloud = !input.preferCloud;
   return result;
 }
+/**
+ * Names the supplied text a green edit left out.
+ * @param goal - The goal provided.
+ * @param patchPlan - The patch plan containing the full patched content.
+ * @returns The missing text or undefined if everything is patched.
+ */
+export function unfinishedBrief(goal: string, patchPlan: Array<{ fullPatchedContent?: unknown }>): string | undefined {
+  const contents = patchPlan.map(p => p.fullPatchedContent).filter((c): c is string => typeof c === 'string');
+  if (contents.length === 0) return undefined;
+  const missing = missingLiterals(goal, contents);
+  if (missing.length === 0) return undefined;
+  return workOrderNote(missing);
+}

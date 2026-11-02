@@ -4,7 +4,7 @@ import { formatCodingAgentsMarkdown, type CodingAgentsInput, type CodingAgentsRe
 import { detectSpecialCasing } from './verify-guard.js';
 import { resetVerifyCache } from './verify-cache.js';
 import { loadCodingAgentsSettings } from './settings.js';
-import { checkWorkOrder, type WorkOrderCheck } from './work-order-decision.js';
+import { checkWorkOrder, unfinishedBrief, type WorkOrderCheck } from './work-order-decision.js';
 
 /** The failing set as an identity: case names without their durations, sorted. Empty when nothing is known. */
 const failingSignature = (cases: string[] | undefined) =>
@@ -155,12 +155,14 @@ export async function runWithRepairLoop(
         brief += `\n\nYour last edit hard-coded the input ${hard.map(h => `"${h}"`).join(', ')}. That is not a fix: find what makes the code accept or mishandle it in general, and change that.`;
       }
     }
+    const unfinished = !brief && result.applied && !result.error ? unfinishedBrief(input.goal, (result.patchPlan ?? []) as Array<{ fullPatchedContent?: unknown }>) : undefined;
     let check: WorkOrderCheck | undefined;
     if (brief) {
       check = await workOrder({ goal: input.goal, patchPlan: (result.patchPlan ?? []) as Array<{ fullPatchedContent?: unknown }>, brief, cloudAllowed, preferCloud: !!current.preferCloud });
       brief = check.brief;
       if (check.preferCloud !== undefined) { input = { ...input, preferCloud: check.preferCloud }; escalated = check.preferCloud; }
     }
+    if (unfinished) brief = unfinished;
     const SUITE_LEVEL_CASE = /^\S+\.(?:test|spec)\.[cm]?[jt]sx?(?:\s*\[.*\])?$/i;
     const failedCases = result.verification?.failedCases;
     const namedFailures = failedCases?.filter(c => !SUITE_LEVEL_CASE.test(c)).length;

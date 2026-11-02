@@ -10,8 +10,31 @@ export interface TriageResult { cause: TriageCause; action: TriageAction; source
 const DEFAULT_ACTION: Record<TriageCause, TriageAction> = { not_copied: 'reroute', wrong_place: 'retry', goal_unclear: 'stop' };
 const RULE_RESULT: TriageResult = { cause: 'not_copied', action: 'reroute', source: 'rule' };
 
+/** Where the text after an "add the line(s)" request starts, or -1 when the goal has no such request or it is negated. */
+function addedTextStart(goal: string): number {
+  const m = /\badd\s+(?:the|this|these|one)?\s*(?:\w+\s+)?lines?\b[^`]*/i.exec(goal);
+  if (!m) return -1;
+  if (/(?:do not|don't)\s+$/i.test(goal.slice(Math.max(0, m.index - 12), m.index))) return -1;
+  return m.index + m[0].length;
+}
+
+/** The leading run of backticked spans in text (joined by spaces, commas, "and" or "then"), trimmed, 8+ characters each. */
+function leadingSpans(text: string): string[] {
+  const run = /^[^`]*(?:`[^`]+`(?:[\s,]*(?:and|then)?[\s,]*`[^`]+`)*)/.exec(text);
+  if (!run) return [];
+  return [...run[0].matchAll(/`([^`]+)`/g)].map(s => s[1].trim()).filter(s => s.length >= 8);
+}
+
+/** The code an "add the line(s) ..." request supplies, or null when the goal makes no such request. */
+function addedLiterals(goal: string): string[] | null {
+  const start = addedTextStart(goal);
+  return start < 0 ? null : leadingSpans(goal.slice(start));
+}
+
 /** The backticked code the goal says to put in place: spans of 8+ characters after the first "replace ... with", none if that is negated. */
 export function requiredLiterals(goal: string): string[] {
+  const added = addedLiterals(goal);
+  if (added) return added;
   const match = goal.match(/\breplace\b[\s\S]*?\bwith\b/i);
   if (!match) return [];
 

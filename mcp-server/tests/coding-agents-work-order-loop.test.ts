@@ -59,3 +59,26 @@ describe('the repair loop goes back to the work order', () => {
         expect(inputs[1].preferCloud).toBeUndefined();
     });
 });
+
+describe('a green check does not finish a partial work order', () => {
+    const green = (content: string): CodingAgentsResult => ({
+        sessionId: 's', goal: GOAL, pipelineStage: 'completed', relevantFiles: [], anchors: [], patchSummary: '', diagnostics: [],
+        patchPlan: [{ filePath: 'a.ts', fullPatchedContent: content }],
+        applied: true, checkpointId: 'cp1', status: 'applied',
+        verification: { command: 'c', status: 'passed', ok: true, baselineOk: true, exitCode: 0, timedOut: false, outputTail: '', durationMs: 1, failedCases: [] },
+    } as unknown as CodingAgentsResult);
+    const input: CodingAgentsInput = { goal: GOAL, dryRun: false, verifyCommand: 'node t.js', resolve: { action: 'apply' }, maxRepairAttempts: 2, samples: 1 };
+
+    it('retries with the missing text, then converges when it lands', async () => {
+        const inputs: CodingAgentsInput[] = [];
+        const results = [green(NEW_A), green(NEW_A + NEW_B)];
+        const r = await runWithRepairLoop(input, 's', undefined, async i => { inputs.push(i); return results[inputs.length - 1]; }, async () => []);
+        expect(inputs).toHaveLength(2);
+        expect(String(inputs[1].feedback)).toContain(NEW_B);
+        expect(r.repair?.outcome).toBe('converged');
+    });
+    it('does not report converged when the text never lands', async () => {
+        const r = await runWithRepairLoop(input, 's', undefined, async () => green(NEW_A), async () => []);
+        expect(r.repair?.outcome).not.toBe('converged');
+    });
+});

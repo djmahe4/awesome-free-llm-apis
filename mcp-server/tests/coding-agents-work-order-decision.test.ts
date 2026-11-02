@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { checkWorkOrder } from '../src/tools/coding-agents/work-order-decision.js';
+import { checkWorkOrder, unfinishedBrief } from '../src/tools/coding-agents/work-order-decision.js';
 
 const NEW_A = 'const withoutAnsi = strip(text);';
 const NEW_B = 'return clean(withoutAnsi);';
@@ -49,5 +49,19 @@ describe('checkWorkOrder', () => {
     it('a stop is reported', async () => {
         const r = await checkWorkOrder({ goal: GOAL, patchPlan: plan('x'), brief: 'b', cloudAllowed: true, preferCloud: false }, answer('stop'));
         expect(r.action).toBe('stop');
+    });
+});
+
+describe('unfinishedBrief', () => {
+    it('names the text a green edit left out', () => {
+        const brief = unfinishedBrief(GOAL, plan(NEW_A));
+        expect(brief?.startsWith('The goal supplied')).toBe(true);
+        expect(brief).toContain(NEW_B);
+        expect(brief).not.toContain(NEW_A);
+    });
+    it('is undefined when everything landed, nothing was patched, or the goal supplied nothing', () => {
+        expect(unfinishedBrief(GOAL, plan(NEW_A + NEW_B))).toBeUndefined();
+        expect(unfinishedBrief(GOAL, [])).toBeUndefined();
+        expect(unfinishedBrief('Make it faster.', plan('x'))).toBeUndefined();
     });
 });

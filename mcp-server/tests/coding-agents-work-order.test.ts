@@ -23,6 +23,24 @@ describe('requiredLiterals', () => {
     });
 });
 
+describe('requiredLiterals for added lines', () => {
+    it('takes the code after "add the line"', () => {
+        expect(requiredLiterals('After the import add the line `const answer = 42;`. Change nothing else.')).toEqual(['const answer = 42;']);
+    });
+    it('takes a chain of lines joined by and or then', () => {
+        expect(requiredLiterals('Add these lines: `const first = 1;` then `const second = 2;` and `const third = 3;`.')).toEqual(['const first = 1;', 'const second = 2;', 'const third = 3;']);
+    });
+    it('does not take code named later in the goal', () => {
+        expect(requiredLiterals('Add the line `const first = 1;` directly after `const anchor = 0;`.')).toEqual(['const first = 1;']);
+    });
+    it('does not read "add a function" as supplied text', () => {
+        expect(requiredLiterals('Add a function `helperFunction` to the file.')).toEqual([]);
+    });
+    it('ignores a negated addition', () => {
+        expect(requiredLiterals('Do not add the line `const first = 1;`.')).toEqual([]);
+    });
+});
+
 describe('missingLiterals', () => {
     it('reports only the text no file contains, ignoring surrounding whitespace', () => {
         expect(missingLiterals(GOAL, [`function f() {\n  ${NEW_A}\n  return wrong;\n}`])).toEqual([NEW_B]);
