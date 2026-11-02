@@ -5,6 +5,7 @@ import { detectSpecialCasing } from './verify-guard.js';
 import { resetVerifyCache } from './verify-cache.js';
 import { loadCodingAgentsSettings } from './settings.js';
 import { alreadyAdded } from './work-order.js';
+import { runSteps, splitSteps } from './goal-steps.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { checkWorkOrder, noChangeBrief, unfinishedBrief, type WorkOrderCheck } from './work-order-decision.js';
@@ -93,6 +94,10 @@ export async function runWithRepairLoop(
   restoreFiles?: RestoreFiles,
   workOrder: typeof checkWorkOrder = checkWorkOrder,
 ): Promise<CodingAgentsResult> {
+  const steps = input.edits ? [] : splitSteps(input.goal);
+  if (steps.length > 0) {
+    return runSteps(input, steps, step => runWithRepairLoop(step, sessionId, run, runner, rollback, restoreFiles, workOrder), rollback);
+  }
   // Deterministic AST edits cannot be "re-generated", so there is nothing to repair by retrying.
   const retriable = !(input.astEditOps && input.astEditOps.length > 0);
   const repairBudget = retriable ? Math.min(MAX_REPAIR_ATTEMPTS, Math.max(0, input.maxRepairAttempts ?? DEFAULT_REPAIR_ATTEMPTS)) : 0;

@@ -1,4 +1,5 @@
 import { missingLiterals, workOrderNote, triageDeviation, type TriageAction, type TriageCause, type TriageResult } from './work-order.js';
+import { staleLiterals } from './work-order.js';
 
 export interface WorkOrderCheckInput {
   goal: string;
@@ -42,6 +43,8 @@ export function unfinishedBrief(goal: string, patchPlan: Array<{ fullPatchedCont
   const contents = patchPlan.map(p => p.fullPatchedContent).filter((c): c is string => typeof c === 'string');
   if (contents.length === 0) return undefined;
   const missing = missingLiterals(goal, contents);
+  const stale = staleLiterals(goal, contents);
+  if (stale.length > 0) return ['The goal said to replace this text and it is still in the file:', ...stale, ...(missing.length > 0 ? ['', workOrderNote(missing)] : [])].join('\n');
   if (missing.length === 0) return undefined;
   return workOrderNote(missing);
 }

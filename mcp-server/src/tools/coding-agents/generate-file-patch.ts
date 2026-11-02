@@ -330,7 +330,10 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
       }
     }
 
-    if (!appliedPatch && cloudAllowed) {
+    // A large module is not regenerated in the cloud either: that path drops or renames code (#148).
+    const largeModule = !rewriteSmallFile && patchedContent.split(/\r?\n/).length > 300 && /^\s*export\s+/m.test(patchedContent);
+    if (!appliedPatch && cloudAllowed && largeModule) caTrace('cloud full-file fallback skipped (large module)', relPath);
+    if (!appliedPatch && cloudAllowed && !largeModule) {
       const localReason = lastFailureReason;
       caTrace('cloud full-file fallback', relPath);
       const { patch: cloudPatch, failureReason } = await generateCodePatchWithCloudLLM(
