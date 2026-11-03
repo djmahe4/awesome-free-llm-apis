@@ -641,24 +641,33 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       let patchedContent = originalContent;
       let rewrites = 0;
 
-      // 4a. LLM generation via localLlmPatch with seamless cloud fallback
+      // 4a. Candidate patch retrieval: from cached proposal or via local/cloud LLM generation
       const cachedPatch = isCachedProposalApply ? cachedProposal?.patchPlan?.find(p => p.filePath === relPath) : undefined;
+      let candidatePatchedContent: string | null = null;
+      let candidateFailed = false;
+
       if (cachedPatch && typeof cachedPatch.fullPatchedContent === 'string') {
-        patchedContent = cachedPatch.fullPatchedContent;
+        candidatePatchedContent = cachedPatch.fullPatchedContent;
       } else if (!dryRun && (!input.astEditOps || input.astEditOps.length === 0)) {
         const generated = await generateFilePatch({
           input: { ...input, _symbolGraph: symbolGraph } as any, result, relPath, fullPath, workspaceRoot, sessionId, run, resolvedModel, originalContent, activeGoal,
           loadedTasks, nextPendingTask, changeFiles, runContents, editedInRun,
         });
-        const lost = lostSymbols(relPath, originalContent, generated.patchedContent, input.goal);
+        candidatePatchedContent = generated.patchedContent;
+        candidateFailed = generated.failed;
+      }
+
+      if (candidatePatchedContent !== null) {
+        const effectiveGoal = (isCachedProposalApply && cachedProposal?.goal) ? cachedProposal.goal : (input.goal || '');
+        const lost = lostSymbols(relPath, originalContent, candidatePatchedContent, effectiveGoal);
         if (lost.length > 0) {
           result.symbolLoss = [...(result.symbolLoss ?? []), ...lost];
           result.diagnostics.push({ filePath: relPath, message: 'The edit removed ' + lost.join(', ') + ', which the goal does not mention, so it was not written.', severity: 'error', source: 'llm-patch' });
           taskHadFailure = true;
         } else {
-          patchedContent = generated.patchedContent;
+          patchedContent = candidatePatchedContent;
         }
-        if (generated.failed) taskHadFailure = true;
+        if (candidateFailed) taskHadFailure = true;
       }
 
       // 4b. Structural AST rewrites (OMP-style $$$VAR patterns)
@@ -907,6 +916,10 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     result.pipelineStage = 'completed';
     // applied = true only when patches were actually written to disk
     result.applied = !dryRun && input.resolve?.action === 'apply' && !verifyWithheld && !reviewBlocked;
+    if (result.applied && noopFiles === patches.length && (result.symbolLoss?.length || 0) > 0) {
+      result.applied = false;
+      result.message = `${result.message ? result.message + ' ' : ''}Refused to apply changes: unmentioned symbols were lost (${result.symbolLoss!.join(', ')}).`;
+    }
     if (result.applied) { globalEpisodicCache.flush().catch(() => {}); }
     if (result.applied && noopFiles > 0 && noopFiles < patches.length) {
       result.partialApply = true;

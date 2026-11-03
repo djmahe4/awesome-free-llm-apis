@@ -173,6 +173,14 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
               lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: ${appliedCount} block(s) matched, but applying them increases the file's compiler error count — rejected atomically (partial async/signature migrations are worse than no change)`;
             } else {
               lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: no blocks applied (${failures.join('; ') || 'unknown reason'})`;
+              if (failures.length > 0) {
+                result.diagnostics.push({
+                  filePath: relPath,
+                  message: `Local model (${resolvedModel}) SEARCH/REPLACE: 0 block(s) applied, ${failures.length} skipped: ${failures.join('; ')}`,
+                  severity: 'warning',
+                  source: 'llm-patch',
+                });
+              }
             }
           }
         } else if (srLlmResult.error) {

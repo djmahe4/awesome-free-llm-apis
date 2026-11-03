@@ -125,4 +125,57 @@ describe('coding-agents UX & safety enhancements', () => {
     const written = await fs.readFile(path.join(ws, 'src/index.ts'), 'utf-8');
     expect(written).toContain('export const val = 2;');
   });
+
+  it('cached proposal apply refuses to overwrite when unmentioned symbol is lost', async () => {
+    ws = await fs.mkdtemp(path.join(os.tmpdir(), 'ca-symbol-loss-apply-'));
+    const initialContent = 'export function existingHelper(): void {}\nexport function coreService(): number { return 1; }\n';
+    await fs.outputFile(path.join(ws, 'src/service.ts'), initialContent);
+
+    const sessionId = `sym-loss-${Date.now()}`;
+
+    // Mock an unapplied proposal in cache whose fullPatchedContent removed existingHelper
+    const { codingAgentsResultsCache, stableWorkspaceSessionId } = await import('../src/tools/coding-agents/session-wiring.js');
+    const canonicalSessionId = stableWorkspaceSessionId(ws);
+    const mockProposal = {
+      sessionId: canonicalSessionId,
+      goal: 'update coreService to return 2',
+      status: 'proposed',
+      applied: false,
+      pipelineStage: 'completed',
+      relevantFiles: ['src/service.ts'],
+      anchors: [],
+      diagnostics: [],
+      patchSummary: 'update coreService',
+      patchPlan: [
+        {
+          filePath: 'src/service.ts',
+          anchorTag: '#sha8',
+          startLine: 1,
+          endLine: 2,
+          originalSnippet: initialContent,
+          replacementSnippet: 'export function coreService(): number { return 2; }\n',
+          fullPatchedContent: 'export function coreService(): number { return 2; }\n',
+          unchanged: false,
+          unifiedDiff: '',
+          isNewFile: false,
+        },
+      ],
+    } as any;
+    codingAgentsResultsCache.set(`coding_agents:${sessionId}`, mockProposal);
+    codingAgentsResultsCache.set(`coding_agents:${canonicalSessionId}`, mockProposal);
+
+    const res: any = await CodingAgentsHandler({
+      goal: 'apply',
+      workspaceRoot: ws,
+      sessionId,
+    });
+
+    expect(res.applied).toBe(false);
+    expect(res.symbolLoss).toBeDefined();
+    expect(res.symbolLoss).toContain('existingHelper');
+
+    // Verify disk content was not altered to drop existingHelper
+    const diskContent = await fs.readFile(path.join(ws, 'src/service.ts'), 'utf-8');
+    expect(diskContent).toContain('export function existingHelper');
+  });
 });
