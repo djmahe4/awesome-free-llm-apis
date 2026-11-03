@@ -53,7 +53,9 @@ interface CodingAgentsInput {
   // off by default: lets cmd:/test: rows you wrote in hypotheses.md run an allowlisted command (same allowlist as verifyCommand)
   "hypothesisExec": false,
   // off by default (costs model calls): the model proposes extra assumptions to check, and in enforce mode corrects a refuted goal once
-  "hypothesisModel": false
+  "hypothesisModel": false,
+  // off by default: validate subagent delegation and checks (subagentValidation?: boolean)
+  "subagentValidation": false
 }
 ```
 
@@ -110,6 +112,8 @@ interface CodingAgentsResult {
   replannedGoal?: string;        // the corrected goal, when hypothesisModel is on and enforce found a refuted assumption
   isPaused?: boolean;
   applied: boolean;
+  partialApply?: boolean;        // true when only some files could be patched/applied (e.g. symbol-loss refusal)
+  durationMs?: number;           // total elapsed wall-clock milliseconds for the run benchmark
   checkpointId?: string;
   restoredFiles?: string[];
   modelUsed?: string;
