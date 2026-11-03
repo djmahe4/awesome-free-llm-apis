@@ -15,7 +15,8 @@ const ALLOWED_EXECUTABLES = new Set([
 ]);
 const INTERPRETERS = new Set(['node', 'python', 'python3']);
 const RUNNER_SHELL_FLAGS = new Set(['-c', '--call']);
-const INLINE_CODE_FLAGS = new Set(['-e', '--eval', '-p', '--print', '-c', '--command', '--exec']);
+const NODE_INLINE_FLAGS = new Set(['-e', '--eval', '-p', '--print', '-c', '--command', '--exec']);
+const PYTHON_INLINE_FLAGS = new Set(['-c', '--command']);
 const SHELL_CHARS = /[;&|<>`$(){}\\\n\r"'*?~!#]/;
 
 export type VerifyValidation = { ok: true; exe: string; args: string[] } | { ok: false; reason: string };
@@ -36,8 +37,11 @@ export function validateVerifyCommand(command: string): VerifyValidation {
     const flag = args.find(a => RUNNER_SHELL_FLAGS.has(a));
     if (flag) return { ok: false, reason: `shell flag ${flag} is not allowed in verifyCommand; point it at a script or test file` };
   }
-  if (INTERPRETERS.has(interpreter)) {
-    const flag = args.find(a => INLINE_CODE_FLAGS.has(a));
+  if (interpreter === 'node') {
+    const flag = args.find(a => NODE_INLINE_FLAGS.has(a));
+    if (flag) return { ok: false, reason: `inline-code flag ${flag} is not allowed in verifyCommand; point it at a script or test file` };
+  } else if (interpreter === 'python' || interpreter === 'python3') {
+    const flag = args.find(a => PYTHON_INLINE_FLAGS.has(a));
     if (flag) return { ok: false, reason: `inline-code flag ${flag} is not allowed in verifyCommand; point it at a script or test file` };
   }
   return { ok: true, exe, args };
@@ -92,7 +96,7 @@ function withoutKey(env: NodeJS.ProcessEnv, key: string): NodeJS.ProcessEnv {
 
 function killTree(pid: number | undefined): void {
   if (!pid) return;
-  if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+  if (process.platform === 'win32') { try { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' }); } catch {} try { process.kill(pid, 'SIGKILL'); } catch {} }
   else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } } }
 }
 
