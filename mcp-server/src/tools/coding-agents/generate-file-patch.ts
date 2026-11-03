@@ -21,6 +21,7 @@ import type { CodingAgentsInput, CodingAgentsResult, TaskItem } from './types.js
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
 import { applyAnchored } from './anchored-edit.js';
 import { anchoredWindow, applyEdits } from './anchored-edit.js';
+import { buildSymbolContextBlock } from './symbol-graph-cache.js';
 
 /** Everything the per-file generation step reads from the run (extracted from runCodingAgentsPipeline). */
 export interface FilePatchContext {
@@ -78,7 +79,14 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
     // The tests the verifyCommand runs are the specification: show them (read-only).
     const testContext = input.verifyCommand ? await readVerifyTestContext(input.verifyCommand, workspaceRoot) : '';
     const endOfFileHint = isEndOfFileInstruction(activeGoal) ? ' To add code at the end of the file, leave the SEARCH part empty and put the new code in REPLACE.' : '';
-    const augmentedInstruction = testContext ? `${baseInstruction}${endOfFileHint}\n\n${testContext}` : baseInstruction + endOfFileHint;
+    const baseAugmented = testContext ? `${baseInstruction}${endOfFileHint}\n\n${testContext}` : baseInstruction + endOfFileHint;
+    const targetFile = relPath;
+    const symbolCtxBlock = (input as any)._symbolGraph
+      ? buildSymbolContextBlock(targetFile, (input as any)._symbolGraph)
+      : '';
+    const augmentedInstruction = symbolCtxBlock
+      ? `${baseAugmented}\n\n${symbolCtxBlock}`
+      : baseAugmented;
 
     // Try SEARCH/REPLACE first, local model then cloud — see
     // generateSearchReplacePatch: unchanged content never passes through
@@ -88,7 +96,12 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
     // parses or every block fails to match — e.g. the model ignores the
     // requested format entirely.
     // rewrite mode (set by the repair loop) skips patching for small files and regenerates them.
-    const rewriteSmallFile = !!input.rewrite && patchedContent.split(/\r?\n/).length <= 200;
+    // Also skip SEARCH/REPLACE for brand-new or empty files — an empty file has no existing lines to anchor on.
+    const isNewOrEmpty = !patchedContent || patchedContent.trim() === '';
+    const rewriteSmallFile = (!!input.rewrite && patchedContent.split(/\r?\n/).length <= 200) || isNewOrEmpty;
+    const fileInstruction = isNewOrEmpty
+      ? `${augmentedInstruction}\n\nNote: ${relPath} is currently empty. Generate the complete valid implementation code from scratch. Do not paste or echo the goal or instruction text as code; start directly with the required code definitions.`
+      : augmentedInstruction;
     // The repair loop escalates to the cloud model when the local one keeps repeating a wrong edit (#106).
     const cloudFirst = !!input.preferCloud && (input.allowCloudFallback ?? loadCodingAgentsSettings(workspaceRoot).allowCloudFallback);
     const localModel = cloudFirst ? null : resolvedModel;
@@ -214,18 +227,18 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
         // right before the corruption guard runs on the reconstructed
         // full content — matching the cloud path's guard timing exactly.
         const hasExports = /^\s*export\s+/m.test(patchedContent);
-        const windowInfo = !hasExports ? extractWindowForInstruction(patchedContent, activeGoal) : null;
+        const windowInfo = !hasExports && !isNewOrEmpty ? extractWindowForInstruction(patchedContent, activeGoal) : null;
         caTrace('local full/window patch', relPath);
         const llmResult = await localLlmPatch({
           filePath: fullPath,
-          instruction: augmentedInstruction,
+          instruction: fileInstruction,
           workspace_root: workspaceRoot,
           sessionId,
           temperature: input.temperature,
           ...(input.model && resolvedModel ? { model: resolvedModel } : {}),
           ...(input.think ? { think: input.think } : {}),
           ...(run ? { signal: run.controller.signal } : {}),
-          contentOverride: windowInfo ? windowInfo.window : undefined,
+          contentOverride: isNewOrEmpty ? '' : (windowInfo ? windowInfo.window : undefined),
           excerptRange: windowInfo
             ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }
             : undefined,
@@ -281,14 +294,15 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
       // generation — a stronger cloud model is more likely to follow
       // the format correctly, and success here is unconditionally safe
       // (unchanged content never passed through the model).
-      try {
-        const { useFreeLLM } = await import('../use-free-llm.js');
-        caTrace('cloud search-replace fallback', relPath);
-        const srResult = await generateSearchReplacePatch(
-          patchedContent,
-          activeGoal,
-          relPath,
-          tasksContext,
+      if (!isNewOrEmpty) {
+        try {
+          const { useFreeLLM } = await import('../use-free-llm.js');
+          caTrace('cloud search-replace fallback', relPath);
+          const srResult = await generateSearchReplacePatch(
+            patchedContent,
+            symbolCtxBlock ? (activeGoal + "\n\n" + symbolCtxBlock) : activeGoal,
+            relPath,
+            tasksContext,
           async (prompt) => {
             const res = await useFreeLLM({
               messages: [
@@ -329,6 +343,7 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
       } catch {
         // Fall through to the older cloud strategy below regardless of why.
       }
+      }
     }
 
     // A large module is not regenerated in the cloud either: that path drops or renames code (#148).
@@ -339,7 +354,7 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
       caTrace('cloud full-file fallback', relPath);
       const { patch: cloudPatch, failureReason } = await generateCodePatchWithCloudLLM(
         fullPath,
-        activeGoal,
+        fileInstruction,
         patchedContent,
         workspaceRoot,
         sessionId,
