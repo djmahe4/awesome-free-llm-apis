@@ -193,13 +193,13 @@ export class ReaProxy {
       protocolVersion: '2024-11-05',
       capabilities: {},
       clientInfo: { name: 'awesome-free-llm-apis', version: '1.1.2' },
-    });
+    }, Math.max(this.requestTimeoutMs, 5000));
 
     // 2. Handshake Step 2: notifications/initialized
     this.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
 
     // 3. Handshake Step 3: tools/list
-    const toolsResponse = await this.request('tools/list', {});
+    const toolsResponse = await this.request('tools/list', {}, Math.max(this.requestTimeoutMs, 5000));
     const tools: any[] = toolsResponse?.tools || [];
 
     this.callableList = [];
@@ -237,7 +237,7 @@ export class ReaProxy {
     };
   }
 
-  private request(method: string, params: Record<string, unknown>): Promise<any> {
+  private request(method: string, params: Record<string, unknown>, timeoutMs: number = this.requestTimeoutMs): Promise<any> {
     if (this.isClosed) {
       return Promise.reject(new ProxyError('Proxy is closed', 'closed'));
     }
@@ -252,9 +252,11 @@ export class ReaProxy {
           } catch {
             // Process might be dead
           }
-          reject(new ProxyError(`Request timed out after ${this.requestTimeoutMs}ms`, 'timeout'));
+          setTimeout(() => {
+            reject(new ProxyError(`Request timed out after ${timeoutMs}ms`, 'timeout'));
+          }, 50);
         }
-      }, this.requestTimeoutMs);
+      }, timeoutMs);
 
       this.pending.set(id, { resolve, reject, timer, method });
       this.send({ jsonrpc: '2.0', id, method, params });
