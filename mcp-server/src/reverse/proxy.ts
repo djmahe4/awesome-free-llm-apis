@@ -111,6 +111,8 @@ export class ReaProxy {
   }>();
   private stdoutBuffer = '';
   private isClosed = false;
+  private isStarted = false;
+  private startPromise: Promise<ProxyStartResult> | null = null;
 
   private callableList: string[] = [];
   private blockedList: BlockedToolInfo[] = [];
@@ -163,14 +165,27 @@ export class ReaProxy {
   }
 
   public async start(): Promise<ProxyStartResult> {
-    if (this.child) {
+    if (this.isStarted && this.child) {
       return {
         callable: this.callable,
         blocked: this.blocked,
         pins: this.pins,
       };
     }
+    if (this.startPromise) {
+      return this.startPromise;
+    }
+    this.startPromise = this.doStart();
+    try {
+      const res = await this.startPromise;
+      this.isStarted = true;
+      return res;
+    } finally {
+      this.startPromise = null;
+    }
+  }
 
+  private async doStart(): Promise<ProxyStartResult> {
     this.child = spawn(this.command, this.args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: this.env,
@@ -179,6 +194,14 @@ export class ReaProxy {
 
     this.child.stdout?.on('data', (chunk: Buffer) => {
       this.handleStdoutChunk(chunk);
+    });
+
+    let stderrBuf = '';
+    this.child.stderr?.on('data', (chunk: Buffer) => {
+      stderrBuf += chunk.toString('utf8');
+      if (stderrBuf.length > 4096) {
+        stderrBuf = stderrBuf.slice(-4096);
+      }
     });
 
     let earlyError: Error | null = null;
@@ -196,11 +219,14 @@ export class ReaProxy {
       if (earlyErrorReject) earlyErrorReject(new ProxyError(`Failed to spawn engine: ${err.message}`, 'closed'));
     });
 
-    this.child.on('exit', () => {
+    this.child.on('exit', (code, signal) => {
       this.isClosed = true;
+      const details = stderrBuf.trim()
+        ? `: ${stderrBuf.trim()}`
+        : (code !== null ? ` (exit code ${code})` : (signal ? ` (signal ${signal})` : ''));
       for (const [_, req] of this.pending) {
         if (req.timer) clearTimeout(req.timer);
-        req.reject(new ProxyError('Engine process terminated', 'closed'));
+        req.reject(new ProxyError(`Engine process terminated${details}`, 'closed'));
       }
       this.pending.clear();
       this.child = null;
@@ -380,6 +406,8 @@ export class ReaProxy {
 
   public async close(): Promise<void> {
     this.isClosed = true;
+    this.isStarted = false;
+    this.startPromise = null;
     for (const [_, req] of this.pending) {
       if (req.timer) clearTimeout(req.timer);
       req.reject(new ProxyError('Proxy is closed', 'closed'));

@@ -105,4 +105,26 @@ describe('ReaProxy Tool Execution, Timeouts, Buffering and Caps', () => {
 
     await proxy.close();
   });
+it('handles multiple concurrent tool calls safely without cross-talk', async () => {
+    const proxy = new ReaProxy({
+      command: process.execPath,
+      args: [FAKE_REA],
+    });
+    await proxy.start();
+
+    const results = await Promise.all([
+      proxy.call('inspect_artifact', { path: '/path/1' }),
+      proxy.call('analyze_javascript_application', { path: '/path/2' }),
+      proxy.call('get_evidence_bundle', { evidence_id: 'ev-1' }),
+    ]);
+
+    expect(results).toHaveLength(3);
+    for (const res of results) {
+      expect(res.text).toContain('ev-1');
+      expect(res.untrustedContent).toBe(true);
+      expect(res.provenance.trusted).toBe(false);
+    }
+
+    await proxy.close();
+  });
 });

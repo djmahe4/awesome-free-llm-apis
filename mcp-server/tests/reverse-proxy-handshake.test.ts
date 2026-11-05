@@ -88,4 +88,17 @@ describe('ReaProxy Handshake & Tool Categorization', () => {
     // Proxy must be closed and cleaned up, not leave orphaned child
     await expect(proxy.call('inspect_artifact', {})).rejects.toThrow(/closed/);
   });
+it('handles concurrent calls to start() safely', async () => {
+    const proxy = new ReaProxy({
+      command: process.execPath,
+      args: [FAKE_REA],
+    });
+    const [res1, res2] = await Promise.all([
+      proxy.start(),
+      proxy.start(),
+    ]);
+    expect(res1.callable).toEqual(res2.callable);
+    expect(res1.blocked).toEqual(res2.blocked);
+    await proxy.close();
+  });
 });
