@@ -41,4 +41,16 @@ describe('reverseTool MCP handler', () => {
     expect(res.data.capabilities).toContain('scan_github');
     expect(res.data.capabilities).toContain('inspect_gguf');
   });
+
+  it('handles engine initialization failure gracefully and cleans up proxy in finally', async () => {
+    const origEnv = process.env.REA_AGENTS_PATH;
+    try {
+      process.env.REA_AGENTS_PATH = 'non_existent_engine_executable_123';
+      const res = await reverseTool({ action: 'list_capabilities' });
+      expect(res.success).toBe(true);
+      expect(res.data.engineBlocked.some((b: any) => b.name === 'rea-engine')).toBe(true);
+    } finally {
+      process.env.REA_AGENTS_PATH = origEnv;
+    }
+  });
 });

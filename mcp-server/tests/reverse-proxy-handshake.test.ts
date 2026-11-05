@@ -69,4 +69,23 @@ describe('ReaProxy Handshake & Tool Categorization', () => {
     await expect(secondProxy.call('inspect_artifact', {})).rejects.toThrow(ProxyError);
     await secondProxy.close();
   });
+
+  it('terminates spawned engine process when handshake fails or times out', async () => {
+    const proxy = new ReaProxy({
+      command: process.execPath,
+      args: ['-e', 'setInterval(()=>{}, 1000)'],
+      handshakeTimeoutMs: 300,
+    });
+
+    let thrown = false;
+    try {
+      await proxy.start();
+    } catch {
+      thrown = true;
+    }
+    expect(thrown).toBe(true);
+
+    // Proxy must be closed and cleaned up, not leave orphaned child
+    await expect(proxy.call('inspect_artifact', {})).rejects.toThrow(/closed/);
+  });
 });

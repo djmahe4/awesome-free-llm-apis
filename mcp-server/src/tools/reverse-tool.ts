@@ -78,17 +78,18 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     let engineBlocked: BlockedToolInfo[] = [];
 
     if (reaPath) {
+      const proxy = new ReaProxy({
+        command: reaPath,
+        requestTimeoutMs: 5000,
+      });
       try {
-        const proxy = new ReaProxy({
-          command: reaPath,
-          requestTimeoutMs: 5000,
-        });
         const info = await proxy.start();
         engineCallable = info.callable;
         engineBlocked = info.blocked;
-        await proxy.close();
       } catch (err: any) {
         engineBlocked.push({ name: 'rea-engine', reason: err.message || 'Failed to initialize engine' });
+      } finally {
+        await proxy.close();
       }
     }
 

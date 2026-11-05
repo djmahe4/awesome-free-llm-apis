@@ -70,6 +70,7 @@ export interface ReaProxyOptions {
   args?: string[];
   env?: Record<string, string>;
   requestTimeoutMs?: number;
+  handshakeTimeoutMs?: number;
   maxResponseBytes?: number;
   pins?: Record<string, string>;
 }
@@ -119,6 +120,7 @@ export class ReaProxy {
   private readonly args: string[];
   private readonly env: Record<string, string>;
   private readonly requestTimeoutMs: number;
+  private readonly handshakeTimeoutMs?: number;
   private readonly maxResponseBytes: number;
   private readonly initialPins?: Record<string, string>;
 
@@ -127,6 +129,7 @@ export class ReaProxy {
     this.args = options.args || [];
     this.env = options.env || (process.env as Record<string, string>);
     this.requestTimeoutMs = options.requestTimeoutMs ?? 15000;
+    this.handshakeTimeoutMs = options.handshakeTimeoutMs;
     this.maxResponseBytes = options.maxResponseBytes ?? 4 * 1024 * 1024;
     this.initialPins = options.pins;
   }
@@ -178,6 +181,21 @@ export class ReaProxy {
       this.handleStdoutChunk(chunk);
     });
 
+    let earlyError: Error | null = null;
+    let earlyErrorReject: ((err: Error) => void) | null = null;
+
+    this.child.on('error', (err) => {
+      earlyError = err;
+      this.isClosed = true;
+      for (const [_, req] of this.pending) {
+        if (req.timer) clearTimeout(req.timer);
+        req.reject(new ProxyError(`Engine process error: ${err.message}`, 'closed'));
+      }
+      this.pending.clear();
+      this.child = null;
+      if (earlyErrorReject) earlyErrorReject(new ProxyError(`Failed to spawn engine: ${err.message}`, 'closed'));
+    });
+
     this.child.on('exit', () => {
       this.isClosed = true;
       for (const [_, req] of this.pending) {
@@ -188,53 +206,69 @@ export class ReaProxy {
       this.child = null;
     });
 
-    // 1. Handshake Step 1: initialize
-    const initResponse = await this.request('initialize', {
-      protocolVersion: '2024-11-05',
-      capabilities: {},
-      clientInfo: { name: 'awesome-free-llm-apis', version: '1.1.2' },
-    }, Math.max(this.requestTimeoutMs, 5000));
-
-    // 2. Handshake Step 2: notifications/initialized
-    this.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
-
-    // 3. Handshake Step 3: tools/list
-    const toolsResponse = await this.request('tools/list', {}, Math.max(this.requestTimeoutMs, 5000));
-    const tools: any[] = toolsResponse?.tools || [];
-
-    this.callableList = [];
-    this.blockedList = [];
-    this.schemaPins = {};
-
-    for (const tool of tools) {
-      const name = tool.name;
-      const hash = this.hashTool(tool);
-      this.schemaPins[name] = hash;
-
-      // Check pin mismatch
-      if (this.initialPins && this.initialPins[name] && this.initialPins[name] !== hash) {
-        this.blockedList.push({ name, reason: 'schema_changed' });
-        continue;
+    try {
+      if (earlyError) {
+        throw new ProxyError(`Failed to spawn engine: ${(earlyError as Error).message}`, 'closed');
       }
 
-      // Allowlist check: Must be readOnlyHint: true and not setup or mutating
-      const isReadOnly = tool.annotations?.readOnlyHint === true;
-      const isSetupOrMutate = name.toLowerCase().includes('setup') || name.toLowerCase().startsWith('write_');
+      const hsTimeout = this.handshakeTimeoutMs ?? Math.max(this.requestTimeoutMs, 5000);
 
-      if (isReadOnly && !isSetupOrMutate) {
-        this.callableList.push(name);
-      } else {
-        const reason = isSetupOrMutate ? (name.includes('setup') ? 'setup_tool' : 'mutating_tool') : 'not_read_only';
-        this.blockedList.push({ name, reason });
+      // 1. Handshake Step 1: initialize (race with immediate spawn failure)
+      const initResponse = await Promise.race([
+        this.request('initialize', {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'awesome-free-llm-apis', version: '1.1.2' },
+        }, hsTimeout),
+        new Promise<any>((_, reject) => {
+          earlyErrorReject = reject;
+        }),
+      ]);
+
+      // 2. Handshake Step 2: notifications/initialized
+      this.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+
+      // 3. Handshake Step 3: tools/list
+      const toolsResponse = await this.request('tools/list', {}, hsTimeout);
+      const tools: any[] = toolsResponse?.tools || [];
+
+      this.callableList = [];
+      this.blockedList = [];
+      this.schemaPins = {};
+
+      for (const tool of tools) {
+        const name = tool.name;
+        const hash = this.hashTool(tool);
+        this.schemaPins[name] = hash;
+
+        // Check pin mismatch
+        if (this.initialPins && this.initialPins[name] && this.initialPins[name] !== hash) {
+          this.blockedList.push({ name, reason: 'schema_changed' });
+          continue;
+        }
+
+        // Allowlist check: Must be readOnlyHint: true and not setup or mutating
+        const isReadOnly = tool.annotations?.readOnlyHint === true;
+        const isSetupOrMutate = name.toLowerCase().includes('setup') || name.toLowerCase().startsWith('write_');
+
+        if (isReadOnly && !isSetupOrMutate) {
+          this.callableList.push(name);
+        } else {
+          const reason = isSetupOrMutate ? (name.includes('setup') ? 'setup_tool' : 'mutating_tool') : 'not_read_only';
+          this.blockedList.push({ name, reason });
+        }
       }
+
+      return {
+        callable: this.callable,
+        blocked: this.blocked,
+        pins: this.pins,
+        serverInfo: initResponse?.serverInfo,
+      };
+    } catch (err) {
+      await this.close();
+      throw err;
     }
-
-    return {
-      callable: this.callable,
-      blocked: this.blocked,
-      pins: this.pins,
-      serverInfo: initResponse?.serverInfo,
-    };
   }
 
   private request(method: string, params: Record<string, unknown>, timeoutMs: number = this.requestTimeoutMs): Promise<any> {
@@ -244,6 +278,7 @@ export class ReaProxy {
 
     const id = ++this.requestId;
     return new Promise((resolve, reject) => {
+      let cancelTimer: NodeJS.Timeout | null = null;
       const timer = setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
@@ -252,13 +287,25 @@ export class ReaProxy {
           } catch {
             // Process might be dead
           }
-          setTimeout(() => {
+          cancelTimer = setTimeout(() => {
+            if (this.isClosed) return;
             reject(new ProxyError(`Request timed out after ${timeoutMs}ms`, 'timeout'));
-          }, 50);
+          }, 60);
         }
       }, timeoutMs);
 
-      this.pending.set(id, { resolve, reject, timer, method });
+      this.pending.set(id, {
+        resolve: (val) => {
+          if (cancelTimer) clearTimeout(cancelTimer);
+          resolve(val);
+        },
+        reject: (err) => {
+          if (cancelTimer) clearTimeout(cancelTimer);
+          reject(err);
+        },
+        timer,
+        method,
+      });
       this.send({ jsonrpc: '2.0', id, method, params });
     });
   }
