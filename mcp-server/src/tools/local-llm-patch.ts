@@ -258,13 +258,15 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
     // this is the actual fix: a model asked for "the complete file" on a
     // 1000-line file will truncate/hallucinate the parts it doesn't touch;
     // asking for just the excerpt removes that temptation entirely.
+    const isNewOrEmpty = !fileExists || !fileContent.trim();
+
     const fileNotice = isSearchReplace
       ? `You are editing ${path.basename(absPath)}${input.excerptRange ? ` (an excerpt is shown below, lines ${input.excerptRange.startLine}–${input.excerptRange.endLine} of ${input.excerptRange.totalLines} total)` : ''}. The content below is shown ONLY so you can find exact text to change — you do not need to reproduce it.`
       : input.excerptRange
         ? `You are editing a specific section of ${path.basename(absPath)} (${input.excerptRange.totalLines} lines total). The excerpt below is lines ${input.excerptRange.startLine}–${input.excerptRange.endLine} of the file (${input.excerptRange.endLine - input.excerptRange.startLine + 1} lines). Your reply REPLACES this excerpt verbatim, line for line — reproduce every unchanged line exactly as shown, and only alter the specific line(s) the instruction targets. Do NOT summarize, abbreviate, or omit any line, and do NOT return just the changed line(s) alone — that would delete the rest of the excerpt. Wrap the full ${input.excerptRange.endLine - input.excerptRange.startLine + 1}-line reply in a single code fence with no other commentary. The file's content outside this excerpt is separate and must NOT be reproduced.`
-        : fileExists
-          ? `You are patching a single file. Apply the instruction and return the COMPLETE new file content only, wrapped in a single code fence. Do not include explanations outside the fence.`
-          : `You are creating a new file: ${path.basename(absPath)}. Implement the instruction and return the COMPLETE file content only, wrapped in a single code fence. Do not include explanations outside the fence.`;
+        : isNewOrEmpty
+          ? `You are creating the file: ${path.basename(absPath)}. Implement the instruction and return the COMPLETE valid source code only, wrapped in a single code fence. Do not include explanations outside the fence. IMPORTANT: Write actual executable code. Do NOT paste or echo the instruction/goal text into the code block.`
+          : `You are patching a single file. Apply the instruction and return the COMPLETE new file content only, wrapped in a single code fence. Do not include explanations outside the fence.`;
 
     const searchReplaceFormatBlock = isSearchReplace
       ? [
@@ -283,14 +285,15 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
         ].join('\n')
       : '';
 
+    const fileSection = fileContent.trim()
+      ? (input.excerptRange
+          ? `## Excerpt: lines ${input.excerptRange.startLine}–${input.excerptRange.endLine} of ${path.basename(absPath)}\n\`\`\`\n${fileContent}\n\`\`\``
+          : `## File: ${path.basename(absPath)}\n\`\`\`\n${fileContent}\n\`\`\``)
+      : `## File: ${path.basename(absPath)} (empty file)`;
+
     const prompt = [
       fileNotice,
-      input.excerptRange
-        ? `## Excerpt: lines ${input.excerptRange.startLine}–${input.excerptRange.endLine} of ${path.basename(absPath)}`
-        : `## File: ${path.basename(absPath)}`,
-      '```',
-      fileContent,
-      '```',
+      fileSection,
       `## Instruction\n${input.instruction}`,
       contextBlock,
       searchReplaceFormatBlock,
@@ -315,7 +318,9 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
               ? 'You are a precise code-editing assistant. Reply with ONLY the requested SEARCH/REPLACE blocks.'
               : input.excerptRange
                 ? 'You are a precise code-editing assistant. Return ONLY the updated excerpt lines inside one code fence. Do NOT return the rest of the file.'
-                : 'You are a precise code-editing assistant. Return only the complete new file content in a single code fence.',
+                : isNewOrEmpty
+                  ? 'You are an expert programmer. Write clean, complete, syntactically valid code that implements the requested functionality. Return ONLY the code inside a single code fence. Never paste the prompt or instruction text as code.'
+                  : 'You are a precise code-editing assistant. Return only the complete new file content in a single code fence.',
           },
           { role: 'user' as const, content: prompt },
         ];

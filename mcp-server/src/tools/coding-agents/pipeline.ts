@@ -34,8 +34,12 @@ import {
   extractGoalFromTasksMarkdown,
 } from './tasks.js';
 import { isNoopPatch } from './patch-gen.js';
-import { resolveGateMode, runHypothesisGate, writeHypothesesFile } from './hypothesis-gate.js';
+import { resolveGateMode, runHypothesisGate, writeHypothesesFile, HYPOTHESES_FILE } from './hypothesis-gate.js';
 import { modelProposer, modelReviser } from './hypothesis-model.js';
+import { buildSymbolGraph, SymbolGraphCache } from './symbol-graph-cache.js';
+import { makeSubagentValidator } from './subagent-validator.js';
+import { globalEpisodicCache } from './episodic-probe-cache.js';
+const _symbolGraphCache = new SymbolGraphCache();
 import { loadCodingAgentsSettings } from './settings.js';
 import {
   discoverWiringTargets,
@@ -59,18 +63,21 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
   }
   const runKey = `coding_agents:${sessionId}`;
 
+  const cachedProposal = codingAgentsResultsCache.get(runKey);
+
   if (input.action === 'status') {
     const run = RunRegistry.get(runKey);
     if (!run) {
       return withMarkdown({
-        sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: [], anchors: [],
+        sessionId, goal: input.goal || cachedProposal?.goal || '', pipelineStage: 'completed', relevantFiles: [], anchors: [],
         patchPlan: [], patchSummary: '', diagnostics: [], applied: false,
         error: `No run found for sessionId '${sessionId}'. Call with action:"execute" (dryRun:false) first.`,
       });
     }
     if (!run.done) {
+      const activeGoal = input.goal || (run as any).goal || cachedProposal?.goal || '';
       return withMarkdown({
-        sessionId, goal: input.goal, pipelineStage: 'edit', relevantFiles: [], anchors: [],
+        sessionId, goal: activeGoal, pipelineStage: 'edit', relevantFiles: [], anchors: [],
         patchPlan: [], patchSummary: '', diagnostics: [], applied: false,
         status: 'running',
         message: `Running: ${run.completedCount}/${run.totalCount} file(s) (last: ${run.lastSubtask || 'n/a'})`,
@@ -93,8 +100,21 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
     });
   }
 
-  const dryRun = input.dryRun !== false; // same default as the pipeline itself
   const isRollback = input.resolve?.action === 'rollback';
+  let isApply = input.resolve?.action === 'apply' || (input.action as string) === 'apply';
+
+  // If there's an unapplied cached proposal for this session, recognize apply-like goals:
+  // e.g. "apply", "apply plan", "apply the changes", "apply proposal"
+  const isApplyGoal = !!cachedProposal && cachedProposal.status === 'proposed' && !cachedProposal.applied && !!input.goal && /^apply(\s+(the\s+)?(plan|proposal|changes?|edits?|patch))?$/i.test(input.goal.trim());
+  if (isApplyGoal) {
+    isApply = true;
+    input.resolve = { action: 'apply' };
+  }
+
+  const isCachedProposalApply = isApply && cachedProposal?.status === 'proposed' && !cachedProposal.applied && !!cachedProposal.patchPlan?.length;
+
+  // resolve apply defaults dryRun to false when omitted; otherwise respects dryRun if explicitly provided
+  const dryRun = input.dryRun !== undefined ? input.dryRun : !isApply;
   // Per-file undo / history reads are deterministic disk operations — like
   // rollback they must run synchronously, never be backgrounded behind RunRegistry.
   const isFileHistoryOp = input.resolve?.action === 'undo_file' || input.resolve?.action === 'file_history';
@@ -104,8 +124,8 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
   // so there's nothing slow here to background.
   const isAstOnly = !!input.astEditOps && input.astEditOps.length > 0;
 
-  // Fast, synchronous paths: preview, plan creation, rollback, per-file undo/history, deterministic AST edits — unchanged behavior.
-  if (dryRun || isRollback || isFileHistoryOp || isPlanOnly || isAstOnly) {
+  // Fast, synchronous paths: preview, plan creation, rollback, applying an existing proposal, per-file undo/history, deterministic AST edits.
+  if (dryRun || isRollback || isFileHistoryOp || isPlanOnly || isAstOnly || isCachedProposalApply) {
     return runCodingAgentsPipeline(input, sessionId);
   }
 
@@ -122,6 +142,7 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
   }
 
   const run = RunRegistry.start(runKey);
+  (run as any).goal = input.goal;
   (async () => {
     try {
       // Real execution: a failed check or a blocking review is retried with a debugger brief (bounded).
@@ -165,12 +186,31 @@ export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<Cod
 async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: string, run?: RunInfo): Promise<CodingAgentsResult> {
   const start = Date.now();
   const workspaceRoot = path.resolve(input.workspaceRoot || process.cwd());
-  const dryRun = input.dryRun !== false; // safe default: true
+  const runKey = `coding_agents:${sessionId}`;
+  const cachedProposal = codingAgentsResultsCache.get(runKey);
+  let isApply = input.resolve?.action === 'apply' || (input.action as string) === 'apply';
+  const isApplyGoal = !!cachedProposal && cachedProposal.status === 'proposed' && !cachedProposal.applied && !!input.goal && /^apply(\s+(the\s+)?(plan|proposal|changes?|edits?|patch))?$/i.test(input.goal.trim());
+  if (isApplyGoal) {
+    isApply = true;
+    input = { ...input, resolve: { action: 'apply' } };
+  }
+  const isCachedProposalApply = isApply && cachedProposal?.status === 'proposed' && !cachedProposal.applied && !!cachedProposal.patchPlan?.length;
+  if (isCachedProposalApply) {
+    input = {
+      ...input,
+      goal: (input.goal && !isApplyGoal) ? input.goal : cachedProposal.goal,
+      targetFiles: (input.targetFiles && input.targetFiles.length > 0) ? input.targetFiles : cachedProposal.relevantFiles,
+      verifyCommand: input.verifyCommand || (cachedProposal as any).verifyCommand,
+      dryRun: input.dryRun !== undefined ? input.dryRun : false,
+    };
+  }
+
+  const dryRun = input.dryRun !== undefined ? input.dryRun : !isApply;
   const topK = input.topKFiles || 5;
 
   let result: CodingAgentsResult = {
     sessionId,
-    goal: input.goal,
+    goal: input.goal || '',
     pipelineStage: 'enumerate',
     relevantFiles: [],
     anchors: [],
@@ -181,21 +221,27 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
   };
 
   const finalizeResult = async (): Promise<CodingAgentsResult> => {
+    result.durationMs = Date.now() - start;
     if (result.status !== 'paused' && result.status !== 'undo_file' && result.status !== 'file_history') {
       result.status = (result.restoredFiles && result.restoredFiles.length > 0)
         ? 'rollback'
         : (result.applied ? 'applied' : (input.dryRun === false ? 'proposed' : 'dry_run'));
       if (result.status === 'proposed' && !result.message) {
-        result.message = "The edit is proposed but not applied: dryRun is false and no resolve was given. Call again with resolve: { action: 'apply' } to apply it.";
+        result.message = `The edit is proposed but not applied: dryRun is false and no resolve was given. To apply, call again with resolve: { action: 'apply' } (or goal: 'apply') and sessionId: '${sessionId}'.`;
       }
     }
     result.content = formatCodingAgentsMarkdown(result);
     result.markdown = result.content;
+    if (result.applied) { await globalEpisodicCache.flush().catch(() => {}); }
     await logToolCall(sessionId, 'coding_agents', input, result, Date.now() - start, !!result.error).catch(() => {});
     return result;
   };
 
   try {
+    if (!input.goal && !input.action && !input.resolve && !input.verifyReport) {
+      result.error = 'Goal is required when starting an edit';
+      return await finalizeResult();
+    }
     if (input.verifyCommand !== undefined) {
       const v = validateVerifyCommand(input.verifyCommand);
       if (!v.ok) {
@@ -340,24 +386,92 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     // ── Step 1: Enumerate ────────────────────────────────────────────────────
     const codeFiles: string[] = await scanCodeFiles(workspaceRoot, 100);
 
-    // ── Step 1b: Check the assumptions before anything is edited ─────────────
-    // Names the goal relies on and the files it targets are looked up in the workspace; a refuted one is reported
-    // (warn) or stops the run here, before any model call (enforce). Settings: hypothesisGate in coding-agents.json.
+    // Feedback-based scope selection: prioritize target files, files mentioned in goal/feedback,
+    // and 1-hop neighborhood rather than an arbitrary slice of codeFiles.
+    const feedbackTerms = (input.feedback || '').toLowerCase().match(/\b[\w.-]+\.(?:ts|js|py|go|rs)\b/g) || [];
+    const goalTerms = (activeGoal || '').toLowerCase().match(/\b[\w.-]+\.(?:ts|js|py|go|rs)\b/g) || [];
+    const prioritizedFiles = Array.from(new Set([
+      ...(effectiveTargetFiles || []),
+      ...codeFiles.filter(f => goalTerms.some(t => f.toLowerCase().includes(t)) || feedbackTerms.some(t => f.toLowerCase().includes(t))),
+      ...codeFiles
+    ])).slice(0, 30);
+
+    // 1. Build symbol graph first so blast radius & neighborhood are known
+    const symbolGraph = await buildSymbolGraph(
+      prioritizedFiles,
+      workspaceRoot,
+      _symbolGraphCache
+    );
+    (result as any)._symbolGraph = symbolGraph;
+    (input as any)._symbolGraph = symbolGraph;
+
+    // 2. Compute direct callers / dependents to judge true blast radius
+    const directCallers = new Set<string>();
+    if (effectiveTargetFiles) {
+      for (const tf of effectiveTargetFiles) {
+        for (const caller of symbolGraph.getCallers(tf)) {
+          directCallers.add(caller);
+        }
+      }
+    }
+    if (directCallers.size > 0) {
+      (result as any).callerFiles = Array.from(directCallers);
+    }
+
+    // ── Step 1b: Check assumptions with bounded context ─────────────
     {
+      const settings = loadCodingAgentsSettings(workspaceRoot);
+      const primaryPropose = settings.hypothesisModel ? modelProposer(workspaceRoot, sessionId) : undefined;
+      // Real large change zone: 3+ target files OR high blast-radius hub (3+ direct callers)
+      const isLargeChangeZone = Boolean((effectiveTargetFiles && effectiveTargetFiles.length >= 3) || (directCallers.size >= 3));
+      const shouldRunValidator = settings.subagentValidation || (settings.hypothesisGate !== 'off' && isLargeChangeZone);
+      // Pass scoped 1-hop neighborhood to subagent validator
+      const scopedValidatorFiles = prioritizedFiles.filter(f =>
+        (effectiveTargetFiles && effectiveTargetFiles.includes(f)) || directCallers.has(f)
+      );
+      const subPropose = shouldRunValidator
+        ? makeSubagentValidator(workspaceRoot, sessionId, undefined, scopedValidatorFiles.length > 0 ? scopedValidatorFiles : prioritizedFiles)
+        : undefined;
+
+      const composedPropose = (primaryPropose || subPropose)
+        ? async (ctx: Parameters<NonNullable<typeof primaryPropose>>[0]) => {
+            const [a, b] = await Promise.allSettled([
+              primaryPropose ? primaryPropose(ctx) : Promise.resolve([]),
+              subPropose ? subPropose(ctx) : Promise.resolve([]),
+            ]);
+            const seen = new Set(ctx.derived.map(h => h.probe));
+            const merged: Array<{ claim: string; probe: string }> = [];
+            for (const p of [
+              ...(a.status === 'fulfilled' ? (a as PromiseFulfilledResult<any[]>).value : []),
+              ...(b.status === 'fulfilled' ? (b as PromiseFulfilledResult<any[]>).value : []),
+            ]) {
+              if (p && typeof p.probe === 'string' && !seen.has(p.probe)) { seen.add(p.probe); merged.push(p); }
+            }
+            return merged;
+          }
+        : undefined;
+
       const gate = await runHypothesisGate({
         mode: resolveGateMode(workspaceRoot), goal: activeGoal, files: codeFiles,
         targetFiles: effectiveTargetFiles, tasks: nextPendingTask ? [nextPendingTask] : undefined, workspaceRoot,
-        ...(loadCodingAgentsSettings(workspaceRoot).hypothesisModel ? { propose: modelProposer(workspaceRoot, sessionId), revise: modelReviser(workspaceRoot, sessionId) } : {}),
+        ...(composedPropose ? { propose: composedPropose, revise: modelReviser(workspaceRoot, sessionId) } : {}),
       });
       if (gate.replanned) {
         activeGoal = gate.goal;
         result.replannedGoal = gate.goal;
         caTrace('hypothesis gate re-planned', gate.goal.slice(0, 80));
       }
-      if (gate.hypotheses.length > 0) {
+      const shouldWriteHypotheses = gate.refuted.length > 0
+        || gate.blocked
+        || gate.replanned
+        || (loadedTasks && loadedTasks.length > 0)
+        || (await fs.pathExists(path.join(workspaceRoot, HYPOTHESES_FILE)));
+      if (gate.hypotheses.length > 0 && shouldWriteHypotheses) {
         await writeHypothesesFile(workspaceRoot, activeGoal, gate.hypotheses).catch(() => {});
         result.hypotheses = gate.hypotheses;
         result.hypothesesFile = 'hypotheses.md';
+      } else if (gate.hypotheses.length > 0) {
+        result.hypotheses = gate.hypotheses;
       }
       for (const h of gate.refuted) {
         result.diagnostics.push({ filePath: '', message: `Assumption refuted: ${h.claim} (${h.evidence})`, severity: gate.blocked ? 'error' : 'warning', source: 'hypothesis' });
@@ -527,21 +641,33 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       let patchedContent = originalContent;
       let rewrites = 0;
 
-      // 4a. LLM generation via localLlmPatch with seamless cloud fallback
-      if (!dryRun && (!input.astEditOps || input.astEditOps.length === 0)) {
+      // 4a. Candidate patch retrieval: from cached proposal or via local/cloud LLM generation
+      const cachedPatch = isCachedProposalApply ? cachedProposal?.patchPlan?.find(p => p.filePath === relPath) : undefined;
+      let candidatePatchedContent: string | null = null;
+      let candidateFailed = false;
+
+      if (cachedPatch && typeof cachedPatch.fullPatchedContent === 'string') {
+        candidatePatchedContent = cachedPatch.fullPatchedContent;
+      } else if (!dryRun && (!input.astEditOps || input.astEditOps.length === 0)) {
         const generated = await generateFilePatch({
-          input, result, relPath, fullPath, workspaceRoot, sessionId, run, resolvedModel, originalContent, activeGoal,
+          input: { ...input, _symbolGraph: symbolGraph } as any, result, relPath, fullPath, workspaceRoot, sessionId, run, resolvedModel, originalContent, activeGoal,
           loadedTasks, nextPendingTask, changeFiles, runContents, editedInRun,
         });
-        const lost = lostSymbols(relPath, originalContent, generated.patchedContent, input.goal);
+        candidatePatchedContent = generated.patchedContent;
+        candidateFailed = generated.failed;
+      }
+
+      if (candidatePatchedContent !== null) {
+        const effectiveGoal = (isCachedProposalApply && cachedProposal?.goal) ? cachedProposal.goal : (input.goal || '');
+        const lost = lostSymbols(relPath, originalContent, candidatePatchedContent, effectiveGoal);
         if (lost.length > 0) {
           result.symbolLoss = [...(result.symbolLoss ?? []), ...lost];
           result.diagnostics.push({ filePath: relPath, message: 'The edit removed ' + lost.join(', ') + ', which the goal does not mention, so it was not written.', severity: 'error', source: 'llm-patch' });
           taskHadFailure = true;
         } else {
-          patchedContent = generated.patchedContent;
+          patchedContent = candidatePatchedContent;
         }
-        if (generated.failed) taskHadFailure = true;
+        if (candidateFailed) taskHadFailure = true;
       }
 
       // 4b. Structural AST rewrites (OMP-style $$$VAR patterns)
@@ -631,10 +757,15 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     // Independent review of the proposed diff (never executes anything). It can stop an apply only
     // with a concrete input/expected/actual finding; otherwise it is reported and the edit proceeds.
     let reviewBlocked = false;
-    // Runs only when there is NO objective check: with a verifyCommand the tests are the judge (a 7B
-    // reviewer kept insisting spec-correct code was wrong, and each review costs a model swap).
+    // Runs when there is NO objective check, or when tests cannot be the sole judge (the agent itself
+    // touched/added tests, or a requested test produced no edit, or review was explicitly requested).
     // Also skipped for test-only edits and for deterministic AST edits.
-    if (!dryRun && input.review !== false && !input.verifyCommand && !(input.astEditOps && input.astEditOps.length > 0) && resolvedModel && patchFacts.length > 0 && !patchFacts.every(f => isTestFile(f.filePath))) {
+    const reviewExplicitlyRequested = input.review === true;
+    const agentTouchedTests = patchFacts.some(f => isTestFile(f.filePath));
+    const testHadNoop = noopWarnings.some(w => isTestFile(w.filePath));
+    const shouldReview = !input.verifyCommand || reviewExplicitlyRequested || agentTouchedTests || testHadNoop;
+
+    if (!dryRun && input.review !== false && shouldReview && !(input.astEditOps && input.astEditOps.length > 0) && resolvedModel && patchFacts.length > 0 && !patchFacts.every(f => isTestFile(f.filePath))) {
       try {
         const { chatLocal } = await import('../../providers/ollama-local.js');
         const diff = patches.map(p => p.unifiedDiff).join('\n');
@@ -785,6 +916,16 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     result.pipelineStage = 'completed';
     // applied = true only when patches were actually written to disk
     result.applied = !dryRun && input.resolve?.action === 'apply' && !verifyWithheld && !reviewBlocked;
+    if (result.applied && noopFiles === patches.length && (result.symbolLoss?.length || 0) > 0) {
+      result.applied = false;
+      result.message = `${result.message ? result.message + ' ' : ''}Refused to apply changes: unmentioned symbols were lost (${result.symbolLoss!.join(', ')}).`;
+    }
+    if (result.applied) { globalEpisodicCache.flush().catch(() => {}); }
+    if (result.applied && noopFiles > 0 && noopFiles < patches.length) {
+      result.partialApply = true;
+      const noopNames = noopWarnings.map(w => w.filePath).join(', ');
+      result.message = `${result.message ? result.message + ' ' : ''}Warning: ${noopNames} had no changes produced by the model.`;
+    }
 
     // Behavioural gate: re-run the check on the patched workspace. A regression (passed before,
     // fails now) is an error diagnostic, which the post-apply gate below turns into an automatic

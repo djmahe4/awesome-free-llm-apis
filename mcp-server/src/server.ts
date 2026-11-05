@@ -67,6 +67,7 @@ import { resolvePathWithinRoots, pathParamWithinRoots, relativeSegmentError } fr
 import { WorkspaceScanner } from './cache/workspace.js';
 import { STATE_FILE } from './pipeline/middlewares/constants.js';
 import { createHandshake, renderLeaseModule, requireWikiLease, assertDashboardFetch, LeaseError } from './wiki-lease.js';
+import { globalEpisodicCache } from './tools/coding-agents/episodic-probe-cache.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2022,6 +2023,8 @@ async function main() {
     } catch (err: any) {
       console.error('[cas] Boot restore failed (non-fatal):', err?.message || err);
     }
+
+    await globalEpisodicCache.load().catch(() => {});
 
     // Periodically check/sync telemetry every hour (supports continuous server runs)
     const telemetryInterval = setInterval(async () => {

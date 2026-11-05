@@ -23,6 +23,7 @@ export interface CodingAgentsSettings {
   hypothesisExec: boolean;
   /** Asks the model for extra assumptions to check, and for one corrected goal when enforce finds a refuted one. Off by default (costs model calls). */
   hypothesisModel: boolean;
+  subagentValidation: boolean;
 }
 
 export function loadCodingAgentsSettings(workspaceRoot: string): CodingAgentsSettings {
@@ -35,9 +36,10 @@ export function loadCodingAgentsSettings(workspaceRoot: string): CodingAgentsSet
       hypothesisGate: raw?.hypothesisGate === 'off' || raw?.hypothesisGate === 'enforce' ? raw.hypothesisGate : 'warn',
       hypothesisExec: raw?.hypothesisExec === true,
       hypothesisModel: raw?.hypothesisModel === true,
+      subagentValidation: raw?.subagentValidation === true,
     };
   } catch {
-    return { skipFailingTests: [], allowCloudFallback: false, hypothesisGate: 'warn', hypothesisExec: false, hypothesisModel: false };
+    return { skipFailingTests: [], allowCloudFallback: false, hypothesisGate: 'warn', hypothesisExec: false, hypothesisModel: false, subagentValidation: false };
   }
 }
 

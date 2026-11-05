@@ -223,6 +223,8 @@ export interface CodingAgentsResult {
   usedFallbackModel?: boolean;
   wiringFiles?: string[];
   wiringContext?: string[];
+  partialApply?: boolean;
+  durationMs?: number;
 }
 
 export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
@@ -235,9 +237,13 @@ export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
     ? '⏳ Running in Background'
     : result.status === 'paused'
     ? '⏸️ Workflow Paused (tasks.md)'
-    : (result.applied ? '✅ Changes Applied to Disk' : (result.patchPlan?.length ? '🔍 Proposed Plan (Dry Run)' : '⚡ Execution Completed'));
+    : result.status === 'proposed'
+    ? '📝 Proposed Plan (Pending Apply)'
+    : (result.applied ? (result.partialApply ? '⚠️ Partial Changes Applied to Disk' : '✅ Changes Applied to Disk') : (result.patchPlan?.length ? '🔍 Proposed Plan (Dry Run)' : '⚡ Execution Completed'));
   lines.push(`### 🤖 Coding Agent: ${statusLabel}\n`);
-  lines.push(`- **Goal:** ${result.goal}`);
+  if (result.goal && result.goal !== 'undefined') {
+    lines.push(`- **Goal:** ${result.goal}`);
+  }
   lines.push(`- **Pipeline Stage:** \`${result.pipelineStage || 'completed'}\``);
   if (result.checkpointId) {
     lines.push(`- **CAS Checkpoint:** \`${result.checkpointId}\``);
