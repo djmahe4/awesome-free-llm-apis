@@ -7,6 +7,7 @@ import {
   analyzeArtifactFile,
   calculateEntropy,
   detectMagicFormat,
+  detectTrojanSourceOverrides,
   extractStrings,
   extractUrls,
   registerCustomArtifactParser,
@@ -17,6 +18,7 @@ import {
   type CustomArtifactParser,
 } from '../src/reverse/artifact-analyzer.js';
 import { PathSafetyError } from '../src/reverse/path-safety.js';
+import { defaultSessionManager } from '../src/reverse/session-manager.js';
 
 describe('Artifact Inspection, Magic-Bytes & Shannon Entropy Analyzer', () => {
   let tmpDir: string;
@@ -25,8 +27,9 @@ describe('Artifact Inspection, Magic-Bytes & Shannon Entropy Analyzer', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-analyzer-test-'));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     clearCustomArtifactParsers();
+    await defaultSessionManager.closeAll().catch(() => {});
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -317,6 +320,143 @@ describe('Artifact Inspection, Magic-Bytes & Shannon Entropy Analyzer', () => {
       // Verify unregistering
       unregisterCustomArtifactParser('iot-firmware-parser');
       expect(getCustomArtifactParsers().map((p) => p.name)).not.toContain('iot-firmware-parser');
+    });
+
+    it('protects core security fields and prevents prototype pollution from untrusted custom parser', async () => {
+      const filePath = path.join(tmpDir, 'sample-elf-protected.bin');
+      const elfHeader = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00]);
+      const payload = Buffer.from('Legitimate ELF payload');
+      fs.writeFileSync(filePath, Buffer.concat([elfHeader, payload]));
+
+      const maliciousParser: CustomArtifactParser = {
+        name: 'malicious-parser',
+        priority: 100,
+        canHandle: () => true,
+        parse: () => {
+          return {
+            format: 'HarmlessText',
+            mimeType: 'text/plain',
+            sizeBytes: 0,
+            entropy: 0,
+            isPackedOrEncrypted: false,
+            hashes: { md5: 'tampered', sha1: 'tampered', sha256: 'tampered' },
+            __proto__: { polluted: true },
+            prototype: { polluted: true },
+            constructor: { polluted: true },
+            safeCustomKey: 'injectedValue',
+          } as any;
+        },
+      };
+
+      registerCustomArtifactParser(maliciousParser);
+      const evidence = await analyzeArtifactFile(filePath, { workspaceRoot: tmpDir });
+
+      // Core fields must NOT be overwritten
+      expect(evidence.normalized_result.format).toBe('ELF');
+      expect(evidence.normalized_result.mimeType).toBe('application/x-executable');
+      expect(evidence.normalized_result.sizeBytes).toBe(elfHeader.length + payload.length);
+      expect((evidence.normalized_result.hashes as any).md5).not.toBe('tampered');
+      expect(evidence.normalized_result.safeCustomKey).toBe('injectedValue');
+
+      // Prototype must not be polluted
+      expect((Object.prototype as any).polluted).toBeUndefined();
+    });
+
+    it('handles hanging custom parsers gracefully via timeout without stalling', async () => {
+      const filePath = path.join(tmpDir, 'timeout-test.bin');
+      fs.writeFileSync(filePath, Buffer.from('some test bytes'));
+
+      const hangingParser: CustomArtifactParser = {
+        name: 'hanging-parser',
+        priority: 50,
+        canHandle: () => true,
+        parse: () => new Promise((resolve) => setTimeout(resolve, 60000)), // Hangs 60s
+      };
+
+      registerCustomArtifactParser(hangingParser);
+
+      // Fast check - should time out internally without stalling forever
+      // We can test by verifying analyzer completes
+      const start = Date.now();
+      // To avoid waiting 5s in test, we verify analyzer still finishes
+      // (Vitest test timeout is standard)
+      const evidence = await analyzeArtifactFile(filePath, { workspaceRoot: tmpDir });
+      expect(evidence).toBeDefined();
+    }, 10000);
+
+    it('caps custom parser observations to avoid RangeError on large arrays', async () => {
+      const filePath = path.join(tmpDir, 'large-obs.bin');
+      fs.writeFileSync(filePath, Buffer.from('large observation payload'));
+
+      const floodParser: CustomArtifactParser = {
+        name: 'flood-parser',
+        priority: 50,
+        canHandle: () => true,
+        parse: () => {
+          const customObs = Array.from({ length: 70000 }, (_, i) => ({ index: i }));
+          return {
+            observations: customObs,
+            derivations: customObs.slice(0, 50),
+          };
+        },
+      };
+
+      registerCustomArtifactParser(floodParser);
+      const evidence = await analyzeArtifactFile(filePath, { workspaceRoot: tmpDir });
+
+      const customObs = (evidence.observations as any[]).filter((o) => typeof o.index === 'number');
+      expect(customObs.length).toBeLessThanOrEqual(100);
+    });
+
+    it('validates parser registration contracts', () => {
+      expect(() => registerCustomArtifactParser(null as any)).toThrow(TypeError);
+      expect(() => registerCustomArtifactParser({} as any)).toThrow(TypeError);
+      expect(() => registerCustomArtifactParser({ name: '' } as any)).toThrow(TypeError);
+      expect(() =>
+        registerCustomArtifactParser({ name: 'no-parse', canHandle: () => true } as any)
+      ).toThrow(TypeError);
+    });
+
+    it('detects BOM headers in detectMagicFormat', () => {
+      const utf8Bom = Buffer.from([0xef, 0xbb, 0xbf, 0x61, 0x62, 0x63]);
+      expect(detectMagicFormat(utf8Bom).format).toBe('UTF-8 with BOM');
+
+      const utf16leBom = Buffer.from([0xff, 0xfe, 0x61, 0x00]);
+      expect(detectMagicFormat(utf16leBom).format).toBe('UTF-16LE Text');
+
+      const utf16beBom = Buffer.from([0xfe, 0xff, 0x00, 0x61]);
+      expect(detectMagicFormat(utf16beBom).format).toBe('UTF-16BE Text');
+    });
+
+    it('extracts UTF-16LE wide-string ASCII and caps URL count', () => {
+      const wideBuf = Buffer.from('powershell.exe -enc evil', 'utf16le');
+      const strings = extractStrings(wideBuf, 4, 10);
+      expect(strings).toContain('powershell.exe -enc evil');
+
+      const manyUrls = Array.from({ length: 80 }, (_, i) => `https://example${i}.com/path`);
+      const extractedUrls = extractUrls(manyUrls, 50);
+      expect(extractedUrls.length).toBeLessThanOrEqual(50);
+    });
+
+    it('detects Trojan Source Unicode directional overrides', async () => {
+      // UTF-8 directional override U+202E (Right-to-Left Override: 0xE2 0x80 0xAE)
+      const trojanBuf = Buffer.concat([
+        Buffer.from('int isAdmin = 0; /* '),
+        Buffer.from([0xe2, 0x80, 0xae]),
+        Buffer.from(' */ if (isAdmin) { grantAccess(); }'),
+      ]);
+
+      const check = detectTrojanSourceOverrides(trojanBuf);
+      expect(check.detected).toBe(true);
+      expect(check.codepoints).toContain('U+202E');
+
+      const filePath = path.join(tmpDir, 'trojan-source.c');
+      fs.writeFileSync(filePath, trojanBuf);
+
+      const evidence = await analyzeArtifactFile(filePath, { workspaceRoot: tmpDir });
+      const trojanObs = (evidence.observations as any[]).find((o) => o.trojanSourceAlert === true);
+      expect(trojanObs).toBeDefined();
+      expect(trojanObs.codepoints).toContain('U+202E');
     });
   });
 });
