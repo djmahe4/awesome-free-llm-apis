@@ -25,6 +25,36 @@ export interface AnalysisProfile {
   [key: string]: unknown;
 }
 
+
+export interface DynamicTraceFrame {
+  callsite?: string;
+  functionName?: string;
+  file?: string;
+  line?: number;
+  column?: number;
+  runtimeArgs?: Record<string, unknown>;
+}
+
+export interface DynamicExecutionRecord {
+  runId: string;
+  timestamp: string;
+  entrypoint?: string;
+  exitCode?: number;
+  stackTraces?: string[];
+  executedFunctions?: string[];
+  networkEndpointsInvoked?: string[];
+  syscallsOrSideEffects?: string[];
+  frames?: DynamicTraceFrame[];
+}
+
+export interface DiscrepancyRecord {
+  category: 'unexecuted_static_decoy' | 'hidden_runtime_call' | 'env_divergence' | 'state_mutation' | 'trace_divergence';
+  description: string;
+  staticEvidence?: unknown;
+  dynamicEvidence?: unknown;
+  confidence: 'high' | 'medium' | 'low';
+}
+
 export interface ReverseEvidence {
   evidence_id: string;
   normalized_result: Record<string, unknown>;
@@ -32,6 +62,8 @@ export interface ReverseEvidence {
   coverage: AnalysisCoverage;
   limitations: string[];
   list_unknowns: string[];
+  dynamic_traces?: DynamicExecutionRecord[];
+  discrepancies?: DiscrepancyRecord[];
   // v1 backwards-compatible fields
   observations: any[];
   derivations: any[];
@@ -50,6 +82,8 @@ export interface CreateEvidenceParams {
   coverage?: AnalysisCoverage;
   limitations?: string[];
   unknowns?: string[];
+  dynamicTraces?: DynamicExecutionRecord[];
+  discrepancies?: DiscrepancyRecord[];
   observations?: any[];
   derivations?: any[];
   inferences?: any[];
@@ -60,7 +94,9 @@ const memoryEvidenceStore = new Map<string, ReverseEvidence>();
 const MAX_MEMORY_EVIDENCE = 500;
 
 function setMemoryEvidence(id: string, bundle: ReverseEvidence): void {
-  if (!memoryEvidenceStore.has(id) && memoryEvidenceStore.size >= MAX_MEMORY_EVIDENCE) {
+  if (memoryEvidenceStore.has(id)) {
+    memoryEvidenceStore.delete(id);
+  } else if (memoryEvidenceStore.size >= MAX_MEMORY_EVIDENCE) {
     const oldest = memoryEvidenceStore.keys().next().value;
     if (oldest) memoryEvidenceStore.delete(oldest);
   }
@@ -97,6 +133,8 @@ export function createEvidenceBundle(params: CreateEvidenceParams): ReverseEvide
     coverage: params.coverage || { scope: 'file', status: 'complete' },
     limitations: params.limitations || [],
     list_unknowns: params.unknowns || [],
+    dynamic_traces: params.dynamicTraces || [],
+    discrepancies: params.discrepancies || [],
     observations: params.observations || [],
     derivations: params.derivations || [],
     inferences: params.inferences || [],
@@ -119,7 +157,7 @@ export function createEvidenceBundle(params: CreateEvidenceParams): ReverseEvide
 }
 
 export function normalizeEvidence(raw: any, meta: { tool: string; target?: string }): ReverseEvidence {
-  const evidence_id = raw?.evidence_id || `ev-${crypto.randomBytes(8).toString('hex')}`;
+  const evidence_id = raw?.evidence_id ? sanitizeEvidenceId(raw.evidence_id) : `ev-${crypto.randomBytes(8).toString('hex')}`;
   const norm = raw?.normalized_result || (typeof raw === 'object' && raw !== null ? raw : { raw });
   let sha256 = '';
   try {
@@ -135,13 +173,15 @@ export function normalizeEvidence(raw: any, meta: { tool: string; target?: strin
       timestamp: new Date().toISOString(),
       ...(raw?.analysis_profile || {}),
     },
-    coverage: raw?.coverage || { scope: 'file', status: 'complete' },
+    coverage: { scope: 'file', status: 'complete', ...(typeof raw?.coverage === 'object' ? raw.coverage : {}) },
     limitations: raw?.limitations || [],
-    list_unknowns: raw?.list_unknowns || raw?.residualUnknowns || [],
+    dynamic_traces: Array.isArray(raw?.dynamic_traces) ? raw.dynamic_traces : [],
+    discrepancies: Array.isArray(raw?.discrepancies) ? raw.discrepancies : [],
+    list_unknowns: Array.isArray(raw?.list_unknowns) ? raw.list_unknowns : (Array.isArray(raw?.residualUnknowns) ? raw.residualUnknowns : (Array.isArray(raw?.unknowns) ? raw.unknowns : [])),
     observations: raw?.observations || [],
     derivations: raw?.derivations || [],
     inferences: raw?.inferences || [],
-    residualUnknowns: raw?.residualUnknowns || raw?.list_unknowns || [],
+    residualUnknowns: Array.isArray(raw?.residualUnknowns) ? raw.residualUnknowns : (Array.isArray(raw?.list_unknowns) ? raw.list_unknowns : (Array.isArray(raw?.unknowns) ? raw.unknowns : [])),
     provenance: {
       source: raw?.provenance?.source || 'rea-mcp',
       sha256: raw?.provenance?.sha256 || sha256,
@@ -175,7 +215,10 @@ export function storeEvidence(bundle: ReverseEvidence, dirPath?: string): void {
 
 export function getStoredEvidence(evidenceId: string, dirPath?: string): ReverseEvidence | null {
   if (memoryEvidenceStore.has(evidenceId)) {
-    return memoryEvidenceStore.get(evidenceId)!;
+    const bundle = memoryEvidenceStore.get(evidenceId)!;
+    memoryEvidenceStore.delete(evidenceId);
+    memoryEvidenceStore.set(evidenceId, bundle);
+    return bundle;
   }
   const targetDir = dirPath || (process.env.VITEST ? undefined : path.join(getMcpDir(), 'reverse', 'evidence'));
   if (targetDir) {
@@ -191,4 +234,51 @@ export function getStoredEvidence(evidenceId: string, dirPath?: string): Reverse
     }
   }
   return null;
+}
+
+
+export function compareStaticAndDynamicTraces(
+  staticFindings: { routes?: string[]; functions?: string[]; endpoints?: string[] },
+  dynamicRecords: DynamicExecutionRecord[]
+): DiscrepancyRecord[] {
+  const discrepancies: DiscrepancyRecord[] = [];
+  const executedFunctions = new Set<string>();
+  const invokedEndpoints = new Set<string>();
+
+  for (const run of dynamicRecords) {
+    if (run.executedFunctions) {
+      for (const fn of run.executedFunctions) executedFunctions.add(fn);
+    }
+    if (run.networkEndpointsInvoked) {
+      for (const ep of run.networkEndpointsInvoked) invokedEndpoints.add(ep);
+    }
+  }
+
+  if (staticFindings.functions) {
+    for (const fn of staticFindings.functions) {
+      if (!executedFunctions.has(fn)) {
+        discrepancies.push({
+          category: 'unexecuted_static_decoy',
+          description: `Function "${fn}" present in static AST was never invoked in dynamic execution runs.`,
+          staticEvidence: fn,
+          confidence: 'medium',
+        });
+      }
+    }
+  }
+
+  if (staticFindings.endpoints) {
+    for (const ep of invokedEndpoints) {
+      if (!staticFindings.endpoints.includes(ep)) {
+        discrepancies.push({
+          category: 'hidden_runtime_call',
+          description: `Endpoint "${ep}" invoked at runtime was not found in static route definitions.`,
+          dynamicEvidence: ep,
+          confidence: 'high',
+        });
+      }
+    }
+  }
+
+  return discrepancies;
 }

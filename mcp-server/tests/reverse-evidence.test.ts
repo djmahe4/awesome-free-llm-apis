@@ -9,13 +9,16 @@ import {
   getStoredEvidence,
   clearEvidenceMemoryCache,
   sanitizeEvidenceId,
+  compareStaticAndDynamicTraces,
   type ReverseEvidence,
+  type DynamicExecutionRecord,
 } from '../src/reverse/evidence.js';
 
 describe('Evidence Contract & Provenance', () => {
   let tmpDir: string;
 
   beforeEach(() => {
+    clearEvidenceMemoryCache();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'evidence-test-'));
   });
 
@@ -147,5 +150,60 @@ describe('Evidence Contract & Provenance', () => {
   it('returns null when querying non-existent evidence ID', () => {
     const nonExistent = getStoredEvidence('ev-nonexistent', tmpDir);
     expect(nonExistent).toBeNull();
+  });
+
+  it('refreshes LRU recency on get and evicts oldest unaccessed entry', () => {
+    for (let i = 0; i < 500; i++) {
+      normalizeEvidence({ evidence_id: `ev-lru-${i}` }, { tool: 'test' });
+    }
+
+    const refreshed = getStoredEvidence('ev-lru-0');
+    expect(refreshed).not.toBeNull();
+
+    normalizeEvidence({ evidence_id: 'ev-lru-500' }, { tool: 'test' });
+
+    expect(getStoredEvidence('ev-lru-0')).not.toBeNull();
+    expect(getStoredEvidence('ev-lru-1')).toBeNull();
+    expect(getStoredEvidence('ev-lru-500')).not.toBeNull();
+  });
+
+  it('sanitizes evidence_id, spreads coverage, and falls back to unknowns in normalizeEvidence', () => {
+    const normalized = normalizeEvidence({
+      evidence_id: 'ev-../../bad/id#1',
+      coverage: { status: 'partial' as const },
+      unknowns: ['unresolved_symbol'],
+    }, { tool: 'test' });
+
+    expect(normalized.evidence_id).toBe('ev-badid1');
+    expect(normalized.coverage).toEqual({ scope: 'file', status: 'partial' });
+    expect(normalized.list_unknowns).toEqual(['unresolved_symbol']);
+    expect(normalized.residualUnknowns).toEqual(['unresolved_symbol']);
+  });
+it('detects discrepancies between static AST predictions and dynamic execution traces', () => {
+    const staticFindings = {
+      functions: ['authHandler', 'decoyServiceMirage', 'realPaymentProcess'],
+      endpoints: ['/api/v1/login', '/api/v1/pay'],
+    };
+
+    const dynamicRuns: DynamicExecutionRecord[] = [
+      {
+        runId: 'run-1',
+        timestamp: new Date().toISOString(),
+        executedFunctions: ['authHandler', 'realPaymentProcess'],
+        networkEndpointsInvoked: ['/api/v1/login', '/hidden/dynamic/telemetry'],
+        stackTraces: ['Error\n    at authHandler (auth.js:12:5)'],
+      },
+    ];
+
+    const discrepancies = compareStaticAndDynamicTraces(staticFindings, dynamicRuns);
+    expect(discrepancies.length).toBe(2);
+
+    const decoy = discrepancies.find(d => d.category === 'unexecuted_static_decoy');
+    expect(decoy).toBeDefined();
+    expect(decoy?.description).toContain('decoyServiceMirage');
+
+    const hidden = discrepancies.find(d => d.category === 'hidden_runtime_call');
+    expect(hidden).toBeDefined();
+    expect(hidden?.description).toContain('/hidden/dynamic/telemetry');
   });
 });
