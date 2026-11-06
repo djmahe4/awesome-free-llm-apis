@@ -1008,6 +1008,18 @@
             </tbody>
           </table>
         </details>
+        <details class="qs-tool-card">
+          <summary><span class="qs-tool-name">reverse_tool</span><span class="qs-tool-desc">Reverse engineering analyzer, AST risk scanner & artifact forensics</span></summary>
+          <table class="qs-table">
+            <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>enum: status | list_capabilities | analyze_javascript | analyze_artifact | get_evidence</td><td>✓</td><td>Analysis action to execute</td></tr>
+              <tr><td><code>target</code></td><td>string</td><td>for analyze / get</td><td>Target file path or evidence ID (ev-*)</td></tr>
+              <tr><td><code>authorization</code></td><td>enum: ctf | lab | consent</td><td>for analyze / target list</td><td>Mandatory security authorization framing</td></tr>
+              <tr><td><code>options</code></td><td>object</td><td></td><td>Analysis parameters (workspaceRoot, reaAgentsPath, etc.)</td></tr>
+            </tbody>
+          </table>
+        </details>
       </div>
 
       <!-- Prompting & Steering Guide -->

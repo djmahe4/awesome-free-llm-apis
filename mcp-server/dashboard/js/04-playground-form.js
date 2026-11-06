@@ -227,6 +227,17 @@ const TOOLS = [
       { id: 'artifactId', label: 'Artifact ID (for approve/reroll/effects)', type: 'text', placeholder: 'art_123', showFor: ['reroll_artifact', 'approve_artifact', 'apply_effect', 'undo_effect', 'update_artifact_bounds'] }
     ]
   }
+  ,
+  {
+    id: 'reverse_tool', label: 'reverse_tool', icon: '🔍',
+    tag: 'Reverse Engineering Analyzer',
+    fields: [
+      { id: 'action', label: 'Action', type: 'select', options: ['status', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence'] },
+      { id: 'target', label: 'Target File / Evidence ID', type: 'text', placeholder: 'path/to/target.js or ev-123', showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence'] },
+      { id: 'authorization', label: 'Authorization Framing', type: 'select', options: ['', 'ctf', 'lab', 'consent'], showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence'] },
+      { id: 'options', label: 'Analysis Options (JSON)', type: 'textarea', placeholder: '{"workspaceRoot": "./"}', showFor: ['analyze_javascript', 'analyze_artifact'] }
+    ]
+  }
 ];
 
 let activeTool = TOOLS[0];
@@ -407,6 +418,17 @@ const TOOL_WHEN_TO_USE = {
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
       <li>No parameters required — returns live memory counters synchronized with disk storage.</li>
+    </ul>`,
+  reverse_tool: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Reverse engineering analyzer with strict authorization framing (CTF/lab/consent) and structured evidence ledgers.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "status"</code> — Check engine readiness and supported Node.js runtime.</li>
+      <li><code>action: "list_capabilities"</code> — List static and active dynamic analysis capabilities.</li>
+      <li><code>action: "analyze_javascript"</code> — AST route, sink, and credential scanner for JS/TS.</li>
+      <li><code>action: "analyze_artifact"</code> — Binary magic-bytes, entropy, and packaging inspector.</li>
+      <li><code>action: "get_evidence"</code> — Retrieve stored immutable evidence bundle by evidence ID.</li>
     </ul>`
 };
 
@@ -663,7 +685,7 @@ function collectParams(tool) {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
     } else if (f.id === 'files') {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
-    } else if (f.id === 'params' || f.id === 'graphNode' || f.id === 'gates' || f.id === 'script_instructions' || f.id === 'metadata') {
+    } else if (f.id === 'params' || f.id === 'graphNode' || f.id === 'gates' || f.id === 'script_instructions' || f.id === 'metadata' || f.id === 'options') {
       const raw = el.value.trim();
       if (raw) {
         try { params[f.id] = JSON.parse(raw); } catch { params[f.id] = raw; }
