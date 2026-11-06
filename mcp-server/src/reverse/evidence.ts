@@ -60,7 +60,7 @@ const memoryEvidenceStore = new Map<string, ReverseEvidence>();
 const MAX_MEMORY_EVIDENCE = 500;
 
 function setMemoryEvidence(id: string, bundle: ReverseEvidence): void {
-  if (memoryEvidenceStore.size >= MAX_MEMORY_EVIDENCE) {
+  if (!memoryEvidenceStore.has(id) && memoryEvidenceStore.size >= MAX_MEMORY_EVIDENCE) {
     const oldest = memoryEvidenceStore.keys().next().value;
     if (oldest) memoryEvidenceStore.delete(oldest);
   }
@@ -119,12 +119,6 @@ export function createEvidenceBundle(params: CreateEvidenceParams): ReverseEvide
 }
 
 export function normalizeEvidence(raw: any, meta: { tool: string; target?: string }): ReverseEvidence {
-  if (raw && raw.evidence_id && raw.normalized_result && raw.provenance) {
-    raw.provenance.trusted = false;
-    setMemoryEvidence(raw.evidence_id, raw);
-    return raw as ReverseEvidence;
-  }
-
   const evidence_id = raw?.evidence_id || `ev-${crypto.randomBytes(8).toString('hex')}`;
   const norm = raw?.normalized_result || (typeof raw === 'object' && raw !== null ? raw : { raw });
   let sha256 = '';
@@ -137,7 +131,10 @@ export function normalizeEvidence(raw: any, meta: { tool: string; target?: strin
   const bundle: ReverseEvidence = {
     evidence_id,
     normalized_result: norm,
-    analysis_profile: raw?.analysis_profile || { timestamp: new Date().toISOString() },
+    analysis_profile: {
+      timestamp: new Date().toISOString(),
+      ...(raw?.analysis_profile || {}),
+    },
     coverage: raw?.coverage || { scope: 'file', status: 'complete' },
     limitations: raw?.limitations || [],
     list_unknowns: raw?.list_unknowns || raw?.residualUnknowns || [],
@@ -148,11 +145,15 @@ export function normalizeEvidence(raw: any, meta: { tool: string; target?: strin
     provenance: {
       source: raw?.provenance?.source || 'rea-mcp',
       sha256: raw?.provenance?.sha256 || sha256,
-      tool: meta.tool,
+      tool: meta.tool || raw?.provenance?.tool || 'unknown',
       trusted: false,
     },
     raw,
   };
+
+  if (meta.target) {
+    bundle.analysis_profile.target = meta.target;
+  }
 
   setMemoryEvidence(evidence_id, bundle);
   return bundle;

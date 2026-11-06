@@ -66,9 +66,24 @@ describe('Evidence Contract & Provenance', () => {
     const normalized = normalizeEvidence(raw, { tool: 'inspect_artifact', target: 'bundle.asar' });
     expect(normalized.evidence_id).toBe('ev-custom-1');
     expect(normalized.normalized_result).toEqual({ files: 3 });
+    expect(normalized.analysis_profile.target).toBe('bundle.asar');
     expect(normalized.limitations).toContain('timeout reached');
     expect(normalized.provenance.trusted).toBe(false);
     expect(normalized.provenance.source).toBe('rea-mcp');
+  });
+
+  it('populates default coverage, limitations, and list_unknowns when normalizing partial object', () => {
+    const partial = {
+      raw_findings: ['sample'],
+    };
+
+    const normalized = normalizeEvidence(partial, { tool: 'binary_analyzer' });
+    expect(normalized.coverage).toEqual({ scope: 'file', status: 'complete' });
+    expect(normalized.limitations).toEqual([]);
+    expect(normalized.list_unknowns).toEqual([]);
+    expect(normalized.residualUnknowns).toEqual([]);
+    expect(normalized.observations).toEqual([]);
+    expect(normalized.provenance.trusted).toBe(false);
   });
 
   it('persists and retrieves evidence bundles by ID from disk after cache clear', () => {
