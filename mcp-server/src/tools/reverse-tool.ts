@@ -1,9 +1,13 @@
 import { ReaProxy, type BlockedToolInfo } from '../reverse/proxy.js';
+import { analyzeJsFile } from '../reverse/js-analyzer.js';
+import { analyzeArtifactFile } from '../reverse/artifact-analyzer.js';
+import { getStoredEvidence, storeEvidence, type ReverseEvidence } from '../reverse/evidence.js';
 
 export type ReverseAuthorization = 'ctf' | 'lab' | 'consent';
+const VALID_AUTH: ReverseAuthorization[] = ['ctf', 'lab', 'consent'];
 
 export interface ReverseToolInput {
-  action: 'status' | 'list_capabilities';
+  action: 'status' | 'list_capabilities' | 'analyze_javascript' | 'analyze_artifact' | 'get_evidence';
   target?: string;
   authorization?: ReverseAuthorization;
   options?: Record<string, unknown>;
@@ -13,13 +17,15 @@ export interface ReverseToolResult {
   success: boolean;
   action: string;
   target?: string;
-  data?: any;
+  data?: unknown;
+  evidence?: ReverseEvidence;
   error?: string;
 }
 
 /** Checks whether the running Node.js version is >= 22.19 and not 23 or 25 */
 export function checkNodeCompatibility(versionStr = process.versions.node): { supported: boolean; version: string; reason?: string } {
-  const [major, minor] = versionStr.split('.').map(Number);
+  const cleaned = versionStr.replace(/^v/, '');
+  const [major, minor] = cleaned.split('.').map(Number);
   if (major === 23 || major === 25) {
     return {
       supported: false,
@@ -38,6 +44,9 @@ export function checkNodeCompatibility(versionStr = process.versions.node): { su
 }
 
 export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolResult> {
+  if (!input || typeof input !== 'object') {
+    return { success: false, action: 'unknown', error: 'Input must be an object' };
+  }
   const { action, target, authorization, options } = input;
 
   if (action === 'status') {
@@ -55,6 +64,8 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
         reason: nodeCheck.reason,
         builtInCapabilities: [
           'analyze_javascript',
+          'analyze_artifact',
+          'get_evidence',
           'scan_github',
           'inspect_gguf',
           'probe_memorization',
@@ -64,7 +75,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   }
 
   if (action === 'list_capabilities') {
-    if (target && !authorization) {
+    if ((target && !authorization) || (authorization && !VALID_AUTH.includes(authorization as ReverseAuthorization))) {
       return {
         success: false,
         action: 'list_capabilities',
@@ -95,6 +106,8 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
 
     const staticCapabilities = [
       'analyze_javascript',
+      'analyze_artifact',
+      'get_evidence',
       'scan_github',
       'inspect_gguf',
       'probe_memorization',
@@ -118,9 +131,106 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     };
   }
 
+  if (action === 'analyze_javascript' || action === 'analyze_artifact' || action === 'get_evidence') {
+    if (!authorization || !VALID_AUTH.includes(authorization as ReverseAuthorization)) {
+      return {
+        success: false,
+        action,
+        target,
+        error: 'Target analysis requires authorization framing: "ctf" | "lab" | "consent".',
+      };
+    }
+
+    if (!target || !target.trim()) {
+      return {
+        success: false,
+        action,
+        error: 'Target is required.',
+      };
+    }
+
+    if (action === 'analyze_javascript') {
+      try {
+        const evidence = await analyzeJsFile(target, {
+          workspaceRoot: options?.workspaceRoot as string | undefined,
+          reaAgentsPath: (options?.reaAgentsPath as string | undefined) || process.env.REA_AGENTS_PATH,
+          ...options,
+        });
+        storeEvidence(evidence);
+        return {
+          success: true,
+          action: 'analyze_javascript',
+          target,
+          evidence,
+          data: evidence.normalized_result,
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          action: 'analyze_javascript',
+          target,
+          error: err.message || String(err),
+        };
+      }
+    }
+
+    if (action === 'analyze_artifact') {
+      try {
+        const evidence = await analyzeArtifactFile(target, {
+          workspaceRoot: options?.workspaceRoot as string | undefined,
+          reaAgentsPath: (options?.reaAgentsPath as string | undefined) || process.env.REA_AGENTS_PATH,
+          ...options,
+        });
+        storeEvidence(evidence);
+        return {
+          success: true,
+          action: 'analyze_artifact',
+          target,
+          evidence,
+          data: evidence.normalized_result,
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          action: 'analyze_artifact',
+          target,
+          error: err.message || String(err),
+        };
+      }
+    }
+
+    if (action === 'get_evidence') {
+      try {
+        const evidence = getStoredEvidence(target);
+        if (!evidence) {
+          return {
+            success: false,
+            action: 'get_evidence',
+            target,
+            error: `Evidence not found: "${target}".`,
+          };
+        }
+        return {
+          success: true,
+          action: 'get_evidence',
+          target,
+          evidence,
+          data: evidence,
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          action: 'get_evidence',
+          target,
+          error: err.message || String(err),
+        };
+      }
+    }
+  }
+
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions in Phase 1: "status", "list_capabilities".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence".`,
   };
 }
