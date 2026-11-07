@@ -1,10 +1,14 @@
 name: python
+language: python
 extensions:
   - .py
 sinks:
   - type: command_injection
     regex: "\\b(?:subprocess\\.(?:Popen|call|check_call|check_output|run)|os\\.system|os\\.popen)\\b"
+    pattern: "\\b(?:subprocess\\.(?:Popen|call|check_call|check_output|run)|os\\.system|os\\.popen)\\b"
   - type: code_execution
     regex: "\\b(?:eval|exec)\\b"
+    pattern: "\\b(?:eval|exec)\\b"
   - type: deserialization
     regex: "\\b(?:pickle\\.loads?|yaml\\.load)\\s*\\("
+    pattern: "\\b(?:pickle\\.loads?|yaml\\.load)\\s*\\("

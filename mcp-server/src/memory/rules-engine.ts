@@ -53,11 +53,13 @@ export interface SymbolRulesEngineOptions {
 
 interface LanguageSinkRule {
   type: string;
-  regex: string;
+  regex?: string;
+  pattern?: string;
 }
 
 interface LanguageRuleConfig {
   name: string;
+  language?: string;
   extensions?: string[];
   sinks?: LanguageSinkRule[];
 }
@@ -334,9 +336,27 @@ export class SymbolRulesEngine {
           if (file.endsWith('.yaml') || file.endsWith('.yml')) {
             try {
               const content = fs.readFileSync(path.join(langDir, file), 'utf8');
-              const parsed = yaml.parse(content) as LanguageRuleConfig;
-              if (parsed && parsed.name) {
-                this.languageRules.set(parsed.name.toLowerCase(), parsed);
+              const parsedRaw = yaml.parse(content) as any;
+              if (parsedRaw) {
+                const langName = parsedRaw.name || parsedRaw.language;
+                if (langName) {
+                  const sinks = Array.isArray(parsedRaw.sinks)
+                    ? parsedRaw.sinks.map((s: any) => {
+                        const reg = s.regex || s.pattern;
+                        return {
+                          type: s.type,
+                          regex: reg,
+                          pattern: reg,
+                        };
+                      })
+                    : undefined;
+                  this.languageRules.set(langName.toLowerCase(), {
+                    name: langName,
+                    language: parsedRaw.language || langName,
+                    extensions: parsedRaw.extensions,
+                    sinks,
+                  });
+                }
               }
             } catch {
               // ignore malformed rule
@@ -856,10 +876,13 @@ export class SymbolRulesEngine {
     const lines = code.split(/\r?\n/);
 
     if (langRule?.sinks) {
-      const compiled = langRule.sinks.map((s) => ({
-        type: s.type,
-        regex: this.getOrCreateRegex(s.regex),
-      })).filter((s): s is { type: string; regex: RegExp } => s.regex !== null);
+      const compiled = langRule.sinks.map((s) => {
+        const reg = s.regex || s.pattern;
+        return {
+          type: s.type,
+          regex: reg ? this.getOrCreateRegex(reg) : null,
+        };
+      }).filter((s): s is { type: string; regex: RegExp } => s.regex !== null);
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];

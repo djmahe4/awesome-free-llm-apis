@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { SymbolRulesEngine } from '../src/memory/rules-engine.js';
 
 describe('SymbolRulesEngine: Decomposed Multi-Language, Sigma, Nuclei & YARA Rules', () => {
@@ -198,5 +201,22 @@ impl BufferPool {
         column: 13,
       })
     );
+  });
+
+  it('tolerates parsed.language and sink pattern in directory loading', () => {
+    const tmpRules = path.join(os.tmpdir(), `test-rules-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`);
+    const langDir = path.join(tmpRules, 'languages');
+    fs.mkdirSync(langDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(langDir, 'custom.yaml'),
+      `language: custom\nextensions:\n  - .custom\nsinks:\n  - type: custom_sink\n    pattern: "\\\\bcustom_eval\\\\("`
+    );
+
+    const customEngine = new SymbolRulesEngine({ rulesDir: tmpRules });
+    const sinks = customEngine.detectSinks('custom_eval(input)', 'custom');
+    expect(sinks).toHaveLength(1);
+    expect(sinks[0].sinkType).toBe('custom_sink');
+
+    fs.rmSync(tmpRules, { recursive: true, force: true });
   });
 });

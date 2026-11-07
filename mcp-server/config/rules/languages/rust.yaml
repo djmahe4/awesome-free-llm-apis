@@ -1,8 +1,11 @@
 name: rust
+language: rust
 extensions:
   - .rs
 sinks:
   - type: unsafe_block
     regex: "\\bunsafe\\b[ \\t]*\\{"
+    pattern: "\\bunsafe\\b[ \\t]*\\{"
   - type: command_injection
     regex: "\\bCommand::new\\b"
+    pattern: "\\bCommand::new\\b"

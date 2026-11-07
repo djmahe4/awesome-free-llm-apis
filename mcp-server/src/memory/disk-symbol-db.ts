@@ -53,6 +53,7 @@ export class DiskSymbolDb {
   private stmtGetEdgesTo: StatementSync;
   private stmtGetAllEdges: StatementSync;
   private stmtDeleteNodesByFile: StatementSync;
+  private stmtDeleteEdgesByNode: StatementSync;
   private stmtDeleteRepoNodes: StatementSync;
   private stmtDeleteRepoEdges: StatementSync;
 
@@ -159,6 +160,10 @@ export class DiskSymbolDb {
     this.stmtDeleteNodesByFile = this.db.prepare(`
       DELETE FROM dag_nodes WHERE repo_hash = ? AND file_path = ?
     `);
+
+    this.stmtDeleteEdgesByNode = this.db.prepare(
+      'DELETE FROM dag_edges WHERE repo_hash = ? AND (source = ? OR target = ?)'
+    );
 
     this.stmtDeleteRepoNodes = this.db.prepare(`
       DELETE FROM dag_nodes WHERE repo_hash = ?
@@ -355,6 +360,10 @@ export class DiskSymbolDb {
 
   deleteNodesByFile(repoHash: string, filePath: string): void {
     if (this.isClosed) throw new Error('DiskSymbolDb is closed');
+    const nodes = this.getNodesByFile(repoHash, filePath);
+    for (const node of nodes) {
+      this.stmtDeleteEdgesByNode.run(repoHash, node.id, node.id);
+    }
     this.stmtDeleteNodesByFile.run(repoHash, filePath);
     for (const [key, entry] of this.nodeCache.entries()) {
       if (key.startsWith(`${repoHash}::`) && entry.node.filePath === filePath) {

@@ -231,6 +231,30 @@ describe('DiskSymbolDb: Zero-OOM Paged SQLite Storage Engine', () => {
     expect(db.getNodesByFile('repo_del', 'src/file2.ts')).toHaveLength(1);
   });
 
+  it('verifies deleteNodesByFile removes both nodes and connected edges', () => {
+    db.putNode('repo_edges', { id: 'file1::n1', kind: 'function', filePath: 'src/file1.ts' });
+    db.putNode('repo_edges', { id: 'file1::n2', kind: 'function', filePath: 'src/file1.ts' });
+    db.putNode('repo_edges', { id: 'file2::n3', kind: 'function', filePath: 'src/file2.ts' });
+
+    db.putEdge('repo_edges', { source: 'file1::n1', target: 'file2::n3', kind: 'invokes' });
+    db.putEdge('repo_edges', { source: 'file2::n3', target: 'file1::n2', kind: 'invokes' });
+    db.putEdge('repo_edges', { source: 'file2::n3', target: 'file2::n3', kind: 'invokes' });
+
+    db.deleteNodesByFile('repo_edges', 'src/file1.ts');
+
+    expect(db.getNode('repo_edges', 'file1::n1')).toBeNull();
+    expect(db.getNode('repo_edges', 'file1::n2')).toBeNull();
+    expect(db.getNode('repo_edges', 'file2::n3')).not.toBeNull();
+
+    const remainingEdges = db.getAllEdges('repo_edges');
+    expect(remainingEdges).toHaveLength(1);
+    expect(remainingEdges[0]).toEqual({
+      source: 'file2::n3',
+      target: 'file2::n3',
+      kind: 'invokes',
+    });
+  });
+
   it('deleteRepo deletes all nodes, edges and cache for that repo', () => {
     db.putNode('repo_r1', { id: 'r1::n1', kind: 'function', filePath: 'src/a.ts' });
     db.putNode('repo_r2', { id: 'r2::n1', kind: 'function', filePath: 'src/b.ts' });
