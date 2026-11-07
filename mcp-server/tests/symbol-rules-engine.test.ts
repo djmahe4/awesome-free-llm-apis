@@ -328,4 +328,94 @@ rule Custom_Cobalt_Strike_Beacon {
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  it('merges custom sinks and extensions into existing language rules without overwriting defaults', () => {
+    const engine = new SymbolRulesEngine();
+
+    // Verify baseline Python defaults
+    expect(engine.detectLanguage('worker.py')).toBe('python');
+    const baseSinks = engine.detectSinks('os.system("whoami")', 'python');
+    expect(baseSinks.some((s) => s.sinkType === 'command_injection')).toBe(true);
+
+    // Inject additive custom sinks and additional file extensions (.pyw)
+    engine.injectLanguageRule({
+      language: 'python',
+      extensions: ['.pyw'],
+      sinks: [
+        {
+          type: 'custom_danger',
+          pattern: '\\bcustom_danger\\(',
+        },
+      ],
+    });
+
+    // Both original .py and newly added .pyw should resolve to python
+    expect(engine.detectLanguage('worker.py')).toBe('python');
+    expect(engine.detectLanguage('worker.pyw')).toBe('python');
+
+    // Both baseline sinks and the new custom sink should be detected
+    const pyCode = `
+os.system("whoami")
+custom_danger("untrusted_payload")
+`;
+    const detected = engine.detectSinks(pyCode, 'python');
+    expect(detected.some((s) => s.sinkType === 'command_injection')).toBe(true);
+    expect(detected.some((s) => s.sinkType === 'custom_danger')).toBe(true);
+
+    // Updating an existing sink type should modify in-place without duplicating
+    engine.injectLanguageRule({
+      language: 'python',
+      sinks: [
+        {
+          type: 'command_injection',
+          pattern: '\\bcustom_exec_override\\(',
+        },
+      ],
+    });
+
+    const pyRule = engine.getLanguageRule('python');
+    expect(pyRule?.sinks?.filter((s) => s.type === 'command_injection').length).toBe(1);
+
+    const updatedDetected = engine.detectSinks('custom_exec_override("ping")', 'python');
+    expect(updatedDetected.some((s) => s.sinkType === 'command_injection')).toBe(true);
+
+    const oldSinkDetected = engine.detectSinks('os.system("ping")', 'python');
+    expect(oldSinkDetected.some((s) => s.sinkType === 'command_injection')).toBe(false);
+
+    // Flexible identifier fallbacks for Sigma and Nuclei
+    engine.injectSigmaRule({
+      title: 'Sigma Rule Without ID',
+      detection: {
+        keywords: ['fallback_sigma_sink'],
+      },
+    } as any);
+    expect(engine.matchSigmaRules('fallback_sigma_sink').length).toBeGreaterThanOrEqual(1);
+
+    engine.injectNucleiTemplate({
+      info: {
+        name: 'Nuclei Template Without ID',
+      },
+      matchers: [
+        {
+          type: 'word',
+          words: ['fallback_nuclei_sink'],
+        },
+      ],
+    } as any);
+    expect(engine.matchNucleiTemplates('fallback_nuclei_sink').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('safely handles null and undefined inputs across all engine methods', () => {
+    const engine = new SymbolRulesEngine();
+    expect(engine.extractSymbols(null as any, 'python', 'app.py')).toEqual([]);
+    expect(engine.detectSinks(undefined as any, 'python')).toEqual([]);
+    expect(engine.detectLanguage(null as any)).toBeNull();
+    expect(engine.matchSigmaRules(null as any)).toEqual([]);
+    expect(engine.matchNucleiTemplates(undefined as any)).toEqual([]);
+    expect(engine.matchYaraRules(null as any)).toEqual([]);
+    expect(() => engine.injectLanguageRule(null as any)).not.toThrow();
+    expect(() => engine.injectSigmaRule(undefined as any)).not.toThrow();
+    expect(() => engine.injectNucleiTemplate(null as any)).not.toThrow();
+    expect(() => engine.injectYaraRule(undefined as any)).not.toThrow();
+  });
 });

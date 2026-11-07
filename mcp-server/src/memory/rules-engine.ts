@@ -258,27 +258,41 @@ export class SymbolRulesEngine {
     this.resolveAndLoadRules(options?.rulesDir);
   }
 
+  detectLanguage(filePath: string): string | null {
+    if (!filePath || typeof filePath !== 'string') return null;
+    const ext = path.extname(filePath).toLowerCase();
+    for (const [lang, config] of this.languageRules.entries()) {
+      if (config.extensions && config.extensions.includes(ext)) {
+        return this.normalizeLanguage(lang);
+      }
+    }
+    return null;
+  }
+
   injectLanguageRule(rule: LanguageRuleConfig): void {
+    if (!rule) return;
     const rawName = rule.name || rule.language;
     if (!rawName) return;
     const langKey = rawName.toLowerCase().trim();
 
     const existing = this.languageRules.get(langKey) || this.languageRules.get(this.normalizeLanguage(langKey));
-    if (existing?.sinks) {
-      for (const s of existing.sinks) {
-        const r = s.regex || s.pattern;
-        if (r) {
-          this.regexCache.delete(r);
-          for (const k of Array.from(this.regexCache.keys())) {
-            if (k === r || k.startsWith(`${r}::`)) {
-              this.regexCache.delete(k);
-            }
-          }
+
+    const clearRegexCache = (r?: string) => {
+      if (!r) return;
+      this.regexCache.delete(r);
+      for (const k of Array.from(this.regexCache.keys())) {
+        if (k === r || k.startsWith(`${r}::`)) {
+          this.regexCache.delete(k);
         }
       }
+    };
+
+    let mergedExtensions = existing?.extensions ? [...existing.extensions] : undefined;
+    if (Array.isArray(rule.extensions) && rule.extensions.length > 0) {
+      mergedExtensions = Array.from(new Set([...(mergedExtensions || []), ...rule.extensions]));
     }
 
-    const sinks = Array.isArray(rule.sinks)
+    const incomingSinks = Array.isArray(rule.sinks)
       ? rule.sinks.map((s: any) => {
           const reg = s.regex || s.pattern;
           return {
@@ -289,25 +303,31 @@ export class SymbolRulesEngine {
         })
       : undefined;
 
-    if (sinks) {
-      for (const s of sinks) {
-        const r = s.regex || s.pattern;
-        if (r) {
-          this.regexCache.delete(r);
-          for (const k of Array.from(this.regexCache.keys())) {
-            if (k === r || k.startsWith(`${r}::`)) {
-              this.regexCache.delete(k);
-            }
+    let mergedSinks: LanguageSinkRule[] | undefined = existing?.sinks ? existing.sinks.map((s) => ({ ...s })) : undefined;
+    if (incomingSinks && incomingSinks.length > 0) {
+      if (!mergedSinks) {
+        mergedSinks = [...incomingSinks];
+      } else {
+        for (const s of incomingSinks) {
+          const idx = mergedSinks.findIndex((es) => es.type === s.type);
+          if (idx >= 0) {
+            clearRegexCache(mergedSinks[idx].regex || mergedSinks[idx].pattern);
+            mergedSinks[idx] = s;
+          } else {
+            mergedSinks.push(s);
           }
         }
+      }
+      for (const s of incomingSinks) {
+        clearRegexCache(s.regex || s.pattern);
       }
     }
 
     const normalizedRule: LanguageRuleConfig = {
       name: langKey,
-      language: (rule.language || rawName).toLowerCase().trim(),
-      extensions: rule.extensions,
-      sinks,
+      language: (rule.language || existing?.language || rawName).toLowerCase().trim(),
+      extensions: mergedExtensions ?? existing?.extensions,
+      sinks: mergedSinks ?? existing?.sinks,
     };
 
     const norm = this.normalizeLanguage(langKey);
@@ -317,9 +337,21 @@ export class SymbolRulesEngine {
     }
   }
 
+  getLanguageRule(language: string): LanguageRuleConfig | undefined {
+    const norm = this.normalizeLanguage(language);
+    return this.languageRules.get(norm) || this.languageRules.get(language.toLowerCase().trim());
+  }
+
   injectSigmaRule(rule: SigmaRuleConfig): void {
-    if (!rule || !rule.id) return;
-    const existingIndex = this.sigmaRules.findIndex((r) => r.id === rule.id);
+    if (!rule) return;
+    const ruleId = rule.id || (rule as any).name || (rule as any).title;
+    if (!ruleId) return;
+    if (!rule.id) {
+      rule.id = ruleId;
+    }
+    const existingIndex = this.sigmaRules.findIndex(
+      (r) => r.id === ruleId || (r as any).name === ruleId || (r as any).title === ruleId
+    );
     if (existingIndex >= 0) {
       this.sigmaRules[existingIndex] = rule;
     } else {
@@ -328,8 +360,15 @@ export class SymbolRulesEngine {
   }
 
   injectNucleiTemplate(template: NucleiTemplateConfig): void {
-    if (!template || !template.id) return;
-    const existingIndex = this.nucleiTemplates.findIndex((t) => t.id === template.id);
+    if (!template) return;
+    const templateId = template.id || (template as any).info?.name || (template as any).name;
+    if (!templateId) return;
+    if (!template.id) {
+      template.id = templateId;
+    }
+    const existingIndex = this.nucleiTemplates.findIndex(
+      (t) => t.id === templateId || t.info?.name === templateId || (t as any).name === templateId
+    );
     if (existingIndex >= 0) {
       this.nucleiTemplates[existingIndex] = template;
     } else {
@@ -348,10 +387,19 @@ export class SymbolRulesEngine {
     if (!ruleOrRawYar || typeof ruleOrRawYar !== 'object') return;
     const rule = ruleOrRawYar;
     const ruleId = rule.id || rule.name;
+    if (!ruleId) return;
+    if (!rule.id) {
+      rule.id = ruleId;
+    }
     const existingIndex = this.yaraRules.findIndex(
       (yr) => (ruleId && (yr.id === ruleId || yr.name === ruleId)) || (rule.name && yr.name === rule.name)
     );
     if (existingIndex >= 0) {
+      const oldRule = this.yaraRules[existingIndex];
+      const oldPatterns = this.parseYaraStrings(oldRule.strings);
+      for (const p of oldPatterns) {
+        this.regexCache.delete(`yara:${p.pattern}`);
+      }
       this.yaraRules[existingIndex] = rule;
     } else {
       this.yaraRules.unshift(rule);
@@ -777,7 +825,8 @@ export class SymbolRulesEngine {
     }
   }
 
-  private normalizeLanguage(language: string): string {
+  private normalizeLanguage(language?: string): string {
+    if (!language || typeof language !== 'string') return '';
     const l = language.toLowerCase().trim();
     if (['py', 'python'].includes(l)) return 'python';
     if (['js', 'jsx', 'ts', 'tsx', 'mjs', 'javascript', 'typescript'].includes(l)) return 'javascript';
@@ -787,6 +836,7 @@ export class SymbolRulesEngine {
   }
 
   extractSymbols(code: string, language: string, filePath: string): ExtractedSymbol[] {
+    if (!code || typeof code !== 'string') return [];
     const normLang = this.normalizeLanguage(language);
     if (normLang === 'python') {
       return this.extractPythonSymbols(code, filePath);
@@ -1160,6 +1210,7 @@ export class SymbolRulesEngine {
   }
 
   detectSinks(code: string, language: string): DetectedSink[] {
+    if (!code || typeof code !== 'string') return [];
     const sinks: DetectedSink[] = [];
     const normLang = this.normalizeLanguage(language);
     const langRule = this.languageRules.get(normLang);
@@ -1196,10 +1247,12 @@ export class SymbolRulesEngine {
   }
 
   matchSigmaRules(code: string): SigmaMatch[] {
+    if (!code || typeof code !== 'string') return [];
     const matches: SigmaMatch[] = [];
     const lines = code.split(/\r?\n/);
 
     for (const rule of this.sigmaRules) {
+      if (!rule) continue;
       const keywords = this.extractSigmaKeywords(rule);
       if (keywords.length === 0) continue;
 
@@ -1228,6 +1281,7 @@ export class SymbolRulesEngine {
   }
 
   private extractSigmaKeywords(rule: SigmaRuleConfig): string[] {
+    if (!rule) return [];
     const sel = rule.detection?.selection;
     if (Array.isArray(sel)) return sel;
     if (sel && typeof sel === 'object' && Array.isArray((sel as any).keywords)) {
@@ -1240,10 +1294,12 @@ export class SymbolRulesEngine {
   }
 
   matchNucleiTemplates(code: string): NucleiMatch[] {
+    if (!code || typeof code !== 'string') return [];
     const matches: NucleiMatch[] = [];
     const lines = code.split(/\r?\n/);
 
     for (const template of this.nucleiTemplates) {
+      if (!template) continue;
       const matchers: NucleiMatcherConfig[] = [];
       if (Array.isArray(template.matchers)) {
         matchers.push(...template.matchers);
@@ -1304,9 +1360,11 @@ export class SymbolRulesEngine {
   }
 
   matchYaraRules(content: string): YaraMatch[] {
+    if (!content || typeof content !== 'string') return [];
     const matches: YaraMatch[] = [];
 
     for (const rule of this.yaraRules) {
+      if (!rule) continue;
       const stringPatterns = this.parseYaraStrings(rule.strings);
       for (const sp of stringPatterns) {
         const regex = this.getYaraPatternRegex(sp.pattern);
