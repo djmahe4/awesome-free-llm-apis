@@ -950,16 +950,17 @@ export async function createMCPServer(): Promise<Server> {
           '  - analyze_javascript: Parse JavaScript/TypeScript files for AST-level security risks and behavior.',
           '  - analyze_artifact: Inspect binary, ELF, PE, or archive artifacts.',
           '  - get_evidence: Retrieve stored evidence and metadata by ID.',
+          '  - scan_github: Recon remote GitHub repo releases, AST symbols, call flows, and wiki.',
         ].join('\n'),
         inputSchema: {
           type: 'object' as const,
           properties: {
             action: {
               type: 'string',
-              enum: ['status', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence'],
+              enum: ['status', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github'],
               description: 'Reverse engineering action to perform'
             },
-            target: { type: 'string', description: 'Target file path or evidence ID' },
+            target: { type: 'string', description: 'Target file path, GitHub repository (owner/repo or URL), or evidence ID' },
             authorization: {
               type: 'string',
               enum: ['ctf', 'lab', 'consent'],
