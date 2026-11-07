@@ -10,11 +10,41 @@ import { RepoSymbolDb, type RepoKnowledgeRecord, type RepoSymbolItem } from '../
 import { AuditTaintBridge } from '../memory/audit-taint-bridge.js';
 import type { FetchLike } from '../utils/http.js';
 import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function resolveModelInspectorPath(): string {
+  const candidates = [
+    path.resolve(__dirname, '../../scripts/model_inspector.py'),
+    path.resolve(__dirname, '../../../scripts/model_inspector.py'),
+    path.resolve(process.cwd(), 'scripts/model_inspector.py'),
+    path.resolve(process.cwd(), 'mcp-server/scripts/model_inspector.py'),
+  ];
+  return candidates.find(c => fs.existsSync(c)) || candidates[0];
+}
 
 export type ReverseAuthorization = 'ctf' | 'lab' | 'consent';
 const VALID_AUTH: ReverseAuthorization[] = ['ctf', 'lab', 'consent'];
 
-export type ReverseToolAction = 'status' | 'list_capabilities' | 'analyze_javascript' | 'analyze_artifact' | 'get_evidence' | 'scan_github';
+export type ReverseToolAction =
+  | 'status'
+  | 'list_capabilities'
+  | 'analyze_javascript'
+  | 'analyze_artifact'
+  | 'get_evidence'
+  | 'scan_github'
+  | 'inspect_model'
+  | 'infer_layer_roles'
+  | 'trace_layer_execution'
+  | 'reconstruct_training_samples'
+  | 'extract_model_layer'
+  | 'analyze_model_layer';
 
 export interface ReverseToolInput {
   action: ReverseToolAction;
@@ -306,6 +336,12 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           'scan_github',
           'inspect_gguf',
           'probe_memorization',
+          'inspect_model',
+          'infer_layer_roles',
+          'trace_layer_execution',
+          'reconstruct_training_samples',
+          'extract_model_layer',
+          'analyze_model_layer',
         ],
       },
     };
@@ -348,6 +384,12 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       'scan_github',
       'inspect_gguf',
       'probe_memorization',
+      'inspect_model',
+      'infer_layer_roles',
+      'trace_layer_execution',
+      'reconstruct_training_samples',
+      'extract_model_layer',
+      'analyze_model_layer',
     ];
 
     return {
@@ -465,9 +507,94 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
   }
 
+  const modelActions = [
+    'inspect_model',
+    'infer_layer_roles',
+    'trace_layer_execution',
+    'reconstruct_training_samples',
+    'extract_model_layer',
+    'analyze_model_layer',
+  ];
+
+  if (modelActions.includes(action)) {
+    if (!target || !target.trim()) {
+      return {
+        success: false,
+        action,
+        error: 'Target is required.',
+      };
+    }
+
+    if (action === 'reconstruct_training_samples') {
+      if (authorization !== 'consent' || options?.explicitConsentAck !== true) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'Reconstruction of training samples requires explicit authorization: "consent" and options.explicitConsentAck: true due to potential training data privacy boundaries.',
+        };
+      }
+    }
+
+    const scriptPath = resolveModelInspectorPath();
+    const actionMap: Record<string, string> = {
+      inspect_model: 'inspect',
+      infer_layer_roles: 'infer_roles',
+      trace_layer_execution: 'trace_execution',
+      reconstruct_training_samples: 'reconstruct_samples',
+      extract_model_layer: 'extract_layer',
+      analyze_model_layer: 'analyze_layer',
+    };
+
+    const pyAction = actionMap[action];
+    const args = [scriptPath, pyAction, '--file', target];
+    if (options?.format) {
+      args.push('--format', String(options.format));
+    }
+    if (options?.layer) {
+      args.push('--layer', String(options.layer));
+    }
+    if (options?.output) {
+      args.push('--output', String(options.output));
+    }
+    if (options?.cacheDir) {
+      args.push('--cache-dir', String(options.cacheDir));
+    }
+    if (options?.targetClass !== undefined) {
+      args.push('--target-class', String(options.targetClass));
+    }
+    if (options?.steps !== undefined) {
+      args.push('--steps', String(options.steps));
+    }
+
+    try {
+      const { stdout } = await execFileAsync('python', args, {
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 30000,
+        encoding: 'utf8',
+      });
+      const data = JSON.parse(stdout);
+      return {
+        success: true,
+        action,
+        target,
+        data,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        action,
+        target,
+        error: err.message || String(err),
+      };
+    }
+  }
+
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer".`,
   };
 }
+
+export const runReverseTool = reverseTool;
