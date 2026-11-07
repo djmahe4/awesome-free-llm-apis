@@ -123,6 +123,8 @@ def inspect_gguf(filepath):
                     'offset': t_offset
                 })
 
+            align = metadata.get('general.alignment', 32)
+            tensor_data_offset = (offset + align - 1) // align * align
             arch = metadata.get('general.architecture', 'unknown')
             return {
                 'format': 'gguf',
@@ -131,6 +133,7 @@ def inspect_gguf(filepath):
                 'contextLength': metadata.get(f'{arch}.context_length', metadata.get('context_length')),
                 'metadata': metadata,
                 'tensorCount': len(tensors),
+                'tensorDataOffset': tensor_data_offset,
                 'tensors': tensors
             }
         finally:
@@ -176,7 +179,10 @@ def inspect_pytorch(filepath):
                     classes = list(data['names'].values()) if isinstance(data['names'], dict) else data['names']
                     result['metadata']['classes'] = classes
 
-                state_dict = data.get('model', data)
+                if hasattr(data, 'state_dict'):
+                    state_dict = data.state_dict()
+                else:
+                    state_dict = data.get('model') or data.get('state_dict') or data.get('model_state_dict') or data
                 if hasattr(state_dict, 'state_dict'):
                     state_dict = state_dict.state_dict()
                 if isinstance(state_dict, dict):
@@ -422,27 +428,36 @@ def reconstruct_training_samples(filepath, fmt, target_class=0, steps=50, output
 def get_tensor_data(filepath, fmt, layer_name):
     import numpy as np
     if fmt == 'gguf':
-        info = inspect_gguf(filepath)
-        tensor_info = next((t for t in info.get('tensors', []) if t['name'] == layer_name), None)
-        if tensor_info:
-            with open(filepath, 'rb') as f:
-                f.seek(0, os.SEEK_END)
-                total_size = f.tell()
-                base_offset = total_size - 128
-                f.seek(base_offset + tensor_info.get('offset', 0))
-                shape = tensor_info.get('shape', [4, 4])
-                num_elements = 1
-                for d in shape:
-                    num_elements *= d
-                raw_bytes = f.read(num_elements * 4)
-                if len(raw_bytes) == num_elements * 4:
-                    data = np.frombuffer(raw_bytes, dtype=np.float32).reshape(shape)
-                    return data, tensor_info
+        try:
+            info = inspect_gguf(filepath)
+            tensor_info = next((t for t in info.get('tensors', []) if t['name'] == layer_name), None)
+            if tensor_info:
+                with open(filepath, 'rb') as f:
+                    f.seek(0, os.SEEK_END)
+                    total_size = f.tell()
+                    base_offset = info.get('tensorDataOffset', 0)
+                    shape = tensor_info.get('shape', [4, 4])
+                    num_elements = 1
+                    for d in shape:
+                        num_elements *= d
+                    target_offset = base_offset + tensor_info.get('offset', 0)
+                    byte_count = num_elements * 4
+                    if target_offset + byte_count <= total_size:
+                        f.seek(target_offset)
+                        raw_bytes = f.read(byte_count)
+                        if len(raw_bytes) == byte_count:
+                            data = np.frombuffer(raw_bytes, dtype=np.float32).reshape(shape)
+                            return data, tensor_info
+        except Exception:
+            pass
     elif fmt == 'pytorch':
         try:
             import torch
             checkpoint = torch.load(filepath, map_location='cpu', weights_only=True)
-            state_dict = checkpoint.get('model', checkpoint)
+            if hasattr(checkpoint, 'state_dict'):
+                state_dict = checkpoint.state_dict()
+            else:
+                state_dict = checkpoint.get('model') or checkpoint.get('state_dict') or checkpoint.get('model_state_dict') or checkpoint
             if hasattr(state_dict, 'state_dict'):
                 state_dict = state_dict.state_dict()
             if layer_name in state_dict:

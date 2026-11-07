@@ -234,7 +234,7 @@ describe('reverse_tool Model Introspection Actions', () => {
   });
 
   it('prevents duplicate concurrent runs if runKey is already running', async () => {
-    const sessionId = `duplicate-test-`;
+    const sessionId = `duplicate-test-${Date.now()}`;
     const firstRes = await runReverseTool({
       action: 'inspect_model',
       target: ggufFixture,
@@ -254,5 +254,45 @@ describe('reverse_tool Model Introspection Actions', () => {
     expect(dupRes.success).toBe(true);
     expect((dupRes.data as any).status).toBe('running');
     expect((dupRes.data as any).message).toContain('already in progress');
+  });
+  it('rejects model target with path traversal attempt', async () => {
+    const res = await runReverseTool({
+      action: 'inspect_model',
+      target: '../../traversal.gguf',
+      authorization: 'lab',
+    });
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('Path traversal disallowed in target');
+  });
+
+  it('rejects extract_model_layer when options.layer is missing', async () => {
+    const res = await runReverseTool({
+      action: 'extract_model_layer',
+      target: ggufFixture,
+      authorization: 'lab',
+    });
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('options.layer is required');
+  });
+
+  it('rejects analyze_model_layer when options.layer is missing', async () => {
+    const res = await runReverseTool({
+      action: 'analyze_model_layer',
+      target: ggufFixture,
+      authorization: 'lab',
+    });
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('options.layer is required');
+  });
+
+  it('verifies inspect_model reports tensorDataOffset for GGUF', async () => {
+    const res = await runReverseTool({
+      action: 'inspect_model',
+      target: ggufFixture,
+      authorization: 'lab',
+      options: { format: 'gguf' },
+    });
+    expect(res.success).toBe(true);
+    expect((res.data as any).tensorDataOffset).toBe(256);
   });
 });
