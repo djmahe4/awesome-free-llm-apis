@@ -6,6 +6,7 @@ import json
 import zipfile
 import argparse
 import re
+import pickle
 
 GGUF_MAGIC = 0x46554747  # 'GGUF'
 GGML_TYPES = {
@@ -13,6 +14,46 @@ GGML_TYPES = {
     6: 'Q5_0', 7: 'Q5_1', 8: 'Q8_0', 9: 'Q8_1',
     12: 'Q4_K', 13: 'Q5_K', 14: 'Q6_K', 15: 'Q8_K'
 }
+
+class SafeUnpickler(pickle.Unpickler):
+    """Restricts pickle loading to safe primitive types and torch structures."""
+    SAFE_CLASSES = {
+        'builtins': {
+            'dict', 'list', 'set', 'frozenset', 'tuple', 'int', 'float', 'str', 'bool',
+            'bytes', 'bytearray', 'NoneType'
+        },
+        '__builtin__': {
+            'dict', 'list', 'set', 'frozenset', 'tuple', 'int', 'float', 'str', 'bool',
+            'bytes', 'bytearray', 'NoneType'
+        },
+        'types': {'NoneType'},
+        'collections': {'OrderedDict', 'defaultdict'},
+        'torch': {
+            'Tensor', 'FloatStorage', 'HalfStorage', 'DoubleStorage',
+            'IntStorage', 'LongStorage', 'ShortStorage', 'ByteStorage',
+            'CharStorage', 'BoolStorage', 'BFloat16Storage',
+            'QUInt8Storage', 'QInt8Storage', 'QInt32Storage'
+        },
+        'torch._utils': {'_rebuild_tensor_v2', '_rebuild_parameter'},
+    }
+
+    def find_class(self, module, name):
+        if module in self.SAFE_CLASSES and name in self.SAFE_CLASSES[module]:
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(f"Global '{module}.{name}' is forbidden for safe unpickling")
+
+def read_varint(data, idx):
+    val = 0
+    shift = 0
+    while idx < len(data):
+        b = data[idx]
+        idx += 1
+        val |= (b & 0x7f) << shift
+        if not (b & 0x80):
+            break
+        shift += 7
+    return val, idx
+
 
 def inspect_gguf(filepath):
     with open(filepath, 'rb') as f:
@@ -40,12 +81,20 @@ def inspect_gguf(filepath):
                     val = mm[offset:offset+v_len].decode('utf-8', errors='replace')
                     offset += v_len
                     metadata[key] = val
-                elif val_type in (4, 5):  # UINT32, INT32
+                elif val_type == 4:  # UINT32
                     val = struct.unpack('<I', mm[offset:offset+4])[0]
                     offset += 4
                     metadata[key] = val
-                elif val_type in (10, 11):  # UINT64, INT64
+                elif val_type == 5:  # INT32
+                    val = struct.unpack('<i', mm[offset:offset+4])[0]
+                    offset += 4
+                    metadata[key] = val
+                elif val_type == 10:  # UINT64
                     val = struct.unpack('<Q', mm[offset:offset+8])[0]
+                    offset += 8
+                    metadata[key] = val
+                elif val_type == 11:  # INT64
+                    val = struct.unpack('<q', mm[offset:offset+8])[0]
                     offset += 8
                     metadata[key] = val
                 elif val_type == 6:  # FLOAT32
@@ -114,9 +163,8 @@ def inspect_pytorch(filepath):
                 data = torch.load(filepath, map_location='cpu', weights_only=True, mmap=True)
             except Exception:
                 try:
-                    import pickle
                     with zf.open(pkl_entry) as pf:
-                        data = pickle.load(pf)
+                        data = SafeUnpickler(pf).load()
                 except Exception as pe:
                     result['metadata']['load_warning'] = str(pe)
 
@@ -169,30 +217,31 @@ def inspect_onnx(filepath):
         res = {'format': 'onnx', 'irVersion': None, 'producerName': None, 'opsetVersion': None}
         idx = 0
         while idx < len(data):
-            tag = data[idx]
+            tag, idx = read_varint(data, idx)
             field = tag >> 3
             wire = tag & 0x07
-            idx += 1
             if field == 1 and wire == 0:
-                val = 0
-                shift = 0
-                while True:
-                    b = data[idx]
-                    idx += 1
-                    val |= (b & 0x7f) << shift
-                    if not (b & 0x80): break
-                    shift += 7
+                val, idx = read_varint(data, idx)
                 res['irVersion'] = val
             elif field == 2 and wire == 2:
-                l = data[idx]; idx += 1
+                l, idx = read_varint(data, idx)
                 res['producerName'] = data[idx:idx+l].decode('utf-8', errors='replace')
                 idx += l
             elif field == 8 and wire == 2:
-                l = data[idx]; idx += 1
+                l, idx = read_varint(data, idx)
                 sub = data[idx:idx+l]
                 if len(sub) >= 2 and sub[0] == 0x10:
                     res['opsetVersion'] = sub[1]
                 idx += l
+            elif wire == 0:
+                _, idx = read_varint(data, idx)
+            elif wire == 1:
+                idx += 8
+            elif wire == 2:
+                l, idx = read_varint(data, idx)
+                idx += l
+            elif wire == 5:
+                idx += 4
             else:
                 break
         return res
