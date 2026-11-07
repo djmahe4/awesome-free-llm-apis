@@ -382,10 +382,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           },
         };
       }
-      const cached = reverseToolResultsCache.get(runKey);
-      if (cached) {
-        return cached;
-      }
       if (run?.controller?.signal?.aborted) {
         return {
           success: false,
@@ -397,6 +393,10 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
             sessionId: effectiveSessionId,
           },
         };
+      }
+      const cached = reverseToolResultsCache.get(runKey);
+      if (cached) {
+        return cached;
       }
       return {
         success: !run?.error,
@@ -631,6 +631,32 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       };
     }
 
+    const allowedRoots = [
+      process.cwd(),
+      os.tmpdir(),
+      ...(options?.workspaceRoot ? [String(options.workspaceRoot)] : []),
+    ];
+
+    if (!isSafeAllowedPath(target, allowedRoots)) {
+      return {
+        success: false,
+        action,
+        target,
+        error: 'Path traversal disallowed in target.',
+      };
+    }
+
+    if (action === 'extract_model_layer' || action === 'analyze_model_layer') {
+      if (!options?.layer || !String(options.layer).trim()) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'options.layer is required.',
+        };
+      }
+    }
+
     if (action === 'reconstruct_training_samples') {
       if (authorization !== 'consent' || options?.explicitConsentAck !== true) {
         return {
@@ -671,12 +697,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     if (options?.layer) {
       args.push('--layer', String(options.layer));
     }
-
-    const allowedRoots = [
-      process.cwd(),
-      os.tmpdir(),
-      ...(options?.workspaceRoot ? [String(options.workspaceRoot)] : []),
-    ];
 
     if (options?.output) {
       const outStr = String(options.output);

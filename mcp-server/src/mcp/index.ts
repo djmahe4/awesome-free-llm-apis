@@ -935,8 +935,7 @@ export async function createMCPServer(): Promise<Server> {
           },
           required: ['action']
         }
-      }
-,
+      },
       {
         name: 'reverse_tool',
         description: [
@@ -1120,7 +1119,7 @@ export async function createMCPServer(): Promise<Server> {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
           isError: !result?.success,
         };
-            } else if (name === 'reverse_tool') {
+      } else if (name === 'reverse_tool') {
         const { reverseTool } = await import('../tools/reverse-tool.js');
         const result = await reverseTool(args as any);
         response = {
