@@ -26,16 +26,41 @@ export const reverseToolResultsCache = new BoundedMap<string, ReverseToolResult>
 
 function resolveModelInspectorPath(): string {
   const candidates = [
+    path.resolve(__dirname, '../scripts/model_inspector.py'),
     path.resolve(__dirname, '../../scripts/model_inspector.py'),
     path.resolve(__dirname, '../../../scripts/model_inspector.py'),
     path.resolve(process.cwd(), 'scripts/model_inspector.py'),
     path.resolve(process.cwd(), 'mcp-server/scripts/model_inspector.py'),
+    path.resolve(process.cwd(), 'dist/scripts/model_inspector.py'),
+    path.resolve(process.cwd(), 'mcp-server/dist/scripts/model_inspector.py'),
   ];
   const found = candidates.find(c => fs.existsSync(c));
   if (!found) {
     throw new Error('Model inspector script (model_inspector.py) not found in candidates: ' + candidates.join(', '));
   }
   return found;
+}
+
+export function resolvePythonPath(): string {
+  if (process.env.PYTHON) {
+    return process.env.PYTHON;
+  }
+  const isWin = process.platform === 'win32';
+  const pyRel = isWin ? path.join('Scripts', 'python.exe') : path.join('bin', 'python');
+  const candidates = [
+    path.resolve(process.cwd(), 'venv', pyRel),
+    path.resolve(process.cwd(), '.venv', pyRel),
+    path.resolve(process.cwd(), 'mcp-server/venv', pyRel),
+    path.resolve(process.cwd(), 'mcp-server/.venv', pyRel),
+    path.resolve(__dirname, '../venv', pyRel),
+    path.resolve(__dirname, '../.venv', pyRel),
+    path.resolve(__dirname, '../../venv', pyRel),
+    path.resolve(__dirname, '../../.venv', pyRel),
+    path.resolve(__dirname, '../../../venv', pyRel),
+    path.resolve(__dirname, '../../../.venv', pyRel),
+  ];
+  const found = candidates.find(c => fs.existsSync(c));
+  return found || 'python';
 }
 
 function isSafeAllowedPath(rawPath: string, allowedDirs: string[]): boolean {
@@ -729,7 +754,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       args.push('--steps', String(options.steps));
     }
 
-    const pythonBin = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+    const pythonBin = resolvePythonPath();
     const isAsync = options?.async === true;
     const syncBudgetMs = Number(options?.syncBudgetMs ?? 30_000);
 
