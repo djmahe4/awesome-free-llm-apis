@@ -1,0 +1,16 @@
+id: yara-symbolic-loader
+name: Symbolic_Library_Loader_Patterns
+meta:
+  description: "Patterns associated with manual ELF loaders or encrypted dlopen strings"
+strings:
+  - id: "$memfd"
+    type: ascii
+    value: "memfd_create"
+  - id: "$libc_dl"
+    type: ascii
+    value: "__libc_dlopen_mode"
+  - id: "$elf_magic"
+    type: hex
+    value: "7F 45 4C 46"
+condition: "any of them and filesize < 5MB"
+max_filesize_bytes: 5242880

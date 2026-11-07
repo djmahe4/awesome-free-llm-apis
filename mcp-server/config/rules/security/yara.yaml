@@ -1,0 +1,20 @@
+type: yara
+rules:
+  - id: yara_reverse_shell
+    name: ReverseShellPayload
+    tags:
+      - ctf
+      - payload
+    strings:
+      - "$bash_tcp = \"/dev/tcp/\" ascii"
+      - "$sh_pipe = \"/bin/sh -i\" ascii"
+      - "$nc_e = \"nc -e /bin/sh\" ascii"
+    condition: "any of them"
+  - id: yara_dangerous_deserialization
+    name: PicklePayload
+    tags:
+      - exploit
+    strings:
+      - "$cos_system = \"cos\\nsystem\" ascii"
+      - "$cposix_system = \"cposix\\nsystem\" ascii"
+    condition: "any of them"

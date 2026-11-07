@@ -1,0 +1,11 @@
+name: go
+language: go
+extensions:
+  - .go
+sinks:
+  - type: command_injection
+    regex: "\\b(?:exec\\.Command|exec\\.CommandContext)\\b"
+    pattern: "\\b(?:exec\\.Command|exec\\.CommandContext)\\b"
+  - type: sql_injection
+    regex: "\\b(?:db\\.Query|db\\.Exec)\\s*\\([^)]*\\+"
+    pattern: "\\b(?:db\\.Query|db\\.Exec)\\s*\\([^)]*\\+"
