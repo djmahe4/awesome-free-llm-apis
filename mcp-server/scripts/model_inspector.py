@@ -3,6 +3,7 @@ import os
 import mmap
 import struct
 import json
+import zipfile
 import argparse
 
 GGUF_MAGIC = 0x46554747  # 'GGUF'
@@ -85,6 +86,62 @@ def inspect_gguf(filepath):
         finally:
             mm.close()
 
+def inspect_pytorch(filepath):
+    is_zip = zipfile.is_zipfile(filepath)
+    if not is_zip:
+        raise ValueError("Legacy uncompressed PyTorch pickles not supported for safety; ZIP checkpoint required")
+
+    result = {
+        'format': 'pytorch',
+        'isZipContainer': True,
+        'fileSizeBytes': os.path.getsize(filepath),
+        'metadata': {},
+        'tensorCount': 0,
+        'tensors': []
+    }
+
+    with zipfile.ZipFile(filepath, 'r') as zf:
+        infolist = zf.infolist()
+        result['records'] = [{'name': info.filename, 'size': info.file_size} for info in infolist]
+
+        # Extract archive/data.pkl safely
+        pkl_entry = next((info.filename for info in infolist if info.filename.endswith('data.pkl')), None)
+        if pkl_entry:
+            data = None
+            try:
+                import torch
+                data = torch.load(filepath, map_location='cpu', weights_only=True, mmap=True)
+            except Exception:
+                try:
+                    import pickle
+                    with zf.open(pkl_entry) as pf:
+                        data = pickle.load(pf)
+                except Exception as pe:
+                    result['metadata']['load_warning'] = str(pe)
+
+            if isinstance(data, dict):
+                for k in ('epoch', 'best_fitness', 'date', 'version', 'task'):
+                    if k in data and data[k] is not None:
+                        result['metadata'][k] = data[k]
+                if 'names' in data and isinstance(data['names'], (dict, list)):
+                    classes = list(data['names'].values()) if isinstance(data['names'], dict) else data['names']
+                    result['metadata']['classes'] = classes
+
+                state_dict = data.get('model', data)
+                if hasattr(state_dict, 'state_dict'):
+                    state_dict = state_dict.state_dict()
+                if isinstance(state_dict, dict):
+                    result['tensorCount'] = len(state_dict)
+                    for name, tensor in list(state_dict.items())[:50]:
+                        if hasattr(tensor, 'shape'):
+                            result['tensors'].append({
+                                'name': str(name),
+                                'shape': list(tensor.shape),
+                                'dtype': str(tensor.dtype).replace('torch.', '')
+                            })
+
+    return result
+
 def main():
     parser = argparse.ArgumentParser(description="Model Artifact Inspector")
     parser.add_argument("action", choices=["inspect", "infer_roles", "trace_execution", "extract_layer", "analyze_layer", "reconstruct_samples"])
@@ -108,6 +165,8 @@ def main():
     if args.action == "inspect":
         if fmt == 'gguf':
             print(json.dumps(inspect_gguf(args.file), indent=2))
+        elif fmt == 'pytorch':
+            print(json.dumps(inspect_pytorch(args.file), indent=2))
         else:
             raise NotImplementedError(f"Format {fmt} not yet implemented")
 

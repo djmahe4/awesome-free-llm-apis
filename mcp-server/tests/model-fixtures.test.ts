@@ -20,6 +20,10 @@ describe('Model Artifact Fixtures', () => {
 
     // PyTorch ZIP check: PK\x03\x04
     const ptBuf = fs.readFileSync(ptFile);
-    expect(ptBuf.subarray(0, 2).toString('ascii')).toBe('PK');
+    expect(ptBuf.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+
+    // ONNX protobuf header check: field 1 varint 8
+    const onnxBuf = fs.readFileSync(onnxFile);
+    expect(onnxBuf.subarray(0, 2)).toEqual(Buffer.from([0x08, 0x08]));
   });
 });
