@@ -8,6 +8,11 @@ import argparse
 import re
 import pickle
 
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 GGUF_MAGIC = 0x46554747  # 'GGUF'
 GGML_TYPES = {
     0: 'F32', 1: 'F16', 2: 'Q4_0', 3: 'Q4_1',
@@ -324,8 +329,9 @@ def infer_layer_roles(filepath, fmt):
 
 
 def trace_layer_execution(filepath, fmt, cache_dir):
+    if np is None:
+        raise ModuleNotFoundError("No module named 'numpy'. numpy is required for tensor inspection and activation reconstruction. Please install numpy.")
     os.makedirs(cache_dir, exist_ok=True)
-    import numpy as np
 
     current_activation = np.array([[1.0, 0.5, -0.2, 0.8]], dtype=np.float32)
     steps = []
@@ -372,7 +378,8 @@ def trace_layer_execution(filepath, fmt, cache_dir):
 
 
 def reconstruct_training_samples(filepath, fmt, target_class=0, steps=50, output_file=None):
-    import numpy as np
+    if np is None:
+        raise ModuleNotFoundError("No module named 'numpy'. numpy is required for tensor inspection and activation reconstruction. Please install numpy.")
 
     class_name = "class_" + str(target_class)
     if fmt == 'pytorch':
@@ -426,7 +433,8 @@ def reconstruct_training_samples(filepath, fmt, target_class=0, steps=50, output
 
 
 def get_tensor_data(filepath, fmt, layer_name):
-    import numpy as np
+    if np is None:
+        raise ModuleNotFoundError("No module named 'numpy'. numpy is required for tensor inspection and activation reconstruction. Please install numpy.")
     if fmt == 'gguf':
         try:
             info = inspect_gguf(filepath)
@@ -471,7 +479,8 @@ def get_tensor_data(filepath, fmt, layer_name):
 
 
 def extract_layer(filepath, fmt, layer_name, output_path):
-    import numpy as np
+    if np is None:
+        raise ModuleNotFoundError("No module named 'numpy'. numpy is required for tensor inspection and activation reconstruction. Please install numpy.")
     data, tensor_info = get_tensor_data(filepath, fmt, layer_name)
     raw_bytes = data.astype(np.float32).tobytes()
     byte_len = len(raw_bytes)
@@ -508,7 +517,8 @@ def extract_layer(filepath, fmt, layer_name, output_path):
 
 
 def analyze_layer(filepath, fmt, layer_name):
-    import numpy as np
+    if np is None:
+        raise ModuleNotFoundError("No module named 'numpy'. numpy is required for tensor inspection and activation reconstruction. Please install numpy.")
     data, tensor_info = get_tensor_data(filepath, fmt, layer_name)
     flat = data.flatten()
     frobenius = float(np.linalg.norm(flat))
