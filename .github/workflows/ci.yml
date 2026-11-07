@@ -2,6 +2,8 @@ name: CI
 
 on:
   pull_request:
+    types:
+      - closed
     branches:
       - '**'
     paths:
@@ -12,6 +14,7 @@ on:
 jobs:
   validate:
     name: Validate data.json & README
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -36,6 +39,7 @@ jobs:
 
   test:
     name: Build & Test MCP Server (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
