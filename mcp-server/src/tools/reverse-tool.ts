@@ -7,6 +7,7 @@ import { RemoteRepoSource, type RemoteFileDescriptor } from '../reverse/remote-r
 import { parseGitHubRepoUrl, discoverSkillsInTree, parseReadmeSkills, type DiscoveredSkill } from '../reverse/github-skills.js';
 import { extractSymbolsAndFlow } from '../reverse/grep-ast.js';
 import { RepoSymbolDb, type RepoKnowledgeRecord, type RepoSymbolItem } from '../reverse/repo-symbol-db.js';
+import { AuditTaintBridge } from '../memory/audit-taint-bridge.js';
 import type { FetchLike } from '../utils/http.js';
 import path from 'node:path';
 
@@ -208,21 +209,30 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       symbolDb.saveRecord(record);
       const wikiMarkdown = symbolDb.generateWikiMarkdown(record);
 
+      const normalizedResult: Record<string, any> = {
+        owner,
+        repo,
+        commitSha: treeRes.commitSha,
+        releaseAssets,
+        skills,
+        symbols,
+        callFlows,
+        wikiMarkdown,
+      };
+
+      if (releaseAssets.some(a => a.category === 'binary_native' || a.category === 'asar') || manifests.length > 3) {
+        normalizedResult.shallowCloneConsent = new AuditTaintBridge().createShallowClonePrompt(
+          'https://github.com/' + owner + '/' + repo,
+          'Deep AST and binary reverse engineering'
+        );
+      }
+
       const evidence = createEvidenceBundle({
         tool: 'reverse_tool',
         source: 'github_scan',
         target,
         limitations: limitations.length > 0 ? limitations : undefined,
-        normalizedResult: {
-          owner,
-          repo,
-          commitSha: treeRes.commitSha,
-          releaseAssets,
-          skills,
-          symbols,
-          callFlows,
-          wikiMarkdown,
-        },
+        normalizedResult,
         analysisProfile: {
           targetType: 'network',
           action: 'scan_github',
