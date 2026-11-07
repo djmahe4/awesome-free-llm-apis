@@ -1058,7 +1058,10 @@ git commit -m "feat(reverse): implement persistent local repo symbol DB and anti
 
 ---
 
-### Task 5: GitHub Skill Repository Discovery, Overwriting Downloader & `load_skill_prompt` Bridge
+### Task 5: GitHub Skill Repository Discovery, README Understanding & load_skill_prompt Bridge
+
+> User Requirement: Accommodate README-based understanding of skill repositories for repos like inceptionstack/loki-skills (Agent skills library for Loki — adapted from Kiro Powers and custom-built for AI agent workflows). Extract skill catalogs, tables, and section definitions from README.md and enrich tree-discovered skills with README descriptions.
+
 
 **Files:**
 - Create: `mcp-server/src/reverse/github-skills.ts`
@@ -1254,7 +1257,7 @@ export function parseGitHubRepoUrl(target: string): { owner: string; repo: strin
 
 export function discoverSkillsInTree(tree: Array<{ path: string; type?: string }>): string[] {
   return tree
-    .filter(entry => entry.type === 'blob' && SKILL_REGEX.test(entry.path))
+    .filter(entry => (!entry.type || entry.type === 'blob') && SKILL_REGEX.test(entry.path))
     .map(entry => entry.path);
 }
 
@@ -1375,7 +1378,7 @@ export async function loadSkillPromptFromRepo(options: {
     return { success: false, error: `Failed to inspect repository tree: ${treeRes.error}` };
   }
 
-  const skillPaths = discoverSkillsInTree(treeRes.descriptors);
+  const skillPaths = discoverSkillsInTree(treeRes.descriptors.map(d => ({ path: d.path, type: 'blob' })));
   if (skillPaths.length === 0) {
     return { success: false, error: `No SKILL.md found in repository "${parsed.owner}/${parsed.repo}".` };
   }

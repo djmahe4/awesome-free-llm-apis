@@ -110,7 +110,7 @@ export async function listReleaseAssets(
     });
 
     if (!res.ok || !Array.isArray(res.json)) {
-      if (isRateLimited(res) || res.status === 403) {
+      if (isRateLimited(res)) {
         return {
           success: false,
           releases: [],
