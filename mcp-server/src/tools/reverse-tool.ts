@@ -26,7 +26,11 @@ function resolveModelInspectorPath(): string {
     path.resolve(process.cwd(), 'scripts/model_inspector.py'),
     path.resolve(process.cwd(), 'mcp-server/scripts/model_inspector.py'),
   ];
-  return candidates.find(c => fs.existsSync(c)) || candidates[0];
+  const found = candidates.find(c => fs.existsSync(c));
+  if (!found) {
+    throw new Error('Model inspector script (model_inspector.py) not found in candidates: ' + candidates.join(', '));
+  }
+  return found;
 }
 
 export type ReverseAuthorization = 'ctf' | 'lab' | 'consent';
@@ -334,8 +338,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           'analyze_artifact',
           'get_evidence',
           'scan_github',
-          'inspect_gguf',
-          'probe_memorization',
           'inspect_model',
           'infer_layer_roles',
           'trace_layer_execution',
@@ -382,8 +384,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       'analyze_artifact',
       'get_evidence',
       'scan_github',
-      'inspect_gguf',
-      'probe_memorization',
       'inspect_model',
       'infer_layer_roles',
       'trace_layer_execution',
@@ -517,6 +517,15 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   ];
 
   if (modelActions.includes(action)) {
+    if (!authorization || !VALID_AUTH.includes(authorization as ReverseAuthorization)) {
+      return {
+        success: false,
+        action,
+        target,
+        error: 'Target analysis requires authorization framing: "ctf" | "lab" | "consent".',
+      };
+    }
+
     if (!target || !target.trim()) {
       return {
         success: false,
@@ -555,10 +564,28 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       args.push('--layer', String(options.layer));
     }
     if (options?.output) {
-      args.push('--output', String(options.output));
+      const outStr = String(options.output);
+      if (outStr.includes('..')) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'Path traversal disallowed in options.output.',
+        };
+      }
+      args.push('--output', outStr);
     }
     if (options?.cacheDir) {
-      args.push('--cache-dir', String(options.cacheDir));
+      const cacheStr = String(options.cacheDir);
+      if (cacheStr.includes('..')) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'Path traversal disallowed in options.cacheDir.',
+        };
+      }
+      args.push('--cache-dir', cacheStr);
     }
     if (options?.targetClass !== undefined) {
       args.push('--target-class', String(options.targetClass));
@@ -567,8 +594,10 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       args.push('--steps', String(options.steps));
     }
 
+    const pythonBin = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+
     try {
-      const { stdout } = await execFileAsync('python', args, {
+      const { stdout } = await execFileAsync(pythonBin, args, {
         maxBuffer: 10 * 1024 * 1024,
         timeout: 30000,
         encoding: 'utf8',
