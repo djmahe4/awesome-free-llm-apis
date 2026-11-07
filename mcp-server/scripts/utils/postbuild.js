@@ -3,7 +3,7 @@
  * @description Handles post-build cleanup, script synchronization, and directory preparation for the production distribution.
  * Usage: node scripts/utils/postbuild.js
  */
-import { mkdirSync, copyFileSync, existsSync } from 'node:fs';
+import fs, { mkdirSync, copyFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -15,6 +15,9 @@ const copies = [
   { from: 'src/providers/gemini_client.py', to: 'dist/providers/gemini_client.py' },
   { from: 'scripts/utils/update_prompt_json.py', to: 'dist/scripts/update_prompt_json.py' },
   { from: 'scripts/utils/pdf_screenshot.py', to: 'dist/scripts/pdf_screenshot.py' },
+  { from: 'scripts/model_inspector.py', to: 'dist/scripts/model_inspector.py' },
+  { from: 'scripts/sandboxes/python-sandbox-runner.py', to: 'dist/scripts/sandboxes/python-sandbox-runner.py' },
+  { from: 'scripts/utils/generate_model_fixtures.py', to: 'dist/scripts/utils/generate_model_fixtures.py' },
 ];
 
 console.log('Running post-build tasks...');
@@ -34,8 +37,8 @@ try {
     execSync(`"${sysPython}" -m venv "${venvDir}"`, { stdio: 'inherit' });
   }
 
-  console.log('Installing/upgrading Python dependencies (pymupdf, google-genai, duckduckgo-mcp-server, kokoro-onnx, soundfile, llmfit)...');
-  execSync(`"${pythonPath}" -m pip install pymupdf google-genai duckduckgo-mcp-server kokoro-onnx soundfile llmfit`, { stdio: 'inherit' });
+  console.log('Installing/upgrading Python dependencies (pymupdf, google-genai, duckduckgo-mcp-server, kokoro-onnx, soundfile, llmfit, numpy, RestrictedPython)...');
+  execSync(`"${pythonPath}" -m pip install pymupdf google-genai duckduckgo-mcp-server kokoro-onnx soundfile llmfit numpy RestrictedPython`, { stdio: 'inherit' });
   console.log('Python virtual environment setup complete.');
 } catch (err) {
   console.error('Warning: Python virtual environment setup failed. Details:', err.message);
@@ -45,8 +48,14 @@ for (const { from, to } of copies) {
   const src = resolve(root, from);
   const dest = resolve(root, to);
   mkdirSync(dirname(dest), { recursive: true });
-  copyFileSync(src, dest);
-  console.log(`  copied ${from} → ${to}`);
+  if (fs.existsSync(src)) {
+    copyFileSync(src, dest);
+    console.log(`  copied ${from} → ${to}`);
+
+  } else {
+    console.warn(`Warning: source file missing, skipping copy: ${src}`);
+  }
+
 }
 
 // Step 1.5: Pre-download embedding models
@@ -108,5 +117,3 @@ try {
 } catch (err) {
   console.warn('Warning: Cyber tools index sync skipped. Details:', err.message);
 }
-
-
