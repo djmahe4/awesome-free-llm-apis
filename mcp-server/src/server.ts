@@ -199,6 +199,7 @@ export function createExpressApp(): express.Express {
     { pattern: '/api/tool', limit: '10mb' },
     { pattern: '/api/browser_tool', limit: '10mb' },
     { pattern: '/api/cyber_tool', limit: '10mb' },
+    { pattern: '/api/reverse_tool', limit: '10mb' },
     { pattern: '/api/movie_tool', limit: '10mb' },
     { pattern: /^\/api\/movie(\/|$)/, limit: '10mb' },
   ];
@@ -642,6 +643,11 @@ export function createExpressApp(): express.Express {
               result = await runMovieTool(params);
               break;
             }
+            case 'reverse_tool': {
+              const { reverseTool } = await import('./tools/reverse-tool.js');
+              result = await reverseTool(params);
+              break;
+            }
             default:
               res.status(400).json({ error: `Unknown tool: ${tool}` });
               return;
@@ -825,6 +831,18 @@ export function createExpressApp(): express.Express {
       });
 
       // Cyber Tool Security Registry & Wiki API Endpoint
+            app.post('/api/reverse_tool', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const body = req.body || {};
+          const { reverseTool } = await import('./tools/reverse-tool.js');
+          const result = await reverseTool(body);
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
       app.post('/api/cyber_tool', express.json({ limit: '10mb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {

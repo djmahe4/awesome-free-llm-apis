@@ -23,6 +23,7 @@ export interface FieldUse {
 
 const BROWSER = 'src/browser/dispatch.ts';
 const CYBER = 'src/tools/cyber-tool.ts';
+const REVERSE = 'src/tools/reverse-tool.ts';
 const MOVIE = 'src/tools/movie-tool.ts';
 const AGENTS = 'src/tools/coding-agents/pipeline.ts';
 const AGENTS_HTTP = 'src/tools/coding-agents/http-input.ts';
@@ -30,6 +31,12 @@ const AGENTS_HTTP = 'src/tools/coding-agents/http-input.ts';
 const g = (pattern: string, file: string) => `grep:${pattern}@${file}`;
 
 export const FIELD_USES: FieldUse[] = [
+  // ---- reverse_tool -------------------------------------------------------------------------------------------
+  { tool: 'reverse_tool', field: 'target', actions: ['analyze_javascript', 'analyze_artifact', 'get_evidence'], need: 'required', probe: g('Target is required', REVERSE) },
+  { tool: 'reverse_tool', field: 'target', actions: ['list_capabilities'], need: 'read', probe: g('target', REVERSE) },
+  { tool: 'reverse_tool', field: 'authorization', actions: ['analyze_javascript', 'analyze_artifact', 'get_evidence'], need: 'required', probe: g('Target analysis requires authorization framing', REVERSE) },
+  { tool: 'reverse_tool', field: 'authorization', actions: ['list_capabilities'], need: 'read', probe: g('authorization', REVERSE) },
+  { tool: 'reverse_tool', field: 'options', actions: ['analyze_javascript', 'analyze_artifact'], need: 'read', probe: g('options', REVERSE) },
   // ---- browser_tool --------------------------------------------------------------------------------------------
   { tool: 'browser_tool', field: 'url', actions: ['navigate'], need: 'required', probe: g('navigate requires url', BROWSER) },
   { tool: 'browser_tool', field: 'url', actions: ['scrape'], need: 'read', probe: g('url', BROWSER) },

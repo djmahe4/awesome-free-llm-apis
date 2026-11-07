@@ -276,6 +276,16 @@ Multi-agent declarative harness execution and coordination engine.
 
 ---
 
+### `reverse_tool` [v1.1.2]
+Reverse engineering analysis engine and static artifact forensics inspector.
+- **Authorization Framing**: Enforces `'ctf'` | `'lab'` | `'consent'` on all deep analysis actions (`analyze_javascript`, `analyze_artifact`, `get_evidence`).
+- **Resilient AST Extraction**: Sliding-window AST scanner for JavaScript/TypeScript routes, sinks, and API secrets.
+- **Artifact Forensics**: Format detection (ELF, PE, WASM, ASAR, GGUF), Shannon entropy calculation, dual 1-byte/wide-character extraction, and Trojan Source detection.
+- **Cryptographic Evidence Ledger**: SHA-256 evidence bundles with deterministic IDs and discrepancy tracking.
+- Full reference in [reverse_tool.md](references/reverse_tool.md).
+
+---
+
 ## 🧭 Prompting & Steering Directives
 
 ### 1. The `override` keyword (in-prompt, bypasses `.gitignore`)
@@ -333,6 +343,7 @@ preferred persona: coder
   - [`coding_agents`](references/coding_agents.md)
   - [`agent_harness`](references/agent_harness.md)
   - [`movie_tool`](references/movie_tool.md)
+  - [`reverse_tool`](references/reverse_tool.md)
   - [`manage_memory`](references/manage_memory.md)
   - [`store_workspace_skill`](references/store_workspace_skill.md)
 

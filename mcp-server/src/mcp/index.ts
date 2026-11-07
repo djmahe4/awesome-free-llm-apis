@@ -936,6 +936,40 @@ export async function createMCPServer(): Promise<Server> {
           required: ['action']
         }
       }
+,
+      {
+        name: 'reverse_tool',
+        description: [
+          'Reverse engineering analysis engine and static artifact inspector.',
+          '',
+          'USER STORY: Analyze compiled artifacts, JavaScript ASTs, and evidence files with authorization scoping.',
+          '',
+          'ACTIONS:',
+          '  - status: Check engine environment, supported Node.js version, and capabilities.',
+          '  - list_capabilities: List callable and blocked capabilities from static analysis and REA engine.',
+          '  - analyze_javascript: Parse JavaScript/TypeScript files for AST-level security risks and behavior.',
+          '  - analyze_artifact: Inspect binary, ELF, PE, or archive artifacts.',
+          '  - get_evidence: Retrieve stored evidence and metadata by ID.',
+        ].join('\n'),
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['status', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence'],
+              description: 'Reverse engineering action to perform'
+            },
+            target: { type: 'string', description: 'Target file path or evidence ID' },
+            authorization: {
+              type: 'string',
+              enum: ['ctf', 'lab', 'consent'],
+              description: 'Authorization framing required for analysis'
+            },
+            options: { type: 'object', description: 'Additional analysis options' }
+          },
+          required: ['action']
+        }
+      }
     ],
   }));
 
@@ -1059,6 +1093,13 @@ export async function createMCPServer(): Promise<Server> {
       } else if (name === 'movie_tool') {
         const { runMovieTool } = await import('../tools/movie-tool.js');
         const result = await runMovieTool(args as any);
+        response = {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          isError: !result?.success,
+        };
+            } else if (name === 'reverse_tool') {
+        const { reverseTool } = await import('../tools/reverse-tool.js');
+        const result = await reverseTool(args as any);
         response = {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
           isError: !result?.success,
