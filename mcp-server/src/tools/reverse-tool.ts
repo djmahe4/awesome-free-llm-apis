@@ -9,6 +9,7 @@ import { extractSymbolsAndFlow } from '../reverse/grep-ast.js';
 import { RepoSymbolDb, type RepoKnowledgeRecord, type RepoSymbolItem } from '../reverse/repo-symbol-db.js';
 import { AuditTaintBridge } from '../memory/audit-taint-bridge.js';
 import { RunRegistry } from '../pipeline/middlewares/RunRegistry.js';
+import { BoundedMap } from '../utils/bounded-map.js';
 import type { FetchLike } from '../utils/http.js';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -21,7 +22,7 @@ const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const reverseToolResultsCache = new Map<string, ReverseToolResult>();
+export const reverseToolResultsCache = new BoundedMap<string, ReverseToolResult>(100);
 
 function resolveModelInspectorPath(): string {
   const candidates = [
@@ -385,6 +386,18 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       if (cached) {
         return cached;
       }
+      if (run?.controller?.signal?.aborted) {
+        return {
+          success: false,
+          action: 'status',
+          target,
+          error: run.error || 'Operation aborted',
+          data: {
+            status: 'aborted',
+            sessionId: effectiveSessionId,
+          },
+        };
+      }
       return {
         success: !run?.error,
         action: 'status',
@@ -417,9 +430,11 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           'get_evidence',
           'scan_github',
           'inspect_model',
+          'inspect_gguf',
           'infer_layer_roles',
           'trace_layer_execution',
           'reconstruct_training_samples',
+          'probe_memorization',
           'extract_model_layer',
           'analyze_model_layer',
         ],
@@ -465,9 +480,11 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       'get_evidence',
       'scan_github',
       'inspect_model',
+      'inspect_gguf',
       'infer_layer_roles',
       'trace_layer_execution',
       'reconstruct_training_samples',
+      'probe_memorization',
       'extract_model_layer',
       'analyze_model_layer',
     ];
@@ -696,12 +713,31 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     const isAsync = options?.async === true;
     const syncBudgetMs = Number(options?.syncBudgetMs ?? 30_000);
 
+    if (runKey && RunRegistry.isRunning(runKey)) {
+      const existing = RunRegistry.get(runKey)!;
+      return {
+        success: true,
+        action,
+        target,
+        data: {
+          status: 'running',
+          sessionId: effectiveSessionId,
+          startedAt: existing.startedAt,
+          elapsedMs: Date.now() - existing.startedAt,
+          message: `Operation already in progress for session ${effectiveSessionId}. Poll with action: 'status'.`,
+        },
+      };
+    }
+
+    const runInfo = runKey ? RunRegistry.start(runKey) : undefined;
+
     const executeAction = async (): Promise<ReverseToolResult> => {
       try {
         const { stdout } = await execFileAsync(pythonBin, args, {
           maxBuffer: 10 * 1024 * 1024,
           timeout: 120_000,
           encoding: 'utf8',
+          signal: runInfo?.controller?.signal,
         });
         const data = JSON.parse(stdout);
         return {
@@ -719,10 +755,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
         };
       }
     };
-
-    if (runKey) {
-      RunRegistry.start(runKey);
-    }
 
     if (isAsync) {
       executeAction().then(res => {
@@ -743,16 +775,23 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       };
     }
 
-    const timeoutPromise = new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), syncBudgetMs));
+    let timer: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<'timeout'>(resolve => {
+      timer = setTimeout(() => resolve('timeout'), syncBudgetMs);
+    });
     const executionPromise = executeAction();
 
-    const winner = await Promise.race([executionPromise, timeoutPromise]);
-    if (winner !== 'timeout') {
-      if (runKey) {
-        RunRegistry.finish(runKey, winner.success ? undefined : winner.error);
-        reverseToolResultsCache.set(runKey, winner);
+    try {
+      const winner = await Promise.race([executionPromise, timeoutPromise]);
+      if (winner !== 'timeout') {
+        if (runKey) {
+          RunRegistry.finish(runKey, winner.success ? undefined : winner.error);
+          reverseToolResultsCache.set(runKey, winner);
+        }
+        return winner;
       }
-      return winner;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
 
     // Exceeded 30 sec synchronous window: yield running status, continue in background

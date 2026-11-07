@@ -225,5 +225,34 @@ describe('reverse_tool Model Introspection Actions', () => {
     expect(abortRes.success).toBe(true);
     expect(abortRes.action).toBe('abort');
     expect((abortRes.data as any).sessionId).toBe(sessionId);
+
+    const statusAfterAbort = await runReverseTool({
+      action: 'status',
+      sessionId,
+    });
+    expect((statusAfterAbort.data as any)?.status).toBe('aborted');
+  });
+
+  it('prevents duplicate concurrent runs if runKey is already running', async () => {
+    const sessionId = `duplicate-test-`;
+    const firstRes = await runReverseTool({
+      action: 'inspect_model',
+      target: ggufFixture,
+      authorization: 'lab',
+      sessionId,
+      options: { format: 'gguf', async: true },
+    });
+    expect(firstRes.success).toBe(true);
+
+    const dupRes = await runReverseTool({
+      action: 'inspect_model',
+      target: ggufFixture,
+      authorization: 'lab',
+      sessionId,
+      options: { format: 'gguf', async: true },
+    });
+    expect(dupRes.success).toBe(true);
+    expect((dupRes.data as any).status).toBe('running');
+    expect((dupRes.data as any).message).toContain('already in progress');
   });
 });

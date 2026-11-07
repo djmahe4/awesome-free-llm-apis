@@ -946,6 +946,7 @@ export async function createMCPServer(): Promise<Server> {
           '',
           'ACTIONS:',
           '  - status: Check engine environment, supported Node.js version, and capabilities.',
+          '  - abort: Cancel an active running analysis session by sessionId or target.',
           '  - list_capabilities: List callable and blocked capabilities from static analysis and REA engine.',
           '  - analyze_javascript: Parse JavaScript/TypeScript files for AST-level security risks and behavior.',
           '  - analyze_artifact: Inspect binary, ELF, PE, or archive artifacts.',
