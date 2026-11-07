@@ -8,18 +8,72 @@ import { parseGitHubRepoUrl, discoverSkillsInTree, parseReadmeSkills, type Disco
 import { extractSymbolsAndFlow } from '../reverse/grep-ast.js';
 import { RepoSymbolDb, type RepoKnowledgeRecord, type RepoSymbolItem } from '../reverse/repo-symbol-db.js';
 import { AuditTaintBridge } from '../memory/audit-taint-bridge.js';
+import { RunRegistry } from '../pipeline/middlewares/RunRegistry.js';
+import { BoundedMap } from '../utils/bounded-map.js';
 import type { FetchLike } from '../utils/http.js';
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+export const reverseToolResultsCache = new BoundedMap<string, ReverseToolResult>(100);
+
+function resolveModelInspectorPath(): string {
+  const candidates = [
+    path.resolve(__dirname, '../../scripts/model_inspector.py'),
+    path.resolve(__dirname, '../../../scripts/model_inspector.py'),
+    path.resolve(process.cwd(), 'scripts/model_inspector.py'),
+    path.resolve(process.cwd(), 'mcp-server/scripts/model_inspector.py'),
+  ];
+  const found = candidates.find(c => fs.existsSync(c));
+  if (!found) {
+    throw new Error('Model inspector script (model_inspector.py) not found in candidates: ' + candidates.join(', '));
+  }
+  return found;
+}
+
+function isSafeAllowedPath(rawPath: string, allowedDirs: string[]): boolean {
+  if (typeof rawPath !== 'string' || !rawPath.trim()) return false;
+  if (rawPath.includes('\0')) return false;
+  const parts = rawPath.split(/[\\/]/);
+  if (parts.includes('..')) return false;
+  const resolved = path.resolve(rawPath);
+  return allowedDirs.some(dir => {
+    const resolvedDir = path.resolve(dir);
+    const rel = path.relative(resolvedDir, resolved);
+    return !rel.startsWith('..') && !path.isAbsolute(rel);
+  });
+}
 
 export type ReverseAuthorization = 'ctf' | 'lab' | 'consent';
 const VALID_AUTH: ReverseAuthorization[] = ['ctf', 'lab', 'consent'];
 
-export type ReverseToolAction = 'status' | 'list_capabilities' | 'analyze_javascript' | 'analyze_artifact' | 'get_evidence' | 'scan_github';
+export type ReverseToolAction =
+  | 'status'
+  | 'abort'
+  | 'list_capabilities'
+  | 'analyze_javascript'
+  | 'analyze_artifact'
+  | 'get_evidence'
+  | 'scan_github'
+  | 'inspect_model'
+  | 'infer_layer_roles'
+  | 'trace_layer_execution'
+  | 'reconstruct_training_samples'
+  | 'extract_model_layer'
+  | 'analyze_model_layer';
 
 export interface ReverseToolInput {
   action: ReverseToolAction;
   target?: string;
   authorization?: ReverseAuthorization;
+  sessionId?: string;
   options?: Record<string, unknown>;
 }
 
@@ -70,7 +124,32 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   if (!input || typeof input !== 'object') {
     return { success: false, action: 'unknown', error: 'Input must be an object' };
   }
-  const { action, target, authorization, options } = input;
+  let { action, target, authorization, options } = input;
+  if ((action as string) === 'inspect_gguf') {
+    action = 'inspect_model';
+  } else if ((action as string) === 'probe_memorization') {
+    action = 'reconstruct_training_samples';
+  }
+
+  const effectiveSessionId = input.sessionId || (options?.sessionId as string) || (target ? `rev-${target.replace(/[^\w.-]/g, '_')}` : undefined);
+  const runKey = effectiveSessionId ? `reverse_tool:${effectiveSessionId}` : undefined;
+
+  if (action === 'abort') {
+    if (!runKey) {
+      return { success: false, action: 'abort', error: 'sessionId or target is required to abort.' };
+    }
+    const aborted = RunRegistry.abort(runKey);
+    return {
+      success: true,
+      action: 'abort',
+      target,
+      data: {
+        sessionId: effectiveSessionId,
+        aborted,
+        message: aborted ? 'Run aborted successfully.' : `No active run found for sessionId '${effectiveSessionId}' to abort.`,
+      },
+    };
+  }
 
   if (action === 'scan_github') {
     if (!authorization || !VALID_AUTH.includes(authorization as ReverseAuthorization)) {
@@ -287,6 +366,50 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   }
 
   if (action === 'status') {
+    if (runKey && (RunRegistry.get(runKey) || reverseToolResultsCache.has(runKey))) {
+      const run = RunRegistry.get(runKey);
+      if (run && !run.done) {
+        return {
+          success: true,
+          action: 'status',
+          target,
+          data: {
+            status: 'running',
+            sessionId: effectiveSessionId,
+            startedAt: run.startedAt,
+            elapsedMs: Date.now() - run.startedAt,
+            message: `Analysis in progress (${run.lastSubtask || 'running'})`,
+          },
+        };
+      }
+      if (run?.controller?.signal?.aborted) {
+        return {
+          success: false,
+          action: 'status',
+          target,
+          error: run.error || 'Operation aborted',
+          data: {
+            status: 'aborted',
+            sessionId: effectiveSessionId,
+          },
+        };
+      }
+      const cached = reverseToolResultsCache.get(runKey);
+      if (cached) {
+        return cached;
+      }
+      return {
+        success: !run?.error,
+        action: 'status',
+        target,
+        error: run?.error,
+        data: {
+          status: run?.error ? 'failed' : 'done',
+          sessionId: effectiveSessionId,
+        },
+      };
+    }
+
     const nodeCheck = checkNodeCompatibility();
     const reaPath = process.env.REA_AGENTS_PATH || null;
     return {
@@ -300,12 +423,20 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
         reaAgentsPath: reaPath,
         reason: nodeCheck.reason,
         builtInCapabilities: [
+          'status',
+          'abort',
           'analyze_javascript',
           'analyze_artifact',
           'get_evidence',
           'scan_github',
+          'inspect_model',
           'inspect_gguf',
+          'infer_layer_roles',
+          'trace_layer_execution',
+          'reconstruct_training_samples',
           'probe_memorization',
+          'extract_model_layer',
+          'analyze_model_layer',
         ],
       },
     };
@@ -342,12 +473,20 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
 
     const staticCapabilities = [
+      'status',
+      'abort',
       'analyze_javascript',
       'analyze_artifact',
       'get_evidence',
       'scan_github',
+      'inspect_model',
       'inspect_gguf',
+      'infer_layer_roles',
+      'trace_layer_execution',
+      'reconstruct_training_samples',
       'probe_memorization',
+      'extract_model_layer',
+      'analyze_model_layer',
     ];
 
     return {
@@ -465,9 +604,241 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
   }
 
+  const modelActions = [
+    'inspect_model',
+    'infer_layer_roles',
+    'trace_layer_execution',
+    'reconstruct_training_samples',
+    'extract_model_layer',
+    'analyze_model_layer',
+  ];
+
+  if (modelActions.includes(action)) {
+    if (!authorization || !VALID_AUTH.includes(authorization as ReverseAuthorization)) {
+      return {
+        success: false,
+        action,
+        target,
+        error: 'Target analysis requires authorization framing: "ctf" | "lab" | "consent".',
+      };
+    }
+
+    if (!target || !target.trim()) {
+      return {
+        success: false,
+        action,
+        error: 'Target is required.',
+      };
+    }
+
+    const allowedRoots = [
+      process.cwd(),
+      os.tmpdir(),
+      ...(options?.workspaceRoot ? [String(options.workspaceRoot)] : []),
+    ];
+
+    if (!isSafeAllowedPath(target, allowedRoots)) {
+      return {
+        success: false,
+        action,
+        target,
+        error: 'Path traversal disallowed in target.',
+      };
+    }
+
+    if (action === 'extract_model_layer' || action === 'analyze_model_layer') {
+      if (!options?.layer || !String(options.layer).trim()) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'options.layer is required.',
+        };
+      }
+    }
+
+    if (action === 'reconstruct_training_samples') {
+      if (authorization !== 'consent' || options?.explicitConsentAck !== true) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'Reconstruction of training samples requires explicit authorization: "consent" and options.explicitConsentAck: true due to potential training data privacy boundaries.',
+        };
+      }
+    }
+
+    let scriptPath: string;
+    try {
+      scriptPath = resolveModelInspectorPath();
+    } catch (err: any) {
+      return {
+        success: false,
+        action,
+        target,
+        error: err.message || String(err),
+      };
+    }
+
+    const actionMap: Record<string, string> = {
+      inspect_model: 'inspect',
+      infer_layer_roles: 'infer_roles',
+      trace_layer_execution: 'trace_execution',
+      reconstruct_training_samples: 'reconstruct_samples',
+      extract_model_layer: 'extract_layer',
+      analyze_model_layer: 'analyze_layer',
+    };
+
+    const pyAction = actionMap[action];
+    const args = [scriptPath, pyAction, '--file', target];
+    if (options?.format) {
+      args.push('--format', String(options.format));
+    }
+    if (options?.layer) {
+      args.push('--layer', String(options.layer));
+    }
+
+    if (options?.output) {
+      const outStr = String(options.output);
+      if (!isSafeAllowedPath(outStr, allowedRoots)) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'Path traversal disallowed in options.output.',
+        };
+      }
+      args.push('--output', path.resolve(outStr));
+    }
+    if (options?.cacheDir) {
+      const cacheStr = String(options.cacheDir);
+      if (!isSafeAllowedPath(cacheStr, allowedRoots)) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'Path traversal disallowed in options.cacheDir.',
+        };
+      }
+      args.push('--cache-dir', path.resolve(cacheStr));
+    }
+    if (options?.targetClass !== undefined) {
+      args.push('--target-class', String(options.targetClass));
+    }
+    if (options?.steps !== undefined) {
+      args.push('--steps', String(options.steps));
+    }
+
+    const pythonBin = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+    const isAsync = options?.async === true;
+    const syncBudgetMs = Number(options?.syncBudgetMs ?? 30_000);
+
+    if (runKey && RunRegistry.isRunning(runKey)) {
+      const existing = RunRegistry.get(runKey)!;
+      return {
+        success: true,
+        action,
+        target,
+        data: {
+          status: 'running',
+          sessionId: effectiveSessionId,
+          startedAt: existing.startedAt,
+          elapsedMs: Date.now() - existing.startedAt,
+          message: `Operation already in progress for session ${effectiveSessionId}. Poll with action: 'status'.`,
+        },
+      };
+    }
+
+    const runInfo = runKey ? RunRegistry.start(runKey) : undefined;
+
+    const executeAction = async (): Promise<ReverseToolResult> => {
+      try {
+        const { stdout } = await execFileAsync(pythonBin, args, {
+          maxBuffer: 10 * 1024 * 1024,
+          timeout: 120_000,
+          encoding: 'utf8',
+          signal: runInfo?.controller?.signal,
+        });
+        const data = JSON.parse(stdout);
+        return {
+          success: true,
+          action,
+          target,
+          data,
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          action,
+          target,
+          error: err.message || String(err),
+        };
+      }
+    };
+
+    if (isAsync) {
+      executeAction().then(res => {
+        if (runKey) {
+          reverseToolResultsCache.set(runKey, res);
+          RunRegistry.finish(runKey, res.success ? undefined : res.error);
+        }
+      });
+      return {
+        success: true,
+        action,
+        target,
+        data: {
+          status: 'running',
+          sessionId: effectiveSessionId,
+          message: `Operation started in background. Poll with action: 'status' and sessionId: '${effectiveSessionId}'.`,
+        },
+      };
+    }
+
+    let timer: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<'timeout'>(resolve => {
+      timer = setTimeout(() => resolve('timeout'), syncBudgetMs);
+    });
+    const executionPromise = executeAction();
+
+    try {
+      const winner = await Promise.race([executionPromise, timeoutPromise]);
+      if (winner !== 'timeout') {
+        if (runKey) {
+          RunRegistry.finish(runKey, winner.success ? undefined : winner.error);
+          reverseToolResultsCache.set(runKey, winner);
+        }
+        return winner;
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+
+    // Exceeded 30 sec synchronous window: yield running status, continue in background
+    executionPromise.then(res => {
+      if (runKey) {
+        reverseToolResultsCache.set(runKey, res);
+        RunRegistry.finish(runKey, res.success ? undefined : res.error);
+      }
+    });
+
+    return {
+      success: true,
+      action,
+      target,
+      data: {
+        status: 'running',
+        sessionId: effectiveSessionId,
+        message: `Operation exceeded ${Math.round(syncBudgetMs / 1000)}s synchronous window; continuing in background. Poll with action: 'status' and sessionId: '${effectiveSessionId}'.`,
+      },
+    };
+  }
+
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer".`,
   };
 }
+
+export const runReverseTool = reverseTool;

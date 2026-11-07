@@ -132,7 +132,7 @@ All branches are cut from `v1.1.2`, merged back when green, one concern each.
 | 1 | `feat/reverse-proxy-core` | proxy (handshake, caps, tree-kill), `status`, `list_capabilities`, threat-model tests |
 | 2 | `feat/reverse-artifact-js` | `analyze_javascript`, `analyze_artifact`, evidence passthrough, provenance |
 | 3 | `feat/reverse-github-assets` | `scan_github` over the existing client, token support, release-asset listing |
-| 4 | `feat/reverse-gguf` | `inspect_gguf`, `extract_layer`, `analyze_layer` |
+| 4 | `feat/reverse-model-artifacts` | `inspect_model` (GGUF, ONNX, PyTorch `.pt`), `extract_model_layer`, `analyze_model_layer` (see [detailed implementation plan](./2026-11-07-reverse-model-artifacts-gguf-onnx-pt.md)) |
 | 5 | `feat/reverse-probe-memorization` | `probe_memorization`, metric tests, refusal rules |
 | 6 | `feat/movie-stems` | `separate_stems`, `smooth_stems`, cache, subprocess hardening |
 | 7 | `feat/movie-animate-still` | `animate_still` (depth, mask, layers, warp, interpolation, ffmpeg) |

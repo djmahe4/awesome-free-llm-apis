@@ -720,13 +720,13 @@ pgRunBtn.addEventListener('click', async () => {
   const ws = pgWorkspace.value.trim();
   if (ws) {
     params.workspace_root = ws;
-    params.sessionId = activeSessionId;
+    params.sessionId = params.sessionId || activeSessionId;
     if (activeTool.id === 'use_free_llm' && pgAgenticToggle?.checked) {
       params.agentic = true;
     }
   } else {
     // Unify multi-tool retrospective session tracking even in one-shot / standalone sessions
-    params.sessionId = activeSessionId;
+    params.sessionId = params.sessionId || activeSessionId;
   }
 
   function extractHumanReadableUserText(toolId, p) {

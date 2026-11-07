@@ -232,10 +232,11 @@ const TOOLS = [
     id: 'reverse_tool', label: 'reverse_tool', icon: '🔍',
     tag: 'Reverse Engineering Analyzer',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['status', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github'] },
-      { id: 'target', label: 'Target File / Evidence ID', type: 'text', placeholder: 'path/to/target.js, owner/repo, or ev-123', showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github'] },
-      { id: 'authorization', label: 'Authorization Framing', type: 'select', options: ['', 'ctf', 'lab', 'consent'], showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github'] },
-      { id: 'options', label: 'Analysis Options (JSON)', type: 'textarea', placeholder: '{"workspaceRoot": "./"}', showFor: ['analyze_javascript', 'analyze_artifact', 'scan_github'] }
+      { id: 'action', label: 'Action', type: 'select', options: ['status', 'abort', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
+      { id: 'target', label: 'Target File / Evidence ID', type: 'text', placeholder: 'path/to/target.js, owner/repo, or ev-123', showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
+      { id: 'authorization', label: 'Authorization Framing', type: 'select', options: ['', 'ctf', 'lab', 'consent'], showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
+      { id: 'sessionId', label: 'Session ID (Async)', type: 'text', placeholder: 'sess-123', showFor: ['status', 'abort', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
+      { id: 'options', label: 'Analysis Options (JSON)', type: 'textarea', placeholder: '{"workspaceRoot": "./"}', showFor: ['analyze_javascript', 'analyze_artifact', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] }
     ]
   }
 ];
@@ -425,11 +426,18 @@ const TOOL_WHEN_TO_USE = {
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
       <li><code>action: "status"</code> — Check engine readiness and supported Node.js runtime.</li>
+      <li><code>action: "abort"</code> — Cancel an active running analysis session by sessionId or target.</li>
       <li><code>action: "list_capabilities"</code> — List static and active dynamic analysis capabilities.</li>
       <li><code>action: "analyze_javascript"</code> — AST route, sink, and credential scanner for JS/TS.</li>
       <li><code>action: "analyze_artifact"</code> — Binary magic-bytes, entropy, and packaging inspector.</li>
       <li><code>action: "get_evidence"</code> — Retrieve stored immutable evidence bundle by evidence ID.</li>
       <li><code>action: "scan_github"</code> — Recon GitHub repo, releases, AST symbols, call flows, and wiki.</li>
+      <li><code>action: "inspect_model"</code> — Inspect metadata, tensors, and format of GGUF, PyTorch, and ONNX models.</li>
+      <li><code>action: "infer_layer_roles"</code> — Invert layer names to functional roles (Attention, FFN, Backbone, Head).</li>
+      <li><code>action: "trace_layer_execution"</code> — Layer-by-layer forward execution tracing with cached activations.</li>
+      <li><code>action: "reconstruct_training_samples"</code> — Synthesize class prototype exemplars via activation maximization (consent-gated).</li>
+      <li><code>action: "extract_model_layer"</code> — Extract tensor slice to standalone SafeTensors binary.</li>
+      <li><code>action: "analyze_model_layer"</code> — Profile layer weights (Frobenius norm, sparsity, mean, std).</li>
     </ul>`
 };
 
