@@ -1,0 +1,12 @@
+id: sigma-command-injection
+title: Command Injection Sinks
+status: stable
+level: critical
+detection:
+  selection:
+    keywords:
+      - "subprocess.call"
+      - "subprocess.check_output"
+      - "os.system"
+      - "execSync"
+  condition: selection

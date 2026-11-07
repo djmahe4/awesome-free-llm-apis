@@ -1,0 +1,10 @@
+id: nuclei-rce-sinks
+info:
+  name: Remote Code Execution and Shell Process Sinks
+  severity: critical
+  tags: rce,injection
+file:
+  - matchers:
+      - type: regex
+        regex:
+          - "\\b(?:child_process\\.exec|subprocess\\.Popen|Command::new|os\\.system)\\b"

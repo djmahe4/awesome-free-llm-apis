@@ -1,0 +1,10 @@
+id: yara-reverse-shells
+name: ReverseShellPayload
+tags:
+  - ctf
+  - payload
+strings:
+  - "$bash_tcp = \"/dev/tcp/\" ascii"
+  - "$sh_pipe = \"/bin/sh -i\" ascii"
+  - "$nc_e = \"nc -e /bin/sh\" ascii"
+condition: any of them

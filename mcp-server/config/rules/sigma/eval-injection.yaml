@@ -1,0 +1,11 @@
+id: sigma-eval-injection
+title: Dynamic Eval Code Execution
+status: stable
+level: critical
+detection:
+  selection:
+    keywords:
+      - "eval("
+      - "Function("
+      - "exec("
+  condition: selection

@@ -1,0 +1,14 @@
+name: javascript
+extensions:
+  - .js
+  - .ts
+  - .jsx
+  - .tsx
+  - .mjs
+sinks:
+  - type: eval_injection
+    regex: "\\b(?:eval|Function)\\s*\\("
+  - type: command_injection
+    regex: "\\b(?:child_process\\.(?:exec|execSync|spawn|spawnSync)|exec|execSync|spawn|spawnSync)\\s*\\("
+  - type: dom_xss
+    regex: "\\b(?:innerHTML|outerHTML)\\s*="

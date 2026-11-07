@@ -1,0 +1,24 @@
+type: sigma
+rules:
+  - id: sigma_command_injection
+    title: Shell Command Execution via Subprocess
+    status: stable
+    level: high
+    detection:
+      selection:
+        keywords:
+          - "subprocess.Popen"
+          - "subprocess.call"
+          - "os.system"
+          - "child_process.exec"
+      condition: selection
+  - id: sigma_eval_injection
+    title: Dynamic Code Evaluation Sink
+    status: stable
+    level: critical
+    detection:
+      selection:
+        keywords:
+          - "eval("
+          - "Function("
+      condition: selection
