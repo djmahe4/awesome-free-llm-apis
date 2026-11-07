@@ -7,6 +7,7 @@ import os from 'node:os';
 import { resolveConfigDir } from '../utils/config-path.js';
 import { listHermesSkills, findHermesSkill, loadHermesSkillContent, searchHermesSkills } from '../hermes/loader.js';
 import { RunRegistry } from '../pipeline/middlewares/RunRegistry.js';
+import { parseGitHubRepoUrl, loadSkillPromptFromRepo, discoverRepoSkills } from '../reverse/github-skills.js';
 
 const SKILL_INDEX_URL = 'https://sickn33.github.io/agentic-awesome-skills/skills.json';
 const RAW_BASE_URL = 'https://raw.githubusercontent.com/sickn33/agentic-awesome-skills/main';
@@ -39,6 +40,12 @@ export interface LoadSkillPromptInput {
   sessionId?: string;
   /** 'run' (default) starts/returns a background download run; 'status' polls it. Mirrors use_free_llm's run/continue/status pattern — a skill with many files can legitimately take a while, so this shouldn't be killed by a hard timeout. */
   pollAction?: 'run' | 'status';
+  /** @internal Custom directory for installing skills, used in tests. */
+  targetSkillsDir?: string;
+  /** @internal Mockable fetch double for testing. */
+  fetchImpl?: any;
+  /** @internal GitHub token override for testing. */
+  token?: string;
 }
 
 export interface LoadSkillPromptResult {
@@ -229,6 +236,50 @@ export function resolveSkillFile(skillDir: string, relativePath: string): string
 }
 
 export async function loadSkillPrompt(input: LoadSkillPromptInput): Promise<LoadSkillPromptResult> {
+  const targetRepo = input.name || input.skill;
+  const parsed = targetRepo ? parseGitHubRepoUrl(targetRepo) : null;
+  if (
+    parsed &&
+    (input.type === 'load' || input.type === 'search' || input.type === 'list')
+  ) {
+    if (input.type === 'list' || input.type === 'search') {
+      const result = await discoverRepoSkills({
+        owner: parsed.owner,
+        repo: parsed.repo,
+        fetchImpl: input.fetchImpl,
+        token: input.token,
+      });
+      let skills = result.skills.map(s => ({ name: s.name, description: s.description }));
+      if (input.type === 'search') {
+        const rawKeywords = (input.keywords && input.keywords.length > 0)
+          ? input.keywords
+          : (input.name && input.name !== targetRepo ? input.name : '').split(/\s+/).filter(k => k.trim().length > 0);
+        if (rawKeywords.length > 0) {
+          const lowerKeywords = rawKeywords.map(k => k.toLowerCase());
+          skills = skills.filter(s => {
+            const combined = `${s.name} ${s.description}`.toLowerCase();
+            return lowerKeywords.some(kw => combined.includes(kw));
+          });
+        }
+      }
+      return { success: true, skills };
+    }
+
+    if (input.type === 'load') {
+      let skillName = (input.skill && !parseGitHubRepoUrl(input.skill) ? input.skill : undefined)
+        ?? (input.name && !parseGitHubRepoUrl(input.name) ? input.name : undefined)
+        ?? input.keywords?.[0];
+      return await loadSkillPromptFromRepo({
+        repoUrl: targetRepo!,
+        skillName,
+        workspaceDir: input.workspaceDir,
+        targetSkillsDir: input.targetSkillsDir,
+        overwrite: true,
+        fetchImpl: input.fetchImpl,
+        token: input.token,
+      });
+    }
+  }
   try {
     if (input.source === 'hermes') {
       return await loadHermesSkillPrompt(input);

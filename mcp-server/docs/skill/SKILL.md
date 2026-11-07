@@ -278,7 +278,8 @@ Multi-agent declarative harness execution and coordination engine.
 
 ### `reverse_tool` [v1.1.2]
 Reverse engineering analysis engine and static artifact forensics inspector.
-- **Authorization Framing**: Enforces `'ctf'` | `'lab'` | `'consent'` on all deep analysis actions (`analyze_javascript`, `analyze_artifact`, `get_evidence`).
+- **Authorization Framing**: Enforces `'ctf'` | `'lab'` | `'consent'` on all deep analysis actions (`analyze_javascript`, `analyze_artifact`, `get_evidence`, `scan_github`).
+- **GitHub Recon & Asset Forensics**: Discovers release binaries/ASARs/models, indexes tree descriptors, extracts AST symbols/call flows on demand, and generates architectural wiki documentation (`scan_github`).
 - **Resilient AST Extraction**: Sliding-window AST scanner for JavaScript/TypeScript routes, sinks, and API secrets.
 - **Artifact Forensics**: Format detection (ELF, PE, WASM, ASAR, GGUF), Shannon entropy calculation, dual 1-byte/wide-character extraction, and Trojan Source detection.
 - **Cryptographic Evidence Ledger**: SHA-256 evidence bundles with deterministic IDs and discrepancy tracking.

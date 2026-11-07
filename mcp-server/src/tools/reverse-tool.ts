@@ -1,16 +1,38 @@
 import { ReaProxy, type BlockedToolInfo } from '../reverse/proxy.js';
 import { analyzeJsFile } from '../reverse/js-analyzer.js';
 import { analyzeArtifactFile } from '../reverse/artifact-analyzer.js';
-import { getStoredEvidence, storeEvidence, type ReverseEvidence } from '../reverse/evidence.js';
+import { getStoredEvidence, storeEvidence, createEvidenceBundle, type ReverseEvidence } from '../reverse/evidence.js';
+import { listReleaseAssets, type GitHubReleaseAsset } from '../reverse/github-releases.js';
+import { RemoteRepoSource, type RemoteFileDescriptor } from '../reverse/remote-repo-source.js';
+import { parseGitHubRepoUrl, discoverSkillsInTree, parseReadmeSkills, type DiscoveredSkill } from '../reverse/github-skills.js';
+import { extractSymbolsAndFlow } from '../reverse/grep-ast.js';
+import { RepoSymbolDb, type RepoKnowledgeRecord, type RepoSymbolItem } from '../reverse/repo-symbol-db.js';
+import type { FetchLike } from '../utils/http.js';
+import path from 'node:path';
 
 export type ReverseAuthorization = 'ctf' | 'lab' | 'consent';
 const VALID_AUTH: ReverseAuthorization[] = ['ctf', 'lab', 'consent'];
 
+export type ReverseToolAction = 'status' | 'list_capabilities' | 'analyze_javascript' | 'analyze_artifact' | 'get_evidence' | 'scan_github';
+
 export interface ReverseToolInput {
-  action: 'status' | 'list_capabilities' | 'analyze_javascript' | 'analyze_artifact' | 'get_evidence';
+  action: ReverseToolAction;
   target?: string;
   authorization?: ReverseAuthorization;
   options?: Record<string, unknown>;
+}
+
+export interface ReverseScanGithubData {
+  owner: string;
+  repo: string;
+  commitSha: string;
+  releaseAssets: GitHubReleaseAsset[];
+  skills: DiscoveredSkill[];
+  symbols: RepoSymbolItem[];
+  callFlows: string[];
+  wikiMarkdown: string;
+  descriptors: RemoteFileDescriptor[];
+  readmeExcerpt?: string;
 }
 
 export interface ReverseToolResult {
@@ -48,6 +70,211 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     return { success: false, action: 'unknown', error: 'Input must be an object' };
   }
   const { action, target, authorization, options } = input;
+
+  if (action === 'scan_github') {
+    if (!authorization || !VALID_AUTH.includes(authorization as ReverseAuthorization)) {
+      return {
+        success: false,
+        action: 'scan_github',
+        target,
+        error: 'Target analysis requires authorization framing: "ctf" | "lab" | "consent".',
+      };
+    }
+
+    if (!target || !target.trim()) {
+      return {
+        success: false,
+        action: 'scan_github',
+        error: 'Target is required.',
+      };
+    }
+
+    const parsedRepo = parseGitHubRepoUrl(target);
+    if (!parsedRepo) {
+      return {
+        success: false,
+        action: 'scan_github',
+        target,
+        error: `Invalid GitHub repository target: "${target}". Expected "owner/repo" or "https://github.com/owner/repo".`,
+      };
+    }
+
+    const { owner, repo } = parsedRepo;
+    const fetchImpl = options?.fetchImpl as FetchLike | undefined;
+    const token = (options?.token as string | undefined) || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+    const storageDir = options?.storageDir as string | undefined;
+    const ref = (typeof options?.ref === 'string' && options.ref.trim())
+      || (typeof options?.branch === 'string' && options.branch.trim())
+      || 'main';
+
+    try {
+      const limitations: string[] = [];
+      const releasesRes = await listReleaseAssets(owner, repo, { fetchImpl, token, limit: 10 });
+      if (!releasesRes.success || releasesRes.error) {
+        limitations.push(releasesRes.error || `Failed to fetch releases for ${owner}/${repo}`);
+      }
+      const releaseAssets = releasesRes.assets || [];
+
+      const source = new RemoteRepoSource({ fetchImpl, token });
+      const treeRes = await source.indexTree(owner, repo, ref);
+      if (!treeRes.success) {
+        return {
+          success: false,
+          action: 'scan_github',
+          target,
+          error: treeRes.error || `Failed to index tree for ${owner}/${repo}`,
+        };
+      }
+
+      const skillPaths = discoverSkillsInTree(treeRes.descriptors);
+      const readmeSkills = treeRes.readmeExcerpt ? parseReadmeSkills(treeRes.readmeExcerpt) : [];
+      const skills: DiscoveredSkill[] = [];
+      const addedSkillNames = new Set<string>();
+
+      for (const sPath of skillPaths) {
+        let name = path.posix.basename(path.posix.dirname(sPath));
+        if (name === '.' || !name || name === 'skills') {
+          name = repo;
+        }
+        const matched = readmeSkills.find(r => r.name.toLowerCase() === name.toLowerCase());
+        skills.push({
+          name,
+          description: matched ? matched.description : 'Skill definition',
+          path: sPath,
+        });
+        addedSkillNames.add(name.toLowerCase());
+      }
+
+      for (const rSkill of readmeSkills) {
+        if (!addedSkillNames.has(rSkill.name.toLowerCase())) {
+          skills.push(rSkill);
+          addedSkillNames.add(rSkill.name.toLowerCase());
+        }
+      }
+
+      const shortlisted = treeRes.descriptors.filter(d => d.isSource).slice(0, 5);
+      const symbols: RepoSymbolItem[] = [];
+      const callFlows: string[] = [];
+      const manifests: string[] = [];
+      const dependencies: Array<{ name: string; spec?: string }> = [];
+
+      for (const d of treeRes.descriptors) {
+        if (d.tags.includes('manifest')) {
+          manifests.push(d.path);
+        }
+      }
+
+      for (const fileDesc of shortlisted) {
+        const rawFile = await source.fetchRawFile(owner, repo, treeRes.commitSha, fileDesc.path);
+        if (rawFile.ok) {
+          const analysis = extractSymbolsAndFlow(fileDesc.path, rawFile.text);
+          for (const sym of analysis.symbols) {
+            symbols.push({
+              name: sym.name,
+              kind: sym.kind,
+              line: sym.line,
+              filePath: fileDesc.path,
+            });
+          }
+          for (const flow of analysis.callFlows) {
+            if (!callFlows.includes(flow)) {
+              callFlows.push(flow);
+            }
+          }
+          if (analysis.dependencies) {
+            for (const dep of analysis.dependencies) {
+              if (!dependencies.some(d => d.name === dep)) {
+                dependencies.push({ name: dep });
+              }
+            }
+          }
+        }
+      }
+
+      const record: RepoKnowledgeRecord = {
+        owner,
+        repo,
+        commitSha: treeRes.commitSha,
+        indexedAt: new Date().toISOString(),
+        readmeClaims: treeRes.readmeExcerpt ? treeRes.readmeExcerpt.split(/\r?\n/).map(l => l.trim()).filter(Boolean) : [],
+        symbols,
+        callFlows,
+        manifests,
+        dependencies,
+        releaseAssets,
+      };
+
+      const symbolDb = new RepoSymbolDb(storageDir);
+      symbolDb.saveRecord(record);
+      const wikiMarkdown = symbolDb.generateWikiMarkdown(record);
+
+      const evidence = createEvidenceBundle({
+        tool: 'reverse_tool',
+        source: 'github_scan',
+        target,
+        limitations: limitations.length > 0 ? limitations : undefined,
+        normalizedResult: {
+          owner,
+          repo,
+          commitSha: treeRes.commitSha,
+          releaseAssets,
+          skills,
+          symbols,
+          callFlows,
+          wikiMarkdown,
+        },
+        analysisProfile: {
+          targetType: 'network',
+          action: 'scan_github',
+          owner,
+          repo,
+          commitSha: treeRes.commitSha,
+          target,
+        },
+        coverage: {
+          scope: 'package',
+          status: 'complete',
+        },
+        observations: [
+          { releaseAssetsCount: releaseAssets.length },
+          { skillsCount: skills.length },
+          { symbolsCount: symbols.length },
+        ],
+        derivations: [
+          { commitSha: treeRes.commitSha },
+        ],
+      });
+
+      storeEvidence(evidence, storageDir);
+
+      return {
+        success: true,
+        action: 'scan_github',
+        target,
+        evidence,
+        data: {
+          owner,
+          repo,
+          commitSha: treeRes.commitSha,
+          releaseAssets,
+          skills,
+          symbols,
+          callFlows,
+          wikiMarkdown,
+          descriptors: treeRes.descriptors,
+          readmeExcerpt: treeRes.readmeExcerpt,
+        },
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        success: false,
+        action: 'scan_github',
+        target,
+        error: `GitHub scan failed: ${message}`,
+      };
+    }
+  }
 
   if (action === 'status') {
     const nodeCheck = checkNodeCompatibility();
@@ -231,6 +458,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github".`,
   };
 }

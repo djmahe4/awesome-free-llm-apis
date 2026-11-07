@@ -232,10 +232,10 @@ const TOOLS = [
     id: 'reverse_tool', label: 'reverse_tool', icon: '🔍',
     tag: 'Reverse Engineering Analyzer',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['status', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence'] },
-      { id: 'target', label: 'Target File / Evidence ID', type: 'text', placeholder: 'path/to/target.js or ev-123', showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence'] },
-      { id: 'authorization', label: 'Authorization Framing', type: 'select', options: ['', 'ctf', 'lab', 'consent'], showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence'] },
-      { id: 'options', label: 'Analysis Options (JSON)', type: 'textarea', placeholder: '{"workspaceRoot": "./"}', showFor: ['analyze_javascript', 'analyze_artifact'] }
+      { id: 'action', label: 'Action', type: 'select', options: ['status', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github'] },
+      { id: 'target', label: 'Target File / Evidence ID', type: 'text', placeholder: 'path/to/target.js, owner/repo, or ev-123', showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github'] },
+      { id: 'authorization', label: 'Authorization Framing', type: 'select', options: ['', 'ctf', 'lab', 'consent'], showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github'] },
+      { id: 'options', label: 'Analysis Options (JSON)', type: 'textarea', placeholder: '{"workspaceRoot": "./"}', showFor: ['analyze_javascript', 'analyze_artifact', 'scan_github'] }
     ]
   }
 ];
@@ -429,6 +429,7 @@ const TOOL_WHEN_TO_USE = {
       <li><code>action: "analyze_javascript"</code> — AST route, sink, and credential scanner for JS/TS.</li>
       <li><code>action: "analyze_artifact"</code> — Binary magic-bytes, entropy, and packaging inspector.</li>
       <li><code>action: "get_evidence"</code> — Retrieve stored immutable evidence bundle by evidence ID.</li>
+      <li><code>action: "scan_github"</code> — Recon GitHub repo, releases, AST symbols, call flows, and wiki.</li>
     </ul>`
 };
 
