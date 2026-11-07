@@ -965,6 +965,7 @@ export async function createMCPServer(): Promise<Server> {
               type: 'string',
               enum: [
                 'status',
+                'abort',
                 'list_capabilities',
                 'analyze_javascript',
                 'analyze_artifact',
@@ -985,6 +986,7 @@ export async function createMCPServer(): Promise<Server> {
               enum: ['ctf', 'lab', 'consent'],
               description: 'Authorization framing required for analysis'
             },
+            sessionId: { type: 'string', description: 'Session identifier for async polling and status retrieval' },
             options: { type: 'object', description: 'Additional analysis options' }
           },
           required: ['action']

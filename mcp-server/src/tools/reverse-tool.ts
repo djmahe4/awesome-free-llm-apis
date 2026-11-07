@@ -8,6 +8,7 @@ import { parseGitHubRepoUrl, discoverSkillsInTree, parseReadmeSkills, type Disco
 import { extractSymbolsAndFlow } from '../reverse/grep-ast.js';
 import { RepoSymbolDb, type RepoKnowledgeRecord, type RepoSymbolItem } from '../reverse/repo-symbol-db.js';
 import { AuditTaintBridge } from '../memory/audit-taint-bridge.js';
+import { RunRegistry } from '../pipeline/middlewares/RunRegistry.js';
 import type { FetchLike } from '../utils/http.js';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -19,6 +20,8 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const reverseToolResultsCache = new Map<string, ReverseToolResult>();
 
 function resolveModelInspectorPath(): string {
   const candidates = [
@@ -52,6 +55,7 @@ const VALID_AUTH: ReverseAuthorization[] = ['ctf', 'lab', 'consent'];
 
 export type ReverseToolAction =
   | 'status'
+  | 'abort'
   | 'list_capabilities'
   | 'analyze_javascript'
   | 'analyze_artifact'
@@ -68,6 +72,7 @@ export interface ReverseToolInput {
   action: ReverseToolAction;
   target?: string;
   authorization?: ReverseAuthorization;
+  sessionId?: string;
   options?: Record<string, unknown>;
 }
 
@@ -123,6 +128,26 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     action = 'inspect_model';
   } else if ((action as string) === 'probe_memorization') {
     action = 'reconstruct_training_samples';
+  }
+
+  const effectiveSessionId = input.sessionId || (options?.sessionId as string) || (target ? `rev-${target.replace(/[^\w.-]/g, '_')}` : undefined);
+  const runKey = effectiveSessionId ? `reverse_tool:${effectiveSessionId}` : undefined;
+
+  if (action === 'abort') {
+    if (!runKey) {
+      return { success: false, action: 'abort', error: 'sessionId or target is required to abort.' };
+    }
+    const aborted = RunRegistry.abort(runKey);
+    return {
+      success: true,
+      action: 'abort',
+      target,
+      data: {
+        sessionId: effectiveSessionId,
+        aborted,
+        message: aborted ? 'Run aborted successfully.' : `No active run found for sessionId '${effectiveSessionId}' to abort.`,
+      },
+    };
   }
 
   if (action === 'scan_github') {
@@ -340,6 +365,38 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   }
 
   if (action === 'status') {
+    if (runKey && (RunRegistry.get(runKey) || reverseToolResultsCache.has(runKey))) {
+      const run = RunRegistry.get(runKey);
+      if (run && !run.done) {
+        return {
+          success: true,
+          action: 'status',
+          target,
+          data: {
+            status: 'running',
+            sessionId: effectiveSessionId,
+            startedAt: run.startedAt,
+            elapsedMs: Date.now() - run.startedAt,
+            message: `Analysis in progress (${run.lastSubtask || 'running'})`,
+          },
+        };
+      }
+      const cached = reverseToolResultsCache.get(runKey);
+      if (cached) {
+        return cached;
+      }
+      return {
+        success: !run?.error,
+        action: 'status',
+        target,
+        error: run?.error,
+        data: {
+          status: run?.error ? 'failed' : 'done',
+          sessionId: effectiveSessionId,
+        },
+      };
+    }
+
     const nodeCheck = checkNodeCompatibility();
     const reaPath = process.env.REA_AGENTS_PATH || null;
     return {
@@ -353,6 +410,8 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
         reaAgentsPath: reaPath,
         reason: nodeCheck.reason,
         builtInCapabilities: [
+          'status',
+          'abort',
           'analyze_javascript',
           'analyze_artifact',
           'get_evidence',
@@ -363,8 +422,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           'reconstruct_training_samples',
           'extract_model_layer',
           'analyze_model_layer',
-          'inspect_gguf',
-          'probe_memorization',
         ],
       },
     };
@@ -401,6 +458,8 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
 
     const staticCapabilities = [
+      'status',
+      'abort',
       'analyze_javascript',
       'analyze_artifact',
       'get_evidence',
@@ -411,8 +470,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       'reconstruct_training_samples',
       'extract_model_layer',
       'analyze_model_layer',
-      'inspect_gguf',
-      'probe_memorization',
     ];
 
     return {
@@ -636,34 +693,92 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
 
     const pythonBin = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+    const isAsync = options?.async === true;
+    const syncBudgetMs = Number(options?.syncBudgetMs ?? 30_000);
 
-    try {
-      const { stdout } = await execFileAsync(pythonBin, args, {
-        maxBuffer: 10 * 1024 * 1024,
-        timeout: 30000,
-        encoding: 'utf8',
+    const executeAction = async (): Promise<ReverseToolResult> => {
+      try {
+        const { stdout } = await execFileAsync(pythonBin, args, {
+          maxBuffer: 10 * 1024 * 1024,
+          timeout: 120_000,
+          encoding: 'utf8',
+        });
+        const data = JSON.parse(stdout);
+        return {
+          success: true,
+          action,
+          target,
+          data,
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          action,
+          target,
+          error: err.message || String(err),
+        };
+      }
+    };
+
+    if (runKey) {
+      RunRegistry.start(runKey);
+    }
+
+    if (isAsync) {
+      executeAction().then(res => {
+        if (runKey) {
+          reverseToolResultsCache.set(runKey, res);
+          RunRegistry.finish(runKey, res.success ? undefined : res.error);
+        }
       });
-      const data = JSON.parse(stdout);
       return {
         success: true,
         action,
         target,
-        data,
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        action,
-        target,
-        error: err.message || String(err),
+        data: {
+          status: 'running',
+          sessionId: effectiveSessionId,
+          message: `Operation started in background. Poll with action: 'status' and sessionId: '${effectiveSessionId}'.`,
+        },
       };
     }
+
+    const timeoutPromise = new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), syncBudgetMs));
+    const executionPromise = executeAction();
+
+    const winner = await Promise.race([executionPromise, timeoutPromise]);
+    if (winner !== 'timeout') {
+      if (runKey) {
+        RunRegistry.finish(runKey, winner.success ? undefined : winner.error);
+        reverseToolResultsCache.set(runKey, winner);
+      }
+      return winner;
+    }
+
+    // Exceeded 30 sec synchronous window: yield running status, continue in background
+    executionPromise.then(res => {
+      if (runKey) {
+        reverseToolResultsCache.set(runKey, res);
+        RunRegistry.finish(runKey, res.success ? undefined : res.error);
+      }
+    });
+
+    return {
+      success: true,
+      action,
+      target,
+      data: {
+        status: 'running',
+        sessionId: effectiveSessionId,
+        message: `Operation exceeded ${Math.round(syncBudgetMs / 1000)}s synchronous window; continuing in background. Poll with action: 'status' and sessionId: '${effectiveSessionId}'.`,
+      },
+    };
   }
 
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer".`,
   };
 }
 

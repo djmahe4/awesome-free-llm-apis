@@ -232,9 +232,10 @@ const TOOLS = [
     id: 'reverse_tool', label: 'reverse_tool', icon: '🔍',
     tag: 'Reverse Engineering Analyzer',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['status', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
+      { id: 'action', label: 'Action', type: 'select', options: ['status', 'abort', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
       { id: 'target', label: 'Target File / Evidence ID', type: 'text', placeholder: 'path/to/target.js, owner/repo, or ev-123', showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
       { id: 'authorization', label: 'Authorization Framing', type: 'select', options: ['', 'ctf', 'lab', 'consent'], showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
+      { id: 'sessionId', label: 'Session ID (Async)', type: 'text', placeholder: 'sess-123', showFor: ['status', 'abort', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
       { id: 'options', label: 'Analysis Options (JSON)', type: 'textarea', placeholder: '{"workspaceRoot": "./"}', showFor: ['analyze_javascript', 'analyze_artifact', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] }
     ]
   }
