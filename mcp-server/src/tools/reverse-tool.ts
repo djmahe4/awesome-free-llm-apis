@@ -11,6 +11,7 @@ import { AuditTaintBridge } from '../memory/audit-taint-bridge.js';
 import type { FetchLike } from '../utils/http.js';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -31,6 +32,19 @@ function resolveModelInspectorPath(): string {
     throw new Error('Model inspector script (model_inspector.py) not found in candidates: ' + candidates.join(', '));
   }
   return found;
+}
+
+function isSafeAllowedPath(rawPath: string, allowedDirs: string[]): boolean {
+  if (typeof rawPath !== 'string' || !rawPath.trim()) return false;
+  if (rawPath.includes('\0')) return false;
+  const parts = rawPath.split(/[\\/]/);
+  if (parts.includes('..')) return false;
+  const resolved = path.resolve(rawPath);
+  return allowedDirs.some(dir => {
+    const resolvedDir = path.resolve(dir);
+    const rel = path.relative(resolvedDir, resolved);
+    return !rel.startsWith('..') && !path.isAbsolute(rel);
+  });
 }
 
 export type ReverseAuthorization = 'ctf' | 'lab' | 'consent';
@@ -104,7 +118,12 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   if (!input || typeof input !== 'object') {
     return { success: false, action: 'unknown', error: 'Input must be an object' };
   }
-  const { action, target, authorization, options } = input;
+  let { action, target, authorization, options } = input;
+  if ((action as string) === 'inspect_gguf') {
+    action = 'inspect_model';
+  } else if ((action as string) === 'probe_memorization') {
+    action = 'reconstruct_training_samples';
+  }
 
   if (action === 'scan_github') {
     if (!authorization || !VALID_AUTH.includes(authorization as ReverseAuthorization)) {
@@ -344,6 +363,8 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           'reconstruct_training_samples',
           'extract_model_layer',
           'analyze_model_layer',
+          'inspect_gguf',
+          'probe_memorization',
         ],
       },
     };
@@ -390,6 +411,8 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       'reconstruct_training_samples',
       'extract_model_layer',
       'analyze_model_layer',
+      'inspect_gguf',
+      'probe_memorization',
     ];
 
     return {
@@ -545,7 +568,18 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       }
     }
 
-    const scriptPath = resolveModelInspectorPath();
+    let scriptPath: string;
+    try {
+      scriptPath = resolveModelInspectorPath();
+    } catch (err: any) {
+      return {
+        success: false,
+        action,
+        target,
+        error: err.message || String(err),
+      };
+    }
+
     const actionMap: Record<string, string> = {
       inspect_model: 'inspect',
       infer_layer_roles: 'infer_roles',
@@ -563,9 +597,16 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     if (options?.layer) {
       args.push('--layer', String(options.layer));
     }
+
+    const allowedRoots = [
+      process.cwd(),
+      os.tmpdir(),
+      ...(options?.workspaceRoot ? [String(options.workspaceRoot)] : []),
+    ];
+
     if (options?.output) {
       const outStr = String(options.output);
-      if (outStr.includes('..')) {
+      if (!isSafeAllowedPath(outStr, allowedRoots)) {
         return {
           success: false,
           action,
@@ -573,11 +614,11 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           error: 'Path traversal disallowed in options.output.',
         };
       }
-      args.push('--output', outStr);
+      args.push('--output', path.resolve(outStr));
     }
     if (options?.cacheDir) {
       const cacheStr = String(options.cacheDir);
-      if (cacheStr.includes('..')) {
+      if (!isSafeAllowedPath(cacheStr, allowedRoots)) {
         return {
           success: false,
           action,
@@ -585,7 +626,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           error: 'Path traversal disallowed in options.cacheDir.',
         };
       }
-      args.push('--cache-dir', cacheStr);
+      args.push('--cache-dir', path.resolve(cacheStr));
     }
     if (options?.targetClass !== undefined) {
       args.push('--target-class', String(options.targetClass));

@@ -951,13 +951,32 @@ export async function createMCPServer(): Promise<Server> {
           '  - analyze_artifact: Inspect binary, ELF, PE, or archive artifacts.',
           '  - get_evidence: Retrieve stored evidence and metadata by ID.',
           '  - scan_github: Recon remote GitHub repo releases, AST symbols, call flows, and wiki.',
+          '  - inspect_model: Inspect metadata, format, architecture, and tensors of GGUF, PyTorch, and ONNX models.',
+          '  - infer_layer_roles: Invert layer names to semantic roles (Self-Attention, FFN, Backbone, SPPF, Head).',
+          '  - trace_layer_execution: Step-by-step layer forward tracing with cached activation tensors and statistics.',
+          '  - reconstruct_training_samples: Activation maximization prototype synthesis and memorization probing (consent-gated).',
+          '  - extract_model_layer: Slice layer tensor to standalone SafeTensors binary.',
+          '  - analyze_model_layer: Statistical weight profiling (Frobenius norm, sparsity, mean, std).',
         ].join('\n'),
         inputSchema: {
           type: 'object' as const,
           properties: {
             action: {
               type: 'string',
-              enum: ['status', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github'],
+              enum: [
+                'status',
+                'list_capabilities',
+                'analyze_javascript',
+                'analyze_artifact',
+                'get_evidence',
+                'scan_github',
+                'inspect_model',
+                'infer_layer_roles',
+                'trace_layer_execution',
+                'reconstruct_training_samples',
+                'extract_model_layer',
+                'analyze_model_layer'
+              ],
               description: 'Reverse engineering action to perform'
             },
             target: { type: 'string', description: 'Target file path, GitHub repository (owner/repo or URL), or evidence ID' },
