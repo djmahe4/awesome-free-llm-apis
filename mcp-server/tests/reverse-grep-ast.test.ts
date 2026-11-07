@@ -123,4 +123,34 @@ helper()
     expect(res.callFlows).toContain('last_worker -> helper');
     expect(res.callFlows.filter(f => f.startsWith('last_worker ->'))).toEqual(['last_worker -> helper']);
   });
+
+  it('correctly traces call flows when function has return type annotation with braces', () => {
+    const code = `
+function helperStep(a: number) {
+  return a * 2;
+}
+
+function foo(): { x: number } {
+  return helperStep(1);
+}
+`;
+
+    const res = extractSymbolsAndFlow('return-type.ts', code);
+    expect(res.callFlows).toContain('foo -> helperStep');
+  });
+
+  it('correctly traces call flows when function has destructured parameters', () => {
+    const code = `
+function helperStep(a: number) {
+  return a * 2;
+}
+
+function foo({ a }: { a: number }) {
+  return helperStep(a);
+}
+`;
+
+    const res = extractSymbolsAndFlow('destructured.ts', code);
+    expect(res.callFlows).toContain('foo -> helperStep');
+  });
 });

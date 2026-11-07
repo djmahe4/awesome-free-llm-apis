@@ -36,58 +36,229 @@ const KEYWORDS = new Set([
 const HTTP_VERBS = new Set(['get', 'post', 'put', 'delete', 'patch', 'use', 'all']);
 
 function findJsClosingBrace(code: string, start: number): number {
-  let depth = 0;
-  let seenOpenBrace = false;
+  const len = code.length;
+  let c = start;
+
+  // Handle route handlers like app.get('/...', (req, res) => ...):
+  // advance past the route call prefix to reach the callback function.
+  const routeMatch = /^\s*(?:app|router)\.(?:get|post|put|delete|patch|all|use)\s*\(\s*(?:['"`][^'"`]*['"`]\s*,\s*)+/.exec(code.slice(c));
+  if (routeMatch) {
+    c += routeMatch[0].length;
+  }
+
   let inString: string | null = null;
   let inLineComment = false;
   let inBlockComment = false;
 
-  for (let c = start; c < code.length; c++) {
+  const skipCommentsAndStrings = (): boolean => {
     const ch = code[c];
-    const prev = c > start ? code[c - 1] : '';
+    const prev = c > 0 ? code[c - 1] : '';
 
     if (inLineComment) {
       if (ch === '\n') inLineComment = false;
-      continue;
+      return true;
     }
     if (inBlockComment) {
       if (ch === '/' && prev === '*') inBlockComment = false;
-      continue;
+      return true;
     }
     if (inString) {
-      if (ch === inString && prev !== '\\') inString = null;
-      continue;
+      if (ch === inString) {
+        let backslashes = 0;
+        let k = c - 1;
+        while (k >= 0 && code[k] === '\\') {
+          backslashes++;
+          k--;
+        }
+        if (backslashes % 2 === 0) {
+          inString = null;
+        }
+      }
+      return true;
     }
 
-    if (ch === '/' && c + 1 < code.length && code[c + 1] === '/') {
+    if (ch === '/' && c + 1 < len && code[c + 1] === '/') {
       inLineComment = true;
       c++;
-      continue;
+      return true;
     }
-    if (ch === '/' && c + 1 < code.length && code[c + 1] === '*') {
+    if (ch === '/' && c + 1 < len && code[c + 1] === '*') {
       inBlockComment = true;
       c++;
-      continue;
+      return true;
     }
     if (ch === '"' || ch === "'" || ch === '`') {
       inString = ch;
+      return true;
+    }
+
+    return false;
+  };
+
+  // 1. Consume parameter list `(...)` first (tracking parens depth so any destructured braces inside params are skipped).
+  let angleDepth = 0;
+  let foundParamStart = false;
+
+  for (; c < len; c++) {
+    if (skipCommentsAndStrings()) continue;
+    const ch = code[c];
+
+    if (ch === '<') {
+      angleDepth++;
+    } else if (ch === '>') {
+      if (angleDepth > 0) angleDepth--;
+    } else if (ch === '(' && angleDepth === 0) {
+      foundParamStart = true;
+      c++;
+      break;
+    }
+  }
+
+  if (!foundParamStart) return -1;
+
+  let parenDepth = 1;
+  for (; c < len; c++) {
+    if (skipCommentsAndStrings()) continue;
+    const ch = code[c];
+
+    if (ch === '(') {
+      parenDepth++;
+    } else if (ch === ')') {
+      parenDepth--;
+      if (parenDepth === 0) {
+        c++;
+        break;
+      }
+    }
+  }
+
+  if (parenDepth !== 0) return -1;
+
+  // 2. After parameter list, handle return type annotation `: ...`:
+  // any object type braces `{ ... }` or generic angle brackets `<...>` in the return type must be skipped before the function body begins.
+  let inReturnType = false;
+  let typeBraceDepth = 0;
+  let typeAngleDepth = 0;
+  let typeParenDepth = 0;
+  let typeBracketDepth = 0;
+  let lastTypeOp = '';
+  let bodyStart = -1;
+
+  for (; c < len; c++) {
+    if (skipCommentsAndStrings()) continue;
+    const ch = code[c];
+
+    if (!inReturnType) {
+      if (ch === ':') {
+        inReturnType = true;
+        lastTypeOp = ':';
+        continue;
+      }
+      if (ch === '{') {
+        bodyStart = c;
+        break;
+      }
+      if (ch === '=' && c + 1 < len && code[c + 1] === '>') {
+        c++;
+        continue;
+      }
       continue;
     }
 
+    // Inside return type annotation
+    if (ch === '<') {
+      typeAngleDepth++;
+      continue;
+    }
+    if (ch === '>') {
+      if (typeAngleDepth > 0) typeAngleDepth--;
+      lastTypeOp = '';
+      continue;
+    }
+    if (ch === '(') {
+      typeParenDepth++;
+      continue;
+    }
+    if (ch === ')') {
+      if (typeParenDepth > 0) typeParenDepth--;
+      continue;
+    }
+    if (ch === '[') {
+      typeBracketDepth++;
+      continue;
+    }
+    if (ch === ']') {
+      if (typeBracketDepth > 0) typeBracketDepth--;
+      lastTypeOp = '';
+      continue;
+    }
+    if (ch === '|' || ch === '&') {
+      if (typeAngleDepth === 0 && typeBraceDepth === 0 && typeParenDepth === 0 && typeBracketDepth === 0) {
+        lastTypeOp = ch;
+      }
+      continue;
+    }
+    if (ch === '=' && c + 1 < len && code[c + 1] === '>') {
+      if (typeAngleDepth === 0 && typeBraceDepth === 0 && typeParenDepth === 0 && typeBracketDepth === 0) {
+        inReturnType = false;
+        c++;
+        continue;
+      }
+    }
     if (ch === '{') {
-      depth++;
-      seenOpenBrace = true;
+      if (
+        typeAngleDepth > 0 ||
+        typeParenDepth > 0 ||
+        typeBracketDepth > 0 ||
+        typeBraceDepth > 0 ||
+        lastTypeOp === ':' ||
+        lastTypeOp === '|' ||
+        lastTypeOp === '&'
+      ) {
+        typeBraceDepth++;
+        lastTypeOp = '';
+        continue;
+      }
+      // Top-level body opening brace
+      bodyStart = c;
+      break;
+    }
+    if (ch === '}') {
+      if (typeBraceDepth > 0) {
+        typeBraceDepth--;
+        lastTypeOp = '';
+      }
+      continue;
+    }
+    if (/[a-zA-Z0-9_$.]/.test(ch)) {
+      lastTypeOp = '';
+      continue;
+    }
+  }
+
+  if (bodyStart === -1) return -1;
+
+  // 3. Once the function body's opening brace `{` is reached, track body brace depth starting at 1.
+  // When body brace depth drops to 0, return the end index.
+  let bodyDepth = 1;
+  for (c = bodyStart + 1; c < len; c++) {
+    if (skipCommentsAndStrings()) continue;
+    const ch = code[c];
+
+    if (ch === '{') {
+      bodyDepth++;
     } else if (ch === '}') {
-      depth--;
-      if (seenOpenBrace && depth === 0) {
+      bodyDepth--;
+      if (bodyDepth === 0) {
         let after = c + 1;
-        while (after < code.length && (code[after] === ')' || code[after] === ';' || code[after] === ' ' || code[after] === '\t')) {
+        while (after < len && (code[after] === ')' || code[after] === ';' || code[after] === ' ' || code[after] === '\t')) {
           after++;
         }
         return after;
       }
     }
   }
+
   return -1;
 }
 
