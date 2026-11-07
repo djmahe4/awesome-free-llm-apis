@@ -51,20 +51,20 @@ export interface SymbolRulesEngineOptions {
   rulesDir?: string;
 }
 
-interface LanguageSinkRule {
+export interface LanguageSinkRule {
   type: string;
   regex?: string;
   pattern?: string;
 }
 
-interface LanguageRuleConfig {
+export interface LanguageRuleConfig {
   name: string;
   language?: string;
   extensions?: string[];
   sinks?: LanguageSinkRule[];
 }
 
-interface SigmaRuleConfig {
+export interface SigmaRuleConfig {
   id: string;
   title?: string;
   level?: string;
@@ -78,13 +78,13 @@ interface SigmaRuleConfig {
   };
 }
 
-interface NucleiMatcherConfig {
+export interface NucleiMatcherConfig {
   type: 'regex' | 'word' | string;
   regex?: string[];
   words?: string[];
 }
 
-interface NucleiTemplateConfig {
+export interface NucleiTemplateConfig {
   id: string;
   info?: {
     name?: string;
@@ -97,7 +97,7 @@ interface NucleiTemplateConfig {
   }>;
 }
 
-interface YaraRuleConfig {
+export interface YaraRuleConfig {
   id: string;
   name?: string;
   tags?: string[];
@@ -256,6 +256,297 @@ export class SymbolRulesEngine {
 
   constructor(options?: SymbolRulesEngineOptions) {
     this.resolveAndLoadRules(options?.rulesDir);
+  }
+
+  injectLanguageRule(rule: LanguageRuleConfig): void {
+    const rawName = rule.name || rule.language;
+    if (!rawName) return;
+    const langKey = rawName.toLowerCase().trim();
+
+    const existing = this.languageRules.get(langKey) || this.languageRules.get(this.normalizeLanguage(langKey));
+    if (existing?.sinks) {
+      for (const s of existing.sinks) {
+        const r = s.regex || s.pattern;
+        if (r) {
+          this.regexCache.delete(r);
+          for (const k of Array.from(this.regexCache.keys())) {
+            if (k === r || k.startsWith(`${r}::`)) {
+              this.regexCache.delete(k);
+            }
+          }
+        }
+      }
+    }
+
+    const sinks = Array.isArray(rule.sinks)
+      ? rule.sinks.map((s: any) => {
+          const reg = s.regex || s.pattern;
+          return {
+            type: s.type,
+            regex: reg,
+            pattern: reg,
+          };
+        })
+      : undefined;
+
+    if (sinks) {
+      for (const s of sinks) {
+        const r = s.regex || s.pattern;
+        if (r) {
+          this.regexCache.delete(r);
+          for (const k of Array.from(this.regexCache.keys())) {
+            if (k === r || k.startsWith(`${r}::`)) {
+              this.regexCache.delete(k);
+            }
+          }
+        }
+      }
+    }
+
+    const normalizedRule: LanguageRuleConfig = {
+      name: langKey,
+      language: (rule.language || rawName).toLowerCase().trim(),
+      extensions: rule.extensions,
+      sinks,
+    };
+
+    const norm = this.normalizeLanguage(langKey);
+    this.languageRules.set(norm, normalizedRule);
+    if (norm !== langKey) {
+      this.languageRules.set(langKey, normalizedRule);
+    }
+  }
+
+  injectSigmaRule(rule: SigmaRuleConfig): void {
+    if (!rule || !rule.id) return;
+    const existingIndex = this.sigmaRules.findIndex((r) => r.id === rule.id);
+    if (existingIndex >= 0) {
+      this.sigmaRules[existingIndex] = rule;
+    } else {
+      this.sigmaRules.unshift(rule);
+    }
+  }
+
+  injectNucleiTemplate(template: NucleiTemplateConfig): void {
+    if (!template || !template.id) return;
+    const existingIndex = this.nucleiTemplates.findIndex((t) => t.id === template.id);
+    if (existingIndex >= 0) {
+      this.nucleiTemplates[existingIndex] = template;
+    } else {
+      this.nucleiTemplates.unshift(template);
+    }
+  }
+
+  injectYaraRule(ruleOrRawYar: YaraRuleConfig | string): void {
+    if (typeof ruleOrRawYar === 'string') {
+      const parsed = this.parseYaraFile(ruleOrRawYar);
+      for (const rule of parsed) {
+        this.injectYaraRule(rule);
+      }
+      return;
+    }
+    if (!ruleOrRawYar || typeof ruleOrRawYar !== 'object') return;
+    const rule = ruleOrRawYar;
+    const ruleId = rule.id || rule.name;
+    const existingIndex = this.yaraRules.findIndex(
+      (yr) => (ruleId && (yr.id === ruleId || yr.name === ruleId)) || (rule.name && yr.name === rule.name)
+    );
+    if (existingIndex >= 0) {
+      this.yaraRules[existingIndex] = rule;
+    } else {
+      this.yaraRules.unshift(rule);
+    }
+
+    const patterns = this.parseYaraStrings(rule.strings);
+    for (const p of patterns) {
+      this.regexCache.delete(`yara:${p.pattern}`);
+    }
+  }
+
+  loadRuleFile(filePath: string): boolean {
+    try {
+      if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+        return false;
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const content = fs.readFileSync(filePath, 'utf8');
+
+      if (ext === '.yar' || ext === '.yara') {
+        const parsed = this.parseYaraFile(content);
+        if (parsed.length > 0) {
+          for (const rule of parsed) {
+            this.injectYaraRule(rule);
+          }
+          return true;
+        }
+        return false;
+      }
+
+      if (ext === '.yaml' || ext === '.yml') {
+        const parsed = yaml.parse(content) as any;
+        if (!parsed) return false;
+
+        let matched = false;
+
+        if (parsed.languages && Array.isArray(parsed.languages)) {
+          for (const r of parsed.languages) {
+            this.injectLanguageRule(r);
+          }
+          matched = true;
+        } else if (parsed.language || (parsed.name && (parsed.sinks || parsed.extensions))) {
+          this.injectLanguageRule(parsed);
+          matched = true;
+        }
+
+        if (parsed.detection) {
+          this.injectSigmaRule(parsed);
+          matched = true;
+        } else if (Array.isArray(parsed.rules) && parsed.rules.some((r: any) => r?.detection)) {
+          for (const r of parsed.rules) {
+            if (r?.detection) this.injectSigmaRule(r);
+          }
+          matched = true;
+        }
+
+        if (parsed.matchers || parsed.file) {
+          this.injectNucleiTemplate(parsed);
+          matched = true;
+        } else if (Array.isArray(parsed.templates) && parsed.templates.some((t: any) => t?.matchers || t?.file)) {
+          for (const t of parsed.templates) {
+            if (t?.matchers || t?.file) this.injectNucleiTemplate(t);
+          }
+          matched = true;
+        }
+
+        if (parsed.strings || parsed.condition) {
+          this.injectYaraRule(parsed);
+          matched = true;
+        } else if (Array.isArray(parsed.rules) && parsed.rules.some((r: any) => r?.strings || r?.condition)) {
+          for (const r of parsed.rules) {
+            if (r?.strings || r?.condition) this.injectYaraRule(r);
+          }
+          matched = true;
+        }
+
+        return matched;
+      }
+
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  loadCustomRulesDir(customDir: string): { languages: number; sigma: number; nuclei: number; yara: number } {
+    const counts = { languages: 0, sigma: 0, nuclei: 0, yara: 0 };
+    if (!fs.existsSync(customDir) || !fs.statSync(customDir).isDirectory()) {
+      return counts;
+    }
+
+    const walk = (dir: string): string[] => {
+      let results: string[] = [];
+      try {
+        const list = fs.readdirSync(dir, { withFileTypes: true });
+        for (const dirent of list) {
+          const fullPath = path.join(dir, dirent.name);
+          if (dirent.isDirectory()) {
+            results.push(...walk(fullPath));
+          } else if (dirent.isFile()) {
+            results.push(fullPath);
+          }
+        }
+      } catch {
+        // ignore
+      }
+      return results;
+    };
+
+    const files = walk(customDir);
+
+    for (const filePath of files) {
+      const ext = path.extname(filePath).toLowerCase();
+      const relPath = path.relative(customDir, filePath).toLowerCase();
+      try {
+        const content = fs.readFileSync(filePath, 'utf8');
+
+        if (ext === '.yar' || ext === '.yara') {
+          const parsed = this.parseYaraFile(content);
+          for (const r of parsed) {
+            this.injectYaraRule(r);
+            counts.yara++;
+          }
+          continue;
+        }
+
+        if (ext === '.yaml' || ext === '.yml') {
+          const parsed = yaml.parse(content) as any;
+          if (!parsed) continue;
+
+          const isLangPath = relPath.includes('languages') || relPath.includes('language');
+          const isSigmaPath = relPath.includes('sigma');
+          const isNucleiPath = relPath.includes('nuclei');
+          const isYaraPath = relPath.includes('yara');
+
+          if (isLangPath || parsed.languages || parsed.language || (parsed.name && (parsed.sinks || parsed.extensions))) {
+            if (Array.isArray(parsed.languages)) {
+              for (const r of parsed.languages) {
+                this.injectLanguageRule(r);
+                counts.languages++;
+              }
+            } else if (parsed.name || parsed.language) {
+              this.injectLanguageRule(parsed);
+              counts.languages++;
+            }
+          }
+
+          if (isSigmaPath || parsed.detection || (Array.isArray(parsed.rules) && parsed.rules.some((r: any) => r?.detection))) {
+            if (Array.isArray(parsed.rules)) {
+              for (const r of parsed.rules) {
+                if (isSigmaPath || r?.detection) {
+                  this.injectSigmaRule(r);
+                  counts.sigma++;
+                }
+              }
+            } else if (parsed.id || parsed.detection) {
+              this.injectSigmaRule(parsed);
+              counts.sigma++;
+            }
+          }
+
+          if (isNucleiPath || parsed.matchers || parsed.file || (Array.isArray(parsed.templates) && parsed.templates.some((t: any) => t?.matchers || t?.file))) {
+            if (Array.isArray(parsed.templates)) {
+              for (const t of parsed.templates) {
+                if (isNucleiPath || t?.matchers || t?.file) {
+                  this.injectNucleiTemplate(t);
+                  counts.nuclei++;
+                }
+              }
+            } else if (parsed.id || parsed.matchers || parsed.file) {
+              this.injectNucleiTemplate(parsed);
+              counts.nuclei++;
+            }
+          }
+
+          if (isYaraPath || parsed.strings || parsed.condition || (Array.isArray(parsed.rules) && parsed.rules.some((r: any) => r?.strings || r?.condition))) {
+            if (Array.isArray(parsed.rules)) {
+              for (const r of parsed.rules) {
+                if (isYaraPath || r?.strings || r?.condition) {
+                  this.injectYaraRule(r);
+                  counts.yara++;
+                }
+              }
+            } else if (parsed.id || parsed.name || parsed.strings) {
+              this.injectYaraRule(parsed);
+              counts.yara++;
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return counts;
   }
 
   private getOrCreateRegex(pattern: string, flags?: string): RegExp | null {

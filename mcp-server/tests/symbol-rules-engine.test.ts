@@ -219,4 +219,113 @@ impl BufferPool {
 
     fs.rmSync(tmpRules, { recursive: true, force: true });
   });
+
+  it('supports runtime dynamic injection of custom language, Sigma, Nuclei, and YARA rules', () => {
+    const dynamicEngine = new SymbolRulesEngine();
+
+    // 1. Inject custom language rule
+    dynamicEngine.injectLanguageRule({
+      name: 'solidity',
+      extensions: ['.sol'],
+      sinks: [{ type: 'reentrancy_risk', regex: '\\bcall\\.value\\b' }],
+    });
+    const solSinks = dynamicEngine.detectSinks('msg.sender.call.value(amount)("")', 'solidity');
+    expect(solSinks.some((s) => s.sinkType === 'reentrancy_risk')).toBe(true);
+
+    // 2. Inject custom Sigma rule
+    dynamicEngine.injectSigmaRule({
+      id: 'sigma-custom-ssrf',
+      title: 'SSRF via HTTP Request',
+      level: 'high',
+      detection: {
+        selection: {
+          keywords: ['requests.get', 'urllib.request.urlopen'],
+        },
+      },
+    });
+    const sigmaMatches = dynamicEngine.matchSigmaRules('response = urllib.request.urlopen(url)');
+    expect(sigmaMatches.some((m) => m.id === 'sigma-custom-ssrf')).toBe(true);
+
+    // 3. Inject custom Nuclei template
+    dynamicEngine.injectNucleiTemplate({
+      id: 'nuclei-jwt-none-alg',
+      info: { name: 'JWT None Algorithm Vulnerability', severity: 'critical' },
+      file: [
+        {
+          matchers: [
+            {
+              type: 'regex',
+              regex: ['"alg"\\s*:\\s*"none"'],
+            },
+          ],
+        },
+      ],
+    });
+    const nucleiMatches = dynamicEngine.matchNucleiTemplates('header = { "alg": "none", "typ": "JWT" }');
+    expect(nucleiMatches.some((m) => m.id === 'nuclei-jwt-none-alg')).toBe(true);
+
+    // 4. Inject custom YARA rule as raw .yar string
+    dynamicEngine.injectYaraRule(`
+rule Custom_Cobalt_Strike_Beacon {
+  meta:
+    description = "Custom Cobalt Strike staged beacon detection"
+  strings:
+    $beacon = "%s as %s\\%s: %d" ascii
+    $pipe = "\\\\.\\pipe\\msagent_" ascii
+  condition:
+    any of them
+}
+`);
+    const yaraMatches = dynamicEngine.matchYaraRules('handle = OpenFile("\\\\.\\pipe\\msagent_777")');
+    expect(yaraMatches.some((m) => m.name === 'Custom_Cobalt_Strike_Beacon')).toBe(true);
+  });
+
+  it('loads rule files and directories dynamically via loadRuleFile and loadCustomRulesDir', () => {
+    const engine = new SymbolRulesEngine();
+    const tmpDir = path.join(os.tmpdir(), `custom-rules-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`);
+    fs.mkdirSync(path.join(tmpDir, 'languages'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'sigma'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'nuclei'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'yara'), { recursive: true });
+
+    // Single rule file test
+    const yarFile = path.join(tmpDir, 'yara', 'test.yar');
+    fs.writeFileSync(
+      yarFile,
+      'rule DynamicYarRule { strings: $s = "dynamic_yara_token" condition: $s }'
+    );
+    expect(engine.loadRuleFile(yarFile)).toBe(true);
+    expect(engine.loadRuleFile(path.join(tmpDir, 'nonexistent.yaml'))).toBe(false);
+
+    const matchesYar = engine.matchYaraRules('some payload with dynamic_yara_token inside');
+    expect(matchesYar.some((m) => m.name === 'DynamicYarRule')).toBe(true);
+
+    // Subfolder custom dir test
+    fs.writeFileSync(
+      path.join(tmpDir, 'languages', 'custom_lang.yaml'),
+      'language: custom_lang\nextensions:\n  - .clang\nsinks:\n  - type: custom_lang_sink\n    regex: "\\\\bclang_exec\\\\("'
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'sigma', 'custom_sigma.yaml'),
+      'id: sigma-dynamic-test\ntitle: Dynamic Sigma\ndetection:\n  selection:\n    keywords:\n      - "dynamic_sigma_trigger"'
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'nuclei', 'custom_nuclei.yaml'),
+      'id: nuclei-dynamic-test\ninfo:\n  name: Dynamic Nuclei\nmatchers:\n  - type: word\n    words:\n      - "dynamic_nuclei_trigger"'
+    );
+
+    const counts = engine.loadCustomRulesDir(tmpDir);
+    expect(counts.languages).toBeGreaterThanOrEqual(1);
+    expect(counts.sigma).toBeGreaterThanOrEqual(1);
+    expect(counts.nuclei).toBeGreaterThanOrEqual(1);
+    expect(counts.yara).toBeGreaterThanOrEqual(1);
+
+    expect(engine.detectSinks('clang_exec(arg);', 'custom_lang')).toContainEqual(
+      expect.objectContaining({ sinkType: 'custom_lang_sink' })
+    );
+    expect(engine.matchSigmaRules('dynamic_sigma_trigger()').some((m) => m.id === 'sigma-dynamic-test')).toBe(true);
+    expect(engine.matchNucleiTemplates('dynamic_nuclei_trigger').some((m) => m.id === 'nuclei-dynamic-test')).toBe(true);
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 });
