@@ -142,6 +142,60 @@ def inspect_pytorch(filepath):
 
     return result
 
+def inspect_onnx(filepath):
+    try:
+        import onnx
+        model = onnx.load(filepath, load_external_data=False)
+        op_counts = {}
+        for node in model.graph.node:
+            op_counts[node.op_type] = op_counts.get(node.op_type, 0) + 1
+
+        return {
+            'format': 'onnx',
+            'irVersion': model.ir_version,
+            'producerName': model.producer_name,
+            'producerVersion': model.producer_version,
+            'opsetVersion': model.opset_import[0].version if model.opset_import else None,
+            'nodeCount': len(model.graph.node),
+            'operatorCounts': op_counts,
+            'inputs': [{'name': i.name} for i in model.graph.input],
+            'outputs': [{'name': o.name} for o in model.graph.output],
+            'initializerCount': len(model.graph.initializer)
+        }
+    except Exception:
+        with open(filepath, 'rb') as f:
+            data = f.read()
+        res = {'format': 'onnx', 'irVersion': None, 'producerName': None, 'opsetVersion': None}
+        idx = 0
+        while idx < len(data):
+            tag = data[idx]
+            field = tag >> 3
+            wire = tag & 0x07
+            idx += 1
+            if field == 1 and wire == 0:
+                val = 0
+                shift = 0
+                while True:
+                    b = data[idx]
+                    idx += 1
+                    val |= (b & 0x7f) << shift
+                    if not (b & 0x80): break
+                    shift += 7
+                res['irVersion'] = val
+            elif field == 2 and wire == 2:
+                l = data[idx]; idx += 1
+                res['producerName'] = data[idx:idx+l].decode('utf-8', errors='replace')
+                idx += l
+            elif field == 8 and wire == 2:
+                l = data[idx]; idx += 1
+                sub = data[idx:idx+l]
+                if len(sub) >= 2 and sub[0] == 0x10:
+                    res['opsetVersion'] = sub[1]
+                idx += l
+            else:
+                break
+        return res
+
 def main():
     parser = argparse.ArgumentParser(description="Model Artifact Inspector")
     parser.add_argument("action", choices=["inspect", "infer_roles", "trace_execution", "extract_layer", "analyze_layer", "reconstruct_samples"])
@@ -167,6 +221,8 @@ def main():
             print(json.dumps(inspect_gguf(args.file), indent=2))
         elif fmt == 'pytorch':
             print(json.dumps(inspect_pytorch(args.file), indent=2))
+        elif fmt == 'onnx':
+            print(json.dumps(inspect_onnx(args.file), indent=2))
         else:
             raise NotImplementedError(f"Format {fmt} not yet implemented")
 
