@@ -1075,6 +1075,22 @@ mark.wiki-line-hit {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: 190px;
+}
+/* A details element cannot size its own content as a flex box, so the body is bounded here and the list scrolls inside it. */
+details.conv-card[open] > .conv-card-body {
+  display: flex;
+  flex-direction: column;
+  max-height: 250px;
+  overflow: hidden;
+}
+.conv-more {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 8px;
 }
 .conv-item {
   padding: 8px 12px;
