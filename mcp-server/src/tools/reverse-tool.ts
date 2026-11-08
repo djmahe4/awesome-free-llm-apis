@@ -821,6 +821,19 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     if (options?.task) {
       args.push('--task', String(options.task));
     }
+    const imagePath = options?.image ?? options?.image_path;
+    if (imagePath) {
+      const imgStr = String(imagePath);
+      if (!isSafeAllowedPath(imgStr, allowedRoots)) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'Path traversal disallowed in options.image.',
+        };
+      }
+      args.push('--image', path.resolve(imgStr));
+    }
 
     const pythonBin = resolvePythonPath();
     const isAsync = options?.async === true;

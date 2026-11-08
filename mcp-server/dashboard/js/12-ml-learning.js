@@ -372,8 +372,9 @@
 
   if (stepBtn) {
     stepBtn.addEventListener('click', () => {
-      window.MLStateBus.optics.time += 0.2;
-      opticsLoop();
+      const bus = window.MLStateBus.optics;
+      bus.time += 0.2;
+      if (!bus.playing) opticsLoop();
     });
   }
 
@@ -386,7 +387,7 @@
       if (wlInput) wlInput.value = '520';
       if (angleInput) angleInput.value = '0';
       updateOpticsLabels();
-      opticsLoop();
+      if (!bus.playing) opticsLoop();
     });
   }
 

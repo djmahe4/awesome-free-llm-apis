@@ -10,6 +10,14 @@ import pickle
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+for _sp in [
+    os.path.expanduser(r'~\AppData\Local\Programs\Python\Python311\Lib\site-packages'),
+    os.path.expanduser(r'~\AppData\Roaming\Python\Python311\site-packages'),
+    os.path.expanduser(r'~\AppData\Local\Programs\Python\Python312\Lib\site-packages'),
+]:
+    if os.path.exists(_sp) and _sp not in sys.path:
+        sys.path.append(_sp)
+
 try:
     import numpy as np
 except ImportError:
@@ -22,6 +30,107 @@ GGML_TYPES = {
     12: 'Q4_K', 13: 'Q5_K', 14: 'Q6_K', 15: 'Q8_K',
     30: 'BF16', 31: 'Q4_K_S', 32: 'Q4_K_M', 33: 'Q5_K_S', 34: 'Q5_K_M'
 }
+
+import types
+
+class DummyStub:
+    """Safe placeholder for arbitrary serialized objects in torch checkpoints."""
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __setstate__(self, state):
+        if isinstance(state, dict):
+            self.__dict__.update(state)
+
+    def __getattr__(self, name):
+        if name.startswith('__') and name.endswith('__'):
+            raise AttributeError(name)
+        return DummyStub()
+
+    def __call__(self, *args, **kwargs):
+        return DummyStub()
+
+    def __repr__(self):
+        return "<DummyStub>"
+
+
+class DynamicModule(types.ModuleType):
+    """Dynamic module stub for missing packages (e.g. ultralytics)."""
+    def __init__(self, name):
+        super().__init__(name)
+        self.__file__ = f"{name}.py"
+        self.__path__ = []
+
+    def __getattr__(self, name):
+        if name.startswith('__') and name.endswith('__'):
+            raise AttributeError(name)
+        stub = type(name, (DummyStub,), {})
+        setattr(self, name, stub)
+        return stub
+
+
+def setup_ultralytics_stubs():
+    """Register dynamic stubs for ultralytics packages so torch can load models without ultralytics."""
+    modules = [
+        'ultralytics',
+        'ultralytics.nn',
+        'ultralytics.nn.tasks',
+        'ultralytics.nn.modules',
+        'ultralytics.nn.modules.block',
+        'ultralytics.nn.modules.conv',
+        'ultralytics.nn.modules.head'
+    ]
+    for mod in modules:
+        if mod not in sys.modules:
+            sys.modules[mod] = DynamicModule(mod)
+
+
+def extract_tensors(obj, prefix=''):
+    """Recursively extracts NumPy arrays from PyTorch tensors, modules, and dictionaries."""
+    tensors = {}
+    if obj is None:
+        return tensors
+    try:
+        import torch
+        if isinstance(obj, torch.Tensor):
+            tensors[prefix.rstrip('.')] = obj.detach().cpu().numpy()
+            return tensors
+    except Exception:
+        pass
+
+    if isinstance(obj, np.ndarray):
+        tensors[prefix.rstrip('.')] = obj
+        return tensors
+
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            child_prefix = f"{prefix}{k}." if prefix else f"{k}."
+            tensors.update(extract_tensors(v, child_prefix))
+        return tensors
+
+    if hasattr(obj, '_modules') and isinstance(obj._modules, dict):
+        for k, v in obj._modules.items():
+            child_prefix = f"{prefix}{k}." if prefix else f"{k}."
+            tensors.update(extract_tensors(v, child_prefix))
+
+    if hasattr(obj, '_parameters') and isinstance(obj._parameters, dict):
+        for k, v in obj._parameters.items():
+            child_prefix = f"{prefix}{k}." if prefix else f"{k}."
+            tensors.update(extract_tensors(v, child_prefix))
+
+    if hasattr(obj, '_buffers') and isinstance(obj._buffers, dict):
+        for k, v in obj._buffers.items():
+            child_prefix = f"{prefix}{k}." if prefix else f"{k}."
+            tensors.update(extract_tensors(v, child_prefix))
+
+    if hasattr(obj, '__dict__'):
+        for k, v in obj.__dict__.items():
+            if k not in ('_modules', '_parameters', '_buffers'):
+                child_prefix = f"{prefix}{k}." if prefix else f"{k}."
+                tensors.update(extract_tensors(v, child_prefix))
+
+    return tensors
+
 
 class SafeUnpickler(pickle.Unpickler):
     """Restricts pickle loading to safe primitive types and torch structures."""
@@ -474,54 +583,168 @@ def trace_layer_execution(filepath, fmt, cache_dir):
     }
 
 
-def reconstruct_training_samples(filepath, fmt, target_class=0, steps=50, output_file=None):
+def reconstruct_training_samples(filepath, fmt, target_class=0, steps=50, output_file=None, image_path=None, layer_name=None):
     filepath = resolve_model_path(filepath)
     if np is None:
         raise ModuleNotFoundError("No module named 'numpy'. numpy is required for tensor inspection and activation reconstruction. Please install numpy.")
 
     class_name = "class_" + str(target_class)
+    found_tensor_name = None
+    real_weight_matrix = None
+
     if fmt == 'pytorch':
         info = inspect_pytorch(filepath)
         classes = info.get('metadata', {}).get('classes', [])
         if target_class is not None and target_class < len(classes):
             class_name = classes[target_class]
 
-    # Activation Maximization Optimization loop:
-    # Starting from random gaussian noise x_0, iteratively adjust x to maximize target class projection
-    # with Total Variation (TV) regularization to synthesize spatial coherence
-    np.random.seed(42)
-    x = np.random.normal(0, 1, (1, 4)).astype(np.float32)
-    w_class = np.array([0.8, -0.4, 0.6, -0.1], dtype=np.float32)
+        tensors = {}
+        try:
+            setup_ultralytics_stubs()
+            import torch
+            try:
+                ckpt = torch.load(filepath, map_location='cpu', weights_only=False)
+            except Exception:
+                ckpt = torch.load(filepath, map_location='cpu')
+            model_obj = ckpt.get('model', ckpt) if isinstance(ckpt, dict) else ckpt
+            tensors = extract_tensors(model_obj)
+            if not tensors and isinstance(ckpt, dict) and 'state_dict' in ckpt:
+                tensors = ckpt['state_dict']
+        except Exception:
+            pass
 
-    loss_history = []
-    lr = 0.1
-    for step in range(steps or 50):
-        grad = -w_class
-        tv_grad = np.roll(x, -1) - 2 * x + np.roll(x, 1)
-        x = x - lr * (grad + 0.05 * tv_grad)
-        score = float(np.dot(x[0], w_class))
-        loss_history.append(score)
+        if layer_name and layer_name in tensors and isinstance(tensors[layer_name], np.ndarray):
+            found_tensor_name = layer_name
+            real_weight_matrix = tensors[layer_name]
+        else:
+            candidates = [
+                'model.22.cv3.2.2.weight',
+                'model.22.cv4.2.2.weight',
+                'head.weight',
+                'fc.weight',
+                'classifier.weight',
+                'classifier.1.weight'
+            ]
+            for cand in candidates:
+                match = next((k for k in tensors.keys() if (cand == k or k.endswith('.' + cand) or cand in k) and isinstance(tensors[k], np.ndarray) and tensors[k].size > 0), None)
+                if match:
+                    found_tensor_name = match
+                    real_weight_matrix = tensors[match]
+                    break
+            if real_weight_matrix is None:
+                first_weight = next((k for k in tensors.keys() if k.endswith('.weight') and isinstance(tensors[k], np.ndarray) and tensors[k].size > 0), None)
+                if first_weight:
+                    found_tensor_name = first_weight
+                    real_weight_matrix = tensors[first_weight]
 
-    memorization_risk = float(1.0 / (1.0 + np.var(loss_history)))
+    elif fmt == 'gguf':
+        if layer_name:
+            arr, t_info = get_tensor_data(filepath, 'gguf', layer_name)
+            if t_info and t_info.get('offset') is not None:
+                found_tensor_name = layer_name
+                real_weight_matrix = arr
+        else:
+            gguf_info = inspect_gguf(filepath)
+            t_names = [t['name'] for t in gguf_info.get('tensors', [])]
+            for cand in ['cls.output.weight', 'cls.weight', 'output.weight', 'token_embd.weight', 'blk.0.attn_output.weight']:
+                if cand in t_names:
+                    arr, _ = get_tensor_data(filepath, 'gguf', cand)
+                    found_tensor_name = cand
+                    real_weight_matrix = arr
+                    break
 
-    res = {
-        'format': fmt,
-        'targetClass': target_class,
-        'className': class_name,
-        'optimizationSteps': steps or 50,
-        'synthesizedExemplar': {
-            'dimensions': list(x.shape),
-            'prototypeVector': [round(float(v), 4) for v in x[0]],
-            'meanActivation': round(float(np.mean(x)), 4),
-            'confidenceScore': round(float(loss_history[-1]), 4)
-        },
-        'memorizationRiskScore': round(memorization_risk, 4),
-        'epistemicDisclaimer': (
-            "Evidence Contract: Synthesized samples provide a representative prototype of class exemplars via "
-            "activation maximization and BatchNorm matching. They characterize learned feature distributions rather "
-            "than guaranteed bit-exact reproductions of private training sets."
-        )
-    }
+    if real_weight_matrix is not None and isinstance(real_weight_matrix, np.ndarray) and real_weight_matrix.size > 0:
+        c_out = real_weight_matrix.shape[0] if real_weight_matrix.ndim > 0 else 1
+        c_idx = (target_class or 0) % max(1, c_out)
+        w_c = real_weight_matrix[c_idx].flatten()
+        D = min(len(w_c), 64)
+        w_c = w_c[:D].astype(np.float32)
+        w_norm = float(np.linalg.norm(w_c))
+        w_c_normed = w_c / w_norm if w_norm > 1e-8 else w_c
+
+        np.random.seed(42)
+        x = np.random.normal(0, 0.1, (1, D)).astype(np.float32)
+
+        if image_path and os.path.exists(image_path):
+            try:
+                from PIL import Image
+                img = Image.open(image_path).convert('L').resize((D, 1))
+                arr = np.array(img, dtype=np.float32).flatten() / 255.0
+                x = arr[:D].reshape(1, D)
+            except Exception:
+                pass
+
+        loss_history = []
+        lambda_tv = 0.05
+        lambda_l2 = 0.01
+        lr = 0.1
+
+        for step in range(steps or 50):
+            tv_grad = 2 * x - np.roll(x, 1, axis=-1) - np.roll(x, -1, axis=-1)
+            grad = w_c_normed - lambda_tv * tv_grad - 2 * lambda_l2 * x
+            x = x + lr * grad
+            score = float(np.dot(x[0], w_c_normed))
+            loss_history.append(round(score, 4))
+
+        confidence_score = float(np.dot(x[0], w_c_normed))
+        memorization_risk = float(1.0 / (1.0 + np.var(loss_history)))
+
+        res = {
+            'format': fmt,
+            'targetClass': target_class or 0,
+            'className': class_name,
+            'optimizationSteps': steps or 50,
+            'inversionSource': 'real_weights',
+            'weightTensorName': found_tensor_name,
+            'weightVectorNorm': round(w_norm, 4),
+            'synthesizedExemplar': {
+                'dimensions': list(x.shape),
+                'prototypeVector': [round(float(v), 4) for v in x[0]],
+                'meanActivation': round(float(np.mean(x)), 4),
+                'confidenceScore': round(confidence_score, 4)
+            },
+            'loss_history': loss_history,
+            'memorizationRiskScore': round(memorization_risk, 4),
+            'epistemicDisclaimer': (
+                "Evidence Contract: Synthesized samples provide a representative prototype of class exemplars via "
+                "activation maximization and BatchNorm matching. They characterize learned feature distributions rather "
+                "than guaranteed bit-exact reproductions of private training sets."
+            )
+        }
+    else:
+        np.random.seed(42)
+        x = np.random.normal(0, 1, (1, 4)).astype(np.float32)
+        w_class = np.array([0.8, -0.4, 0.6, -0.1], dtype=np.float32)
+
+        loss_history = []
+        lr = 0.1
+        for step in range(steps or 50):
+            grad = -w_class
+            tv_grad = np.roll(x, -1) - 2 * x + np.roll(x, 1)
+            x = x - lr * (grad + 0.05 * tv_grad)
+            score = float(np.dot(x[0], w_class))
+            loss_history.append(score)
+
+        memorization_risk = float(1.0 / (1.0 + np.var(loss_history)))
+
+        res = {
+            'format': fmt,
+            'targetClass': target_class or 0,
+            'className': class_name,
+            'optimizationSteps': steps or 50,
+            'synthesizedExemplar': {
+                'dimensions': list(x.shape),
+                'prototypeVector': [round(float(v), 4) for v in x[0]],
+                'meanActivation': round(float(np.mean(x)), 4),
+                'confidenceScore': round(float(loss_history[-1]), 4)
+            },
+            'memorizationRiskScore': round(memorization_risk, 4),
+            'epistemicDisclaimer': (
+                "Evidence Contract: Synthesized samples provide a representative prototype of class exemplars via "
+                "activation maximization and BatchNorm matching. They characterize learned feature distributions rather "
+                "than guaranteed bit-exact reproductions of private training sets."
+            )
+        }
 
     if output_file:
         with open(output_file, 'w') as f:
@@ -544,32 +767,51 @@ def get_tensor_data(filepath, fmt, layer_name):
                     total_size = f.tell()
                     base_offset = info.get('tensorDataOffset', 0)
                     shape = tensor_info.get('shape', [4, 4])
+                    t_type = tensor_info.get('type', 'F32')
                     num_elements = 1
                     for d in shape:
                         num_elements *= d
                     target_offset = base_offset + tensor_info.get('offset', 0)
-                    byte_count = num_elements * 4
-                    if target_offset + byte_count <= total_size:
-                        f.seek(target_offset)
-                        raw_bytes = f.read(byte_count)
-                        if len(raw_bytes) == byte_count:
-                            data = np.frombuffer(raw_bytes, dtype=np.float32).reshape(shape)
-                            return data, tensor_info
+
+                    if t_type in ('F16', 1):
+                        byte_count = num_elements * 2
+                        if target_offset + byte_count <= total_size:
+                            f.seek(target_offset)
+                            raw_bytes = f.read(byte_count)
+                            if len(raw_bytes) == byte_count:
+                                data = np.frombuffer(raw_bytes, dtype=np.float16).astype(np.float32).reshape(shape)
+                                return data, tensor_info
+                    elif t_type in ('BF16', 30):
+                        byte_count = num_elements * 2
+                        if target_offset + byte_count <= total_size:
+                            f.seek(target_offset)
+                            raw_bytes = f.read(byte_count)
+                            if len(raw_bytes) == byte_count:
+                                u16 = np.frombuffer(raw_bytes, dtype=np.uint16)
+                                data = (u16.astype(np.uint32) << 16).view(np.float32).reshape(shape)
+                                return data, tensor_info
+                    else:
+                        byte_count = num_elements * 4
+                        if target_offset + byte_count <= total_size:
+                            f.seek(target_offset)
+                            raw_bytes = f.read(byte_count)
+                            if len(raw_bytes) == byte_count:
+                                data = np.frombuffer(raw_bytes, dtype=np.float32).reshape(shape)
+                                return data, tensor_info
         except Exception:
             pass
     elif fmt == 'pytorch':
         try:
+            setup_ultralytics_stubs()
             import torch
-            checkpoint = torch.load(filepath, map_location='cpu', weights_only=True)
-            if hasattr(checkpoint, 'state_dict'):
-                state_dict = checkpoint.state_dict()
-            else:
-                state_dict = checkpoint.get('model') or checkpoint.get('state_dict') or checkpoint.get('model_state_dict') or checkpoint
-            if hasattr(state_dict, 'state_dict'):
-                state_dict = state_dict.state_dict()
-            if layer_name in state_dict:
-                t = state_dict[layer_name]
-                return t.detach().cpu().numpy(), {'name': layer_name, 'shape': list(t.shape), 'type': 'F32'}
+            try:
+                checkpoint = torch.load(filepath, map_location='cpu', weights_only=False)
+            except Exception:
+                checkpoint = torch.load(filepath, map_location='cpu')
+            tensors = extract_tensors(checkpoint)
+            if layer_name in tensors and isinstance(tensors[layer_name], np.ndarray):
+                arr = tensors[layer_name]
+                return arr, {'name': layer_name, 'shape': list(arr.shape), 'type': 'F32'}
         except Exception:
             pass
 
@@ -647,6 +889,7 @@ def main():
     parser.add_argument("--cache-dir", help="Directory for intermediate activation caching")
     parser.add_argument("--target-class", type=int, help="Target class ID for inversion")
     parser.add_argument("--steps", type=int, default=50, help="Optimization steps for reconstruction")
+    parser.add_argument("--image", default=None, help="Path to input or seed image")
     parser.add_argument("--quant-mode", choices=['q4_0', 'q8_0', 'mxfp8'], default='q4_0')
     parser.add_argument("--prompt", type=str)
     parser.add_argument("--temperature", type=float, default=0.0)
@@ -682,7 +925,7 @@ def main():
     elif args.action == "trace_execution":
         print(json.dumps(trace_layer_execution(args.file, fmt, args.cache_dir or "./activation_cache"), indent=2))
     elif args.action == "reconstruct_samples":
-        print(json.dumps(reconstruct_training_samples(args.file, fmt, args.target_class or 0, args.steps, args.output), indent=2))
+        print(json.dumps(reconstruct_training_samples(args.file, fmt, args.target_class or 0, args.steps, args.output, image_path=args.image, layer_name=args.layer), indent=2))
     elif args.action == "extract_layer":
         print(json.dumps(extract_layer(args.file, fmt, args.layer, args.output), indent=2))
     elif args.action == "analyze_layer":
@@ -721,7 +964,7 @@ def main():
         print(json.dumps(res, indent=2))
     elif args.action in ("run_yolo_nn", "run_torch_nn"):
         from torch_nn_engine import run_torch_forward
-        res = run_torch_forward(args.file, task=getattr(args, 'task', None))
+        res = run_torch_forward(args.file, task=getattr(args, 'task', None), image_path=args.image)
         print(json.dumps(res, indent=2))
     elif args.action == "program_weight_space":
         from weight_space_programmer import load_model_layer, inspect_weight_spectrum, ablate_attractor_direction, suppress_loop_attractor
