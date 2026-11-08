@@ -631,12 +631,41 @@ def detect_model_architecture(metadata, class_names, state_dict=None):
     }
 
 
-def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3, size=32):
+
+def resolve_input_tensor(image_path=None, channels=3, size=32):
+    """
+    Loads real image pixels when provided, or initializes reproducible synthetic canvas.
+    Returns: (tensor, input_metadata)
+    """
+    if image_path and os.path.exists(image_path):
+        try:
+            from PIL import Image
+            img = Image.open(image_path).convert('RGB')
+            img = img.resize((size, size))
+            arr = np.array(img, dtype=np.float32) / 255.0
+            tensor = np.transpose(arr, (2, 0, 1))
+            return tensor, {
+                'source': 'image_file',
+                'path': str(image_path),
+                'dimensions': list(tensor.shape)
+            }
+        except Exception as e:
+            sys.stderr.write(f"Warning: Failed to load image {image_path}: {e}\n")
+
+    np.random.seed(42)
+    synthetic = np.random.uniform(0, 1, (channels, size, size)).astype(np.float32)
+    return synthetic, {
+        'source': 'synthetic_canvas',
+        'seed': 42,
+        'dimensions': list(synthetic.shape)
+    }
+
+
+def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3, size=32, image_path=None):
     """
     Executes pure-NumPy YOLO forward pass with BatchNorm folding and modular task heads (detect, classify, segment, pose).
     """
-    np.random.seed(42)
-    x = np.random.uniform(0, 1, (channels, size, size)).astype(np.float32)
+    x, input_meta = resolve_input_tensor(image_path, channels=channels, size=size)
 
     # 1. Stem Conv + BN Fusion
     w_conv = np.random.randn(8, channels, 3, 3).astype(np.float32) * 0.1
@@ -676,6 +705,7 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
         return {
             'modelType': 'YOLOv8',
             'task': 'classify',
+            'inputMetadata': input_meta,
             'fusedLayersCount': fused_layers_count,
             'topClass': cls_res['topClass'],
             'topProbability': cls_res['topProbability'],
@@ -703,6 +733,7 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
         return {
             'modelType': 'YOLOv8',
             'task': 'segment',
+            'inputMetadata': input_meta,
             'fusedLayersCount': fused_layers_count,
             'detections': seg_res['detections'],
             'segments': seg_res['segments'],
@@ -744,6 +775,7 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
         return {
             'modelType': 'YOLOv8',
             'task': 'pose',
+            'inputMetadata': input_meta,
             'fusedLayersCount': fused_layers_count,
             'detections': detections,
             'poses': poses,
@@ -754,17 +786,17 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
     return {
         'modelType': 'YOLOv8',
         'task': 'detect',
+        'inputMetadata': input_meta,
         'fusedLayersCount': fused_layers_count,
         'detections': detections
     }
 
 
-def forward_resnet(weights_path, metadata, class_names, channels=3, size=32):
+def forward_resnet(weights_path, metadata, class_names, channels=3, size=32, image_path=None):
     """
     Executes pure-NumPy ResNet classification forward pass with residual blocks.
     """
-    np.random.seed(42)
-    x = np.random.uniform(0, 1, (channels, size, size)).astype(np.float32)
+    x, input_meta = resolve_input_tensor(image_path, channels=channels, size=size)
 
     # Stem Conv 3x3 + BN Fusion + MaxPool
     w_stem = np.random.randn(8, channels, 3, 3).astype(np.float32) * 0.1
@@ -799,6 +831,7 @@ def forward_resnet(weights_path, metadata, class_names, channels=3, size=32):
     return {
         'modelType': 'ResNet',
         'task': 'classify',
+        'inputMetadata': input_meta,
         'fusedLayersCount': fused_count,
         'topClass': cls_res['topClass'],
         'topProbability': cls_res['topProbability'],
@@ -806,12 +839,11 @@ def forward_resnet(weights_path, metadata, class_names, channels=3, size=32):
     }
 
 
-def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32):
+def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32, image_path=None):
     """
     Executes pure-NumPy MobileNet forward pass with depthwise separable & inverted residuals.
     """
-    np.random.seed(42)
-    x = np.random.uniform(0, 1, (channels, size, size)).astype(np.float32)
+    x, input_meta = resolve_input_tensor(image_path, channels=channels, size=size)
 
     # Stem Conv 3x3 + BN Fusion
     w_stem = np.random.randn(8, channels, 3, 3).astype(np.float32) * 0.1
@@ -846,6 +878,7 @@ def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32):
     return {
         'modelType': 'MobileNet',
         'task': 'classify',
+        'inputMetadata': input_meta,
         'fusedLayersCount': fused_count,
         'topClass': cls_res['topClass'],
         'topProbability': cls_res['topProbability'],
@@ -853,7 +886,7 @@ def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32):
     }
 
 
-def run_torch_forward(weights_path, channels=3, size=32, task=None):
+def run_torch_forward(weights_path, channels=3, size=32, task=None, image_path=None):
     """
     Dynamic routing to YOLO, ResNet, or MobileNet based on checkpoint inspection and requested task.
     """
@@ -862,11 +895,11 @@ def run_torch_forward(weights_path, channels=3, size=32, task=None):
     active_task = task if task is not None else arch_info['task']
 
     if arch_info['family'] == 'resnet':
-        return forward_resnet(weights_path, metadata, class_names, channels=channels, size=size)
+        return forward_resnet(weights_path, metadata, class_names, channels=channels, size=size, image_path=image_path)
     elif arch_info['family'] == 'mobilenet':
-        return forward_mobilenet(weights_path, metadata, class_names, channels=channels, size=size)
+        return forward_mobilenet(weights_path, metadata, class_names, channels=channels, size=size, image_path=image_path)
     else:
-        return forward_yolo(weights_path, metadata, class_names, task=active_task, channels=channels, size=size)
+        return forward_yolo(weights_path, metadata, class_names, task=active_task, channels=channels, size=size, image_path=image_path)
 
 
 # Backward-compatible aliases
@@ -878,6 +911,7 @@ def main():
     parser = argparse.ArgumentParser(description='Pure-NumPy PyTorch Neural Network Runtime Engine')
     parser.add_argument('action', choices=['detect', 'classify', 'segment', 'pose', 'forward'])
     parser.add_argument('--file', required=True, help='Path to PyTorch checkpoint (.pt/.pth)')
+    parser.add_argument('--image', default=None, help='Path to real input image (optional)')
     parser.add_argument('--channels', type=int, default=3, help='Number of input channels (default: 3)')
     parser.add_argument('--size', type=int, default=32, help='Input spatial size (default: 32)')
     parser.add_argument('--task', choices=['detect', 'classify', 'segment', 'pose'], default=None, help='Model task override')
@@ -887,7 +921,7 @@ def main():
     if args.action in ('detect', 'classify', 'segment', 'pose') and task_override is None:
         task_override = args.action
 
-    res = run_torch_forward(args.file, channels=args.channels, size=args.size, task=task_override)
+    res = run_torch_forward(args.file, channels=args.channels, size=args.size, task=task_override, image_path=args.image)
     print(json.dumps(res, indent=2))
 
 

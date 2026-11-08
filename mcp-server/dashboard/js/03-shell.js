@@ -21,6 +21,7 @@ function activateTab(target) {
   if (target === 'dagmemory') { initDagMemoryTab(); }
   if (target === 'harness')   { initHarnessTab(); }
   if (target === 'movie')     { window.initMovieTab?.(); }
+  if (target === 'ml-learning') { window.initMlLearningTab?.(); }
 
   try { localStorage.setItem('flm.activeTab', target); } catch {}
   return true;
