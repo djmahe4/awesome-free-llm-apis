@@ -58,6 +58,87 @@ def generate_tiny_gguf(filepath):
         for i in range(32):
             f.write(struct.pack('<f', float(i) * 0.05))
 
+def generate_reasoning_gguf(filepath):
+    # GGUF v3 binary header
+    # magic: 'GGUF' (4 bytes), version: 3 (uint32), tensor_count: 7 (uint64), metadata_kv_count: 4 (uint64)
+    with open(filepath, 'wb') as f:
+        f.write(b'GGUF')
+        f.write(struct.pack('<I', 3))
+        f.write(struct.pack('<Q', 7))  # 7 tensors
+        f.write(struct.pack('<Q', 4))  # 4 metadata pairs
+
+        def write_kv_str(k, v):
+            k_b = k.encode('utf-8')
+            f.write(struct.pack('<Q', len(k_b)))
+            f.write(k_b)
+            f.write(struct.pack('<I', 8))  # type STRING
+            v_b = v.encode('utf-8')
+            f.write(struct.pack('<Q', len(v_b)))
+            f.write(v_b)
+
+        def write_kv_u32(k, v):
+            k_b = k.encode('utf-8')
+            f.write(struct.pack('<Q', len(k_b)))
+            f.write(k_b)
+            f.write(struct.pack('<I', 4))  # type UINT32
+            f.write(struct.pack('<I', v))
+
+        # KV 1: "general.architecture" = "reasoning_transformer"
+        write_kv_str('general.architecture', 'reasoning_transformer')
+
+        # KV 2: "reasoning_transformer.context_length" = 512
+        write_kv_u32('reasoning_transformer.context_length', 512)
+
+        # KV 3: "reasoning_transformer.embedding_length" = 16
+        write_kv_u32('reasoning_transformer.embedding_length', 16)
+
+        # KV 4: "reasoning_transformer.head_count" = 2
+        write_kv_u32('reasoning_transformer.head_count', 2)
+
+        tensor_specs = [
+            ('token_embd.weight', [16, 11]),
+            ('blk.0.attn_norm.weight', [16]),
+            ('blk.0.attn_q.weight', [16, 16]),
+            ('blk.0.attn_k.weight', [16, 16]),
+            ('blk.0.attn_v.weight', [16, 16]),
+            ('blk.0.attn_output.weight', [16, 16]),
+            ('output.weight', [16, 11]),
+        ]
+
+        current_offset = 0
+        tensor_info = []
+        for name, shape in tensor_specs:
+            num_elements = 1
+            for d in shape:
+                num_elements *= d
+            current_offset = ((current_offset + 31) // 32) * 32
+            tensor_info.append((name, shape, num_elements, current_offset))
+            current_offset += num_elements * 4
+
+        for name, shape, num_elements, offset in tensor_info:
+            n_b = name.encode('utf-8')
+            f.write(struct.pack('<Q', len(n_b)))
+            f.write(n_b)
+            f.write(struct.pack('<I', len(shape)))
+            for d in shape:
+                f.write(struct.pack('<Q', d))
+            f.write(struct.pack('<I', 0))  # GGML_TYPE_F32
+            f.write(struct.pack('<Q', offset))
+
+        pos = f.tell()
+        pad = (32 - (pos % 32)) % 32
+        f.write(b'\x00' * pad)
+
+        data_start = f.tell()
+        for name, shape, num_elements, offset in tensor_info:
+            target_pos = data_start + offset
+            pad_len = target_pos - f.tell()
+            if pad_len > 0:
+                f.write(b'\x00' * pad_len)
+            for i in range(num_elements):
+                val = ((i % 17) - 8) * 0.05
+                f.write(struct.pack('<f', val))
+
 def generate_tiny_pt(filepath):
     # PyTorch checkpoints are ZIP archives containing archive/data.pkl and records
     with zipfile.ZipFile(filepath, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
@@ -89,6 +170,7 @@ if __name__ == '__main__':
     out_dir = os.path.join(os.path.dirname(__file__), '../../tests/fixtures/models')
     os.makedirs(out_dir, exist_ok=True)
     generate_tiny_gguf(os.path.join(out_dir, 'tiny.gguf'))
+    generate_reasoning_gguf(os.path.join(out_dir, 'reasoning_tiny.gguf'))
     generate_tiny_pt(os.path.join(out_dir, 'tiny.pt'))
     generate_tiny_onnx(os.path.join(out_dir, 'tiny.onnx'))
     print("Generated model fixtures in", out_dir)
