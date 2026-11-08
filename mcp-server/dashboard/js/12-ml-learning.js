@@ -13,7 +13,7 @@
   function toolFetch(init) {
     const call = JSON.parse(init.body);
     const params = call.params || {};
-    // The server keys a reverse_tool run by target, so two calls on one model at once collide (the second answers "running"). Each call gets its own session.
+    // Each call gets its own session, so the results of calls made together never mix.
     if (call.tool === 'reverse_tool' && !params.sessionId) params.sessionId = 'ml-' + String(params.action || 'call') + '-' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
     return fetch('/api/' + call.tool, { ...init, body: JSON.stringify(params) });
   }

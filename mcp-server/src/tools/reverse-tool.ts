@@ -23,6 +23,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const reverseToolResultsCache = new BoundedMap<string, ReverseToolResult>(100);
+/** The session of the latest run for each target, so status and abort given only a target find it. */
+const latestSessionByTarget = new BoundedMap<string, string>(200);
 
 function resolveModelInspectorPath(): string {
   const candidates = [
@@ -177,7 +179,14 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     action = 'reconstruct_training_samples';
   }
 
-  const effectiveSessionId = input.sessionId || (options?.sessionId as string) || (target ? `rev-${target.replace(/[^\w.-]/g, '_')}` : undefined);
+  const namedSession = input.sessionId || (options?.sessionId as string);
+  const targetSession = target ? `rev-${target.replace(/[^\w.-]/g, '_')}` : undefined;
+  // Without a named session a run is keyed by target and action, so two different actions on one model do not collide;
+  // status and abort given only a target use the latest run for it.
+  const readsRun = action === 'status' || action === 'abort';
+  const effectiveSessionId = namedSession
+    || (targetSession && readsRun ? (latestSessionByTarget.get(targetSession) ?? targetSession) : undefined)
+    || (targetSession && !readsRun ? `${targetSession}:${action}` : undefined);
   const runKey = effectiveSessionId ? `reverse_tool:${effectiveSessionId}` : undefined;
 
   if (action === 'abort') {
@@ -856,6 +865,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
 
     const runInfo = runKey ? RunRegistry.start(runKey) : undefined;
+    if (targetSession && effectiveSessionId) latestSessionByTarget.set(targetSession, effectiveSessionId);
 
     const executeAction = async (): Promise<ReverseToolResult> => {
       try {
