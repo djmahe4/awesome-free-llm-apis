@@ -155,6 +155,46 @@ def generate_tiny_pt(filepath):
         zf.writestr('archive/data.pkl', pickle.dumps(meta, protocol=2))
         zf.writestr('archive/data/0', struct.pack('<16f', *[float(x) * 0.1 for x in range(16)]))
 
+def generate_tiny_resnet_pt(filepath):
+    with zipfile.ZipFile(filepath, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('archive/byteorder', 'little')
+        zf.writestr('archive/version', '3')
+        import pickle
+        meta = {
+            'epoch': 25,
+            'arch': 'resnet18',
+            'family': 'resnet',
+            'task': 'classify',
+            'names': {0: 'tench', 1: 'goldfish', 2: 'great_white_shark'},
+            'state_dict': {
+                'conv1.weight': [64, 3, 7, 7],
+                'layer1.0.conv1.weight': [64, 64, 3, 3],
+                'fc.weight': [3, 512],
+            }
+        }
+        zf.writestr('archive/data.pkl', pickle.dumps(meta, protocol=2))
+        zf.writestr('archive/data/0', struct.pack('<16f', *[float(x) * 0.05 for x in range(16)]))
+
+def generate_tiny_mobilenet_pt(filepath):
+    with zipfile.ZipFile(filepath, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('archive/byteorder', 'little')
+        zf.writestr('archive/version', '3')
+        import pickle
+        meta = {
+            'epoch': 30,
+            'arch': 'mobilenet_v2',
+            'family': 'mobilenet',
+            'task': 'classify',
+            'names': {0: 'cat', 1: 'dog', 2: 'bird'},
+            'state_dict': {
+                'features.0.0.weight': [32, 3, 3, 3],
+                'features.1.conv.0.0.weight': [32, 1, 3, 3],
+                'classifier.1.weight': [3, 1280],
+            }
+        }
+        zf.writestr('archive/data.pkl', pickle.dumps(meta, protocol=2))
+        zf.writestr('archive/data/0', struct.pack('<16f', *[float(x) * 0.02 for x in range(16)]))
+
 def generate_tiny_onnx(filepath):
     # Minimal binary ONNX protobuf model (ModelProto with IR version 8)
     buf = io.BytesIO()
@@ -166,11 +206,30 @@ def generate_tiny_onnx(filepath):
     with open(filepath, 'wb') as f:
         f.write(buf.getvalue())
 
+def generate_tiny_yolo_onnx(filepath):
+    # Minimal binary ONNX with Ultralytics producer and YOLO metadata
+    buf = io.BytesIO()
+    buf.write(b'\x08\x08')  # ir_version = 8
+    p_name = b'ultralytics YOLOv8'
+    buf.write(b'\x12' + bytes([len(p_name)]) + p_name)
+    names_json = b'{"0": "player", "1": "ball"}'
+    task_str = b'detect'
+    # Field 14 is metadata_props
+    entry1 = bytes([0x0a, 5]) + b'names' + bytes([0x12, len(names_json)]) + names_json
+    entry2 = bytes([0x0a, 4]) + b'task' + bytes([0x12, len(task_str)]) + task_str
+    buf.write(bytes([0x72, len(entry1)]) + entry1)
+    buf.write(bytes([0x72, len(entry2)]) + entry2)
+    with open(filepath, 'wb') as f:
+        f.write(buf.getvalue())
+
 if __name__ == '__main__':
     out_dir = os.path.join(os.path.dirname(__file__), '../../tests/fixtures/models')
     os.makedirs(out_dir, exist_ok=True)
     generate_tiny_gguf(os.path.join(out_dir, 'tiny.gguf'))
     generate_reasoning_gguf(os.path.join(out_dir, 'reasoning_tiny.gguf'))
     generate_tiny_pt(os.path.join(out_dir, 'tiny.pt'))
+    generate_tiny_resnet_pt(os.path.join(out_dir, 'tiny_resnet.pt'))
+    generate_tiny_mobilenet_pt(os.path.join(out_dir, 'tiny_mobilenet.pt'))
     generate_tiny_onnx(os.path.join(out_dir, 'tiny.onnx'))
+    generate_tiny_yolo_onnx(os.path.join(out_dir, 'tiny_yolo.onnx'))
     print("Generated model fixtures in", out_dir)

@@ -97,6 +97,7 @@ export type ReverseToolAction =
   | 'assemble_moe'
   | 'run_reasoning_model'
   | 'run_yolo_nn'
+  | 'run_torch_nn'
   | 'program_weight_space';
 
 export const isModelAction = (act: string): boolean => [
@@ -110,6 +111,7 @@ export const isModelAction = (act: string): boolean => [
   'assemble_moe',
   'run_reasoning_model',
   'run_yolo_nn',
+  'run_torch_nn',
   'program_weight_space',
 ].includes(act as any);
 
@@ -485,6 +487,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           'assemble_moe',
           'run_reasoning_model',
           'run_yolo_nn',
+  'run_torch_nn',
           'program_weight_space',
         ],
       },
@@ -664,6 +667,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     'assemble_moe',
     'run_reasoning_model',
     'run_yolo_nn',
+  'run_torch_nn',
     'program_weight_space',
   ];
 
@@ -687,6 +691,8 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
 
     const allowedRoots = [
       process.cwd(),
+      path.resolve(process.cwd(), '..'),
+      path.resolve(process.cwd(), '../..'),
       os.tmpdir(),
       ...(options?.workspaceRoot ? [String(options.workspaceRoot)] : []),
     ];
@@ -745,6 +751,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       assemble_moe: 'assemble_moe',
       run_reasoning_model: 'run_reasoning_model',
       run_yolo_nn: 'run_yolo_nn',
+      run_torch_nn: 'run_torch_nn',
       program_weight_space: 'program_weight_space',
     };
 
@@ -810,6 +817,9 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
     if (options?.subcommand) {
       args.push('--subcommand', String(options.subcommand));
+    }
+    if (options?.task) {
+      args.push('--task', String(options.task));
     }
 
     const pythonBin = resolvePythonPath();

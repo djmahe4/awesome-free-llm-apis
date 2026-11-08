@@ -312,7 +312,7 @@ def inspect_onnx(filepath):
     except Exception:
         with open(filepath, 'rb') as f:
             data = f.read()
-        res = {'format': 'onnx', 'irVersion': None, 'producerName': None, 'opsetVersion': None}
+        res = {'format': 'onnx', 'architecture': 'unknown', 'irVersion': None, 'producerName': None, 'opsetVersion': None}
         idx = 0
         while idx < len(data):
             tag, idx = read_varint(data, idx)
@@ -342,6 +342,14 @@ def inspect_onnx(filepath):
                 idx += 4
             else:
                 break
+        prod_lower = (res.get('producerName') or '').lower()
+        raw_lower = data.lower()
+        if 'ultralytics' in prod_lower or 'yolo' in prod_lower or b'yolo' in raw_lower or b'ultralytics' in raw_lower:
+            res['architecture'] = 'yolo'
+        elif 'resnet' in prod_lower or b'resnet' in raw_lower:
+            res['architecture'] = 'resnet'
+        elif 'mobilenet' in prod_lower or b'mobilenet' in raw_lower:
+            res['architecture'] = 'mobilenet'
         return res
 
 def classify_layer_role(tensor_name, shape=None):
@@ -631,7 +639,7 @@ def analyze_layer(filepath, fmt, layer_name):
 
 def main():
     parser = argparse.ArgumentParser(description="Model Artifact Inspector")
-    parser.add_argument("action", choices=["inspect", "infer_roles", "trace_execution", "extract_layer", "analyze_layer", "reconstruct_samples", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "program_weight_space"])
+    parser.add_argument("action", choices=["inspect", "infer_roles", "trace_execution", "extract_layer", "analyze_layer", "reconstruct_samples", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "program_weight_space"])
     parser.add_argument("--file", required=True, help="Path to model file")
     parser.add_argument("--format", choices=["gguf", "onnx", "pytorch", "auto"], default="auto")
     parser.add_argument("--layer", help="Target tensor/layer name")
@@ -647,6 +655,7 @@ def main():
     parser.add_argument("--rank", type=int, default=1)
     parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--subcommand", choices=['inspect', 'ablate', 'suppress', 'demo'], default='inspect')
+    parser.add_argument("--task", choices=['detect', 'classify', 'segment', 'pose'], default=None, help="Model task override")
     args = parser.parse_args()
 
     fmt = args.format
@@ -710,9 +719,9 @@ def main():
         runtime = GGUFReasoningRuntime(args.file)
         res = runtime.generate(args.prompt or 'Solve logic puzzle', max_tokens=args.max_tokens, temperature=args.temperature, seed=args.seed)
         print(json.dumps(res, indent=2))
-    elif args.action == "run_yolo_nn":
-        from yolo_nn_engine import run_yolo_detection
-        res = run_yolo_detection(args.file)
+    elif args.action in ("run_yolo_nn", "run_torch_nn"):
+        from torch_nn_engine import run_torch_forward
+        res = run_torch_forward(args.file, task=getattr(args, 'task', None))
         print(json.dumps(res, indent=2))
     elif args.action == "program_weight_space":
         from weight_space_programmer import load_model_layer, inspect_weight_spectrum, ablate_attractor_direction, suppress_loop_attractor
