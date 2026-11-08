@@ -177,4 +177,27 @@ print(f"SUCCESS: diff={diff:.6e}")
     expect(data.poses.length).toBeGreaterThan(0);
     expect(data.poses[0].keypoints).toHaveLength(30);
   });
+
+  it('runs YOLO forward pass with real match frame and letterbox metadata', async () => {
+    const framePath = path.resolve(__dirname, 'fixtures/media/frames/frame_0050.jpg');
+    if (!fs.existsSync(footydjBestPt) || !fs.existsSync(framePath)) {
+      return;
+    }
+
+    const res = await handleReverseTool({
+      action: 'run_torch_nn',
+      target: footydjBestPt,
+      authorization: 'lab',
+      sessionId: 'smoke-test-real-frame-' + Date.now(),
+      options: { image: framePath },
+    });
+
+    expect(res.success).toBe(true);
+    const data = res.data as any;
+    expect(data.inputMetadata.source).toBe('image_file');
+    expect(data.inputMetadata.letterbox).toBeDefined();
+    expect(data.inputMetadata.letterbox.originalSize).toEqual([1920, 1080]);
+    expect(data.weight_source).toBe('checkpoint_state_dict');
+    expect(data.real_tensors_used.length).toBeGreaterThan(0);
+  });
 });

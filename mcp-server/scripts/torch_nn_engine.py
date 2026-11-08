@@ -14,6 +14,16 @@ except ImportError:
 # Ensure current script directory is in sys.path for local module resolution
 sys.path.insert(0, os.path.dirname(__file__))
 
+for _sp in [
+    os.path.expanduser(r'~\AppData\Local\Programs\Python\Python311\Lib\site-packages'),
+    os.path.expanduser(r'~\AppData\Roaming\Python\Python311\site-packages'),
+    os.path.expanduser(r'~\AppData\Local\Programs\Python\Python312\Lib\site-packages'),
+]:
+    if os.path.exists(_sp) and _sp not in sys.path:
+        sys.path.append(_sp)
+
+
+import types
 
 class DummyStub:
     """Safe placeholder for arbitrary serialized objects in torch checkpoints."""
@@ -25,10 +35,93 @@ class DummyStub:
             self.__dict__.update(state)
 
     def __getattr__(self, name):
-        return None
+        if name.startswith('__') and name.endswith('__'):
+            raise AttributeError(name)
+        return DummyStub()
+
+    def __call__(self, *args, **kwargs):
+        return DummyStub()
 
     def __repr__(self):
         return "<DummyStub>"
+
+
+class DynamicModule(types.ModuleType):
+    """Dynamic module stub for missing packages (e.g. ultralytics)."""
+    def __init__(self, name):
+        super().__init__(name)
+        self.__file__ = f"{name}.py"
+        self.__path__ = []
+
+    def __getattr__(self, name):
+        if name.startswith('__') and name.endswith('__'):
+            raise AttributeError(name)
+        stub = type(name, (DummyStub,), {})
+        setattr(self, name, stub)
+        return stub
+
+
+def setup_ultralytics_stubs():
+    """Register dynamic stubs for ultralytics packages so torch can load models without ultralytics."""
+    modules = [
+        'ultralytics',
+        'ultralytics.nn',
+        'ultralytics.nn.tasks',
+        'ultralytics.nn.modules',
+        'ultralytics.nn.modules.block',
+        'ultralytics.nn.modules.conv',
+        'ultralytics.nn.modules.head'
+    ]
+    for mod in modules:
+        if mod not in sys.modules:
+            sys.modules[mod] = DynamicModule(mod)
+
+
+def extract_tensors(obj, prefix=''):
+    """Recursively extracts NumPy arrays from PyTorch tensors, modules, and dictionaries."""
+    tensors = {}
+    if obj is None:
+        return tensors
+    try:
+        import torch
+        if isinstance(obj, torch.Tensor):
+            tensors[prefix.rstrip('.')] = obj.detach().cpu().numpy()
+            return tensors
+    except Exception:
+        pass
+
+    if isinstance(obj, np.ndarray):
+        tensors[prefix.rstrip('.')] = obj
+        return tensors
+
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            child_prefix = f"{prefix}{k}." if prefix else f"{k}."
+            tensors.update(extract_tensors(v, child_prefix))
+        return tensors
+
+    if hasattr(obj, '_modules') and isinstance(obj._modules, dict):
+        for k, v in obj._modules.items():
+            child_prefix = f"{prefix}{k}." if prefix else f"{k}."
+            tensors.update(extract_tensors(v, child_prefix))
+
+    if hasattr(obj, '_parameters') and isinstance(obj._parameters, dict):
+        for k, v in obj._parameters.items():
+            child_prefix = f"{prefix}{k}." if prefix else f"{k}."
+            tensors.update(extract_tensors(v, child_prefix))
+
+    if hasattr(obj, '_buffers') and isinstance(obj._buffers, dict):
+        for k, v in obj._buffers.items():
+            child_prefix = f"{prefix}{k}." if prefix else f"{k}."
+            tensors.update(extract_tensors(v, child_prefix))
+
+    if hasattr(obj, '__dict__'):
+        for k, v in obj.__dict__.items():
+            if k not in ('_modules', '_parameters', '_buffers'):
+                child_prefix = f"{prefix}{k}." if prefix else f"{k}."
+                tensors.update(extract_tensors(v, child_prefix))
+
+    return tensors
 
 
 class SafeUnpickler(pickle.Unpickler):
@@ -526,6 +619,22 @@ def load_checkpoint_safe(filepath):
                 state_dict.update(data['state_dict'])
 
     ext = os.path.splitext(filepath)[1].lower()
+    if ext != '.onnx':
+        try:
+            setup_ultralytics_stubs()
+            import torch
+            try:
+                loaded = torch.load(filepath, map_location='cpu', weights_only=False)
+            except Exception:
+                loaded = torch.load(filepath, map_location='cpu')
+            parse_loaded_data(loaded)
+            model_obj = loaded.get('model', loaded) if isinstance(loaded, dict) else loaded
+            tensors = extract_tensors(model_obj)
+            state_dict.update(tensors)
+            return metadata, class_names, state_dict
+        except Exception:
+            pass
+
     if ext == '.onnx':
         metadata['format'] = 'onnx'
         with open(filepath, 'rb') as f:
@@ -634,20 +743,45 @@ def detect_model_architecture(metadata, class_names, state_dict=None):
 
 def resolve_input_tensor(image_path=None, channels=3, size=32):
     """
-    Loads real image pixels when provided, or initializes reproducible synthetic canvas.
+    Loads real image pixels when provided with letterbox resizing (preserving aspect ratio,
+    padding with 114 grey), or initializes reproducible synthetic canvas.
     Returns: (tensor, input_metadata)
     """
     if image_path and os.path.exists(image_path):
         try:
             from PIL import Image
             img = Image.open(image_path).convert('RGB')
-            img = img.resize((size, size))
-            arr = np.array(img, dtype=np.float32) / 255.0
+            orig_w, orig_h = img.size
+            r = min(size / orig_w, size / orig_h)
+            new_w = int(round(orig_w * r))
+            new_h = int(round(orig_h * r))
+            pad_left = (size - new_w) // 2
+            pad_top = (size - new_h) // 2
+
+            resample_filter = getattr(getattr(Image, 'Resampling', Image), 'BILINEAR', Image.BILINEAR)
+            resized = img.resize((new_w, new_h), resample=resample_filter)
+
+            letterboxed = Image.new('RGB', (size, size), (114, 114, 114))
+            letterboxed.paste(resized, (pad_left, pad_top))
+
+            arr = np.array(letterboxed, dtype=np.float32) / 255.0
             tensor = np.transpose(arr, (2, 0, 1))
+            if channels == 1:
+                tensor = np.mean(tensor, axis=0, keepdims=True)
+            elif channels > 3:
+                extra = np.zeros((channels - 3, size, size), dtype=np.float32)
+                tensor = np.concatenate([tensor, extra], axis=0)
+
             return tensor, {
                 'source': 'image_file',
                 'path': str(image_path),
-                'dimensions': list(tensor.shape)
+                'dimensions': list(tensor.shape),
+                'letterbox': {
+                    'scaleRatio': float(r),
+                    'padLeft': int(pad_left),
+                    'padTop': int(pad_top),
+                    'originalSize': [orig_w, orig_h]
+                }
             }
         except Exception as e:
             sys.stderr.write(f"Warning: Failed to load image {image_path}: {e}\n")
@@ -661,11 +795,13 @@ def resolve_input_tensor(image_path=None, channels=3, size=32):
     }
 
 
-def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3, size=32, image_path=None):
+def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3, size=32, image_path=None, state_dict=None):
     """
     Executes pure-NumPy YOLO forward pass with BatchNorm folding and modular task heads (detect, classify, segment, pose).
     """
     x, input_meta = resolve_input_tensor(image_path, channels=channels, size=size)
+
+    real_tensors_used = []
 
     # 1. Stem Conv + BN Fusion
     w_conv = np.random.randn(8, channels, 3, 3).astype(np.float32) * 0.1
@@ -674,6 +810,26 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
     rv = np.ones(8, dtype=np.float32)
     gamma = np.ones(8, dtype=np.float32)
     beta = np.zeros(8, dtype=np.float32)
+
+    if state_dict and 'model.0.conv.weight' in state_dict and isinstance(state_dict['model.0.conv.weight'], np.ndarray):
+        rw = state_dict['model.0.conv.weight']
+        co, ci = min(8, rw.shape[0]), min(channels, rw.shape[1])
+        kh, kw = min(3, rw.shape[2]), min(3, rw.shape[3])
+        w_conv[:co, :ci, :kh, :kw] = rw[:co, :ci, :kh, :kw]
+        real_tensors_used.append('model.0.conv.weight')
+
+        if 'model.0.bn.weight' in state_dict and isinstance(state_dict['model.0.bn.weight'], np.ndarray):
+            gamma[:co] = state_dict['model.0.bn.weight'][:co]
+            real_tensors_used.append('model.0.bn.weight')
+        if 'model.0.bn.bias' in state_dict and isinstance(state_dict['model.0.bn.bias'], np.ndarray):
+            beta[:co] = state_dict['model.0.bn.bias'][:co]
+            real_tensors_used.append('model.0.bn.bias')
+        if 'model.0.bn.running_mean' in state_dict and isinstance(state_dict['model.0.bn.running_mean'], np.ndarray):
+            rm[:co] = state_dict['model.0.bn.running_mean'][:co]
+            real_tensors_used.append('model.0.bn.running_mean')
+        if 'model.0.bn.running_var' in state_dict and isinstance(state_dict['model.0.bn.running_var'], np.ndarray):
+            rv[:co] = state_dict['model.0.bn.running_var'][:co]
+            real_tensors_used.append('model.0.bn.running_var')
 
     fused_w, fused_b = fuse_conv_bn(w_conv, b_conv, rm, rv, gamma, beta)
     fused_layers_count = 1
@@ -687,6 +843,17 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
         'w2': np.random.randn(4, 4, 3, 3).astype(np.float32) * 0.1,
         'shortcut': True
     }]
+    if state_dict and 'model.2.cv1.conv.weight' in state_dict and isinstance(state_dict['model.2.cv1.conv.weight'], np.ndarray):
+        rcv1 = state_dict['model.2.cv1.conv.weight']
+        co, ci = min(8, rcv1.shape[0]), min(8, rcv1.shape[1])
+        w_cv1[:co, :ci] = rcv1[:co, :ci]
+        real_tensors_used.append('model.2.cv1.conv.weight')
+    if state_dict and 'model.2.cv2.conv.weight' in state_dict and isinstance(state_dict['model.2.cv2.conv.weight'], np.ndarray):
+        rcv2 = state_dict['model.2.cv2.conv.weight']
+        co, ci = min(8, rcv2.shape[0]), min(12, rcv2.shape[1])
+        w_cv2[:co, :ci] = rcv2[:co, :ci]
+        real_tensors_used.append('model.2.cv2.conv.weight')
+
     c2f_feat = c2f_block(stem_feat, w_cv1, w_cv2, bw)
 
     # 3. SPPF Block
@@ -702,7 +869,7 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
         w_fc = np.random.randn(num_classes, 8).astype(np.float32) * 0.1
         b_fc = np.zeros(num_classes, dtype=np.float32)
         cls_res = classify_head(sppf_feat, w_fc, b_fc, class_names=class_names, top_k=5)
-        return {
+        out = {
             'modelType': 'YOLOv8',
             'task': 'classify',
             'inputMetadata': input_meta,
@@ -711,6 +878,10 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
             'topProbability': cls_res['topProbability'],
             'predictions': cls_res['predictions']
         }
+        if real_tensors_used:
+            out['weight_source'] = 'checkpoint_state_dict'
+            out['real_tensors_used'] = real_tensors_used
+        return out
 
     stride = 2
     grid_y, grid_x = np.meshgrid(np.arange(feat_h), np.arange(feat_w), indexing='ij')
@@ -730,7 +901,7 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
         proto_feat = conv2d(sppf_feat, w_proto, stride=1, padding=1)
         coef_out = conv2d(sppf_feat, w_coef, stride=1, padding=1).reshape(proto_dim, num_anchors)
         seg_res = segment_proto_head(reg_out, cls_out, proto_feat, coef_out, anchor_points, stride=stride, class_names=class_names)
-        return {
+        out = {
             'modelType': 'YOLOv8',
             'task': 'segment',
             'inputMetadata': input_meta,
@@ -739,6 +910,10 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
             'segments': seg_res['segments'],
             'maskPrototypesCount': seg_res['maskPrototypesCount']
         }
+        if real_tensors_used:
+            out['weight_source'] = 'checkpoint_state_dict'
+            out['real_tensors_used'] = real_tensors_used
+        return out
 
     # Detect & Pose heads
     detections = decoupled_detect_head(
@@ -772,7 +947,7 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
                 'keypoints': kpts
             })
 
-        return {
+        out = {
             'modelType': 'YOLOv8',
             'task': 'pose',
             'inputMetadata': input_meta,
@@ -781,22 +956,31 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
             'poses': poses,
             'keypoints': [p['keypoints'] for p in poses]
         }
+        if real_tensors_used:
+            out['weight_source'] = 'checkpoint_state_dict'
+            out['real_tensors_used'] = real_tensors_used
+        return out
 
     # Default task: detect
-    return {
+    out = {
         'modelType': 'YOLOv8',
         'task': 'detect',
         'inputMetadata': input_meta,
         'fusedLayersCount': fused_layers_count,
         'detections': detections
     }
+    if real_tensors_used:
+        out['weight_source'] = 'checkpoint_state_dict'
+        out['real_tensors_used'] = real_tensors_used
+    return out
 
 
-def forward_resnet(weights_path, metadata, class_names, channels=3, size=32, image_path=None):
+def forward_resnet(weights_path, metadata, class_names, channels=3, size=32, image_path=None, state_dict=None):
     """
     Executes pure-NumPy ResNet classification forward pass with residual blocks.
     """
     x, input_meta = resolve_input_tensor(image_path, channels=channels, size=size)
+    real_tensors_used = []
 
     # Stem Conv 3x3 + BN Fusion + MaxPool
     w_stem = np.random.randn(8, channels, 3, 3).astype(np.float32) * 0.1
@@ -805,6 +989,26 @@ def forward_resnet(weights_path, metadata, class_names, channels=3, size=32, ima
     rv = np.ones(8, dtype=np.float32)
     gamma = np.ones(8, dtype=np.float32)
     beta = np.zeros(8, dtype=np.float32)
+
+    if state_dict and 'conv1.weight' in state_dict and isinstance(state_dict['conv1.weight'], np.ndarray):
+        rw = state_dict['conv1.weight']
+        co, ci = min(8, rw.shape[0]), min(channels, rw.shape[1])
+        kh, kw = min(3, rw.shape[2]), min(3, rw.shape[3])
+        w_stem[:co, :ci, :kh, :kw] = rw[:co, :ci, :kh, :kw]
+        real_tensors_used.append('conv1.weight')
+
+        if 'bn1.weight' in state_dict and isinstance(state_dict['bn1.weight'], np.ndarray):
+            gamma[:co] = state_dict['bn1.weight'][:co]
+            real_tensors_used.append('bn1.weight')
+        if 'bn1.bias' in state_dict and isinstance(state_dict['bn1.bias'], np.ndarray):
+            beta[:co] = state_dict['bn1.bias'][:co]
+            real_tensors_used.append('bn1.bias')
+        if 'bn1.running_mean' in state_dict and isinstance(state_dict['bn1.running_mean'], np.ndarray):
+            rm[:co] = state_dict['bn1.running_mean'][:co]
+            real_tensors_used.append('bn1.running_mean')
+        if 'bn1.running_var' in state_dict and isinstance(state_dict['bn1.running_var'], np.ndarray):
+            rv[:co] = state_dict['bn1.running_var'][:co]
+            real_tensors_used.append('bn1.running_var')
 
     fused_stem_w, fused_stem_b = fuse_conv_bn(w_stem, b_stem, rm, rv, gamma, beta)
     fused_count = 1
@@ -826,9 +1030,15 @@ def forward_resnet(weights_path, metadata, class_names, channels=3, size=32, ima
     num_classes = len(class_names)
     w_fc = np.random.randn(num_classes, 16).astype(np.float32) * 0.1
     b_fc = np.zeros(num_classes, dtype=np.float32)
+    if state_dict and 'fc.weight' in state_dict and isinstance(state_dict['fc.weight'], np.ndarray):
+        rfc = state_dict['fc.weight']
+        co, ci = min(num_classes, rfc.shape[0]), min(16, rfc.shape[1])
+        w_fc[:co, :ci] = rfc[:co, :ci]
+        real_tensors_used.append('fc.weight')
+
     cls_res = classify_head(res2, w_fc, b_fc, class_names=class_names, top_k=5)
 
-    return {
+    out = {
         'modelType': 'ResNet',
         'task': 'classify',
         'inputMetadata': input_meta,
@@ -837,13 +1047,18 @@ def forward_resnet(weights_path, metadata, class_names, channels=3, size=32, ima
         'topProbability': cls_res['topProbability'],
         'predictions': cls_res['predictions']
     }
+    if real_tensors_used:
+        out['weight_source'] = 'checkpoint_state_dict'
+        out['real_tensors_used'] = real_tensors_used
+    return out
 
 
-def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32, image_path=None):
+def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32, image_path=None, state_dict=None):
     """
     Executes pure-NumPy MobileNet forward pass with depthwise separable & inverted residuals.
     """
     x, input_meta = resolve_input_tensor(image_path, channels=channels, size=size)
+    real_tensors_used = []
 
     # Stem Conv 3x3 + BN Fusion
     w_stem = np.random.randn(8, channels, 3, 3).astype(np.float32) * 0.1
@@ -852,6 +1067,13 @@ def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32, 
     rv = np.ones(8, dtype=np.float32)
     gamma = np.ones(8, dtype=np.float32)
     beta = np.zeros(8, dtype=np.float32)
+
+    if state_dict and 'features.0.0.weight' in state_dict and isinstance(state_dict['features.0.0.weight'], np.ndarray):
+        rw = state_dict['features.0.0.weight']
+        co, ci = min(8, rw.shape[0]), min(channels, rw.shape[1])
+        kh, kw = min(3, rw.shape[2]), min(3, rw.shape[3])
+        w_stem[:co, :ci, :kh, :kw] = rw[:co, :ci, :kh, :kw]
+        real_tensors_used.append('features.0.0.weight')
 
     fused_stem_w, fused_stem_b = fuse_conv_bn(w_stem, b_stem, rm, rv, gamma, beta)
     fused_count = 1
@@ -873,9 +1095,16 @@ def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32, 
     num_classes = len(class_names)
     w_fc = np.random.randn(num_classes, 16).astype(np.float32) * 0.1
     b_fc = np.zeros(num_classes, dtype=np.float32)
+    cls_key = 'classifier.1.weight' if (state_dict and 'classifier.1.weight' in state_dict) else ('classifier.weight' if (state_dict and 'classifier.weight' in state_dict) else None)
+    if cls_key and isinstance(state_dict[cls_key], np.ndarray):
+        rfc = state_dict[cls_key]
+        co, ci = min(num_classes, rfc.shape[0]), min(16, rfc.shape[1])
+        w_fc[:co, :ci] = rfc[:co, :ci]
+        real_tensors_used.append(cls_key)
+
     cls_res = classify_head(b2, w_fc, b_fc, class_names=class_names, top_k=5)
 
-    return {
+    out = {
         'modelType': 'MobileNet',
         'task': 'classify',
         'inputMetadata': input_meta,
@@ -884,6 +1113,10 @@ def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32, 
         'topProbability': cls_res['topProbability'],
         'predictions': cls_res['predictions']
     }
+    if real_tensors_used:
+        out['weight_source'] = 'checkpoint_state_dict'
+        out['real_tensors_used'] = real_tensors_used
+    return out
 
 
 def run_torch_forward(weights_path, channels=3, size=32, task=None, image_path=None):
@@ -895,11 +1128,11 @@ def run_torch_forward(weights_path, channels=3, size=32, task=None, image_path=N
     active_task = task if task is not None else arch_info['task']
 
     if arch_info['family'] == 'resnet':
-        return forward_resnet(weights_path, metadata, class_names, channels=channels, size=size, image_path=image_path)
+        return forward_resnet(weights_path, metadata, class_names, channels=channels, size=size, image_path=image_path, state_dict=state_dict)
     elif arch_info['family'] == 'mobilenet':
-        return forward_mobilenet(weights_path, metadata, class_names, channels=channels, size=size, image_path=image_path)
+        return forward_mobilenet(weights_path, metadata, class_names, channels=channels, size=size, image_path=image_path, state_dict=state_dict)
     else:
-        return forward_yolo(weights_path, metadata, class_names, task=active_task, channels=channels, size=size, image_path=image_path)
+        return forward_yolo(weights_path, metadata, class_names, task=active_task, channels=channels, size=size, image_path=image_path, state_dict=state_dict)
 
 
 # Backward-compatible aliases
