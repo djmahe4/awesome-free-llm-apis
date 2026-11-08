@@ -83,6 +83,7 @@ describe('CodingAgentsHandler — OMP Multi-File Atomic Update & CAS Rollback', 
       goal: 'migrate legacyLogger across service and worker',
       workspaceRoot: ws,
       dryRun: false,
+      pauseBeforeMultiFile: false,
       topKFiles: 2,
       astEditOps: [
         { pat: 'legacyLogger($$$MSG)', out: 'logger.info($$$MSG)' },

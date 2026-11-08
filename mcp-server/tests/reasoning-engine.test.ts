@@ -6,7 +6,8 @@ import * as fs from 'node:fs';
 describe('Working Reasoning Model GGUF Forward Pass', () => {
   const scriptPath = path.resolve(__dirname, '../scripts/reasoning_engine.py');
   const fixturePath = path.resolve(__dirname, 'fixtures/models/reasoning_tiny.gguf');
-  const pythonBin = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+  const projectPython = path.resolve(__dirname, '../venv/Scripts/python.exe');
+  const pythonBin = process.env.PYTHON || (process.platform === 'win32' && fs.existsSync(projectPython) ? projectPython : (process.platform === 'win32' ? 'python' : 'python3'));
 
   beforeAll(() => {
     if (!fs.existsSync(fixturePath)) {
