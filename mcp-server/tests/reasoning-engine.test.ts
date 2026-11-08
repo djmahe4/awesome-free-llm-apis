@@ -27,8 +27,11 @@ describe('Working Reasoning Model GGUF Forward Pass', () => {
 
     const result = JSON.parse(raw);
     expect(result.tokensGenerated.length).toBeGreaterThan(0);
+    expect(result.output).not.toBe('<pad>');
+    expect(result.output).not.toBe('</think>');
     expect(result.reasoningTrace).toContain('<think>');
-    expect(result.output).toBeDefined();
+    expect(result.reasoningTrace).toContain('</think>');
+    expect(result.output).toBe('14');
   });
 
   it('emits varied outputs when temperature is non-zero', () => {

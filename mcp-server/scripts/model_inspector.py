@@ -17,7 +17,8 @@ GGUF_MAGIC = 0x46554747  # 'GGUF'
 GGML_TYPES = {
     0: 'F32', 1: 'F16', 2: 'Q4_0', 3: 'Q4_1',
     6: 'Q5_0', 7: 'Q5_1', 8: 'Q8_0', 9: 'Q8_1',
-    12: 'Q4_K', 13: 'Q5_K', 14: 'Q6_K', 15: 'Q8_K'
+    12: 'Q4_K', 13: 'Q5_K', 14: 'Q6_K', 15: 'Q8_K',
+    30: 'BF16', 31: 'Q4_K_S', 32: 'Q4_K_M', 33: 'Q5_K_S', 34: 'Q5_K_M'
 }
 
 class SafeUnpickler(pickle.Unpickler):
@@ -60,7 +61,118 @@ def read_varint(data, idx):
     return val, idx
 
 
+def resolve_model_path(filepath):
+    if not isinstance(filepath, str) or not filepath.startswith('ollama:'):
+        return filepath
+
+    model_ref = filepath[len('ollama:'):].strip()
+    if ':' in model_ref:
+        model_name, tag = model_ref.rsplit(':', 1)
+    else:
+        model_name, tag = model_ref, 'latest'
+
+    base_dir = os.path.expanduser('~/.ollama/models')
+    manifests_dir = os.path.join(base_dir, 'manifests')
+    blobs_dir = os.path.join(base_dir, 'blobs')
+
+    candidates = [
+        os.path.join(manifests_dir, *model_name.split('/'), tag),
+        os.path.join(manifests_dir, 'registry.ollama.ai', 'library', *model_name.split('/'), tag),
+        os.path.join(manifests_dir, 'registry.ollama.ai', *model_name.split('/'), tag),
+    ]
+
+    manifest_path = None
+    for cand in candidates:
+        if os.path.isfile(cand):
+            manifest_path = cand
+            break
+
+    if not manifest_path and os.path.isdir(manifests_dir):
+        for root, dirs, files in os.walk(manifests_dir):
+            if tag in files:
+                rel = os.path.relpath(root, manifests_dir).replace('\\', '/')
+                if rel.endswith(model_name) or rel == model_name or os.path.basename(root) == model_name:
+                    manifest_path = os.path.join(root, tag)
+                    break
+
+    if not manifest_path:
+        raise FileNotFoundError(f"Ollama manifest not found for '{filepath}'")
+
+    with open(manifest_path, 'r', encoding='utf-8') as f:
+        manifest = json.load(f)
+
+    layers = manifest.get('layers', [])
+    model_layer = next((l for l in layers if l.get('mediaType') == 'application/vnd.ollama.image.model'), None)
+    if not model_layer and layers:
+        model_layer = max(layers, key=lambda l: l.get('size', 0))
+    if not model_layer or 'digest' not in model_layer:
+        raise ValueError(f"No model blob found in manifest for '{filepath}'")
+
+    blob_name = model_layer['digest'].replace(':', '-')
+    blob_path = os.path.join(blobs_dir, blob_name)
+    if not os.path.exists(blob_path):
+        raise FileNotFoundError(f"Ollama model blob not found: {blob_path}")
+
+    return blob_path
+
+
+def read_gguf_value(mm, offset, val_type, summarize=True):
+    if val_type == 0:  # UINT8
+        val = struct.unpack('<B', mm[offset:offset+1])[0]
+        return val, offset + 1
+    elif val_type == 1:  # INT8
+        val = struct.unpack('<b', mm[offset:offset+1])[0]
+        return val, offset + 1
+    elif val_type == 2:  # UINT16
+        val = struct.unpack('<H', mm[offset:offset+2])[0]
+        return val, offset + 2
+    elif val_type == 3:  # INT16
+        val = struct.unpack('<h', mm[offset:offset+2])[0]
+        return val, offset + 2
+    elif val_type == 4:  # UINT32
+        val = struct.unpack('<I', mm[offset:offset+4])[0]
+        return val, offset + 4
+    elif val_type == 5:  # INT32
+        val = struct.unpack('<i', mm[offset:offset+4])[0]
+        return val, offset + 4
+    elif val_type == 6:  # FLOAT32
+        val = struct.unpack('<f', mm[offset:offset+4])[0]
+        return val, offset + 4
+    elif val_type == 7:  # BOOL
+        val = bool(struct.unpack('<?', mm[offset:offset+1])[0])
+        return val, offset + 1
+    elif val_type == 8:  # STRING
+        v_len = struct.unpack('<Q', mm[offset:offset+8])[0]
+        offset += 8
+        val = mm[offset:offset+v_len].decode('utf-8', errors='replace')
+        return val, offset + v_len
+    elif val_type == 9:  # ARRAY
+        elem_type = struct.unpack('<I', mm[offset:offset+4])[0]
+        offset += 4
+        arr_len = struct.unpack('<Q', mm[offset:offset+8])[0]
+        offset += 8
+        items = []
+        for _ in range(arr_len):
+            elem, offset = read_gguf_value(mm, offset, elem_type, summarize=False)
+            items.append(elem)
+        if summarize and len(items) > 32:
+            return items[:32] + [f"... ({len(items) - 32} more elements)"], offset
+        return items, offset
+    elif val_type == 10:  # UINT64
+        val = struct.unpack('<Q', mm[offset:offset+8])[0]
+        return val, offset + 8
+    elif val_type == 11:  # INT64
+        val = struct.unpack('<q', mm[offset:offset+8])[0]
+        return val, offset + 8
+    elif val_type == 12:  # FLOAT64
+        val = struct.unpack('<d', mm[offset:offset+8])[0]
+        return val, offset + 8
+    else:
+        raise ValueError(f"Unknown GGUF value type: {val_type}")
+
+
 def inspect_gguf(filepath):
+    filepath = resolve_model_path(filepath)
     with open(filepath, 'rb') as f:
         mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
         try:
@@ -79,35 +191,8 @@ def inspect_gguf(filepath):
                 offset += key_len
                 val_type = struct.unpack('<I', mm[offset:offset+4])[0]
                 offset += 4
-
-                if val_type == 8:  # STRING
-                    v_len = struct.unpack('<Q', mm[offset:offset+8])[0]
-                    offset += 8
-                    val = mm[offset:offset+v_len].decode('utf-8', errors='replace')
-                    offset += v_len
-                    metadata[key] = val
-                elif val_type == 4:  # UINT32
-                    val = struct.unpack('<I', mm[offset:offset+4])[0]
-                    offset += 4
-                    metadata[key] = val
-                elif val_type == 5:  # INT32
-                    val = struct.unpack('<i', mm[offset:offset+4])[0]
-                    offset += 4
-                    metadata[key] = val
-                elif val_type == 10:  # UINT64
-                    val = struct.unpack('<Q', mm[offset:offset+8])[0]
-                    offset += 8
-                    metadata[key] = val
-                elif val_type == 11:  # INT64
-                    val = struct.unpack('<q', mm[offset:offset+8])[0]
-                    offset += 8
-                    metadata[key] = val
-                elif val_type == 6:  # FLOAT32
-                    val = struct.unpack('<f', mm[offset:offset+4])[0]
-                    offset += 4
-                    metadata[key] = val
-                else:
-                    offset += 4
+                val, offset = read_gguf_value(mm, offset, val_type, summarize=True)
+                metadata[key] = val
 
             tensors = []
             for _ in range(tensor_count):
@@ -296,6 +381,7 @@ def classify_layer_role(tensor_name, shape=None):
     return ('unknown', 'unknown', 'Unknown or unclassified layer role')
 
 def infer_layer_roles(filepath, fmt):
+    filepath = resolve_model_path(filepath)
     if fmt == 'gguf':
         data = inspect_gguf(filepath)
         raw_layers = data.get('tensors', [])
@@ -329,6 +415,7 @@ def infer_layer_roles(filepath, fmt):
 
 
 def trace_layer_execution(filepath, fmt, cache_dir):
+    filepath = resolve_model_path(filepath)
     if np is None:
         raise ModuleNotFoundError("No module named 'numpy'. numpy is required for tensor inspection and activation reconstruction. Please install numpy.")
     os.makedirs(cache_dir, exist_ok=True)
@@ -378,6 +465,7 @@ def trace_layer_execution(filepath, fmt, cache_dir):
 
 
 def reconstruct_training_samples(filepath, fmt, target_class=0, steps=50, output_file=None):
+    filepath = resolve_model_path(filepath)
     if np is None:
         raise ModuleNotFoundError("No module named 'numpy'. numpy is required for tensor inspection and activation reconstruction. Please install numpy.")
 
@@ -433,6 +521,7 @@ def reconstruct_training_samples(filepath, fmt, target_class=0, steps=50, output
 
 
 def get_tensor_data(filepath, fmt, layer_name):
+    filepath = resolve_model_path(filepath)
     if np is None:
         raise ModuleNotFoundError("No module named 'numpy'. numpy is required for tensor inspection and activation reconstruction. Please install numpy.")
     if fmt == 'gguf':
@@ -479,6 +568,7 @@ def get_tensor_data(filepath, fmt, layer_name):
 
 
 def extract_layer(filepath, fmt, layer_name, output_path):
+    filepath = resolve_model_path(filepath)
     if np is None:
         raise ModuleNotFoundError("No module named 'numpy'. numpy is required for tensor inspection and activation reconstruction. Please install numpy.")
     data, tensor_info = get_tensor_data(filepath, fmt, layer_name)
@@ -517,6 +607,7 @@ def extract_layer(filepath, fmt, layer_name, output_path):
 
 
 def analyze_layer(filepath, fmt, layer_name):
+    filepath = resolve_model_path(filepath)
     if np is None:
         raise ModuleNotFoundError("No module named 'numpy'. numpy is required for tensor inspection and activation reconstruction. Please install numpy.")
     data, tensor_info = get_tensor_data(filepath, fmt, layer_name)
@@ -550,10 +641,12 @@ def main():
 
     fmt = args.format
     if fmt == 'auto':
-        ext = os.path.splitext(args.file)[1].lower()
+        resolved_file = resolve_model_path(args.file)
+        ext = os.path.splitext(resolved_file)[1].lower()
         if ext == '.gguf': fmt = 'gguf'
         elif ext == '.onnx': fmt = 'onnx'
         elif ext in ('.pt', '.pth', '.bin'): fmt = 'pytorch'
+        elif args.file.startswith('ollama:'): fmt = 'gguf'
         else: fmt = 'unknown'
 
     if args.action == "inspect":

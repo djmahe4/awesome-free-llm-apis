@@ -96,13 +96,13 @@ def generate_reasoning_gguf(filepath):
         write_kv_u32('reasoning_transformer.head_count', 2)
 
         tensor_specs = [
-            ('token_embd.weight', [16, 11]),
+            ('token_embd.weight', [16, 14]),
             ('blk.0.attn_norm.weight', [16]),
             ('blk.0.attn_q.weight', [16, 16]),
             ('blk.0.attn_k.weight', [16, 16]),
             ('blk.0.attn_v.weight', [16, 16]),
             ('blk.0.attn_output.weight', [16, 16]),
-            ('output.weight', [16, 11]),
+            ('output.weight', [16, 14]),
         ]
 
         current_offset = 0
