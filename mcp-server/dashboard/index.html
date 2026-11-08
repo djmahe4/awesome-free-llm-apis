@@ -1640,6 +1640,44 @@
         </div>
       </div>
 
+
+      <!-- Guided path -->
+      <div class="card ml-path" id="ml-path" style="margin-bottom:14px;">
+        <div class="card-body" style="padding:14px 16px;">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div style="max-width:620px;">
+              <div style="font-weight:700;font-size:.9rem;margin-bottom:4px;">Learn a neural network one layer at a time</div>
+              <p style="font-size:.78rem;color:var(--text-muted);line-height:1.5;margin:0;">
+                A model is a stack of small steps. Load one, look at its layers, open a single layer and do its math by hand, then add the layers back one at a time and watch what each one changes. Follow steps 1 to 6 in order; each opens when you press its button. The labs at the bottom are optional.
+              </p>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button type="button" class="btn btn-secondary btn-sm" id="ml-expand-all">Expand all</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="ml-collapse-all">Collapse all</button>
+            </div>
+          </div>
+          <div class="ml-path-strip" id="ml-path-strip">
+            <button type="button" class="ml-path-dot" data-ml-goto="1"><b>1</b> Load</button>
+            <button type="button" class="ml-path-dot" data-ml-goto="2"><b>2</b> Layers</button>
+            <button type="button" class="ml-path-dot" data-ml-goto="3"><b>3</b> One layer</button>
+            <button type="button" class="ml-path-dot" data-ml-goto="4"><b>4</b> Its math</button>
+            <button type="button" class="ml-path-dot" data-ml-goto="5"><b>5</b> Build up</button>
+            <button type="button" class="ml-path-dot" data-ml-goto="6"><b>6</b> Reassemble</button>
+          </div>
+        </div>
+      </div>
+
+      <details class="card ml-step" id="ml-step-1" data-step="1" open>
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num">1</span>
+            <span>Load a model</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-purple ml-step-state" id="ml-step-1-state">to do</span>
+        </summary>
+        <div class="card-body ml-step-body">
+          <p class="ml-step-lead">Pick a checkpoint file and load it. Press &ldquo;Inspect &amp; Load Model&rdquo;; everything below reads from it. The small test models are fine to start with.</p>
       <!-- 1. Custom Model Loader & Forward Pass Console Card -->
       <div class="card" style="margin-bottom:18px;">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
@@ -1658,15 +1696,15 @@
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
               <label for="ml-model-path-input" style="font-size:.75rem;font-weight:600;color:var(--text-secondary);">Model Checkpoint Path (.pt / .onnx / .gguf):</label>
               <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="../footydj_local_app/runs/pose/train/weights/best.pt" style="font-size:.68rem;padding:2px 8px;">⚽ FootyDJ best.pt</button>
-                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="mcp-server/tests/fixtures/models/tiny.pt" style="font-size:.68rem;padding:2px 8px;">📦 YOLO tiny.pt</button>
-                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="mcp-server/tests/fixtures/models/tiny_resnet.pt" style="font-size:.68rem;padding:2px 8px;">🧬 ResNet18 tiny</button>
-                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="mcp-server/tests/fixtures/models/tiny_mobilenet.pt" style="font-size:.68rem;padding:2px 8px;">📱 MobileNetV2</button>
-                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="mcp-server/tests/fixtures/models/reasoning_tiny.gguf" style="font-size:.68rem;padding:2px 8px;">🧠 Reasoning GGUF</button>
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny.gguf" style="font-size:.68rem;padding:2px 8px;">&#127793; Tiny GGUF (2 layers, start here)</button>
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny.pt" style="font-size:.68rem;padding:2px 8px;">📦 YOLO tiny.pt</button>
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny_resnet.pt" style="font-size:.68rem;padding:2px 8px;">🧬 ResNet18 tiny</button>
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny_mobilenet.pt" style="font-size:.68rem;padding:2px 8px;">📱 MobileNetV2</button>
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/reasoning_tiny.gguf" style="font-size:.68rem;padding:2px 8px;">🧠 Reasoning GGUF</button>
               </div>
             </div>
             <div style="display:flex;gap:10px;">
-              <input type="text" id="ml-model-path-input" value="mcp-server/tests/fixtures/models/tiny.pt" placeholder="Enter path to model checkpoint (.pt, .onnx, .gguf)" style="flex:1;font-size:.78rem;padding:7px 12px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;">
+              <input type="text" id="ml-model-path-input" value="tests/fixtures/models/tiny.gguf" placeholder="Enter path to model checkpoint (.pt, .onnx, .gguf)" style="flex:1;font-size:.78rem;padding:7px 12px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;">
               <button id="ml-inspect-model-btn" class="btn btn-primary btn-sm" style="display:flex;align-items:center;gap:6px;white-space:nowrap;padding:7px 14px;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 <span>Inspect &amp; Load Model</span>
@@ -1680,12 +1718,12 @@
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                 <label for="ml-image-path-input" style="font-size:.75rem;font-weight:600;color:var(--text-secondary);">Image Input Stimulus:</label>
                 <div style="display:flex;gap:6px;">
-                  <button type="button" class="btn btn-secondary btn-sm ml-image-pill" data-path="mcp-server/tests/fixtures/media/frames/frame_0050.jpg" style="font-size:.65rem;padding:1px 6px;">Frame 50</button>
-                  <button type="button" class="btn btn-secondary btn-sm ml-image-pill" data-path="mcp-server/tests/fixtures/media/frames/frame_0001.jpg" style="font-size:.65rem;padding:1px 6px;">Frame 1</button>
+                  <button type="button" class="btn btn-secondary btn-sm ml-image-pill" data-path="tests/fixtures/media/frames/frame_0050.jpg" style="font-size:.65rem;padding:1px 6px;">Frame 50</button>
+                  <button type="button" class="btn btn-secondary btn-sm ml-image-pill" data-path="tests/fixtures/media/frames/frame_0001.jpg" style="font-size:.65rem;padding:1px 6px;">Frame 1</button>
                   <button type="button" class="btn btn-secondary btn-sm ml-image-pill" data-path="" style="font-size:.65rem;padding:1px 6px;">Without Image</button>
                 </div>
               </div>
-              <input type="text" id="ml-image-path-input" value="mcp-server/tests/fixtures/media/frames/frame_0050.jpg" placeholder="Leave empty for 'Without Image' mode (baseline prior)" style="width:100%;font-size:.75rem;padding:6px 10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:4px;font-family:'JetBrains Mono',monospace;">
+              <input type="text" id="ml-image-path-input" value="tests/fixtures/media/frames/frame_0050.jpg" placeholder="Leave empty for 'Without Image' mode (baseline prior)" style="width:100%;font-size:.75rem;padding:6px 10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:4px;font-family:'JetBrains Mono',monospace;">
             </div>
 
             <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;flex-wrap:wrap;">
@@ -1709,6 +1747,22 @@
         </div>
       </div>
 
+
+          <div class="ml-step-nav"><button type="button" class="btn btn-primary btn-sm" data-ml-next="1">Next: see its layers &rarr;</button></div>
+        </div>
+      </details>
+
+      <details class="card ml-step" id="ml-step-2" data-step="2">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num">2</span>
+            <span>See its layers</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-purple ml-step-state" id="ml-step-2-state">to do</span>
+        </summary>
+        <div class="card-body ml-step-body">
+          <p class="ml-step-lead">A model is a list of named tensors. Each box is one layer; drag to move, scroll to zoom, click one to open it.</p>
       <!-- 2. Interactive Zoomable Layer DAG & Wavefront Graph (Harness-style with Zoom/Pan) -->
       <div class="card" style="margin-bottom:18px;">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
@@ -1741,6 +1795,22 @@
         </div>
       </div>
 
+
+          <div class="ml-step-nav"><button type="button" class="btn btn-primary btn-sm" data-ml-next="2">Next: open one layer &rarr;</button></div>
+        </div>
+      </details>
+
+      <details class="card ml-step" id="ml-step-3" data-step="3">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num">3</span>
+            <span>Open one layer</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-purple ml-step-state" id="ml-step-3-state">to do</span>
+        </summary>
+        <div class="card-body ml-step-body">
+          <p class="ml-step-lead">Click a layer in step 2. This shows what it is for, the formula it computes, the size of its numbers and, after a forward pass, what it produced.</p>
       <!-- 3. Layer Deep Dive & Activation Mechanics Inspector -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(360px, 1fr));gap:16px;margin-bottom:18px;">
         <!-- Left: Layer Architecture & Mathematical Formulation -->
@@ -1835,83 +1905,22 @@
         </div>
       </div>
 
-      <!-- 4. Optics Metaphor Banner -->
-      <div class="card" style="margin-bottom:18px;background:linear-gradient(135deg,rgba(139,92,246,0.08),rgba(6,182,212,0.06));border-color:rgba(139,92,246,0.25);">
-        <div class="card-header" style="padding:10px 16px;">
-          <span class="card-title" style="font-size:.85rem;display:flex;align-items:center;gap:8px;">
-            <span style="font-size:1.1rem;">🌈</span> Refractive Layers Metaphor: Light &amp; Photons Passing Through Neural Optics
-          </span>
-          <span class="badge badge-cyan" style="font-size:.65rem;">Optics &harr; Weights Duality</span>
-        </div>
-        <div class="card-body" style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;font-size:.78rem;">
-          <div style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-cyan);">
-            <div style="font-weight:600;color:var(--accent-cyan);margin-bottom:3px;">🌊 Photon Wavefronts</div>
-            <div style="color:var(--text-muted);line-height:1.35;">Latent activations represented as phase-coherent beams of light propagating across refractive boundaries.</div>
-          </div>
-          <div style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-purple);">
-            <div style="font-weight:600;color:var(--accent-purple);margin-bottom:3px;">🔺 Conv Prisms</div>
-            <div style="color:var(--text-muted);line-height:1.35;">Spatial convolutions act as multi-frequency prisms, decomposing spatial wavelengths into phase-shifted feature bands.</div>
-          </div>
-          <div style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-amber);">
-            <div style="font-weight:600;color:var(--accent-amber);margin-bottom:3px;">💠 MoE Spectral Dividers</div>
-            <div style="color:var(--text-muted);line-height:1.35;">Gating routing acts as dichroic beam splitters, shunting specific wavelengths into specialized sparse expert prisms.</div>
-          </div>
-          <div style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-green);">
-            <div style="font-weight:600;color:var(--accent-green);margin-bottom:3px;">🎯 Unembedding Focus</div>
-            <div style="color:var(--text-muted);line-height:1.35;">Final unembedding linear layer functions as an achromatic lens condensing logits onto the vocabulary sensor plane.</div>
-          </div>
-        </div>
-      </div>
 
-      <!-- 5. 2.5D Optics Canvas Stage -->
-      <div class="card" style="margin-bottom:18px;">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-          <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-            <span>2.5D Neural Optics Wavefront Stage</span>
-          </span>
-          <div style="display:flex;align-items:center;gap:12px;font-size:.72rem;color:var(--text-muted);">
-            <span>Phase Coherence: <strong id="ml-optics-coherence" style="color:var(--accent-cyan);">94.2%</strong></span>
-            <span>Refraction Index &eta;: <strong id="ml-optics-eta" style="color:var(--accent-purple);">1.48</strong></span>
-            <span>Photon Flux: <strong id="ml-optics-flux" style="color:var(--accent-green);">128 &mu;W</strong></span>
-          </div>
+          <div class="ml-step-nav"><button type="button" class="btn btn-primary btn-sm" data-ml-next="3">Next: do its math &rarr;</button></div>
         </div>
-        <div class="card-body" style="padding:0;position:relative;background:#030712;overflow:hidden;border-radius:0 0 var(--radius-sm) var(--radius-sm);">
-          <canvas id="ml-optics-canvas" width="900" height="320" style="display:block;width:100%;height:320px;cursor:crosshair;"></canvas>
-          <div id="ml-optics-overlay" style="position:absolute;bottom:10px;left:14px;font-size:.7rem;font-family:'JetBrains Mono',monospace;color:rgba(255,255,255,0.7);pointer-events:none;">
-            Beam Angle: <span id="ml-lbl-angle">0&deg;</span> | &lambda;: <span id="ml-lbl-wavelength">520nm</span> | Photons: <span id="ml-lbl-photons">64</span>
-          </div>
-        </div>
-        <!-- Optics Beam Controls -->
-        <div style="padding:12px 16px;background:var(--bg-secondary);border-top:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <button id="ml-optics-play-btn" class="btn btn-primary btn-sm">⏸ Pause</button>
-            <button id="ml-optics-step-btn" class="btn btn-secondary btn-sm">⏭ Step</button>
-            <button id="ml-optics-reset-btn" class="btn btn-secondary btn-sm">🔄 Reset Beam</button>
-          </div>
-          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-            <label style="display:flex;align-items:center;gap:6px;font-size:.75rem;">
-              <span>Wavelength &lambda;:</span>
-              <input type="range" id="ml-optics-wavelength" min="380" max="750" value="520" style="width:110px;">
-              <span id="ml-val-wavelength" style="font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--accent-cyan);">520nm</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:.75rem;">
-              <span>Beam Angle:</span>
-              <input type="range" id="ml-optics-angle" min="-45" max="45" value="0" style="width:90px;">
-              <span id="ml-val-angle" style="font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--accent-purple);">0&deg;</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:.75rem;">
-              <span>Lens Profile:</span>
-              <select id="ml-optics-profile" style="font-size:.72rem;padding:3px 8px;border-radius:4px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);">
-                <option value="transformer">Transformer Stack (Attn &rarr; MoE &rarr; Head)</option>
-                <option value="conv">Convolutional Deep Prism</option>
-                <option value="svd">Spectral SVD Filter</option>
-              </select>
-            </label>
-          </div>
-        </div>
-      </div>
+      </details>
 
+      <details class="card ml-step" id="ml-step-4" data-step="4">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num">4</span>
+            <span>Do its math yourself</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-purple ml-step-state" id="ml-step-4-state">to do</span>
+        </summary>
+        <div class="card-body ml-step-body">
+          <p class="ml-step-lead">Almost every layer is a matrix multiply followed by a squashing function. Change the sizes and the function and click a result cell to see exactly which numbers made it.</p>
       <!-- 6. Matrix Simulation & Transformation Workbench -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(360px, 1fr));gap:16px;margin-bottom:18px;">
         <!-- Left: Interactive Matrix Multiplication Visualizer (Y = X W^T) -->
@@ -1962,6 +1971,183 @@
           </div>
         </div>
 
+      </div>
+
+          <div class="ml-step-nav"><button type="button" class="btn btn-primary btn-sm" data-ml-next="4">Next: build the model up &rarr;</button></div>
+        </div>
+      </details>
+
+      <details class="card ml-step" id="ml-step-5" data-step="5">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num">5</span>
+            <span>Build the model up, layer by layer</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-purple ml-step-state" id="ml-step-5-state">to do</span>
+        </summary>
+        <div class="card-body ml-step-body">
+          <p class="ml-step-lead">Start from nothing and add the layers back in order. After each one you see what it is and how many numbers it adds.</p>
+
+          <div class="ml-buildup" id="ml-buildup">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+              <button type="button" class="btn btn-secondary btn-sm" id="ml-build-reset">&#9198; Start over</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="ml-build-back">&#9664; Remove last layer</button>
+              <button type="button" class="btn btn-primary btn-sm" id="ml-build-next">Add next layer &#9654;</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="ml-build-all">Add all &#9197;</button>
+              <span class="badge badge-cyan" id="ml-build-progress">0 of 0 layers</span>
+            </div>
+            <div class="ml-build-now" id="ml-build-now">Load a model in step 1, then press &ldquo;Add next layer&rdquo;.</div>
+            <div class="ml-build-bars" id="ml-build-bars" aria-label="Size of each added layer"></div>
+            <p style="font-size:.68rem;color:var(--text-muted);margin:6px 0 0;">Each bar is how many numbers (parameters) that layer holds. The graph in step 2 shows only the layers you have added so far.</p>
+          </div>
+
+          <div class="ml-step-nav"><button type="button" class="btn btn-primary btn-sm" data-ml-next="5">Next: reassemble &rarr;</button></div>
+        </div>
+      </details>
+
+      <details class="card ml-step" id="ml-step-6" data-step="6">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num">6</span>
+            <span>Reassemble and compare</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-purple ml-step-state" id="ml-step-6-state">to do</span>
+        </summary>
+        <div class="card-body ml-step-body">
+          <p class="ml-step-lead">With every layer added, here is the whole model: how many layers of each kind, how many numbers, and what a forward pass produced.</p>
+
+          <div class="ml-reassemble" id="ml-reassemble">
+            <div class="ml-reassemble-empty" id="ml-reassemble-empty">Add every layer in step 5 to see the finished model here.</div>
+            <div id="ml-reassemble-body" style="display:none;">
+              <div id="ml-reassemble-summary" style="font-size:.78rem;line-height:1.6;"></div>
+              <table class="qs-table" style="margin-top:8px;"><thead><tr><th>Kind of layer</th><th>How many</th><th>Parameters</th></tr></thead><tbody id="ml-reassemble-rows"></tbody></table>
+              <p style="font-size:.68rem;color:var(--text-muted);margin:8px 0 0;" id="ml-reassemble-note"></p>
+            </div>
+          </div>
+
+
+        </div>
+      </details>
+
+      <details class="card ml-step ml-advanced" id="ml-advanced" data-step="adv">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num" style="background:var(--bg-secondary);color:var(--text-muted);">+</span>
+            <span>Optional labs</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-amber">illustrations and experiments</span>
+        </summary>
+        <div class="card-body">
+          <p class="ml-step-lead">These are not part of the path. Some are pictures that explain an idea and do not read your model; each one says which.</p>
+
+        <details class="card ml-lab" id="ml-lab-metaphor" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">Light and lenses: a way to picture layers <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-amber" style="font-size:.65rem;">illustration</span>
+          </summary>
+          <div class="card-body">
+      <!-- 4. Optics Metaphor Banner -->
+      <div class="card" style="margin-bottom:18px;background:linear-gradient(135deg,rgba(139,92,246,0.08),rgba(6,182,212,0.06));border-color:rgba(139,92,246,0.25);">
+        <div class="card-header" style="padding:10px 16px;">
+          <span class="card-title" style="font-size:.85rem;display:flex;align-items:center;gap:8px;">
+            <span style="font-size:1.1rem;">🌈</span> Refractive Layers Metaphor: Light &amp; Photons Passing Through Neural Optics
+          </span>
+          <span class="badge badge-cyan" style="font-size:.65rem;">Optics &harr; Weights Duality</span>
+        </div>
+        <div class="card-body" style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;font-size:.78rem;">
+          <div style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-cyan);">
+            <div style="font-weight:600;color:var(--accent-cyan);margin-bottom:3px;">🌊 Photon Wavefronts</div>
+            <div style="color:var(--text-muted);line-height:1.35;">Latent activations represented as phase-coherent beams of light propagating across refractive boundaries.</div>
+          </div>
+          <div style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-purple);">
+            <div style="font-weight:600;color:var(--accent-purple);margin-bottom:3px;">🔺 Conv Prisms</div>
+            <div style="color:var(--text-muted);line-height:1.35;">Spatial convolutions act as multi-frequency prisms, decomposing spatial wavelengths into phase-shifted feature bands.</div>
+          </div>
+          <div style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-amber);">
+            <div style="font-weight:600;color:var(--accent-amber);margin-bottom:3px;">💠 MoE Spectral Dividers</div>
+            <div style="color:var(--text-muted);line-height:1.35;">Gating routing acts as dichroic beam splitters, shunting specific wavelengths into specialized sparse expert prisms.</div>
+          </div>
+          <div style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-green);">
+            <div style="font-weight:600;color:var(--accent-green);margin-bottom:3px;">🎯 Unembedding Focus</div>
+            <div style="color:var(--text-muted);line-height:1.35;">Final unembedding linear layer functions as an achromatic lens condensing logits onto the vocabulary sensor plane.</div>
+          </div>
+        </div>
+      </div>
+
+
+          </div>
+        </details>
+
+
+        <details class="card ml-lab" id="ml-lab-optics" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">2.5D wavefront stage <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-amber" style="font-size:.65rem;">illustration, numbers are not measured</span>
+          </summary>
+          <div class="card-body">
+      <!-- 5. 2.5D Optics Canvas Stage -->
+      <div class="card" style="margin-bottom:18px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            <span>2.5D Neural Optics Wavefront Stage</span>
+          </span>
+          <div style="display:flex;align-items:center;gap:12px;font-size:.72rem;color:var(--text-muted);">
+            <span>Phase Coherence: <strong id="ml-optics-coherence" style="color:var(--accent-cyan);">94.2%</strong></span>
+            <span>Refraction Index &eta;: <strong id="ml-optics-eta" style="color:var(--accent-purple);">1.48</strong></span>
+            <span>Photon Flux: <strong id="ml-optics-flux" style="color:var(--accent-green);">128 &mu;W</strong></span>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0;position:relative;background:#030712;overflow:hidden;border-radius:0 0 var(--radius-sm) var(--radius-sm);">
+          <canvas id="ml-optics-canvas" width="900" height="320" style="display:block;width:100%;height:320px;cursor:crosshair;"></canvas>
+          <div id="ml-optics-overlay" style="position:absolute;bottom:10px;left:14px;font-size:.7rem;font-family:'JetBrains Mono',monospace;color:rgba(255,255,255,0.7);pointer-events:none;">
+            Beam Angle: <span id="ml-lbl-angle">0&deg;</span> | &lambda;: <span id="ml-lbl-wavelength">520nm</span> | Photons: <span id="ml-lbl-photons">64</span>
+          </div>
+        </div>
+        <!-- Optics Beam Controls -->
+        <div style="padding:12px 16px;background:var(--bg-secondary);border-top:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="ml-optics-play-btn" class="btn btn-primary btn-sm">⏸ Pause</button>
+            <button id="ml-optics-step-btn" class="btn btn-secondary btn-sm">⏭ Step</button>
+            <button id="ml-optics-reset-btn" class="btn btn-secondary btn-sm">🔄 Reset Beam</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:.75rem;">
+              <span>Wavelength &lambda;:</span>
+              <input type="range" id="ml-optics-wavelength" min="380" max="750" value="520" style="width:110px;">
+              <span id="ml-val-wavelength" style="font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--accent-cyan);">520nm</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:.75rem;">
+              <span>Beam Angle:</span>
+              <input type="range" id="ml-optics-angle" min="-45" max="45" value="0" style="width:90px;">
+              <span id="ml-val-angle" style="font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--accent-purple);">0&deg;</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:.75rem;">
+              <span>Lens Profile:</span>
+              <select id="ml-optics-profile" style="font-size:.72rem;padding:3px 8px;border-radius:4px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);">
+                <option value="transformer">Transformer Stack (Attn &rarr; MoE &rarr; Head)</option>
+                <option value="conv">Convolutional Deep Prism</option>
+                <option value="svd">Spectral SVD Filter</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </div>
+
+
+          </div>
+        </details>
+
+
+        <details class="card ml-lab" id="ml-lab-inversion" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">Layer inversion lab <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-cyan" style="font-size:.65rem;">needs a model on the server</span>
+          </summary>
+          <div class="card-body">
         <!-- Right: Layer Inversion Lab (Activation Maximization) -->
         <div class="card" style="display:flex;flex-direction:column;">
           <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
@@ -2024,9 +2210,17 @@
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- 7. Weight-Space Programming Studio Card -->
+          </div>
+        </details>
+
+
+        <details class="card ml-lab" id="ml-lab-surgery" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">Weight-space surgery <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-amber" style="font-size:.65rem;">bars are a demo spectrum</span>
+          </summary>
+          <div class="card-body">
       <div class="card" style="margin-bottom:18px;">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
           <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
@@ -2091,7 +2285,17 @@
         </div>
       </div>
 
-      <!-- 8. Future Media Transforms Scratchpad -->
+
+          </div>
+        </details>
+
+
+        <details class="card ml-lab" id="ml-lab-media" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">Media transforms scratchpad <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-amber" style="font-size:.65rem;">presets, not live output</span>
+          </summary>
+          <div class="card-body">
       <div class="card" style="margin-bottom:18px;">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
           <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
@@ -2213,6 +2417,13 @@
           </div>
         </div>
       </div>
+
+          </div>
+        </details>
+
+        </div>
+      </details>
+
     </section>
   </main>
   <!-- ─── DSP Effect Modal ──────────────────────────────────────── -->

@@ -9,6 +9,12 @@
  */
 
 (function () {
+  // The dashboard server exposes each tool at POST /api/<tool> and reads the params as the body.
+  function toolFetch(init) {
+    const call = JSON.parse(init.body);
+    return fetch('/api/' + call.tool, { ...init, body: JSON.stringify(call.params || {}) });
+  }
+
   // ─── Color Helpers & Snell Refraction ─────────────────────────────
   function wavelengthToRGB(wl) {
     let r = 0, g = 0, b = 0;
@@ -63,8 +69,8 @@
       animId: null
     },
     model: {
-      path: 'mcp-server/tests/fixtures/models/tiny.pt',
-      imagePath: 'mcp-server/tests/fixtures/media/frames/frame_0050.jpg',
+      path: 'tests/fixtures/models/tiny.gguf',
+      imagePath: 'tests/fixtures/media/frames/frame_0050.jpg',
       task: 'detect',
       layers: [],
       selectedLayer: null,
@@ -893,6 +899,11 @@
       else formulaEl.textContent = 'Y = \\sigma(X W^T + b)';
     }
 
+    if (formulaEl) {
+      formulaEl.title = formulaEl.textContent;
+      formulaEl.textContent = plainFormula(node.semanticRole);
+    }
+
     // Update activation stats
     const act = node.activation;
     const meanEl = document.getElementById('ml-act-mean');
@@ -916,6 +927,20 @@
   }
 
   // ─── Custom Model Graph Loader (Zero Hardcoding) ─────────────────
+  function loadNote(text, isError) {
+    const input = document.getElementById('ml-model-path-input');
+    if (!input || !input.parentElement) return;
+    let note = document.getElementById('ml-load-note');
+    if (!note) {
+      note = document.createElement('div');
+      note.id = 'ml-load-note';
+      note.style.cssText = 'font-size:.72rem;margin-top:6px;';
+      input.parentElement.insertAdjacentElement('afterend', note);
+    }
+    note.textContent = text || '';
+    note.style.color = isError ? 'var(--accent-amber)' : 'var(--text-muted)';
+  }
+
   async function loadModelGraph(modelPath) {
     const statusBadge = document.getElementById('ml-loaded-model-badge');
     const inspectBtn = document.getElementById('ml-inspect-model-btn');
@@ -923,7 +948,7 @@
     if (inspectBtn) inspectBtn.disabled = true;
 
     try {
-      const res = await fetch('/api/tools/call', {
+      const res = await toolFetch({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -938,6 +963,18 @@
 
       const json = await res.json();
       const rawLayers = json?.data?.layers || [];
+      if (!res.ok || json?.success === false || rawLayers.length === 0) {
+        const why = (json && json.error) || (res.ok ? 'no layers could be read from this file (PyTorch checkpoints need PyTorch installed on the server; GGUF files do not)' : 'the server answered ' + res.status);
+        if (statusBadge) statusBadge.textContent = 'No layers loaded';
+        loadNote(why, true);
+        window.MLStateBus.dag.nodes = [];
+        window.MLStateBus.dag.edges = [];
+        captureBuild();
+        setState(1, 'could not load', 'badge-amber');
+        setState(2, 'no layers', 'badge-amber');
+        return;
+      }
+      loadNote('', false);
 
       // Group or map layers into clean DAG nodes
       const nodes = [];
@@ -961,7 +998,7 @@
           label: label.length > 18 ? label.slice(0, 18) + '..' : label,
           shape: shape,
           shapeStr: shapeStr,
-          dtype: l.dtype || 'float16',
+          dtype: l.dtype || l.type || 'unknown',
           semanticRole: l.semanticRole || 'layer',
           functionalCategory: l.functionalCategory || 'general',
           description: l.description,
@@ -981,6 +1018,7 @@
       window.MLStateBus.dag.nodes = nodes;
       window.MLStateBus.dag.edges = edges;
       window.MLStateBus.model.layers = rawLayers;
+      captureBuild();
 
       const nodeCountBadge = document.getElementById('ml-dag-node-count');
       if (nodeCountBadge) nodeCountBadge.textContent = `${rawLayers.length} layers (${nodes.length} mapped)`;
@@ -992,6 +1030,7 @@
       }
     } catch (err) {
       if (statusBadge) statusBadge.textContent = 'Inspection Error';
+      loadNote('The request failed: ' + String((err && err.message) || err).slice(0, 160), true);
     } finally {
       if (inspectBtn) inspectBtn.disabled = false;
     }
@@ -1039,7 +1078,7 @@
       if (statusBadge) statusBadge.textContent = 'Forward: Running';
 
       try {
-        const res = await fetch('/api/tools/call', {
+        const res = await toolFetch({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1070,6 +1109,8 @@
             window.MLStateBus.dag.nodes[i].activation = act;
           }
         });
+
+        refreshBuild();
 
         if (srcBadge) {
           if (imagePath.trim()) {
@@ -1321,7 +1362,7 @@
       inversionRunBtn.innerHTML = '<span>⚡ Synthesizing...</span>';
 
       try {
-        const res = await fetch('/api/tools/call', {
+        const res = await toolFetch({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1339,20 +1380,25 @@
           })
         }).catch(() => null);
 
-        const v = [
-          Number((0.7 + Math.random() * 0.25).toFixed(3)),
-          Number((-0.3 - Math.random() * 0.2).toFixed(3)),
-          Number((0.85 + Math.random() * 0.15).toFixed(3)),
-          Number((-0.1 + Math.random() * 0.2).toFixed(3))
-        ];
-        window.MLStateBus.inversion.vector = v;
-
         const vDisp = document.getElementById('ml-inversion-vector-display');
         const lossDisp = document.getElementById('ml-inversion-loss');
-        if (vDisp) vDisp.textContent = `[${v.join(', ')}]`;
-        if (lossDisp) lossDisp.textContent = `Loss: ${(0.02 + Math.random() * 0.03).toFixed(4)}`;
-
-        drawInversionPrototype(v, targetClass);
+        const riskDisp = document.getElementById('ml-inversion-risk');
+        let payload = null;
+        try { payload = res && res.ok ? await res.json() : null; } catch (e) { payload = null; }
+        const data = payload && payload.success !== false ? (payload.data || null) : null;
+        const vec = data && Array.isArray(data.vector) ? data.vector.map(Number).filter(Number.isFinite) : [];
+        if (vec.length > 0) {
+          window.MLStateBus.inversion.vector = vec;
+          if (vDisp) vDisp.textContent = '[' + vec.slice(0, 8).map(x => x.toFixed(3)).join(', ') + (vec.length > 8 ? ', ...' : '') + ']';
+          if (lossDisp) lossDisp.textContent = typeof data.loss === 'number' ? 'Loss: ' + data.loss.toFixed(4) : 'Loss: not reported';
+          if (riskDisp) { riskDisp.textContent = 'from server'; riskDisp.className = 'badge badge-green'; }
+          drawInversionPrototype(vec, targetClass);
+        } else {
+          const why = (payload && (payload.error || (payload.data && payload.data.error))) || (res ? 'the server returned no vector' : 'the server could not be reached');
+          if (vDisp) vDisp.textContent = 'No result: ' + String(why).slice(0, 160);
+          if (lossDisp) lossDisp.textContent = 'Loss: n/a';
+          if (riskDisp) { riskDisp.textContent = 'no result'; riskDisp.className = 'badge badge-amber'; }
+        }
       } finally {
         inversionRunBtn.disabled = false;
         inversionRunBtn.innerHTML = '<span>🔬 Synthesize Prototype</span>';
@@ -1458,13 +1504,14 @@
       surgeryExecBtn.textContent = '⚡ Applying...';
 
       try {
-        await fetch('/api/tools/call', {
+        const surgeryRes = await toolFetch({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             tool: 'reverse_tool',
             params: {
               action: 'program_weight_space',
+              authorization: 'lab',
               target: 'tests/fixtures/models/tiny.pt',
               options: {
                 alpha: window.MLStateBus.surgery.alpha,
@@ -1476,7 +1523,13 @@
         }).catch(() => null);
 
         const summary = document.getElementById('ml-surgery-summary');
-        if (summary) summary.textContent = '✓ Weight surgery applied successfully';
+        let surgeryJson = null;
+        try { surgeryJson = surgeryRes && surgeryRes.ok ? await surgeryRes.json() : null; } catch (e) { surgeryJson = null; }
+        if (summary) {
+          summary.textContent = surgeryJson && surgeryJson.success !== false
+            ? 'Server accepted the request (the bars above are a demo spectrum, not your model)'
+            : 'Not applied: ' + String((surgeryJson && surgeryJson.error) || (surgeryRes ? 'the server refused it' : 'the server could not be reached')).slice(0, 160);
+        }
       } finally {
         surgeryExecBtn.disabled = false;
         surgeryExecBtn.textContent = '⚡ Execute Surgery';
@@ -1580,8 +1633,8 @@
       mediaDispatchBtn.textContent = '🚀 Dispatching...';
 
       try {
-        if (statusElem) statusElem.textContent = `Dispatching ${preset} pipeline via /api/tools/call...`;
-        await fetch('/api/tools/call', {
+        if (statusElem) statusElem.textContent = `Sending the ${preset} request to the server...`;
+        const mediaRes = await toolFetch({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1593,7 +1646,15 @@
           })
         }).catch(() => null);
 
-        if (statusElem) statusElem.innerHTML = `<span style="color:var(--accent-green);">✓ Transform job executed for preset [${preset}].</span>`;
+        let mediaJson = null;
+        try { mediaJson = mediaRes && mediaRes.ok ? await mediaRes.json() : null; } catch (e) { mediaJson = null; }
+        const mediaOk = !!mediaJson && mediaJson.success !== false;
+        if (statusElem) {
+          statusElem.textContent = mediaOk
+            ? 'Server accepted the ' + preset + ' request.'
+            : 'Not run: ' + String((mediaJson && mediaJson.error) || (mediaRes ? 'the server refused the request (it needs real media input)' : 'the server could not be reached')).slice(0, 160);
+          statusElem.style.color = mediaOk ? 'var(--accent-green)' : 'var(--accent-amber)';
+        }
       } finally {
         mediaDispatchBtn.disabled = false;
         mediaDispatchBtn.textContent = '🚀 Dispatch Transform Job';
@@ -1614,6 +1675,191 @@
       drawInversionPrototype([0.824, -0.412, 0.991, -0.105], 0);
     });
   }
+
+
+  // ─── Plain-language formulas ──────────────────────────────────────
+  function plainFormula(role) {
+    const r = String(role || '').toLowerCase();
+    if (r.includes('conv')) return 'output = squash( normalise( filter slid over the input ) + bias )';
+    if (r.includes('c2f') || r.includes('bottle')) return 'output = join( a shortcut copy of the input, the input passed through several small blocks )';
+    if (r.includes('sppf') || r.includes('pool')) return 'output = join( input, input summarised over bigger and bigger windows )';
+    if (r.includes('attn')) return 'output = mix of the values, weighted by how well each query matches each key';
+    if (r.includes('head') || r.includes('detect')) return 'output = boxes and class scores read off the final feature maps';
+    return 'output = squash( input x weights + bias )';
+  }
+
+  // ─── Guided path: collapsible steps, build-up, reassembly ─────────
+  const build = { nodes: [], edges: [], k: 0 };
+  const paramsOf = (n) => (n && Array.isArray(n.shape) && n.shape.length ? n.shape.reduce((a, b) => a * (Number(b) || 1), 1) : 0);
+  const fmtNum = (n) => (n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n));
+  const stepEl = (n) => document.getElementById('ml-step-' + n);
+  const setState = (n, text, cls) => {
+    const b = document.getElementById('ml-step-' + n + '-state');
+    if (b) { b.textContent = text; b.className = 'badge ' + (cls || 'badge-purple') + ' ml-step-state'; }
+  };
+
+  function captureBuild() {
+    const dag = window.MLStateBus.dag;
+    build.nodes = dag.nodes.slice();
+    build.edges = dag.edges.slice();
+    build.k = build.nodes.length;
+    setState(1, 'loaded', 'badge-green');
+    renderBuild();
+    setState(2, build.nodes.length + ' layers', 'badge-green');
+  }
+
+  function applyBuild() {
+    const dag = window.MLStateBus.dag;
+    const acts = window.MLStateBus.model.layerActivations || [];
+    build.nodes.forEach((n, i) => { if (acts[i]) n.activation = acts[i]; });
+    dag.nodes = build.nodes.slice(0, build.k);
+    dag.edges = build.edges.filter((e) => e.from < build.k && e.to < build.k);
+    dag.selectedNode = build.k > 0 ? build.nodes[build.k - 1] : null;
+    if (build.k > 0) selectLayerNode(build.nodes[build.k - 1]);
+    const badge = document.getElementById('ml-dag-node-count');
+    if (badge) badge.textContent = build.k + ' of ' + build.nodes.length + ' layers shown';
+  }
+
+  function renderBuild() {
+    const total = build.nodes.length;
+    const progress = document.getElementById('ml-build-progress');
+    const now = document.getElementById('ml-build-now');
+    const bars = document.getElementById('ml-build-bars');
+    if (progress) progress.textContent = build.k + ' of ' + total + ' layers';
+    const next = document.getElementById('ml-build-next');
+    const back = document.getElementById('ml-build-back');
+    const all = document.getElementById('ml-build-all');
+    if (next) next.disabled = total === 0 || build.k >= total;
+    if (all) all.disabled = total === 0 || build.k >= total;
+    if (back) back.disabled = build.k <= 0;
+
+    if (now) {
+      now.textContent = '';
+      if (total === 0) now.textContent = 'Load a model in step 1, then press \u201cAdd next layer\u201d.';
+      else if (build.k === 0) now.textContent = 'Nothing yet. Press \u201cAdd next layer\u201d to place the first layer.';
+      else {
+        const n = build.nodes[build.k - 1];
+        const act = n.activation;
+        const line = (label, value) => {
+          const d = document.createElement('div');
+          const b = document.createElement('strong');
+          b.textContent = label + ' ';
+          d.append(b, String(value));
+          return d;
+        };
+        now.append(
+          line('Layer ' + build.k + ':', n.name),
+          line('What it is:', n.semanticRole || 'layer'),
+          line('Its numbers:', n.shapeStr + ' = ' + fmtNum(paramsOf(n)) + ' parameters'),
+          line('What it does:', plainFormula(n.semanticRole)),
+          line('Output after it:', act ? 'average ' + act.mean.toFixed(4) + ', spread ' + act.std.toFixed(4) + ' (from your forward pass)' : 'run a forward pass in step 1 to see this')
+        );
+      }
+    }
+
+    if (bars) {
+      bars.textContent = '';
+      const sizes = build.nodes.slice(0, build.k).map(paramsOf);
+      const max = Math.max(1, ...sizes);
+      sizes.forEach((v, i) => {
+        const bar = document.createElement('div');
+        bar.className = 'ml-build-bar' + (i === build.k - 1 ? ' latest' : '');
+        bar.style.height = Math.max(4, Math.round((v / max) * 100)) + '%';
+        bar.title = build.nodes[i].name + ': ' + v.toLocaleString() + ' parameters';
+        bars.appendChild(bar);
+      });
+    }
+
+    if (total > 0) setState(5, build.k + ' of ' + total, build.k >= total ? 'badge-green' : 'badge-cyan');
+    renderReassemble();
+  }
+
+  function renderReassemble() {
+    const total = build.nodes.length;
+    const done = total > 0 && build.k >= total;
+    const empty = document.getElementById('ml-reassemble-empty');
+    const body = document.getElementById('ml-reassemble-body');
+    if (empty) empty.style.display = done ? 'none' : '';
+    if (body) body.style.display = done ? '' : 'none';
+    setState(6, done ? 'complete' : 'waiting', done ? 'badge-green' : 'badge-purple');
+    if (!done) return;
+
+    const byKind = new Map();
+    let sum = 0;
+    build.nodes.forEach((n) => {
+      const kind = n.semanticRole || n.functionalCategory || 'layer';
+      const e = byKind.get(kind) || { count: 0, params: 0 };
+      e.count += 1;
+      e.params += paramsOf(n);
+      sum += paramsOf(n);
+      byKind.set(kind, e);
+    });
+    const rows = document.getElementById('ml-reassemble-rows');
+    if (rows) {
+      rows.textContent = '';
+      [...byKind.entries()].sort((a, b) => b[1].params - a[1].params).forEach(([kind, e]) => {
+        const tr = document.createElement('tr');
+        [kind, String(e.count), fmtNum(e.params)].forEach((t) => { const td = document.createElement('td'); td.textContent = t; tr.appendChild(td); });
+        rows.appendChild(tr);
+      });
+    }
+    const fr = window.MLStateBus.model.forwardResults;
+    const out = fr ? (fr.detections ? fr.detections.length + ' detections' : (fr.topClass ? 'top class ' + fr.topClass : 'a result')) : null;
+    const summary = document.getElementById('ml-reassemble-summary');
+    if (summary) summary.textContent = build.nodes.length + ' layers shown, holding ' + fmtNum(sum) + ' parameters in the tensors listed. ' + (out ? 'The forward pass you ran produced ' + out + '.' : 'Run a forward pass in step 1 to see what the whole model produces.');
+    const note = document.getElementById('ml-reassemble-note');
+    if (note) note.textContent = 'The order is the order of tensors in the file, and large models show a sample of their layers. This page does not re-run a partial model, so it cannot prove the rebuilt chain gives the same answer; it shows what the pieces are.';
+  }
+
+  function refreshBuild() {
+    if (build.nodes.length === 0) return;
+    applyBuild();
+    renderBuild();
+  }
+
+  function moveBuild(delta, toEnd) {
+    const total = build.nodes.length;
+    if (total === 0) return;
+    build.k = toEnd ? total : Math.max(0, Math.min(total, build.k + delta));
+    applyBuild();
+    if (build.k > 0) fitDagView();
+    renderBuild();
+  }
+
+  function setupGuide() {
+    const panel = document.getElementById('panel-ml-learning');
+    if (!panel) return;
+    const numeric = () => Array.from(panel.querySelectorAll('details.ml-step[data-step]')).filter((d) => d.dataset.step !== 'adv');
+    const goTo = (n, collapseOthers) => {
+      const el = stepEl(n);
+      if (!el) return;
+      if (collapseOthers) numeric().forEach((d) => { if (d !== el) d.open = false; });
+      el.open = true;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    panel.querySelectorAll('[data-ml-next]').forEach((btn) => btn.addEventListener('click', () => {
+      const n = Number(btn.getAttribute('data-ml-next'));
+      if (n === 1) setState(1, build.nodes.length ? 'loaded' : 'to do', build.nodes.length ? 'badge-green' : 'badge-purple');
+      goTo(n + 1, true);
+    }));
+    panel.querySelectorAll('[data-ml-goto]').forEach((btn) => btn.addEventListener('click', () => goTo(Number(btn.getAttribute('data-ml-goto')), true)));
+    document.getElementById('ml-expand-all')?.addEventListener('click', () => panel.querySelectorAll('details').forEach((d) => { d.open = true; }));
+    document.getElementById('ml-collapse-all')?.addEventListener('click', () => panel.querySelectorAll('details').forEach((d) => { d.open = false; }));
+
+    // A closed section has no size, so the graph is fitted when its step opens.
+    stepEl(2)?.addEventListener('toggle', (e) => { if (e.target.open) setTimeout(() => { fitDagView(); }, 30); });
+
+    document.getElementById('ml-build-next')?.addEventListener('click', () => moveBuild(1));
+    document.getElementById('ml-build-back')?.addEventListener('click', () => moveBuild(-1));
+    document.getElementById('ml-build-all')?.addEventListener('click', () => moveBuild(0, true));
+    document.getElementById('ml-build-reset')?.addEventListener('click', () => moveBuild(-build.nodes.length));
+
+    // Small touches that make the steps feel connected.
+    document.getElementById('ml-dag-canvas')?.addEventListener('click', () => setState(3, 'viewing a layer', 'badge-cyan'));
+    ['ml-dim-m', 'ml-dim-k', 'ml-dim-n'].forEach((id) => document.getElementById(id)?.addEventListener('input', () => setState(4, 'tried', 'badge-green')));
+    renderBuild();
+  }
+  setupGuide();
 
   // ─── Initial Boot ────────────────────────────────────────────────
   recalculateMatrix();
