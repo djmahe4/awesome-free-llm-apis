@@ -254,7 +254,17 @@ def load_model_layer(filepath: str = None, layer_name: str = None, fallback_dim:
         return arr, {"name": info["name"], "shape": list(arr.shape), "format": "safetensors"}
 
     # Check GGUF
-    if resolved.endswith('.gguf') or open(resolved, 'rb').read(4) == b'GGUF':
+    _is_gguf = False
+    if resolved.endswith('.gguf'):
+        _is_gguf = True
+    else:
+        try:
+            with open(resolved, 'rb') as _f:
+                _is_gguf = (_f.read(4) == b'GGUF')
+        except Exception:
+            _is_gguf = False
+
+    if _is_gguf:
         if get_tensor_data and inspect_gguf:
             info = inspect_gguf(resolved)
             target = layer_name

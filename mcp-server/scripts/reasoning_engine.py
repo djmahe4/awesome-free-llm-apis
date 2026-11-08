@@ -225,60 +225,23 @@ class GGUFReasoningRuntime:
         for pos, tid in enumerate(tokens[:-1]):
             self.forward_token(tid, pos, kv_cache)
 
-        is_math_solve = "2 + 3 * 4" in prompt or ("2" in prompt and "3" in prompt and "4" in prompt and "solve" in prompt.lower())
+        thought_closed = False
+        for step in range(max_tokens):
+            pos = len(kv_cache['k'])
+            current_id = tokens[-1]
+            logits = self.forward_token(current_id, pos, kv_cache)
+            if pad_id < len(logits):
+                logits[pad_id] = -1e9  # mask <pad> so <pad> is never generated
+            if think_id < len(logits):
+                logits[think_id] = -1e9  # mask <think>
 
-        if is_math_solve:
-            math_seq = [
-                word_to_id.get("let", 2 if self.vocab_size > 2 else 0),
-                word_to_id.get("us", 3 if self.vocab_size > 3 else 0),
-                word_to_id.get("calculate", 4 if self.vocab_size > 4 else 0),
-                word_to_id.get("step", 5 if self.vocab_size > 5 else 0),
-                close_think_id,
-                word_to_id.get("14", 8 if self.vocab_size > 8 else 0)
-            ]
-            for next_token in math_seq:
-                pos = len(kv_cache['k'])
-                current_id = tokens[-1]
-                self.forward_token(current_id, pos, kv_cache)
-                tokens.append(next_token)
-        else:
-            thought_closed = False
-            for step in range(max_tokens):
-                pos = len(kv_cache['k'])
-                current_id = tokens[-1]
-                logits = self.forward_token(current_id, pos, kv_cache)
-                if pad_id < len(logits):
-                    logits[pad_id] = -1e9  # mask <pad> so <pad> is never generated
-                if think_id < len(logits):
-                    logits[think_id] = -1e9  # mask <think>
-
-                if not thought_closed:
-                    if step >= max_tokens - 2:
-                        next_token = close_think_id  # close thinking trace cleanly with </think>
-                        thought_closed = True
-                    else:
-                        if step < 2 and close_think_id < len(logits):
-                            logits[close_think_id] = -1e9  # let reasoning develop
-                        if temperature <= 0.0:
-                            next_token = int(np.argmax(logits))
-                        else:
-                            scaled_logits = logits / max(temperature, 1e-4)
-                            if 0 < top_k < len(scaled_logits):
-                                top_indices = np.argsort(scaled_logits)[-top_k:]
-                                mask = np.full_like(scaled_logits, -1e9)
-                                mask[top_indices] = scaled_logits[top_indices]
-                                scaled_logits = mask
-                            exps = np.exp(scaled_logits - np.max(scaled_logits))
-                            probs = exps / np.sum(exps)
-                            probs = probs.astype(np.float64)
-                            probs = probs / np.sum(probs)
-                            probs[-1] = max(0.0, 1.0 - np.sum(probs[:-1]))
-                            next_token = int(np.random.choice(len(probs), p=probs))
-                        if next_token == close_think_id:
-                            thought_closed = True
+            if not thought_closed:
+                if step >= max_tokens - 2:
+                    next_token = close_think_id  # close thinking trace cleanly with </think>
+                    thought_closed = True
                 else:
-                    if close_think_id < len(logits):
-                        logits[close_think_id] = -1e9  # do not re-emit </think>
+                    if step < 2 and close_think_id < len(logits):
+                        logits[close_think_id] = -1e9  # let reasoning develop
                     if temperature <= 0.0:
                         next_token = int(np.argmax(logits))
                     else:
@@ -294,10 +257,30 @@ class GGUFReasoningRuntime:
                         probs = probs / np.sum(probs)
                         probs[-1] = max(0.0, 1.0 - np.sum(probs[:-1]))
                         next_token = int(np.random.choice(len(probs), p=probs))
+                    if next_token == close_think_id:
+                        thought_closed = True
+            else:
+                if close_think_id < len(logits):
+                    logits[close_think_id] = -1e9  # do not re-emit </think>
+                if temperature <= 0.0:
+                    next_token = int(np.argmax(logits))
+                else:
+                    scaled_logits = logits / max(temperature, 1e-4)
+                    if 0 < top_k < len(scaled_logits):
+                        top_indices = np.argsort(scaled_logits)[-top_k:]
+                        mask = np.full_like(scaled_logits, -1e9)
+                        mask[top_indices] = scaled_logits[top_indices]
+                        scaled_logits = mask
+                    exps = np.exp(scaled_logits - np.max(scaled_logits))
+                    probs = exps / np.sum(exps)
+                    probs = probs.astype(np.float64)
+                    probs = probs / np.sum(probs)
+                    probs[-1] = max(0.0, 1.0 - np.sum(probs[:-1]))
+                    next_token = int(np.random.choice(len(probs), p=probs))
 
-                tokens.append(next_token)
-                if thought_closed and step >= max_tokens - 2:
-                    break
+            tokens.append(next_token)
+            if thought_closed and step >= max_tokens - 2:
+                break
 
         if close_think_id in tokens:
             idx_close = tokens.index(close_think_id)
@@ -318,13 +301,13 @@ class GGUFReasoningRuntime:
 
         # Decode the answer token AFTER </think>
         if not answer_tokens:
-            default_ans = word_to_id.get("14", 8 if self.vocab_size > 8 else 0) if is_math_solve else word_to_id.get("verified", 12 if self.vocab_size > 12 else 0)
+            default_ans = word_to_id.get("verified", 12 if self.vocab_size > 12 else 0)
             tokens.append(default_ans)
             answer_tokens = [default_ans]
 
         output_word = self.vocab[answer_tokens[-1] % self.vocab_size]
         if output_word in ("<pad>", "</think>", "<think>"):
-            output_word = "14" if is_math_solve else "verified"
+            output_word = "verified"
 
         return {
             'tokensGenerated': tokens,
