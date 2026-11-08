@@ -63,7 +63,7 @@
       animId: null
     },
     model: {
-      path: 'C:\\Users\\mahes\\OneDrive\\Desktop\\Python-Projects\\footydj_local_app\\runs\\pose\\train\\weights\\best.pt',
+      path: 'mcp-server/tests/fixtures/models/tiny.pt',
       imagePath: 'mcp-server/tests/fixtures/media/frames/frame_0050.jpg',
       task: 'detect',
       layers: [],
@@ -705,12 +705,25 @@
             dagTooltip.style.display = 'block';
             dagTooltip.style.left = `${Math.min(mx + 14, rect.width - 240)}px`;
             dagTooltip.style.top = `${Math.min(my + 14, rect.height - 110)}px`;
-            dagTooltip.innerHTML = `
-              <div style="font-weight:600;color:${found.color};">${found.name}</div>
-              <div style="font-size:.7rem;color:var(--text-muted);margin:2px 0;">Role: <strong>${found.semanticRole}</strong></div>
-              <div style="font-size:.68rem;font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);">Shape: ${found.shapeStr}</div>
-              <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;">Click node to inspect transfer function &amp; activations</div>
-            `;
+            // Node name/role/shape come from inspects model files — never
+            // interpolate them into innerHTML (DOM XSS). Build content via
+            // textContent instead. found.color is from our internal palette.
+            const el = (tag, style, text) => {
+              const d = document.createElement(tag);
+              if (style) d.style.cssText = style;
+              if (text !== undefined) d.textContent = text;
+              return d;
+            };
+            const roleEl = el('div', 'font-size:.7rem;color:var(--text-muted);margin:2px 0;');
+            const roleStrong = document.createElement('strong');
+            roleStrong.textContent = String(found.semanticRole ?? '');
+            roleEl.append('Role: ', roleStrong);
+            dagTooltip.replaceChildren(
+              el('div', `font-weight:600;color:${found.color};`, String(found.name ?? '')),
+              roleEl,
+              el('div', "font-size:.68rem;font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);", `Shape: ${found.shapeStr ?? ''}`),
+              el('div', 'font-size:.65rem;color:var(--text-muted);margin-top:4px;', 'Click node to inspect transfer function & activations')
+            );
           } else {
             dagTooltip.style.display = 'none';
           }
