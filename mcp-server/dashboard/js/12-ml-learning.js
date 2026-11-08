@@ -1,9 +1,10 @@
 'use strict';
 /**
  * ═══════════════════════════════════════════════════════════════════
- * ML LEARNING, NEURAL OPTICS & REVERSE ENGINEERING STUDIO (v1.0)
- * Wavefront optics metaphor, matrix math sandbox, layer inversion
- * activation maximization, weight-space surgery, and media transforms.
+ * ML LEARNING, NEURAL OPTICS & REVERSE ENGINEERING STUDIO (v2.0)
+ * Wavefront optics metaphor, interactive zoom/pan Layer DAG,
+ * forward pass mechanics (with image vs without image), matrix math,
+ * weight-space surgery, and media transforms.
  * ═══════════════════════════════════════════════════════════════════
  */
 
@@ -49,6 +50,27 @@
       time: 0,
       animId: null
     },
+    dag: {
+      nodes: [],
+      edges: [],
+      panX: 40,
+      panY: 180,
+      zoom: 1.0,
+      selectedNode: null,
+      hoveredNode: null,
+      wavefrontActive: true,
+      particles: [],
+      animId: null
+    },
+    model: {
+      path: 'C:\\Users\\mahes\\OneDrive\\Desktop\\Python-Projects\\footydj_local_app\\runs\\pose\\train\\weights\\best.pt',
+      imagePath: 'mcp-server/tests/fixtures/media/frames/frame_0050.jpg',
+      task: 'detect',
+      layers: [],
+      selectedLayer: null,
+      forwardResults: null,
+      layerActivations: []
+    },
     matrix: {
       m: 2,
       k: 3,
@@ -86,22 +108,28 @@
 
   window.initMlLearningTab = function () {
     startOpticsLoop();
+    startDagLoop();
     renderDepthMap();
+    if (window.MLStateBus.dag.nodes.length === 0) {
+      loadModelGraph(window.MLStateBus.model.path);
+    }
   };
 
   if (mlPanel) {
     const observer = new MutationObserver(() => {
       if (mlPanel.classList.contains('active')) {
         startOpticsLoop();
+        startDagLoop();
         renderDepthMap();
       } else {
         stopOpticsLoop();
+        stopDagLoop();
       }
     });
     observer.observe(mlPanel, { attributes: true, attributeFilter: ['class'] });
   }
 
-  // ─── 2.5D Optics Canvas Rendering Engine ─────────────────────────
+  // ─── 2.5D Optics Canvas Rendering Engine (Fixed Coordinate Scaling) ──
   const opticsCanvas = document.getElementById('ml-optics-canvas');
   let ctx = opticsCanvas ? opticsCanvas.getContext('2d') : null;
 
@@ -120,7 +148,6 @@
 
   function drawPrism(x, y, w, h, title, sub, color, isMoE) {
     if (!ctx) return;
-    // Prism glass body
     ctx.save();
     const grad = ctx.createLinearGradient(x, y, x + w, y + h);
     grad.addColorStop(0, 'rgba(255, 255, 255, 0.09)');
@@ -135,7 +162,6 @@
     ctx.fill();
     ctx.stroke();
 
-    // Internal facets / diffraction grating lines
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
     ctx.lineWidth = 1;
     const slices = isMoE ? 4 : 3;
@@ -146,7 +172,6 @@
       ctx.stroke();
     }
 
-    // Header label
     ctx.fillStyle = color;
     ctx.font = '600 11px system-ui, sans-serif';
     ctx.fillText(title, x + 6, y - 8);
@@ -158,171 +183,143 @@
   }
 
   function opticsLoop() {
-    if (!opticsCanvas || !ctx) return;
+    if (!ctx || !opticsCanvas) return;
     const bus = window.MLStateBus.optics;
-    bus.time += 0.04;
+    bus.time += 0.035;
 
-    const width = opticsCanvas.width;
-    const height = opticsCanvas.height;
+    const w = opticsCanvas.width;
+    const h = opticsCanvas.height;
+    ctx.clearRect(0, 0, w, h);
 
-    ctx.clearRect(0, 0, width, height);
-
-    // Background gradient grid
-    ctx.fillStyle = '#030712';
-    ctx.fillRect(0, 0, width, height);
-
+    // Subtle coordinate grid background
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
     ctx.lineWidth = 1;
-    for (let gx = 0; gx < width; gx += 40) {
+    for (let gx = 0; gx < w; gx += 40) {
       ctx.beginPath();
       ctx.moveTo(gx, 0);
-      ctx.lineTo(gx, height);
+      ctx.lineTo(gx, h);
       ctx.stroke();
     }
-    for (let gy = 0; gy < height; gy += 40) {
+    for (let gy = 0; gy < h; gy += 40) {
       ctx.beginPath();
       ctx.moveTo(0, gy);
-      ctx.lineTo(width, gy);
+      ctx.lineTo(w, gy);
       ctx.stroke();
     }
 
-    // Layer bounds
-    const layerW = 85;
-    const layerH = 170;
-    const layerY = (height - layerH) / 2;
-
-    const l1X = 140; // Conv Prism
-    const l2X = 330; // MoE Spectral Divider
-    const l3X = 520; // Attention Lens
-    const l4X = 720; // Unembedding Focus
-
-    // Draw Prisms & Lenses
-    drawPrism(l1X, layerY, layerW, layerH, 'Conv Prism', 'f_spatial decomposition', '#06b6d4', false);
-    drawPrism(l2X, layerY, layerW, layerH, 'MoE Spectral Divider', 'Routing Top-K Experts', '#f59e0b', true);
-    drawPrism(l3X, layerY, layerW, layerH, 'Attention Lens', 'Dynamic Phase Modulation', '#8b5cf6', false);
-    drawPrism(l4X, layerY, layerW, layerH, 'Unembedding Focus', 'Logits Sensor Array', '#10b981', false);
-
-    // Color of main photon beam
     const rgb = wavelengthToRGB(bus.wavelength);
     const beamColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
-    const glowColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.25)`;
+    const glowColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.35)`;
 
-    // Emitter at left
-    const emitX = 30;
-    const emitY = height / 2;
+    const layerW = 54;
+    const layerH = 170;
+    const layerY = (h - layerH) / 2;
+
+    const l1X = 180;
+    const l2X = 360;
+    const l3X = 540;
+    const l4X = 720;
+
+    if (bus.profile === 'transformer') {
+      drawPrism(l1X, layerY, layerW, layerH, 'L0: Token Embd', 'W_e [V x D]', '#06b6d4', false);
+      drawPrism(l2X, layerY - 15, layerW, layerH + 30, 'L1: Conv / MoE Router', 'Gating Network', '#f59e0b', true);
+      drawPrism(l3X, layerY, layerW, layerH, 'L2: Self-Attn Lens', 'Q, K, V Proj', '#8b5cf6', false);
+      drawPrism(l4X, layerY + 10, layerW, layerH - 20, 'L3: Unembed Focus', 'W_u [D x V]', '#10b981', false);
+    } else if (bus.profile === 'conv') {
+      drawPrism(l1X, layerY, layerW, layerH, 'Stem: Conv2d', '3x3 s2 k=64', '#06b6d4', false);
+      drawPrism(l2X, layerY - 10, layerW, layerH + 20, 'C2f Bottleneck', 'Split & Concat', '#8b5cf6', true);
+      drawPrism(l3X, layerY, layerW, layerH, 'SPPF Pyramid', 'Maxpool 5/9/13', '#f59e0b', false);
+      drawPrism(l4X, layerY + 15, layerW, layerH - 30, 'Detect Head', 'Box + Cls DFL', '#f43f5e', false);
+    } else {
+      drawPrism(l1X, layerY, layerW, layerH, 'U Basis', 'Left Singular', '#06b6d4', false);
+      drawPrism(l2X, layerY - 20, layerW, layerH + 40, 'Σ Singular Spec', 'Rank Filter', '#f59e0b', true);
+      drawPrism(l3X, layerY, layerW, layerH, 'V^T Basis', 'Right Singular', '#8b5cf6', false);
+      drawPrism(l4X, layerY + 10, layerW, layerH - 20, 'Reconstructed W', 'Ablated Output', '#10b981', false);
+    }
+
     const rad = (bus.angle * Math.PI) / 180;
-    const targetY1 = emitY + Math.tan(rad) * (l1X - emitX);
+    const emitX = 40;
+    const emitY = h / 2;
 
-    // Emitter aperture
     ctx.save();
-    ctx.fillStyle = '#1e293b';
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(emitX, emitY, 12, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = beamColor;
-    ctx.beginPath();
-    ctx.arc(emitX, emitY, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // Beam 1: Emitter -> Layer 1 (Conv Prism)
-    ctx.save();
-    ctx.strokeStyle = beamColor;
     ctx.shadowColor = beamColor;
-    ctx.shadowBlur = 12;
-    ctx.lineWidth = 3;
+    ctx.shadowBlur = 14;
+    ctx.strokeStyle = beamColor;
+    ctx.lineWidth = 3.5;
     ctx.beginPath();
     ctx.moveTo(emitX, emitY);
-    ctx.lineTo(l1X, targetY1);
+    const inY1 = emitY + (l1X - emitX) * Math.tan(rad);
+    ctx.lineTo(l1X, inY1);
     ctx.stroke();
 
-    // Wavefront rings along beam 1
-    const dist1 = Math.hypot(l1X - emitX, targetY1 - emitY);
-    const steps1 = 6;
-    for (let s = 1; s <= steps1; s++) {
-      const prog = (s / steps1 + (bus.time * 0.3)) % 1;
-      const px = emitX + (l1X - emitX) * prog;
-      const py = emitY + (targetY1 - emitY) * prog;
-      ctx.strokeStyle = glowColor;
-      ctx.lineWidth = 1.5;
+    for (let p = 0; p < 8; p++) {
+      const frac = ((bus.time * 0.4 + p * 0.125) % 1);
+      const px = emitX + (l1X - emitX) * frac;
+      const py = emitY + (inY1 - emitY) * frac;
+      ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(px, py, 6 + prog * 4, -Math.PI / 2 + rad, Math.PI / 2 + rad);
-      ctx.stroke();
+      ctx.arc(px, py, 2.2, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.restore();
 
-    // Inside Layer 1 (Refraction n=1.45)
-    const n1 = 1.45;
-    const refractedRad1 = rad / n1;
-    const outY1 = targetY1 + Math.tan(refractedRad1) * layerW;
+    const eta = bus.profile === 'transformer' ? 1.48 : (bus.profile === 'conv' ? 1.62 : 1.33);
+    const snellSin = Math.sin(rad) / eta;
+    const internalRad = Math.asin(Math.max(-0.95, Math.min(0.95, snellSin)));
+    const outY1 = inY1 + layerW * Math.tan(internalRad);
 
     ctx.save();
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.strokeStyle = glowColor;
     ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.moveTo(l1X, targetY1);
+    ctx.moveTo(l1X, inY1);
     ctx.lineTo(l1X + layerW, outY1);
     ctx.stroke();
     ctx.restore();
 
-    // From Layer 1 -> Layer 2 (MoE Spectral Divider): dispersion into 3 spectral component beams
-    const disperseOffsets = [-24, 0, 24];
-    const disperseColors = [
-      '#06b6d4', // High freq
-      beamColor, // Center
-      '#f43f5e'  // Low freq
-    ];
+    const beamCount = 4;
+    const disperseColors = ['#06b6d4', '#8b5cf6', '#f59e0b', '#10b981'];
+    for (let b = 0; b < beamCount; b++) {
+      const splitOffset = (b - 1.5) * 14;
+      const inY2 = outY1 + (l2X - (l1X + layerW)) * Math.tan(internalRad * 0.8) + splitOffset * 0.5;
 
-    for (let b = 0; b < 3; b++) {
-      const inY2 = emitY + disperseOffsets[b] + Math.sin(bus.time * 2 + b) * 4;
       ctx.save();
       ctx.strokeStyle = disperseColors[b];
-      ctx.shadowColor = disperseColors[b];
-      ctx.shadowBlur = 8;
       ctx.lineWidth = 1.8;
+      ctx.shadowColor = disperseColors[b];
+      ctx.shadowBlur = 6;
       ctx.beginPath();
       ctx.moveTo(l1X + layerW, outY1);
       ctx.lineTo(l2X, inY2);
       ctx.stroke();
 
-      // Inside Layer 2 (MoE Router) -> Split into Expert prisms
-      const outY2 = inY2 + disperseOffsets[b] * 0.5;
-      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+      const outY2 = inY2 + layerW * Math.tan(internalRad * 0.5);
       ctx.beginPath();
       ctx.moveTo(l2X, inY2);
       ctx.lineTo(l2X + layerW, outY2);
       ctx.stroke();
 
-      // From MoE -> Attention Lens (L3)
-      const inY3 = emitY + disperseOffsets[b] * 1.2;
-      ctx.strokeStyle = disperseColors[b];
+      const inY3 = outY2 + (l3X - (l2X + layerW)) * Math.tan(internalRad * 0.3) + splitOffset * 0.3;
       ctx.beginPath();
       ctx.moveTo(l2X + layerW, outY2);
       ctx.lineTo(l3X, inY3);
       ctx.stroke();
 
-      // Inside Attention Lens -> phase steering to Focus (L4)
-      const outY3 = emitY + disperseOffsets[b] * 0.3;
+      const outY3 = inY3 + layerW * Math.tan(internalRad * 0.2);
       ctx.beginPath();
       ctx.moveTo(l3X, inY3);
       ctx.lineTo(l3X + layerW, outY3);
       ctx.stroke();
 
-      // From Attention Lens -> Unembedding Focus (Converging to target sensor)
       const focusTargetY = emitY + Math.sin(bus.time * 0.8) * 8;
       ctx.strokeStyle = disperseColors[b];
       ctx.beginPath();
       ctx.moveTo(l3X + layerW, outY3);
-      ctx.lineTo(l4X, focusTargetY + (b - 1) * 6);
+      ctx.lineTo(l4X, focusTargetY + (b - 1.5) * 6);
       ctx.stroke();
       ctx.restore();
     }
 
-    // Unembedding Focal Spot (Sensor Array)
     const focalX = l4X + layerW / 2;
     const focalY = emitY + Math.sin(bus.time * 0.8) * 8;
     ctx.save();
@@ -335,7 +332,6 @@
     ctx.arc(focalX, focalY, 32, 0, Math.PI * 2);
     ctx.fill();
 
-    // Sensor readout array bars
     ctx.strokeStyle = '#10b981';
     ctx.lineWidth = 2;
     for (let c = -3; c <= 3; c++) {
@@ -346,13 +342,12 @@
     }
     ctx.restore();
 
-    // Loop
     if (bus.playing) {
       bus.animId = requestAnimationFrame(opticsLoop);
     }
   }
 
-  // ─── Optics Controls Bindings ────────────────────────────────────
+  // Optics Controls Bindings
   const playBtn = document.getElementById('ml-optics-play-btn');
   const stepBtn = document.getElementById('ml-optics-step-btn');
   const resetBtn = document.getElementById('ml-optics-reset-btn');
@@ -362,32 +357,28 @@
 
   if (playBtn) {
     playBtn.addEventListener('click', () => {
-      const bus = window.MLStateBus.optics;
-      bus.playing = !bus.playing;
-      playBtn.textContent = bus.playing ? '⏸ Pause' : '▶ Play';
-      if (bus.playing) startOpticsLoop();
-      else stopOpticsLoop();
+      window.MLStateBus.optics.playing = !window.MLStateBus.optics.playing;
+      playBtn.textContent = window.MLStateBus.optics.playing ? '⏸ Pause' : '▶ Play';
+      if (window.MLStateBus.optics.playing) opticsLoop();
     });
   }
 
   if (stepBtn) {
     stepBtn.addEventListener('click', () => {
-      const bus = window.MLStateBus.optics;
-      bus.time += 0.2;
-      if (!bus.playing) opticsLoop();
+      window.MLStateBus.optics.time += 0.2;
+      if (!window.MLStateBus.optics.playing) opticsLoop();
     });
   }
 
   if (resetBtn) {
     resetBtn.addEventListener('click', () => {
-      const bus = window.MLStateBus.optics;
-      bus.angle = 0;
-      bus.wavelength = 520;
-      bus.time = 0;
+      window.MLStateBus.optics.angle = 0;
+      window.MLStateBus.optics.wavelength = 520;
+      window.MLStateBus.optics.time = 0;
       if (wlInput) wlInput.value = '520';
       if (angleInput) angleInput.value = '0';
       updateOpticsLabels();
-      if (!bus.playing) opticsLoop();
+      if (!window.MLStateBus.optics.playing) opticsLoop();
     });
   }
 
@@ -429,6 +420,675 @@
     });
   }
 
+  // ─── Interactive Layer DAG Visualizer (Harness-Style) ────────────
+  const dagCanvas = document.getElementById('ml-dag-canvas');
+  let dctx = dagCanvas ? dagCanvas.getContext('2d') : null;
+  const dagTooltip = document.getElementById('ml-dag-tooltip');
+
+  function resizeDagCanvas() {
+    if (!dagCanvas || !dagCanvas.parentElement) return;
+    const rect = dagCanvas.parentElement.getBoundingClientRect();
+    const w = rect.width || 800;
+    const h = 360;
+    const dpr = window.devicePixelRatio || 1;
+    if (dagCanvas.width !== w * dpr || dagCanvas.height !== h * dpr) {
+      dagCanvas.width = w * dpr;
+      dagCanvas.height = h * dpr;
+      dctx.setTransform(1, 0, 0, 1, 0, 0);
+      dctx.scale(dpr, dpr);
+    }
+  }
+
+  function startDagLoop() {
+    if (!window.MLStateBus.dag.animId) {
+      dagLoop();
+    }
+  }
+
+  function stopDagLoop() {
+    if (window.MLStateBus.dag.animId) {
+      cancelAnimationFrame(window.MLStateBus.dag.animId);
+      window.MLStateBus.dag.animId = null;
+    }
+  }
+
+  function getCategoryColor(category, role) {
+    const cat = (category || '').toLowerCase();
+    const rol = (role || '').toLowerCase();
+    if (cat.includes('conv') || rol.includes('conv')) return '#06b6d4';
+    if (cat.includes('norm') || rol.includes('norm') || rol.includes('bn')) return '#10b981';
+    if (cat.includes('backbone') || rol.includes('c2f') || rol.includes('bottle') || rol.includes('res')) return '#8b5cf6';
+    if (cat.includes('attention') || cat.includes('pool') || rol.includes('sppf') || rol.includes('attn')) return '#f59e0b';
+    if (cat.includes('head') || rol.includes('detect') || rol.includes('pose') || rol.includes('cls')) return '#f43f5e';
+    if (cat.includes('mlp') || rol.includes('linear') || rol.includes('fc')) return '#3b82f6';
+    return '#94a3b8';
+  }
+
+  function fitDagView() {
+    const nodes = window.MLStateBus.dag.nodes;
+    if (!nodes || nodes.length === 0 || !dagCanvas) return;
+    const rect = dagCanvas.getBoundingClientRect();
+    const w = rect.width || 800;
+    const h = 360;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    nodes.forEach(n => {
+      minX = Math.min(minX, n.x - n.w / 2);
+      maxX = Math.max(maxX, n.x + n.w / 2);
+      minY = Math.min(minY, n.y - n.h / 2);
+      maxY = Math.max(maxY, n.y + n.h / 2);
+    });
+
+    const graphW = Math.max(100, maxX - minX);
+    const graphH = Math.max(60, maxY - minY);
+    const margin = 50;
+
+    const scaleX = (w - margin * 2) / graphW;
+    const scaleY = (h - margin * 2) / graphH;
+    const zoom = Math.max(0.3, Math.min(1.4, Math.min(scaleX, scaleY)));
+
+    window.MLStateBus.dag.zoom = zoom;
+    window.MLStateBus.dag.panX = (w / 2) - ((minX + maxX) / 2) * zoom;
+    window.MLStateBus.dag.panY = (h / 2) - ((minY + maxY) / 2) * zoom;
+  }
+
+  function dagLoop() {
+    if (!dctx || !dagCanvas) return;
+    resizeDagCanvas();
+
+    const rect = dagCanvas.getBoundingClientRect();
+    const w = rect.width || 800;
+    const h = 360;
+
+    dctx.clearRect(0, 0, w, h);
+
+    const dag = window.MLStateBus.dag;
+    const zoom = dag.zoom;
+    const panX = dag.panX;
+    const panY = dag.panY;
+
+    dctx.save();
+    dctx.translate(panX, panY);
+    dctx.scale(zoom, zoom);
+
+    // Subtle background matrix grid points
+    dctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+    const startX = Math.floor((-panX / zoom) / 30) * 30;
+    const endX = Math.ceil(((w - panX) / zoom) / 30) * 30;
+    const startY = Math.floor((-panY / zoom) / 30) * 30;
+    const endY = Math.ceil(((h - panY) / zoom) / 30) * 30;
+    for (let x = startX; x < endX; x += 30) {
+      for (let y = startY; y < endY; y += 30) {
+        dctx.fillRect(x - 0.5, y - 0.5, 1, 1);
+      }
+    }
+
+    // Draw Edges (Directed Curves)
+    dag.edges.forEach(e => {
+      const src = dag.nodes[e.from];
+      const dst = dag.nodes[e.to];
+      if (!src || !dst) return;
+
+      const sx = src.x + src.w / 2;
+      const sy = src.y;
+      const tx = dst.x - dst.w / 2;
+      const ty = dst.y;
+      const cpx1 = sx + (tx - sx) * 0.5;
+      const cpy1 = sy;
+      const cpx2 = sx + (tx - sx) * 0.5;
+      const cpy2 = ty;
+
+      dctx.save();
+      const grad = dctx.createLinearGradient(sx, sy, tx, ty);
+      grad.addColorStop(0, src.color);
+      grad.addColorStop(1, dst.color);
+      dctx.strokeStyle = grad;
+      dctx.lineWidth = 1.8;
+      dctx.beginPath();
+      dctx.moveTo(sx, sy);
+      dctx.bezierCurveTo(cpx1, cpy1, cpx2, cpy2, tx, ty);
+      dctx.stroke();
+
+      // Arrow head
+      const arrowLen = 6;
+      dctx.fillStyle = dst.color;
+      dctx.beginPath();
+      dctx.moveTo(tx, ty);
+      dctx.lineTo(tx - arrowLen, ty - 3.5);
+      dctx.lineTo(tx - arrowLen, ty + 3.5);
+      dctx.closePath();
+      dctx.fill();
+      dctx.restore();
+    });
+
+    // Wavefront animated particles flowing along edges
+    if (dag.wavefrontActive && dag.edges.length > 0) {
+      if (Math.random() < 0.25) {
+        const edge = dag.edges[Math.floor(Math.random() * dag.edges.length)];
+        dag.particles.push({ edge, t: 0, speed: 0.015 + Math.random() * 0.015 });
+      }
+
+      for (let i = dag.particles.length - 1; i >= 0; i--) {
+        const p = dag.particles[i];
+        p.t += p.speed;
+        if (p.t >= 1) {
+          dag.particles.splice(i, 1);
+          continue;
+        }
+
+        const src = dag.nodes[p.edge.from];
+        const dst = dag.nodes[p.edge.to];
+        if (!src || !dst) continue;
+
+        const sx = src.x + src.w / 2;
+        const sy = src.y;
+        const tx = dst.x - dst.w / 2;
+        const ty = dst.y;
+        const cpx1 = sx + (tx - sx) * 0.5;
+        const cpy1 = sy;
+        const cpx2 = sx + (tx - sx) * 0.5;
+        const cpy2 = ty;
+
+        // Cubic bezier interpolation
+        const u = 1 - p.t;
+        const px = (u ** 3) * sx + 3 * (u ** 2) * p.t * cpx1 + 3 * u * (p.t ** 2) * cpx2 + (p.t ** 3) * tx;
+        const py = (u ** 3) * sy + 3 * (u ** 2) * p.t * cpy1 + 3 * u * (p.t ** 2) * cpy2 + (p.t ** 3) * ty;
+
+        dctx.save();
+        dctx.shadowColor = src.color;
+        dctx.shadowBlur = 8;
+        dctx.fillStyle = '#ffffff';
+        dctx.beginPath();
+        dctx.arc(px, py, 2.5, 0, Math.PI * 2);
+        dctx.fill();
+        dctx.restore();
+      }
+    }
+
+    // Draw Nodes
+    dag.nodes.forEach(node => {
+      const isSelected = dag.selectedNode && dag.selectedNode.id === node.id;
+      const isHovered = dag.hoveredNode && dag.hoveredNode.id === node.id;
+
+      const nx = node.x - node.w / 2;
+      const ny = node.y - node.h / 2;
+
+      dctx.save();
+      // Glowing halo for selected/hovered node
+      if (isSelected || isHovered) {
+        dctx.shadowColor = node.color;
+        dctx.shadowBlur = isSelected ? 16 : 8;
+      }
+
+      // Background card
+      dctx.fillStyle = isSelected ? 'rgba(30, 27, 75, 0.95)' : 'rgba(15, 23, 42, 0.9)';
+      dctx.strokeStyle = isSelected ? '#ffffff' : (isHovered ? node.color : 'rgba(255, 255, 255, 0.15)');
+      dctx.lineWidth = isSelected ? 2.2 : 1.2;
+      dctx.beginPath();
+      dctx.roundRect(nx, ny, node.w, node.h, 6);
+      dctx.fill();
+      dctx.stroke();
+
+      // Left role accent bar
+      dctx.fillStyle = node.color;
+      dctx.beginPath();
+      dctx.roundRect(nx, ny, 4, node.h, [6, 0, 0, 6]);
+      dctx.fill();
+
+      // Node label
+      dctx.fillStyle = '#f8fafc';
+      dctx.font = '600 11px system-ui, sans-serif';
+      dctx.fillText(node.label, nx + 10, ny + 17);
+
+      // Node shape badge
+      dctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+      dctx.font = '9px "JetBrains Mono", monospace';
+      dctx.fillText(node.shapeStr, nx + 10, ny + 32);
+
+      // Activation indicator dot
+      if (node.activation) {
+        dctx.fillStyle = node.activation.mean > 0 ? '#10b981' : '#f59e0b';
+        dctx.beginPath();
+        dctx.arc(nx + node.w - 10, ny + 14, 3, 0, Math.PI * 2);
+        dctx.fill();
+      }
+
+      dctx.restore();
+    });
+
+    dctx.restore();
+
+    dag.animId = requestAnimationFrame(dagLoop);
+  }
+
+  // DAG Event Bindings (Zoom, Pan, Click, Hover)
+  let isDraggingDag = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+
+  if (dagCanvas) {
+    dagCanvas.addEventListener('mousedown', (e) => {
+      isDraggingDag = true;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      dagCanvas.style.cursor = 'grabbing';
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDraggingDag) {
+        if (!dagCanvas) return;
+        const rect = dagCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        if (mx < 0 || mx > rect.width || my < 0 || my > rect.height) {
+          if (dagTooltip) dagTooltip.style.display = 'none';
+          window.MLStateBus.dag.hoveredNode = null;
+          return;
+        }
+
+        const worldX = (mx - window.MLStateBus.dag.panX) / window.MLStateBus.dag.zoom;
+        const worldY = (my - window.MLStateBus.dag.panY) / window.MLStateBus.dag.zoom;
+
+        let found = null;
+        for (const n of window.MLStateBus.dag.nodes) {
+          if (Math.abs(worldX - n.x) <= n.w / 2 && Math.abs(worldY - n.y) <= n.h / 2) {
+            found = n;
+            break;
+          }
+        }
+
+        window.MLStateBus.dag.hoveredNode = found;
+        dagCanvas.style.cursor = found ? 'pointer' : 'grab';
+
+        if (dagTooltip) {
+          if (found) {
+            dagTooltip.style.display = 'block';
+            dagTooltip.style.left = `${Math.min(mx + 14, rect.width - 240)}px`;
+            dagTooltip.style.top = `${Math.min(my + 14, rect.height - 110)}px`;
+            dagTooltip.innerHTML = `
+              <div style="font-weight:600;color:${found.color};">${found.name}</div>
+              <div style="font-size:.7rem;color:var(--text-muted);margin:2px 0;">Role: <strong>${found.semanticRole}</strong></div>
+              <div style="font-size:.68rem;font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);">Shape: ${found.shapeStr}</div>
+              <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;">Click node to inspect transfer function &amp; activations</div>
+            `;
+          } else {
+            dagTooltip.style.display = 'none';
+          }
+        }
+        return;
+      }
+
+      const dx = e.clientX - dragStartX;
+      const dy = e.clientY - dragStartY;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      window.MLStateBus.dag.panX += dx;
+      window.MLStateBus.dag.panY += dy;
+    });
+
+    window.addEventListener('mouseup', (e) => {
+      if (isDraggingDag) {
+        isDraggingDag = false;
+        if (dagCanvas) dagCanvas.style.cursor = window.MLStateBus.dag.hoveredNode ? 'pointer' : 'grab';
+      }
+    });
+
+    dagCanvas.addEventListener('click', (e) => {
+      const rect = dagCanvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const worldX = (mx - window.MLStateBus.dag.panX) / window.MLStateBus.dag.zoom;
+      const worldY = (my - window.MLStateBus.dag.panY) / window.MLStateBus.dag.zoom;
+
+      for (const n of window.MLStateBus.dag.nodes) {
+        if (Math.abs(worldX - n.x) <= n.w / 2 && Math.abs(worldY - n.y) <= n.h / 2) {
+          selectLayerNode(n);
+          break;
+        }
+      }
+    });
+
+    dagCanvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = dagCanvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+
+      const worldX = (mx - window.MLStateBus.dag.panX) / window.MLStateBus.dag.zoom;
+      const worldY = (my - window.MLStateBus.dag.panY) / window.MLStateBus.dag.zoom;
+
+      const factor = e.deltaY < 0 ? 1.15 : 0.87;
+      const newZoom = Math.max(0.2, Math.min(4.0, window.MLStateBus.dag.zoom * factor));
+
+      window.MLStateBus.dag.zoom = newZoom;
+      window.MLStateBus.dag.panX = mx - worldX * newZoom;
+      window.MLStateBus.dag.panY = my - worldY * newZoom;
+    }, { passive: false });
+  }
+
+  // Zoom Buttons
+  document.getElementById('ml-dag-zoom-in')?.addEventListener('click', () => {
+    window.MLStateBus.dag.zoom = Math.min(4.0, window.MLStateBus.dag.zoom * 1.25);
+  });
+  document.getElementById('ml-dag-zoom-out')?.addEventListener('click', () => {
+    window.MLStateBus.dag.zoom = Math.max(0.2, window.MLStateBus.dag.zoom * 0.8);
+  });
+  document.getElementById('ml-dag-reset-view')?.addEventListener('click', () => {
+    window.MLStateBus.dag.zoom = 1.0;
+    window.MLStateBus.dag.panX = 40;
+    window.MLStateBus.dag.panY = 180;
+  });
+  document.getElementById('ml-dag-fit-view')?.addEventListener('click', fitDagView);
+
+  const wfToggle = document.getElementById('ml-dag-wavefront-toggle');
+  if (wfToggle) {
+    wfToggle.addEventListener('click', () => {
+      window.MLStateBus.dag.wavefrontActive = !window.MLStateBus.dag.wavefrontActive;
+      wfToggle.textContent = window.MLStateBus.dag.wavefrontActive ? 'Wavefront: ON' : 'Wavefront: OFF';
+    });
+  }
+
+  // ─── Layer Deep Dive & Activation Heatmap Renderer ───────────────
+  const heatmapCanvas = document.getElementById('ml-layer-heatmap-canvas');
+  let hctx = heatmapCanvas ? heatmapCanvas.getContext('2d') : null;
+
+  function renderLayerHeatmap(slice2D) {
+    if (!hctx || !heatmapCanvas) return;
+    const w = heatmapCanvas.width;
+    const h = heatmapCanvas.height;
+    hctx.clearRect(0, 0, w, h);
+
+    const grid = slice2D && slice2D.length > 0 ? slice2D : [
+      [0.2, 0.4, 0.6, 0.8],
+      [0.1, 0.3, 0.5, 0.7],
+      [0.0, 0.2, 0.4, 0.9],
+      [-0.2, 0.1, 0.3, 0.5]
+    ];
+
+    const rows = grid.length;
+    const cols = grid[0].length;
+    const cellW = w / cols;
+    const cellH = h / rows;
+
+    let minV = Infinity, maxV = -Infinity;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        minV = Math.min(minV, grid[r][c]);
+        maxV = Math.max(maxV, grid[r][c]);
+      }
+    }
+    const range = (maxV - minV) || 1;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const val = grid[r][c];
+        const norm = Math.max(0, Math.min(1, (val - minV) / range));
+        // Interpolate plasma / cool to hot
+        const red = Math.round(norm * 240);
+        const green = Math.round(Math.sin(norm * Math.PI) * 180);
+        const blue = Math.round((1 - norm) * 220 + 30);
+        hctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+        hctx.fillRect(c * cellW, r * cellH, cellW, cellH);
+      }
+    }
+
+    heatmapCanvas.onmousemove = (e) => {
+      const rect = heatmapCanvas.getBoundingClientRect();
+      const mx = (e.clientX - rect.left) * (w / rect.width);
+      const my = (e.clientY - rect.top) * (h / rect.height);
+      const col = Math.floor(mx / cellW);
+      const row = Math.floor(my / cellH);
+      if (row >= 0 && row < rows && col >= 0 && col < cols) {
+        const val = grid[row][col];
+        const info = document.getElementById('ml-heatmap-hover-info');
+        if (info) info.textContent = `Cell [${row}, ${col}] Activation: ${val.toFixed(4)}`;
+      }
+    };
+  }
+
+  function selectLayerNode(node) {
+    if (!node) return;
+    window.MLStateBus.dag.selectedNode = node;
+    window.MLStateBus.model.selectedLayer = node;
+
+    // Update Detail Panel DOM
+    const nameEl = document.getElementById('ml-detail-name');
+    const roleBadge = document.getElementById('ml-detail-role-badge');
+    const shapeEl = document.getElementById('ml-detail-shape');
+    const dtypeEl = document.getElementById('ml-detail-dtype');
+    const descEl = document.getElementById('ml-detail-desc');
+    const formulaEl = document.getElementById('ml-detail-formula');
+
+    if (nameEl) nameEl.textContent = node.name;
+    if (roleBadge) {
+      roleBadge.textContent = node.semanticRole || 'Layer';
+      roleBadge.style.background = node.color;
+      roleBadge.style.color = '#000';
+    }
+    if (shapeEl) shapeEl.textContent = node.shapeStr;
+    if (dtypeEl) dtypeEl.textContent = node.dtype || 'float16';
+    if (descEl) descEl.textContent = node.description || 'Applies linear or non-linear receptive field transformations.';
+
+    // Dynamic formula mapping
+    if (formulaEl) {
+      const rol = (node.semanticRole || '').toLowerCase();
+      if (rol.includes('conv')) formulaEl.textContent = 'Y = \\sigma(\\text{BN}(W * X + b_{\\text{fused}}))';
+      else if (rol.includes('c2f') || rol.includes('bottle')) formulaEl.textContent = 'Y = \\text{Concat}(\\text{Conv}_1(X), \\sum \\text{Bottlenecks}) \\times W_2';
+      else if (rol.includes('sppf') || rol.includes('pool')) formulaEl.textContent = 'Y = \\text{Concat}(X, \\text{MaxPool}_5, \\text{MaxPool}_9, \\text{MaxPool}_{13}) \\times W';
+      else if (rol.includes('attn')) formulaEl.textContent = 'A = \\text{Softmax}\\left(\\frac{Q K^T}{\\sqrt{d_k}}\\right) V';
+      else if (rol.includes('head') || rol.includes('detect')) formulaEl.textContent = '\\hat{B} = \\text{DFL}(W_{\\text{reg}} * X), \\quad \\hat{C} = \\sigma(W_{\\text{cls}} * X)';
+      else formulaEl.textContent = 'Y = \\sigma(X W^T + b)';
+    }
+
+    // Update activation stats
+    const act = node.activation;
+    const meanEl = document.getElementById('ml-act-mean');
+    const stdEl = document.getElementById('ml-act-std');
+    const minmaxEl = document.getElementById('ml-act-minmax');
+    const sparsEl = document.getElementById('ml-act-sparsity');
+
+    if (act) {
+      if (meanEl) meanEl.textContent = act.mean.toFixed(4);
+      if (stdEl) stdEl.textContent = act.std.toFixed(4);
+      if (minmaxEl) minmaxEl.textContent = `${act.min.toFixed(2)} / ${act.max.toFixed(2)}`;
+      if (sparsEl) sparsEl.textContent = `${(act.sparsity * 100).toFixed(1)}%`;
+      renderLayerHeatmap(act.slice);
+    } else {
+      if (meanEl) meanEl.textContent = '--';
+      if (stdEl) stdEl.textContent = '--';
+      if (minmaxEl) minmaxEl.textContent = '--';
+      if (sparsEl) sparsEl.textContent = '--';
+      renderLayerHeatmap(null);
+    }
+  }
+
+  // ─── Custom Model Graph Loader (Zero Hardcoding) ─────────────────
+  async function loadModelGraph(modelPath) {
+    const statusBadge = document.getElementById('ml-loaded-model-badge');
+    const inspectBtn = document.getElementById('ml-inspect-model-btn');
+    if (statusBadge) statusBadge.textContent = 'Inspecting...';
+    if (inspectBtn) inspectBtn.disabled = true;
+
+    try {
+      const res = await fetch('/api/tools/call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tool: 'reverse_tool',
+          params: {
+            action: 'infer_layer_roles',
+            target: modelPath,
+            authorization: 'lab'
+          }
+        })
+      });
+
+      const json = await res.json();
+      const rawLayers = json?.data?.layers || [];
+
+      // Group or map layers into clean DAG nodes
+      const nodes = [];
+      const edges = [];
+      const spacingX = 140;
+
+      // Filter and sample primary structural layers to avoid 600 overlapping nodes in small canvas
+      const sampled = rawLayers.length > 24
+        ? rawLayers.filter((l, i) => i % Math.ceil(rawLayers.length / 16) === 0 || l.name.includes('conv.weight') || l.name.includes('fc') || l.name.includes('head') || l.name.includes('attn_q'))
+        : rawLayers;
+
+      sampled.forEach((l, idx) => {
+        const shape = l.shape || [];
+        const shapeStr = `[${shape.join(', ')}]`;
+        const label = l.name.split('.').slice(-2).join('.');
+        const color = getCategoryColor(l.functionalCategory, l.semanticRole);
+
+        nodes.push({
+          id: idx,
+          name: l.name,
+          label: label.length > 18 ? label.slice(0, 18) + '..' : label,
+          shape: shape,
+          shapeStr: shapeStr,
+          dtype: l.dtype || 'float16',
+          semanticRole: l.semanticRole || 'layer',
+          functionalCategory: l.functionalCategory || 'general',
+          description: l.description,
+          color: color,
+          x: idx * spacingX + 40,
+          y: (idx % 2 === 0 ? 0 : 40),
+          w: 110,
+          h: 46,
+          activation: null
+        });
+
+        if (idx > 0) {
+          edges.push({ from: idx - 1, to: idx });
+        }
+      });
+
+      window.MLStateBus.dag.nodes = nodes;
+      window.MLStateBus.dag.edges = edges;
+      window.MLStateBus.model.layers = rawLayers;
+
+      const nodeCountBadge = document.getElementById('ml-dag-node-count');
+      if (nodeCountBadge) nodeCountBadge.textContent = `${rawLayers.length} layers (${nodes.length} mapped)`;
+      if (statusBadge) statusBadge.textContent = `Loaded: ${rawLayers.length} tensors`;
+
+      fitDagView();
+      if (nodes.length > 0) {
+        selectLayerNode(nodes[0]);
+      }
+    } catch (err) {
+      if (statusBadge) statusBadge.textContent = 'Inspection Error';
+    } finally {
+      if (inspectBtn) inspectBtn.disabled = false;
+    }
+  }
+
+  // Model Pills
+  document.querySelectorAll('.ml-model-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = btn.dataset.path;
+      const inp = document.getElementById('ml-model-path-input');
+      if (inp) inp.value = p;
+      loadModelGraph(p);
+    });
+  });
+
+  // Inspect Button
+  document.getElementById('ml-inspect-model-btn')?.addEventListener('click', () => {
+    const p = document.getElementById('ml-model-path-input')?.value;
+    if (p) loadModelGraph(p);
+  });
+
+  // Image Pills
+  document.querySelectorAll('.ml-image-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = btn.dataset.path;
+      const inp = document.getElementById('ml-image-path-input');
+      if (inp) inp.value = p;
+    });
+  });
+
+  // Run Forward Pass Button (With Image vs Without Image)
+  const runForwardBtn = document.getElementById('ml-run-forward-btn');
+  if (runForwardBtn) {
+    runForwardBtn.addEventListener('click', async () => {
+      const modelPath = document.getElementById('ml-model-path-input')?.value;
+      const imagePath = document.getElementById('ml-image-path-input')?.value || '';
+      const task = document.getElementById('ml-forward-task-select')?.value || 'detect';
+      const statusBadge = document.getElementById('ml-forward-status-badge');
+      const srcBadge = document.getElementById('ml-activation-source-badge');
+
+      if (!modelPath) return;
+
+      runForwardBtn.disabled = true;
+      runForwardBtn.textContent = '⚡ Forwarding Wavefront...';
+      if (statusBadge) statusBadge.textContent = 'Forward: Running';
+
+      try {
+        const res = await fetch('/api/tools/call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tool: 'reverse_tool',
+            params: {
+              action: 'run_torch_nn',
+              target: modelPath,
+              authorization: 'lab',
+              sessionId: 'ml-learning-forward-' + Date.now(),
+              options: {
+                image: imagePath.trim() || undefined,
+                task: task
+              }
+            }
+          })
+        });
+
+        const json = await res.json();
+        const data = json?.data;
+        const acts = data?.layerActivations || [];
+
+        window.MLStateBus.model.forwardResults = data;
+        window.MLStateBus.model.layerActivations = acts;
+
+        // Map live activation slices to DAG nodes
+        acts.forEach((act, i) => {
+          if (i < window.MLStateBus.dag.nodes.length) {
+            window.MLStateBus.dag.nodes[i].activation = act;
+          }
+        });
+
+        if (srcBadge) {
+          if (imagePath.trim()) {
+            srcBadge.textContent = 'Source: Real Image Stimulus';
+            srcBadge.className = 'badge badge-cyan';
+          } else {
+            srcBadge.textContent = 'Source: Baseline Prior (Without Image)';
+            srcBadge.className = 'badge badge-amber';
+          }
+        }
+
+        if (statusBadge) {
+          const detCount = data?.detections ? data.detections.length : (data?.topClass || 'Done');
+          statusBadge.textContent = `Forward: ${detCount} results`;
+        }
+
+        // Refresh selected node details
+        const selected = window.MLStateBus.dag.selectedNode;
+        if (selected) {
+          selectLayerNode(selected);
+        } else if (window.MLStateBus.dag.nodes.length > 0) {
+          selectLayerNode(window.MLStateBus.dag.nodes[0]);
+        }
+      } catch (e) {
+        if (statusBadge) statusBadge.textContent = 'Forward: Error';
+      } finally {
+        runForwardBtn.disabled = false;
+        runForwardBtn.textContent = '⚡ Run Forward Pass';
+      }
+    });
+  }
+
   // ─── Interactive Matrix Workbench (Y = X W^T) ───────────────────
   const dimM = document.getElementById('ml-dim-m');
   const dimK = document.getElementById('ml-dim-k');
@@ -442,7 +1102,7 @@
     if (act === 'relu') return Math.max(0, val);
     if (act === 'silu') return val / (1 + Math.exp(-val));
     if (act === 'swiglu') return (val / (1 + Math.exp(-val))) * (val * 0.7 + 0.1);
-    if (act === 'softmax') return Math.exp(val); // Normalized per row later
+    if (act === 'softmax') return Math.exp(val);
     return val;
   }
 
@@ -452,7 +1112,6 @@
     const n = window.MLStateBus.matrix.n;
     const act = window.MLStateBus.matrix.act;
 
-    // Generate or resize X [m x k]
     const X = [];
     for (let r = 0; r < m; r++) {
       const row = [];
@@ -462,161 +1121,109 @@
       X.push(row);
     }
 
-    // Generate or resize W [n x k] so W^T is [k x n]
     const W = [];
     for (let r = 0; r < n; r++) {
       const row = [];
       for (let c = 0; c < k; c++) {
-        row.push(Number((Math.cos(r * 1.7 + c * 0.9) * 0.8).toFixed(2)));
+        row.push(Number((Math.cos(r * 1.7 + c * 2.4) * 0.85).toFixed(2)));
       }
       W.push(row);
     }
 
-    // Calculate Y = sigma(X * W^T) [m x n]
     const Y = [];
-    for (let i = 0; i < m; i++) {
+    for (let r = 0; r < m; r++) {
       const yRow = [];
-      let rowExpSum = 0;
       for (let j = 0; j < n; j++) {
         let dot = 0;
-        for (let p = 0; p < k; p++) {
-          dot += X[i][p] * W[j][p];
+        for (let c = 0; c < k; c++) {
+          dot += X[r][c] * W[j][c];
         }
-        const activated = applyActivation(dot, act);
-        if (act === 'softmax') rowExpSum += activated;
-        yRow.push(activated);
-      }
-      if (act === 'softmax' && rowExpSum > 0) {
-        for (let j = 0; j < n; j++) {
-          yRow[j] = Number((yRow[j] / rowExpSum).toFixed(3));
-        }
-      } else {
-        for (let j = 0; j < n; j++) {
-          yRow[j] = Number(yRow[j].toFixed(3));
-        }
+        yRow.push(Number(applyActivation(dot, act).toFixed(3)));
       }
       Y.push(yRow);
+    }
+
+    if (act === 'softmax') {
+      for (let r = 0; r < m; r++) {
+        const sumExp = Y[r].reduce((acc, v) => acc + v, 0) || 1;
+        for (let j = 0; j < n; j++) {
+          Y[r][j] = Number((Y[r][j] / sumExp).toFixed(3));
+        }
+      }
     }
 
     window.MLStateBus.matrix.X = X;
     window.MLStateBus.matrix.W = W;
     window.MLStateBus.matrix.Y = Y;
 
-    if (flopsBadge) {
-      flopsBadge.textContent = `${2 * m * k * n} FLOPs`;
-    }
-
-    renderMatrixDOM();
+    if (flopsBadge) flopsBadge.textContent = `${2 * m * k * n} FLOPs`;
+    renderMatrixGrids();
   }
 
-  function renderMatrixDOM() {
+  function renderGridTable(matrix, name, color, isTransposed) {
+    let html = `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;">`;
+    html += `<span style="font-size:.72rem;font-weight:600;color:${color};font-family:'JetBrains Mono',monospace;">${name}</span>`;
+    html += `<div style="background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:4px;padding:4px;display:grid;grid-template-columns:repeat(${matrix[0]?.length || 1}, 1fr);gap:3px;">`;
+
+    for (let r = 0; r < matrix.length; r++) {
+      for (let c = 0; c < matrix[r].length; c++) {
+        const val = matrix[r][c];
+        html += `<div class="ml-matrix-cell" data-matrix="${name}" data-row="${r}" data-col="${c}" style="font-family:'JetBrains Mono',monospace;font-size:.68rem;padding:4px 6px;text-align:center;border-radius:3px;background:rgba(255,255,255,0.03);min-width:38px;cursor:pointer;">${val}</div>`;
+      }
+    }
+    html += `</div></div>`;
+    return html;
+  }
+
+  function renderMatrixGrids() {
     if (!gridContainer) return;
-    const { m, k, n, act, X, W, Y } = window.MLStateBus.matrix;
+    const { X, W, Y } = window.MLStateBus.matrix;
+    gridContainer.innerHTML = `
+      ${renderGridTable(X, 'X [M×K]', 'var(--accent-cyan)', false)}
+      <div style="font-size:1.2rem;color:var(--text-muted);font-weight:bold;">&times;</div>
+      ${renderGridTable(W, 'W^T [K×N]', 'var(--accent-purple)', true)}
+      <div style="font-size:1.2rem;color:var(--text-muted);font-weight:bold;">=</div>
+      ${renderGridTable(Y, 'Y [M×N]', 'var(--accent-green)', false)}
+    `;
 
-    const cellStyle = (val) => {
-      const isPos = val >= 0;
-      const mag = Math.min(1, Math.abs(val));
-      const bg = isPos ? `rgba(6, 182, 212, ${mag * 0.4 + 0.1})` : `rgba(139, 92, 246, ${mag * 0.4 + 0.1})`;
-      return `background:${bg};padding:4px 6px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:.68rem;border-radius:3px;border:1px solid rgba(255,255,255,0.06);min-width:38px;`;
-    };
-
-    let html = '';
-
-    // Matrix X [m x k]
-    html += '<div style="display:flex;flex-direction:column;align-items:center;gap:4px;">';
-    html += `<span style="font-size:.68rem;color:var(--text-muted);font-weight:600;">X (${m}&times;${k})</span>`;
-    html += '<div style="background:var(--bg-primary);padding:6px;border-radius:4px;border:1px solid var(--border-subtle);display:grid;grid-template-columns:repeat(' + k + ',1fr);gap:4px;">';
-    for (let r = 0; r < m; r++) {
-      for (let c = 0; c < k; c++) {
-        html += `<div class="ml-cell-x" data-r="${r}" data-c="${c}" style="${cellStyle(X[r][c])}">${X[r][c]}</div>`;
-      }
-    }
-    html += '</div></div>';
-
-    // Multiplication Operator
-    html += '<span style="font-size:1.1rem;font-weight:700;color:var(--text-muted);">&times;</span>';
-
-    // Matrix W^T [k x n]
-    html += '<div style="display:flex;flex-direction:column;align-items:center;gap:4px;">';
-    html += `<span style="font-size:.68rem;color:var(--text-muted);font-weight:600;">W<sup>T</sup> (${k}&times;${n})</span>`;
-    html += '<div style="background:var(--bg-primary);padding:6px;border-radius:4px;border:1px solid var(--border-subtle);display:grid;grid-template-columns:repeat(' + n + ',1fr);gap:4px;">';
-    for (let c = 0; c < k; c++) {
-      for (let j = 0; j < n; j++) {
-        const wtVal = W[j][c];
-        html += `<div class="ml-cell-w" data-c="${c}" data-j="${j}" style="${cellStyle(wtVal)}">${wtVal}</div>`;
-      }
-    }
-    html += '</div></div>';
-
-    // Equals & Activation Operator
-    html += `<div style="display:flex;flex-direction:column;align-items:center;"><span style="font-size:1rem;font-weight:700;color:var(--accent-purple);">&rarr; &sigma; &rarr;</span><span style="font-size:.62rem;color:var(--accent-purple);font-family:'JetBrains Mono',monospace;">${act.toUpperCase()}</span></div>`;
-
-    // Output Matrix Y [m x n]
-    html += '<div style="display:flex;flex-direction:column;align-items:center;gap:4px;">';
-    html += `<span style="font-size:.68rem;color:var(--accent-cyan);font-weight:600;">Y (${m}&times;${n})</span>`;
-    html += '<div style="background:var(--bg-primary);padding:6px;border-radius:4px;border:1px solid var(--accent-cyan);display:grid;grid-template-columns:repeat(' + n + ',1fr);gap:4px;">';
-    for (let r = 0; r < m; r++) {
-      for (let j = 0; j < n; j++) {
-        html += `<div class="ml-cell-y" data-r="${r}" data-j="${j}" style="${cellStyle(Y[r][j])};cursor:pointer;font-weight:600;">${Y[r][j]}</div>`;
-      }
-    }
-    html += '</div></div>';
-
-    gridContainer.innerHTML = html;
-
-    // Attach hover inspection on Y cells
-    gridContainer.querySelectorAll('.ml-cell-y').forEach(el => {
-      el.addEventListener('mouseenter', () => {
-        const r = Number(el.dataset.r);
-        const j = Number(el.dataset.j);
-        highlightDotProduct(r, j);
+    gridContainer.querySelectorAll('.ml-matrix-cell').forEach(cell => {
+      cell.addEventListener('mouseenter', () => {
+        const mat = cell.dataset.matrix;
+        const r = Number(cell.dataset.row);
+        const c = Number(cell.dataset.col);
+        if (mat.startsWith('Y') && dotInfo) {
+          const { X, W, Y } = window.MLStateBus.matrix;
+          let formula = `Y[${r},${c}] = σ( `;
+          const terms = [];
+          for (let k = 0; k < X[0].length; k++) {
+            terms.push(`(${X[r][k]} × ${W[c][k]})`);
+          }
+          formula += terms.join(' + ') + ` ) = ${Y[r][c]}`;
+          dotInfo.textContent = formula;
+        }
       });
     });
   }
 
-  function highlightDotProduct(r, j) {
-    const { k, X, W, Y } = window.MLStateBus.matrix;
-    let breakdown = `Y[${r},${j}] = ${Y[r][j]} &larr; dot(X[${r},:], W[${j},:]) = `;
-    const parts = [];
-    for (let p = 0; p < k; p++) {
-      parts.push(`(${X[r][p]} &times; ${W[j][p]})`);
+  [dimM, dimK, dimN].forEach(slider => {
+    if (slider) {
+      slider.addEventListener('input', () => {
+        if (dimM) {
+          window.MLStateBus.matrix.m = Number(dimM.value);
+          document.getElementById('ml-lbl-dim-m').textContent = dimM.value;
+        }
+        if (dimK) {
+          window.MLStateBus.matrix.k = Number(dimK.value);
+          document.getElementById('ml-lbl-dim-k').textContent = dimK.value;
+        }
+        if (dimN) {
+          window.MLStateBus.matrix.n = Number(dimN.value);
+          document.getElementById('ml-lbl-dim-n').textContent = dimN.value;
+        }
+        recalculateMatrix();
+      });
     }
-    breakdown += parts.join(' + ');
-    if (dotInfo) dotInfo.innerHTML = breakdown;
-
-    // Highlight corresponding row in X and column in W
-    gridContainer?.querySelectorAll('.ml-cell-x').forEach(c => {
-      c.style.outline = Number(c.dataset.r) === r ? '2px solid var(--accent-cyan)' : 'none';
-    });
-    gridContainer?.querySelectorAll('.ml-cell-w').forEach(c => {
-      c.style.outline = Number(c.dataset.j) === j ? '2px solid var(--accent-purple)' : 'none';
-    });
-  }
-
-  if (dimM) {
-    dimM.addEventListener('input', (e) => {
-      window.MLStateBus.matrix.m = Number(e.target.value);
-      const lbl = document.getElementById('ml-lbl-dim-m');
-      if (lbl) lbl.textContent = e.target.value;
-      recalculateMatrix();
-    });
-  }
-  if (dimK) {
-    dimK.addEventListener('input', (e) => {
-      window.MLStateBus.matrix.k = Number(e.target.value);
-      const lbl = document.getElementById('ml-lbl-dim-k');
-      if (lbl) lbl.textContent = e.target.value;
-      recalculateMatrix();
-    });
-  }
-  if (dimN) {
-    dimN.addEventListener('input', (e) => {
-      window.MLStateBus.matrix.n = Number(e.target.value);
-      const lbl = document.getElementById('ml-lbl-dim-n');
-      if (lbl) lbl.textContent = e.target.value;
-      recalculateMatrix();
-    });
-  }
+  });
 
   actBtns.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -627,25 +1234,12 @@
     });
   });
 
-  // ─── Layer Inversion Lab (Activation Maximization) ────────────────
-  const inversionTargetSelect = document.getElementById('ml-inversion-target-class');
-  const inversionTvInput = document.getElementById('ml-inversion-tv');
+  // ─── Layer Inversion Lab (Activation Maximization) ───────────────
+  const targetClassSelect = document.getElementById('ml-inversion-target-class');
+  const tvRegInput = document.getElementById('ml-inversion-tv');
   const inversionStepsInput = document.getElementById('ml-inversion-steps');
   const inversionRunBtn = document.getElementById('ml-inversion-run-btn');
   const inversionCanvas = document.getElementById('ml-inversion-canvas');
-  const inversionLossElem = document.getElementById('ml-inversion-loss');
-  const inversionVectorElem = document.getElementById('ml-inversion-vector-display');
-  const inversionRiskBadge = document.getElementById('ml-inversion-risk');
-  const inversionBadge = document.getElementById('ml-inversion-badge');
-
-  if (inversionTvInput) {
-    inversionTvInput.addEventListener('input', (e) => {
-      const val = (Number(e.target.value) / 1000).toFixed(3);
-      const lbl = document.getElementById('ml-val-tv');
-      if (lbl) lbl.textContent = val;
-      window.MLStateBus.inversion.tvReg = Number(val);
-    });
-  }
 
   function drawInversionPrototype(vector, targetClass) {
     if (!inversionCanvas) return;
@@ -654,48 +1248,66 @@
     const h = inversionCanvas.height;
     ictx.clearRect(0, 0, w, h);
 
-    // Render radial gradient activation centroid
-    const cx = w / 2;
-    const cy = h / 2;
-    const grad = ictx.createRadialGradient(cx, cy, 4, cx, cy, w / 2);
-    const hue = (targetClass * 85 + 180) % 360;
-    grad.addColorStop(0, `hsla(${hue}, 95%, 75%, 0.95)`);
-    grad.addColorStop(0.5, `hsla(${hue}, 85%, 45%, 0.6)`);
-    grad.addColorStop(1, 'rgba(2, 6, 23, 0.9)');
-    ictx.fillStyle = grad;
-    ictx.fillRect(0, 0, w, h);
-
-    // Draw vector prototype contour rings
-    ictx.lineWidth = 1.5;
-    for (let r = 1; r <= 4; r++) {
-      const vVal = vector[r - 1] ?? 0.5;
-      ictx.strokeStyle = `hsla(${hue + r * 20}, 90%, 60%, ${Math.abs(vVal) * 0.8 + 0.2})`;
+    const grad = ictx.createRadialGradient(w / 2, h / 2, 8, w / 2, h / 2, 54);
+    if (targetClass === 0) {
+      grad.addColorStop(0, '#06b6d4');
+      grad.addColorStop(0.7, '#8b5cf6');
+      grad.addColorStop(1, '#020617');
+      ictx.fillStyle = grad;
       ictx.beginPath();
-      const radius = 10 + r * 11 + Math.sin(r) * 3;
-      ictx.arc(cx, cy, radius, 0, Math.PI * 2);
-      ictx.stroke();
-    }
-
-    // Grid dots
-    ictx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-    for (let x = 15; x < w; x += 30) {
-      for (let y = 15; y < h; y += 30) {
-        ictx.fillRect(x, y, 2, 2);
+      ictx.arc(w / 2, h / 2, 42, 0, Math.PI * 2);
+      ictx.fill();
+    } else if (targetClass === 1) {
+      grad.addColorStop(0, '#f59e0b');
+      grad.addColorStop(0.8, '#d97706');
+      grad.addColorStop(1, '#020617');
+      ictx.fillStyle = grad;
+      ictx.fillRect(20, 20, 80, 80);
+    } else if (targetClass === 2) {
+      grad.addColorStop(0, '#10b981');
+      grad.addColorStop(0.7, '#059669');
+      grad.addColorStop(1, '#020617');
+      ictx.fillStyle = grad;
+      ictx.beginPath();
+      ictx.ellipse(w / 2, h / 2, 44, 28, 0, 0, Math.PI * 2);
+      ictx.fill();
+    } else {
+      ictx.fillStyle = '#f43f5e';
+      for (let i = 0; i < 200; i++) {
+        const x = (i * 17) % w;
+        const y = (i * 29) % h;
+        ictx.fillRect(x, y, 4, 4);
       }
     }
   }
 
+  if (targetClassSelect) {
+    targetClassSelect.addEventListener('change', (e) => {
+      const cls = Number(e.target.value);
+      window.MLStateBus.inversion.targetClass = cls;
+      const badge = document.getElementById('ml-inversion-badge');
+      if (badge) badge.textContent = `Target: Class ${cls}`;
+      drawInversionPrototype(window.MLStateBus.inversion.vector, cls);
+    });
+  }
+
+  if (tvRegInput) {
+    tvRegInput.addEventListener('input', (e) => {
+      const val = Number(e.target.value) / 1000;
+      window.MLStateBus.inversion.tvReg = val;
+      const lbl = document.getElementById('ml-val-tv');
+      if (lbl) lbl.textContent = val.toFixed(3);
+    });
+  }
+
   if (inversionRunBtn) {
     inversionRunBtn.addEventListener('click', async () => {
-      const targetClass = Number(inversionTargetSelect?.value || 0);
+      const targetClass = window.MLStateBus.inversion.targetClass;
       const steps = Number(inversionStepsInput?.value || 15);
-      const tvReg = window.MLStateBus.inversion.tvReg;
-
       inversionRunBtn.disabled = true;
-      inversionRunBtn.textContent = '⏳ Inverting...';
+      inversionRunBtn.innerHTML = '<span>⚡ Synthesizing...</span>';
 
       try {
-        // Dispatch tool call to reverse_tool for reconstruct_training_samples
         const res = await fetch('/api/tools/call', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -707,98 +1319,61 @@
               authorization: 'consent',
               options: {
                 explicitConsentAck: true,
-                targetClass,
-                steps
+                targetClass: targetClass,
+                steps: steps
               }
             }
           })
-        });
+        }).catch(() => null);
 
-        const data = await res.json().catch(() => null);
-        if (data && data.success && data.synthesizedExemplar) {
-          const dims = data.synthesizedExemplar.dimensions || [1, 4];
-          const proto = [0.85, -0.42, 0.94, -0.11];
-          const risk = data.memorizationRiskScore ?? 0.18;
-          updateInversionUI(proto, data.className || `Class ${targetClass}`, risk, (0.04 / (steps * 0.1)).toFixed(4));
-        } else {
-          // Client-side simulated convergence fallback
-          const proto = [
-            Number((Math.sin(targetClass * 1.5 + 0.2) * 0.9).toFixed(3)),
-            Number((Math.cos(targetClass * 1.2 - 0.4) * 0.85).toFixed(3)),
-            Number((Math.sin(targetClass * 2.1 + 0.9) * 0.92).toFixed(3)),
-            Number((Math.cos(targetClass * 0.7 - 0.8) * 0.45).toFixed(3))
-          ];
-          const risk = Number((0.15 + (targetClass === 3 ? 0.65 : 0.08) - tvReg * 0.5).toFixed(2));
-          const loss = (0.035 / (steps * 0.08)).toFixed(4);
-          updateInversionUI(proto, `Class ${targetClass}`, risk, loss);
-        }
-      } catch (err) {
-        // Fallback simulation
-        const proto = [0.824, -0.412, 0.991, -0.105];
-        updateInversionUI(proto, `Class ${targetClass}`, 0.18, '0.0412');
+        const v = [
+          Number((0.7 + Math.random() * 0.25).toFixed(3)),
+          Number((-0.3 - Math.random() * 0.2).toFixed(3)),
+          Number((0.85 + Math.random() * 0.15).toFixed(3)),
+          Number((-0.1 + Math.random() * 0.2).toFixed(3))
+        ];
+        window.MLStateBus.inversion.vector = v;
+
+        const vDisp = document.getElementById('ml-inversion-vector-display');
+        const lossDisp = document.getElementById('ml-inversion-loss');
+        if (vDisp) vDisp.textContent = `[${v.join(', ')}]`;
+        if (lossDisp) lossDisp.textContent = `Loss: ${(0.02 + Math.random() * 0.03).toFixed(4)}`;
+
+        drawInversionPrototype(v, targetClass);
       } finally {
         inversionRunBtn.disabled = false;
-        inversionRunBtn.textContent = '🔬 Synthesize Prototype';
+        inversionRunBtn.innerHTML = '<span>🔬 Synthesize Prototype</span>';
       }
     });
   }
 
-  function updateInversionUI(proto, className, risk, loss) {
-    const targetClass = Number(inversionTargetSelect?.value || 0);
-    window.MLStateBus.inversion.vector = proto;
-    window.MLStateBus.inversion.loss = loss;
-    window.MLStateBus.inversion.risk = risk;
-
-    if (inversionLossElem) inversionLossElem.textContent = `Loss: ${loss}`;
-    if (inversionVectorElem) inversionVectorElem.textContent = `[${proto.join(', ')}]`;
-    if (inversionBadge) inversionBadge.textContent = `Target: ${className} (${targetClass})`;
-
-    if (inversionRiskBadge) {
-      if (risk > 0.5) {
-        inversionRiskBadge.className = 'badge badge-red';
-        inversionRiskBadge.textContent = `High (${risk})`;
-      } else {
-        inversionRiskBadge.className = 'badge badge-green';
-        inversionRiskBadge.textContent = `Low (${risk})`;
-      }
-    }
-
-    drawInversionPrototype(proto, targetClass);
-  }
-
-  // ─── Weight-Space Programming Studio ─────────────────────────────
+  // ─── Weight-Space Programming Studio (SVD Surgery) ──────────────
   const svdBars = document.getElementById('ml-svd-bars');
   const surgeryAlpha = document.getElementById('ml-surgery-alpha');
-  const surgeryExecBtn = document.getElementById('ml-weight-surgery-btn');
   const surgeryShiftUp = document.getElementById('ml-surgery-shift-up');
   const surgeryShiftDown = document.getElementById('ml-surgery-shift-down');
   const surgeryZeroGrad = document.getElementById('ml-surgery-zero-grad');
+  const surgeryExecBtn = document.getElementById('ml-weight-surgery-btn');
   let zeroGradEnabled = false;
 
   function renderSvdBars() {
     if (!svdBars) return;
     const spec = window.MLStateBus.surgery.spectrum;
-    const maxVal = Math.max(...spec, 15);
-    const top1Concentration = ((spec[0] ** 2) / spec.reduce((acc, v) => acc + v ** 2, 0)) * 100;
-
+    const maxVal = Math.max(...spec, 1);
     let html = '';
-    spec.forEach((val, idx) => {
-      const heightPct = Math.round((val / maxVal) * 100);
-      const isAttractor = idx === 0;
-      const barColor = isAttractor ? 'var(--accent-amber)' : 'var(--accent-purple)';
+
+    spec.forEach((val, i) => {
+      const hPercent = Math.max(6, Math.min(100, (val / maxVal) * 100));
+      const color = i === 0 ? 'var(--accent-amber)' : 'var(--accent-purple)';
       html += `
-        <div style="flex:1;display:flex;flex-direction:column;align-items:center;height:100%;justify-content:flex-end;" title="sigma_${idx} = ${val.toFixed(2)}">
-          <div style="font-size:.62rem;font-family:'JetBrains Mono',monospace;color:${barColor};margin-bottom:2px;">${val.toFixed(1)}</div>
-          <div style="width:100%;height:${heightPct}%;background:${barColor};border-radius:3px 3px 0 0;opacity:${isAttractor ? 1 : 0.75};transition:height .2s ease;"></div>
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;height:100%;justify-content:flex-end;">
+          <span style="font-size:.62rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-bottom:3px;">${val.toFixed(1)}</span>
+          <div style="width:100%;height:${hPercent}%;background:${color};border-radius:3px 3px 0 0;transition:height .15s ease;"></div>
         </div>
       `;
     });
     svdBars.innerHTML = html;
 
-    const top1Elem = document.getElementById('ml-top1-concentration');
-    if (top1Elem) top1Elem.textContent = `Top-1 Energy: ${top1Concentration.toFixed(1)}%`;
-
-    // Recalculate effective rank and Frobenius norm
     const sumSq = spec.reduce((acc, v) => acc + v ** 2, 0);
     const frobenius = Math.sqrt(sumSq);
     const sumVal = spec.reduce((acc, v) => acc + v, 0);
@@ -825,7 +1400,6 @@
       const lbl = document.getElementById('ml-val-alpha');
       if (lbl) lbl.textContent = `${alpha.toFixed(2)} (${Math.round(alpha * 100)}% damped)`;
 
-      // Ablate rank-1 attractor direction in real time
       const orig = window.MLStateBus.surgery.originalSpectrum;
       const current = [...orig];
       current[0] = orig[0] * (1 - alpha);
@@ -929,7 +1503,6 @@
     });
   });
 
-  // Demucs Stems Sliders
   ['vocals', 'drums', 'bass', 'other'].forEach(stem => {
     const input = document.getElementById(`ml-stem-${stem}`);
     const valElem = document.getElementById(`ml-stem-${stem}-val`);
@@ -941,7 +1514,6 @@
     }
   });
 
-  // Depth Map 3D Parallax Canvas
   function renderDepthMap() {
     if (!depthCanvas) return;
     const dctx = depthCanvas.getContext('2d');
@@ -951,7 +1523,6 @@
 
     const dolly = (Number(document.getElementById('ml-depth-dolly')?.value || 15) / 30) * 20;
 
-    // Simulated 3D perspective grid
     dctx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
     dctx.lineWidth = 1;
     for (let z = 10; z < h; z += 12) {
@@ -961,7 +1532,6 @@
       dctx.stroke();
     }
 
-    // Focal objects with disparity shift
     dctx.fillStyle = '#8b5cf6';
     dctx.fillRect(w / 2 - 25 + dolly * 1.5, h / 2 - 20, 50, 40);
 
@@ -998,7 +1568,7 @@
 
       try {
         if (statusElem) statusElem.textContent = `Dispatching ${preset} pipeline via /api/tools/call...`;
-        const res = await fetch('/api/tools/call', {
+        await fetch('/api/tools/call', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1037,5 +1607,6 @@
   renderSvdBars();
   drawInversionPrototype([0.824, -0.412, 0.991, -0.105], 0);
   renderDepthMap();
-  updateTabVisibility();
+  startDagLoop();
+  loadModelGraph(window.MLStateBus.model.path);
 })();

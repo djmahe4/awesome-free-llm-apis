@@ -94,6 +94,19 @@ def extract_tensors(obj, prefix=''):
         tensors[prefix.rstrip('.')] = obj
         return tensors
 
+    if isinstance(obj, (list, tuple)):
+        if len(obj) > 0 and (isinstance(obj[0], (int, float, list, tuple)) or hasattr(obj[0], '__len__')):
+            try:
+                arr = np.array(obj, dtype=np.float32)
+                tensors[prefix.rstrip('.')] = arr
+                return tensors
+            except Exception:
+                pass
+        for i, v in enumerate(obj):
+            child_prefix = f"{prefix}{i}." if prefix else f"{i}."
+            tensors.update(extract_tensors(v, child_prefix))
+        return tensors
+
     if isinstance(obj, dict):
         for k, v in obj.items():
             child_prefix = f"{prefix}{k}." if prefix else f"{k}."
@@ -528,7 +541,9 @@ def classify_head(features, w_fc, b_fc=None, class_names=None, top_k=5):
     return {
         'topClass': predictions[0]['className'] if predictions else None,
         'topProbability': predictions[0]['probability'] if predictions else 0.0,
-        'predictions': predictions
+        'predictions': predictions,
+        'logits': logits,
+        'probs': probs
     }
 
 
@@ -616,7 +631,7 @@ def load_checkpoint_safe(filepath):
                     metadata[k] = v
 
             if 'state_dict' in data and isinstance(data['state_dict'], dict):
-                state_dict.update(data['state_dict'])
+                state_dict.update(extract_tensors(data['state_dict']))
 
     ext = os.path.splitext(filepath)[1].lower()
     if ext != '.onnx':
@@ -741,12 +756,60 @@ def detect_model_architecture(metadata, class_names, state_dict=None):
 
 
 
+def make_layer_summary(name, tensor):
+    if tensor is None:
+        return None
+    try:
+        arr = np.asarray(tensor, dtype=np.float32)
+    except Exception:
+        return None
+    if arr.size == 0:
+        return None
+
+    sl = arr
+    if sl.ndim == 0:
+        sl = sl.reshape(1, 1)
+    elif sl.ndim == 1:
+        sl = sl[:64].reshape(1, -1)
+    elif sl.ndim == 3:
+        sl = sl[0]
+    elif sl.ndim >= 4:
+        sl = sl[0, 0] if sl.ndim == 4 else sl.reshape(-1, sl.shape[-2], sl.shape[-1])[0]
+
+    h, w = sl.shape if sl.ndim == 2 else (1, sl.size)
+    if h > 16 or w > 16:
+        step_h = max(1, h // 16)
+        step_w = max(1, w // 16)
+        sl = sl[::step_h, ::step_w][:16, :16]
+
+    return {
+        'name': name,
+        'shape': list(arr.shape),
+        'mean': round(float(np.mean(arr)), 4),
+        'std': round(float(np.std(arr)), 4),
+        'min': round(float(np.min(arr)), 4),
+        'max': round(float(np.max(arr)), 4),
+        'sparsity': round(float(np.count_nonzero(arr == 0.0) / (arr.size or 1)), 4),
+        'slice': np.round(sl, 4).tolist() if sl.ndim == 2 else []
+    }
+
+
 def resolve_input_tensor(image_path=None, channels=3, size=32):
     """
     Loads real image pixels when provided with letterbox resizing (preserving aspect ratio,
     padding with 114 grey), or initializes reproducible synthetic canvas.
     Returns: (tensor, input_metadata)
     """
+    if image_path is not None:
+        p_str = str(image_path).strip().lower()
+        base_name = os.path.splitext(os.path.basename(p_str))[0]
+        if p_str in ('zero', 'bias_only', 'without_image', 'none_zero') or base_name in ('zero', 'bias_only', 'without_image', 'none_zero'):
+            zeros = np.zeros((channels, size, size), dtype=np.float32)
+            return zeros, {
+                'source': 'without_image_bias_manifold',
+                'dimensions': list(zeros.shape)
+            }
+
     if image_path and os.path.exists(image_path):
         try:
             from PIL import Image
@@ -861,6 +924,13 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
     w_sppf2 = np.random.randn(8, 32, 1, 1).astype(np.float32) * 0.1
     sppf_feat = sppf_block(c2f_feat, w_sppf1, w_sppf2)
 
+    layer_activations = [
+        make_layer_summary('0_input', x),
+        make_layer_summary('1_stem_conv_bn_fused', stem_feat),
+        make_layer_summary('2_c2f_bottleneck', c2f_feat),
+        make_layer_summary('3_sppf_pooling', sppf_feat)
+    ]
+
     feat_h, feat_w = sppf_feat.shape[1], sppf_feat.shape[2]
     num_anchors = feat_h * feat_w
     num_classes = len(class_names)
@@ -869,6 +939,7 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
         w_fc = np.random.randn(num_classes, 8).astype(np.float32) * 0.1
         b_fc = np.zeros(num_classes, dtype=np.float32)
         cls_res = classify_head(sppf_feat, w_fc, b_fc, class_names=class_names, top_k=5)
+        layer_activations.append(make_layer_summary('4_classifier_head', cls_res.get('logits', w_fc)))
         out = {
             'modelType': 'YOLOv8',
             'task': 'classify',
@@ -876,7 +947,8 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
             'fusedLayersCount': fused_layers_count,
             'topClass': cls_res['topClass'],
             'topProbability': cls_res['topProbability'],
-            'predictions': cls_res['predictions']
+            'predictions': cls_res['predictions'],
+            'layerActivations': [l for l in layer_activations if l is not None]
         }
         if real_tensors_used:
             out['weight_source'] = 'checkpoint_state_dict'
@@ -901,6 +973,7 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
         proto_feat = conv2d(sppf_feat, w_proto, stride=1, padding=1)
         coef_out = conv2d(sppf_feat, w_coef, stride=1, padding=1).reshape(proto_dim, num_anchors)
         seg_res = segment_proto_head(reg_out, cls_out, proto_feat, coef_out, anchor_points, stride=stride, class_names=class_names)
+        layer_activations.append(make_layer_summary('4_segment_proto_head', proto_feat))
         out = {
             'modelType': 'YOLOv8',
             'task': 'segment',
@@ -908,7 +981,8 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
             'fusedLayersCount': fused_layers_count,
             'detections': seg_res['detections'],
             'segments': seg_res['segments'],
-            'maskPrototypesCount': seg_res['maskPrototypesCount']
+            'maskPrototypesCount': seg_res['maskPrototypesCount'],
+            'layerActivations': [l for l in layer_activations if l is not None]
         }
         if real_tensors_used:
             out['weight_source'] = 'checkpoint_state_dict'
@@ -947,6 +1021,8 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
                 'keypoints': kpts
             })
 
+        layer_activations.append(make_layer_summary('4_head_regression', reg_out))
+        layer_activations.append(make_layer_summary('5_head_classification', cls_out))
         out = {
             'modelType': 'YOLOv8',
             'task': 'pose',
@@ -954,12 +1030,16 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
             'fusedLayersCount': fused_layers_count,
             'detections': detections,
             'poses': poses,
-            'keypoints': [p['keypoints'] for p in poses]
+            'keypoints': [p['keypoints'] for p in poses],
+            'layerActivations': [l for l in layer_activations if l is not None]
         }
         if real_tensors_used:
             out['weight_source'] = 'checkpoint_state_dict'
             out['real_tensors_used'] = real_tensors_used
         return out
+
+    layer_activations.append(make_layer_summary('4_head_regression', reg_out))
+    layer_activations.append(make_layer_summary('5_head_classification', cls_out))
 
     # Default task: detect
     out = {
@@ -967,7 +1047,8 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
         'task': 'detect',
         'inputMetadata': input_meta,
         'fusedLayersCount': fused_layers_count,
-        'detections': detections
+        'detections': detections,
+        'layerActivations': [l for l in layer_activations if l is not None]
     }
     if real_tensors_used:
         out['weight_source'] = 'checkpoint_state_dict'
@@ -992,9 +1073,13 @@ def forward_resnet(weights_path, metadata, class_names, channels=3, size=32, ima
 
     if state_dict and 'conv1.weight' in state_dict and isinstance(state_dict['conv1.weight'], np.ndarray):
         rw = state_dict['conv1.weight']
-        co, ci = min(8, rw.shape[0]), min(channels, rw.shape[1])
-        kh, kw = min(3, rw.shape[2]), min(3, rw.shape[3])
-        w_stem[:co, :ci, :kh, :kw] = rw[:co, :ci, :kh, :kw]
+        if rw.ndim == 4:
+            co, ci = min(8, rw.shape[0]), min(channels, rw.shape[1])
+            kh, kw = min(3, rw.shape[2]), min(3, rw.shape[3])
+            w_stem[:co, :ci, :kh, :kw] = rw[:co, :ci, :kh, :kw]
+        else:
+            flat_n = min(w_stem.size, rw.size)
+            w_stem.flat[:flat_n] = rw.flat[:flat_n]
         real_tensors_used.append('conv1.weight')
 
         if 'bn1.weight' in state_dict and isinstance(state_dict['bn1.weight'], np.ndarray):
@@ -1032,12 +1117,24 @@ def forward_resnet(weights_path, metadata, class_names, channels=3, size=32, ima
     b_fc = np.zeros(num_classes, dtype=np.float32)
     if state_dict and 'fc.weight' in state_dict and isinstance(state_dict['fc.weight'], np.ndarray):
         rfc = state_dict['fc.weight']
-        co, ci = min(num_classes, rfc.shape[0]), min(16, rfc.shape[1])
-        w_fc[:co, :ci] = rfc[:co, :ci]
+        if rfc.ndim == 2:
+            co, ci = min(num_classes, rfc.shape[0]), min(16, rfc.shape[1])
+            w_fc[:co, :ci] = rfc[:co, :ci]
+        else:
+            flat_n = min(w_fc.size, rfc.size)
+            w_fc.flat[:flat_n] = rfc.flat[:flat_n]
         real_tensors_used.append('fc.weight')
 
     cls_res = classify_head(res2, w_fc, b_fc, class_names=class_names, top_k=5)
 
+    layer_activations = [
+        make_layer_summary('0_input', x),
+        make_layer_summary('1_stem_conv_bn_fused', stem_feat),
+        make_layer_summary('2_stem_maxpool', stem_pool),
+        make_layer_summary('3_res_basic_block_1', res1),
+        make_layer_summary('4_res_basic_block_2', res2),
+        make_layer_summary('5_classifier_head', cls_res.get('logits', w_fc))
+    ]
     out = {
         'modelType': 'ResNet',
         'task': 'classify',
@@ -1045,7 +1142,8 @@ def forward_resnet(weights_path, metadata, class_names, channels=3, size=32, ima
         'fusedLayersCount': fused_count,
         'topClass': cls_res['topClass'],
         'topProbability': cls_res['topProbability'],
-        'predictions': cls_res['predictions']
+        'predictions': cls_res['predictions'],
+        'layerActivations': [l for l in layer_activations if l is not None]
     }
     if real_tensors_used:
         out['weight_source'] = 'checkpoint_state_dict'
@@ -1070,9 +1168,13 @@ def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32, 
 
     if state_dict and 'features.0.0.weight' in state_dict and isinstance(state_dict['features.0.0.weight'], np.ndarray):
         rw = state_dict['features.0.0.weight']
-        co, ci = min(8, rw.shape[0]), min(channels, rw.shape[1])
-        kh, kw = min(3, rw.shape[2]), min(3, rw.shape[3])
-        w_stem[:co, :ci, :kh, :kw] = rw[:co, :ci, :kh, :kw]
+        if rw.ndim == 4:
+            co, ci = min(8, rw.shape[0]), min(channels, rw.shape[1])
+            kh, kw = min(3, rw.shape[2]), min(3, rw.shape[3])
+            w_stem[:co, :ci, :kh, :kw] = rw[:co, :ci, :kh, :kw]
+        else:
+            flat_n = min(w_stem.size, rw.size)
+            w_stem.flat[:flat_n] = rw.flat[:flat_n]
         real_tensors_used.append('features.0.0.weight')
 
     fused_stem_w, fused_stem_b = fuse_conv_bn(w_stem, b_stem, rm, rv, gamma, beta)
@@ -1098,11 +1200,23 @@ def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32, 
     cls_key = 'classifier.1.weight' if (state_dict and 'classifier.1.weight' in state_dict) else ('classifier.weight' if (state_dict and 'classifier.weight' in state_dict) else None)
     if cls_key and isinstance(state_dict[cls_key], np.ndarray):
         rfc = state_dict[cls_key]
-        co, ci = min(num_classes, rfc.shape[0]), min(16, rfc.shape[1])
-        w_fc[:co, :ci] = rfc[:co, :ci]
+        if rfc.ndim == 2:
+            co, ci = min(num_classes, rfc.shape[0]), min(16, rfc.shape[1])
+            w_fc[:co, :ci] = rfc[:co, :ci]
+        else:
+            flat_n = min(w_fc.size, rfc.size)
+            w_fc.flat[:flat_n] = rfc.flat[:flat_n]
         real_tensors_used.append(cls_key)
 
     cls_res = classify_head(b2, w_fc, b_fc, class_names=class_names, top_k=5)
+
+    layer_activations = [
+        make_layer_summary('0_input', x),
+        make_layer_summary('1_stem_conv_bn_fused', stem_feat),
+        make_layer_summary('2_inv_res_block_1', b1),
+        make_layer_summary('3_inv_res_block_2', b2),
+        make_layer_summary('4_classifier_head', cls_res.get('logits', w_fc))
+    ]
 
     out = {
         'modelType': 'MobileNet',
@@ -1111,7 +1225,8 @@ def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32, 
         'fusedLayersCount': fused_count,
         'topClass': cls_res['topClass'],
         'topProbability': cls_res['topProbability'],
-        'predictions': cls_res['predictions']
+        'predictions': cls_res['predictions'],
+        'layerActivations': [l for l in layer_activations if l is not None]
     }
     if real_tensors_used:
         out['weight_source'] = 'checkpoint_state_dict'

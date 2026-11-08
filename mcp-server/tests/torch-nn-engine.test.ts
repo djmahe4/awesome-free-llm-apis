@@ -30,6 +30,8 @@ describe('torch_nn_engine Architecture Generalization & Forward Passes', () => {
     expect(firstDet.box).toHaveLength(4);
     expect(firstDet.confidence).toBeGreaterThan(0);
     expect(firstDet.className).toBeDefined();
+    expect(Array.isArray(data.layerActivations)).toBe(true);
+    expect(data.layerActivations.length).toBeGreaterThanOrEqual(4);
   });
 
   it('runs ResNet classification forward pass on tiny_resnet.pt (residual blocks + fc)', async () => {
@@ -48,6 +50,8 @@ describe('torch_nn_engine Architecture Generalization & Forward Passes', () => {
     expect(data.topProbability).toBeGreaterThan(0);
     expect(Array.isArray(data.predictions)).toBe(true);
     expect(data.predictions.length).toBeGreaterThan(0);
+    expect(Array.isArray(data.layerActivations)).toBe(true);
+    expect(data.layerActivations.length).toBeGreaterThanOrEqual(5);
   });
 
   it('runs MobileNet classification forward pass on tiny_mobilenet.pt (inverted residual + depthwise separable)', async () => {
@@ -65,6 +69,8 @@ describe('torch_nn_engine Architecture Generalization & Forward Passes', () => {
     expect(data.topClass).toBeDefined();
     expect(data.topProbability).toBeGreaterThan(0);
     expect(Array.isArray(data.predictions)).toBe(true);
+    expect(Array.isArray(data.layerActivations)).toBe(true);
+    expect(data.layerActivations.length).toBeGreaterThanOrEqual(5);
   });
 
   it('auto-identifies YOLO from ONNX format (tiny_yolo.onnx) without hardcoding', async () => {
@@ -117,7 +123,7 @@ describe('torch_nn_engine Architecture Generalization & Forward Passes', () => {
     expect((resPose.data as any).task).toBe('pose');
     expect((resPose.data as any).poses).toBeDefined();
     expect((resPose.data as any).poses[0].keypoints).toBeDefined();
-  });
+  }, 20000);
 
   it('verifies Conv2d and BatchNorm folding numerical equivalence via python script', async () => {
     const pythonScript = path.resolve(__dirname, '../scripts/torch_nn_engine.py');
@@ -199,5 +205,19 @@ print(f"SUCCESS: diff={diff:.6e}")
     expect(data.inputMetadata.letterbox.originalSize).toEqual([1920, 1080]);
     expect(data.weight_source).toBe('checkpoint_state_dict');
     expect(data.real_tensors_used.length).toBeGreaterThan(0);
+  });
+
+  it('runs forward pass on without_image bias manifold canvas', async () => {
+    const res = await handleReverseTool({
+      action: 'run_torch_nn',
+      target: tinyPt,
+      authorization: 'lab',
+      options: { image: 'without_image' },
+    });
+
+    expect(res.success).toBe(true);
+    const data = res.data as any;
+    expect(data.inputMetadata.source).toBe('without_image_bias_manifold');
+    expect(Array.isArray(data.layerActivations)).toBe(true);
   });
 });

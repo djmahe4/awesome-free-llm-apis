@@ -341,60 +341,68 @@ def inspect_gguf(filepath):
             mm.close()
 
 def inspect_pytorch(filepath):
+    setup_ultralytics_stubs()
     is_zip = zipfile.is_zipfile(filepath)
-    if not is_zip:
-        raise ValueError("Legacy uncompressed PyTorch pickles not supported for safety; ZIP checkpoint required")
 
     result = {
         'format': 'pytorch',
-        'isZipContainer': True,
+        'isZipContainer': is_zip,
         'fileSizeBytes': os.path.getsize(filepath),
         'metadata': {},
         'tensorCount': 0,
         'tensors': []
     }
 
-    with zipfile.ZipFile(filepath, 'r') as zf:
-        infolist = zf.infolist()
-        result['records'] = [{'name': info.filename, 'size': info.file_size} for info in infolist]
+    data = None
+    if is_zip:
+        try:
+            with zipfile.ZipFile(filepath, 'r') as zf:
+                infolist = zf.infolist()
+                result['records'] = [{'name': info.filename, 'size': info.file_size} for info in infolist]
+                pkl_entry = next((info.filename for info in infolist if info.filename.endswith('data.pkl')), None)
+                if pkl_entry:
+                    try:
+                        import torch
+                        data = torch.load(filepath, map_location='cpu', weights_only=False, mmap=True)
+                    except Exception:
+                        try:
+                            with zf.open(pkl_entry) as pf:
+                                data = SafeUnpickler(pf).load()
+                        except Exception as pe:
+                            result['metadata']['load_warning'] = str(pe)
+        except Exception as ze:
+            result['metadata']['zip_error'] = str(ze)
 
-        # Extract archive/data.pkl safely
-        pkl_entry = next((info.filename for info in infolist if info.filename.endswith('data.pkl')), None)
-        if pkl_entry:
-            data = None
+    if data is None:
+        try:
+            import torch
+            data = torch.load(filepath, map_location='cpu', weights_only=False)
+        except Exception:
             try:
-                import torch
-                data = torch.load(filepath, map_location='cpu', weights_only=True, mmap=True)
-            except Exception:
-                try:
-                    with zf.open(pkl_entry) as pf:
-                        data = SafeUnpickler(pf).load()
-                except Exception as pe:
-                    result['metadata']['load_warning'] = str(pe)
+                with open(filepath, 'rb') as pf:
+                    data = SafeUnpickler(pf).load()
+            except Exception as pe:
+                result['metadata']['load_warning'] = str(pe)
 
-            if isinstance(data, dict):
-                for k in ('epoch', 'best_fitness', 'date', 'version', 'task'):
-                    if k in data and data[k] is not None:
-                        result['metadata'][k] = data[k]
-                if 'names' in data and isinstance(data['names'], (dict, list)):
-                    classes = list(data['names'].values()) if isinstance(data['names'], dict) else data['names']
-                    result['metadata']['classes'] = classes
+    if data is not None:
+        if isinstance(data, dict):
+            for k in ('epoch', 'best_fitness', 'date', 'version', 'task'):
+                if k in data and data[k] is not None:
+                    result['metadata'][k] = data[k]
+            if 'names' in data and isinstance(data['names'], (dict, list)):
+                classes = list(data['names'].values()) if isinstance(data['names'], dict) else data['names']
+                result['metadata']['classes'] = classes
 
-                if hasattr(data, 'state_dict'):
-                    state_dict = data.state_dict()
-                else:
-                    state_dict = data.get('model') or data.get('state_dict') or data.get('model_state_dict') or data
-                if hasattr(state_dict, 'state_dict'):
-                    state_dict = state_dict.state_dict()
-                if isinstance(state_dict, dict):
-                    result['tensorCount'] = len(state_dict)
-                    for name, tensor in list(state_dict.items())[:50]:
-                        if hasattr(tensor, 'shape'):
-                            result['tensors'].append({
-                                'name': str(name),
-                                'shape': list(tensor.shape),
-                                'dtype': str(tensor.dtype).replace('torch.', '')
-                            })
+        all_tensors = extract_tensors(data)
+        result['tensorCount'] = len(all_tensors)
+        for name, tensor in all_tensors.items():
+            sh = list(tensor.shape) if hasattr(tensor, 'shape') else []
+            dt = str(getattr(tensor, 'dtype', 'float32')).replace('torch.', '')
+            result['tensors'].append({
+                'name': str(name),
+                'shape': sh,
+                'dtype': dt
+            })
 
     return result
 
