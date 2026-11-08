@@ -72,7 +72,7 @@
       animId: null
     },
     model: {
-      path: 'tests/fixtures/models/tiny.gguf',
+      path: 'tests/fixtures/models/tiny_cnn.pt',
       imagePath: 'tests/fixtures/media/frames/frame_0050.jpg',
       task: 'detect',
       layers: [],
@@ -459,6 +459,18 @@
       cancelAnimationFrame(window.MLStateBus.dag.animId);
       window.MLStateBus.dag.animId = null;
     }
+  }
+
+  function guessRole(l) {
+    const known = String(l.semanticRole || '');
+    if (known && known !== 'unknown') return { role: known, category: l.functionalCategory || 'general' };
+    const n = String(l.name || '').toLowerCase();
+    const rank = Array.isArray(l.shape) ? l.shape.length : 0;
+    if (/running_|num_batches|bn|norm/.test(n)) return { role: 'batch norm', category: 'norm' };
+    if (rank === 4 || /conv/.test(n)) return { role: 'conv', category: 'conv' };
+    if (/bias/.test(n)) return { role: 'bias', category: 'general' };
+    if (rank === 2 || /fc|linear|head|classif/.test(n)) return { role: 'linear', category: 'head' };
+    return { role: 'layer', category: 'general' };
   }
 
   function getCategoryColor(category, role) {
@@ -985,7 +997,9 @@
     note.style.color = isError ? 'var(--accent-amber)' : 'var(--text-muted)';
   }
 
+  let bootLoad = false;
   async function loadModelGraph(modelPath) {
+    window.MLStateBus.model.path = modelPath;
     const statusBadge = document.getElementById('ml-loaded-model-badge');
     const inspectBtn = document.getElementById('ml-inspect-model-btn');
     if (statusBadge) statusBadge.textContent = 'Inspecting...';
@@ -1010,6 +1024,15 @@
       if (!res.ok || json?.success === false || rawLayers.length === 0) {
         const why = (json && json.error) || (res.ok ? 'no layers could be read from this file (PyTorch checkpoints need PyTorch installed on the server; GGUF files do not)' : 'the server answered ' + res.status);
         if (statusBadge) statusBadge.textContent = 'No layers loaded';
+        if (bootLoad && modelPath === 'tests/fixtures/models/tiny_cnn.pt') {
+          bootLoad = false;
+          const input = document.getElementById('ml-model-path-input');
+          if (input) input.value = 'tests/fixtures/models/tiny.gguf';
+          loadNote('PyTorch is not installed on the server, so the tiny GGUF model was loaded instead (install PyTorch to follow an image through real layers).', false);
+          await loadModelGraph('tests/fixtures/models/tiny.gguf');
+          loadNote('PyTorch is not installed on the server, so the tiny GGUF model was loaded instead (install PyTorch to follow an image through real layers).', false);
+          return;
+        }
         loadNote(why, true);
         window.MLStateBus.dag.nodes = [];
         window.MLStateBus.dag.edges = [];
@@ -1034,7 +1057,8 @@
         const shape = l.shape || [];
         const shapeStr = `[${shape.join(', ')}]`;
         const label = l.name.split('.').slice(-2).join('.');
-        const color = getCategoryColor(l.functionalCategory, l.semanticRole);
+        const guessed = guessRole(l);
+        const color = getCategoryColor(guessed.category, guessed.role);
 
         nodes.push({
           id: idx,
@@ -1043,8 +1067,8 @@
           shape: shape,
           shapeStr: shapeStr,
           dtype: l.dtype || l.type || 'unknown',
-          semanticRole: l.semanticRole || 'layer',
-          functionalCategory: l.functionalCategory || 'general',
+          semanticRole: guessed.role,
+          functionalCategory: guessed.category,
           description: l.description,
           color: color,
           x: idx * spacingX + 40,
@@ -1149,11 +1173,15 @@
         window.MLStateBus.model.layerActivations = acts;
 
         // Map live activation slices to DAG nodes
-        acts.forEach((act, i) => {
-          if (i < window.MLStateBus.dag.nodes.length) {
-            window.MLStateBus.dag.nodes[i].activation = act;
-          }
+        // The engine reports its own stages (input, stem, ...), not one entry per tensor, so a stage is attached to a
+        // layer only when the names match.
+        build.nodes.forEach((n) => { n.activation = null; });
+        acts.forEach((act) => {
+          const stage = String(act.name || '').toLowerCase();
+          const hit = build.nodes.find((n) => stage && n.name.toLowerCase().split('.').some((part) => part.length > 2 && stage.includes(part)));
+          if (hit && !hit.activation) hit.activation = act;
         });
+        showForwardStages(acts, data);
 
         refreshBuild();
 
@@ -1776,8 +1804,6 @@
 
   function applyBuild() {
     const dag = window.MLStateBus.dag;
-    const acts = window.MLStateBus.model.layerActivations || [];
-    build.nodes.forEach((n, i) => { if (acts[i]) n.activation = acts[i]; });
     dag.nodes = build.nodes.slice(0, build.k);
     dag.edges = build.edges.filter((e) => e.from < build.k && e.to < build.k);
     dag.selectedNode = build.k > 0 ? build.nodes[build.k - 1] : null;
@@ -1902,6 +1928,34 @@
     if (note) note.textContent = 'The order is the order of tensors in the file, and large models show a sample of their layers. The chain check comes from the server running the model one layer at a time.';
   }
 
+  function showForwardStages(acts, data) {
+    let box = document.getElementById('ml-forward-stages');
+    if (!box) {
+      const btn = document.getElementById('ml-run-forward-btn');
+      const row = btn && btn.parentElement && btn.parentElement.parentElement && btn.parentElement.parentElement.parentElement;
+      if (!row || !row.parentElement) return;
+      box = document.createElement('div');
+      box.id = 'ml-forward-stages';
+      box.style.cssText = 'font-size:.72rem;line-height:1.55;margin-top:10px;padding:8px 10px;background:var(--bg-secondary);border-radius:4px;color:var(--text-secondary);';
+      row.insertAdjacentElement('afterend', box);
+    }
+    box.textContent = '';
+    const src = data && data.inputMetadata ? (data.inputMetadata.source === 'image_file' ? 'your sample image' : 'a synthetic baseline (no image)') : 'the input';
+    const head = document.createElement('div');
+    head.style.fontWeight = '600';
+    head.textContent = 'What the forward pass did, from ' + src + ':';
+    box.appendChild(head);
+    acts.forEach((a) => {
+      const d = document.createElement('div');
+      d.textContent = String(a.name) + ': shape [' + (a.shape || []).join(', ') + '], average ' + Number(a.mean).toFixed(3) + ', spread ' + Number(a.std).toFixed(3);
+      box.appendChild(d);
+    });
+    const note = document.createElement('div');
+    note.style.cssText = 'color:var(--text-muted);margin-top:4px;';
+    note.textContent = 'These are the stages the server forward engine reports. It follows a fixed YOLO-style layout and uses a tensor from your file only when its name matches that layout; otherwise it uses placeholder random weights, so the numbers can change between runs of the same image and do not describe your model.';
+    box.appendChild(note);
+  }
+
   function refreshBuild() {
     if (build.nodes.length === 0) return;
     applyBuild();
@@ -1958,5 +2012,6 @@
   drawInversionPrototype([0.824, -0.412, 0.991, -0.105], 0);
   renderDepthMap();
   startDagLoop();
-  loadModelGraph(window.MLStateBus.model.path);
+  bootLoad = true;
+  loadModelGraph(window.MLStateBus.model.path).finally(() => { bootLoad = false; });
 })();

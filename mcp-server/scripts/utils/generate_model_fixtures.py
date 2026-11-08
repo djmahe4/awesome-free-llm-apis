@@ -222,6 +222,29 @@ def generate_tiny_yolo_onnx(filepath):
     with open(filepath, 'wb') as f:
         f.write(buf.getvalue())
 
+def generate_tiny_cnn_pt(filepath):
+    """A real two-convolution network with weights, for learning layer by layer. Needs PyTorch; skipped without it."""
+    try:
+        import torch
+        import torch.nn as nn
+    except ImportError:
+        print("PyTorch is not installed; skipping tiny_cnn.pt")
+        return
+
+    class Tiny(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = nn.Conv2d(3, 8, 3, stride=2, padding=1)
+            self.bn1 = nn.BatchNorm2d(8)
+            self.conv2 = nn.Conv2d(8, 16, 3, stride=2, padding=1)
+            self.bn2 = nn.BatchNorm2d(16)
+            self.fc = nn.Linear(16, 3)
+
+    torch.manual_seed(0)
+    model = Tiny().eval()
+    torch.save({'model': model.state_dict(), 'task': 'classify', 'names': ['ball', 'player', 'referee']}, filepath)
+
+
 if __name__ == '__main__':
     out_dir = os.path.join(os.path.dirname(__file__), '../../tests/fixtures/models')
     os.makedirs(out_dir, exist_ok=True)
@@ -230,6 +253,7 @@ if __name__ == '__main__':
     generate_tiny_pt(os.path.join(out_dir, 'tiny.pt'))
     generate_tiny_resnet_pt(os.path.join(out_dir, 'tiny_resnet.pt'))
     generate_tiny_mobilenet_pt(os.path.join(out_dir, 'tiny_mobilenet.pt'))
+    generate_tiny_cnn_pt(os.path.join(out_dir, 'tiny_cnn.pt'))
     generate_tiny_onnx(os.path.join(out_dir, 'tiny.onnx'))
     generate_tiny_yolo_onnx(os.path.join(out_dir, 'tiny_yolo.onnx'))
     print("Generated model fixtures in", out_dir)

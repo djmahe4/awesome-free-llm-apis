@@ -57,7 +57,7 @@
           <span class="badge badge-purple ml-step-state" id="ml-step-1-state">to do</span>
         </summary>
         <div class="card-body ml-step-body">
-          <p class="ml-step-lead">Pick a checkpoint file and load it. Press &ldquo;Inspect &amp; Load Model&rdquo;; everything below reads from it. A tiny two-layer model is loaded for you. The sample image is used by vision models (.pt, .onnx); a GGUF text model ignores it.</p>
+          <p class="ml-step-lead">Pick a checkpoint file and load it. Press &ldquo;Inspect &amp; Load Model&rdquo;; everything below reads from it. A tiny image classifier is loaded for you, with a sample image. Without PyTorch on the server a tiny two-layer text model is loaded instead, which ignores the image.</p>
       <!-- 1. Custom Model Loader & Forward Pass Console Card -->
       <div class="card" style="margin-bottom:18px;">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
@@ -76,7 +76,8 @@
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
               <label for="ml-model-path-input" style="font-size:.75rem;font-weight:600;color:var(--text-secondary);">Model Checkpoint Path (.pt / .onnx / .gguf):</label>
               <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny.gguf" style="font-size:.68rem;padding:2px 8px;">&#127793; Tiny GGUF (2 layers, start here)</button>
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny_cnn.pt" style="font-size:.68rem;padding:2px 8px;">&#127793; Tiny CNN (start here, needs PyTorch)</button>
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny.gguf" style="font-size:.68rem;padding:2px 8px;">&#128220; Tiny GGUF (2 layers, no PyTorch)</button>
                 <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny.pt" style="font-size:.68rem;padding:2px 8px;">📦 YOLO tiny.pt</button>
                 <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny_resnet.pt" style="font-size:.68rem;padding:2px 8px;">🧬 ResNet18 tiny</button>
                 <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny_mobilenet.pt" style="font-size:.68rem;padding:2px 8px;">📱 MobileNetV2</button>
@@ -84,7 +85,7 @@
               </div>
             </div>
             <div style="display:flex;gap:10px;">
-              <input type="text" id="ml-model-path-input" value="tests/fixtures/models/tiny.gguf" placeholder="Enter path to model checkpoint (.pt, .onnx, .gguf)" style="flex:1;font-size:.78rem;padding:7px 12px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;">
+              <input type="text" id="ml-model-path-input" value="tests/fixtures/models/tiny_cnn.pt" placeholder="Enter path to model checkpoint (.pt, .onnx, .gguf)" style="flex:1;font-size:.78rem;padding:7px 12px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;">
               <button id="ml-inspect-model-btn" class="btn btn-primary btn-sm" style="display:flex;align-items:center;gap:6px;white-space:nowrap;padding:7px 14px;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 <span>Inspect &amp; Load Model</span>
