@@ -16,9 +16,12 @@ const TOOLS = [
     id: 'vision_tool', label: 'vision_tool', icon: '👁',
     tag: 'Vision / VLM',
     fields: [
-      { id: 'image_path', label: 'Image Path', type: 'text', placeholder: 'file:///C:/path/to/screenshot.png' },
-      { id: 'prompt',     label: 'Analysis Prompt', type: 'textarea', placeholder: 'Describe the UI layout' },
-      { id: 'model',      label: 'Model Override', type: 'model-picker' },
+      { id: 'image_path', label: 'Image Path', type: 'text', placeholder: 'file:///C:/path/to/screenshot.png', showFor: ['', 'run', 'continue'] },
+      { id: 'prompt',     label: 'Analysis Prompt', type: 'textarea', placeholder: 'Describe the UI layout', showFor: ['', 'run', 'continue'] },
+      { id: 'model',      label: 'Model Override', type: 'model-picker', showFor: ['', 'run', 'continue'] },
+      { id: 'action',     label: 'Task Action', type: 'select', options: ['', 'run', 'status', 'continue', 'abort'] },
+      { id: 'taskId',     label: 'Vision Task ID', type: 'text', placeholder: 'Use returned taskId for status/continue/abort', showFor: ['status', 'continue', 'abort'] },
+      { id: 'sessionId',  label: 'Task ID Alias', type: 'text', placeholder: 'Optional taskId alias', showFor: ['status', 'continue', 'abort'] },
     ]
   },
   {

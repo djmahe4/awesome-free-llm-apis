@@ -292,13 +292,14 @@ export class ImageRouterMiddleware implements Middleware {
 
         const startTime = Date.now();
         const totalBudget = context.request.timeoutMs || 60000;
-        const getRemainingTimeout = () => {
-            const elapsed = Date.now() - startTime;
-            return Math.max(0, totalBudget - elapsed);
-        };
+        const deadlineAt = typeof context.visionDeadlineAt === 'number'
+            ? Math.min(context.visionDeadlineAt, startTime + totalBudget)
+            : startTime + totalBudget;
+        const getRemainingTimeout = () => Math.max(0, deadlineAt - Date.now());
 
         let lastError: Error | null = null;
         const triedModels: string[] = [];
+        const providerErrors: string[] = [];
 
         for (const modelId of candidateModels) {
             const providersWithModel = availableProviders.filter(p =>
@@ -326,17 +327,28 @@ export class ImageRouterMiddleware implements Middleware {
                         modelId,
                         remainingTimeout
                     );
+                    if (!res) throw new Error('provider returned no response object');
+                    const choice = res.choices?.[0];
+                    const responseText = choice?.message?.content;
+                    if ((res as any)?.isError || (res as any)?.error) {
+                        throw new Error(String((res as any).error || 'provider marked the response as an error'));
+                    }
+                    if (typeof responseText !== 'string' || responseText.trim().length === 0) {
+                        throw new Error('provider returned no usable assistant content');
+                    }
 
                     console.debug(`[ImageRouter] Successfully executed vision task using "${modelId}" via "${provider.name}".`);
-                    context.response = res ?? undefined;
+                    context.response = res;
                     return;
                 } catch (err: any) {
-                    console.error(`[ImageRouter] Model "${modelId}" on "${provider.name}" failed: ${err.message}`);
-                    lastError = err;
+                    const message = err?.message || String(err);
+                    console.error(`[ImageRouter] Model "${modelId}" on "${provider.name}" failed: ${message}`);
+                    lastError = err instanceof Error ? err : new Error(message);
+                    providerErrors.push(`${provider.name}/${modelId}: ${message}`);
                 }
             }
         }
 
-        throw new Error(`[ImageRouter] Failed to execute vision request on any available vision model. Tried models: ${triedModels.join(', ')}. Last error: ${lastError?.message}`);
+        throw new Error(`[ImageRouter] Failed to execute vision request on any available vision model. Tried models: ${triedModels.join(', ') || '(none)'}. Provider errors: ${providerErrors.join(' | ') || lastError?.message || 'no provider accepted the request'}`);
     }
 }

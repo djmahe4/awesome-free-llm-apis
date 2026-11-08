@@ -148,16 +148,19 @@ export async function createMCPServer(): Promise<Server> {
       },
       {
         name: 'vision_tool',
-        description: 'Analyze a local image using a vision-capable model via use_free_llm.',
+        description: 'Analyze a local image or a selected PDF page with a vision-capable model. Returns the final analysis when it finishes within 25 seconds; otherwise returns a taskId. Poll with action:"status", retry a failed/timed-out task with action:"continue", or cancel with action:"abort". PDF rendering and provider fallback share a 60-second task deadline; responses include validation errors and PDF extraction/visual-page metadata.',
         inputSchema: {
           type: 'object' as const,
           properties: {
             workspace_root: { type: 'string', description: 'Absolute workspace path' },
-            image_path: { type: 'string', description: 'Image URI using file:/// scheme' },
+            image_path: { type: 'string', description: 'Required for action:"run"; file:/// URI to an image or PDF. Add :<page> to select a PDF page.' },
             prompt: { type: 'string', description: 'Optional analysis prompt' },
             model: { type: 'string', description: 'Optional vision model id' },
+            action: { type: 'string', enum: ['run', 'status', 'continue', 'abort'], description: 'run (default) starts/executes analysis; status polls a task; continue retries a failed or timed-out task; abort cancels it.' },
+            taskId: { type: 'string', description: 'Task ID returned by run; required for status, continue, and abort.' },
+            sessionId: { type: 'string', description: 'Optional alias for taskId.' },
           },
-          required: ['workspace_root', 'image_path'],
+          required: [],
         },
       },
        {
@@ -1038,7 +1041,7 @@ export async function createMCPServer(): Promise<Server> {
       } else if (name === 'vision_tool') {
         const result = await visionTool(args as any);
         response = {
-          content: [{ type: 'text' as const, text: toMarkdownResponse(result.response) }],
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         };
       } else if (name === 'load_skill_prompt') {
         const result = await loadSkillPrompt(args as any);
