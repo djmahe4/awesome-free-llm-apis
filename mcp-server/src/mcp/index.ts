@@ -957,6 +957,11 @@ export async function createMCPServer(): Promise<Server> {
           '  - reconstruct_training_samples: Activation maximization prototype synthesis and memorization probing (consent-gated).',
           '  - extract_model_layer: Slice layer tensor to standalone SafeTensors binary.',
           '  - analyze_model_layer: Statistical weight profiling (Frobenius norm, sparsity, mean, std).',
+          '  - quantize_layer: Block quantization of model layer weights (Q4_0, Q8_0, MXFP8).',
+          '  - assemble_moe: Mixture-of-Experts composite routing and SwiGLU forward execution.',
+          '  - run_reasoning_model: Autoregressive reasoning runtime with RoPE and thinking trace generation.',
+          '  - run_yolo_nn: Pure-NumPy YOLOv8 neural network forward pass and detection decoding.',
+          '  - program_weight_space: Spectral SVD analysis, attractor ablation, and loop suppression in weight space.',
         ].join('\n'),
         inputSchema: {
           type: 'object' as const,
@@ -976,7 +981,12 @@ export async function createMCPServer(): Promise<Server> {
                 'trace_layer_execution',
                 'reconstruct_training_samples',
                 'extract_model_layer',
-                'analyze_model_layer'
+                'analyze_model_layer',
+                'quantize_layer',
+                'assemble_moe',
+                'run_reasoning_model',
+                'run_yolo_nn',
+                'program_weight_space'
               ],
               description: 'Reverse engineering action to perform'
             },

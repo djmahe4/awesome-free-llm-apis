@@ -92,7 +92,26 @@ export type ReverseToolAction =
   | 'trace_layer_execution'
   | 'reconstruct_training_samples'
   | 'extract_model_layer'
-  | 'analyze_model_layer';
+  | 'analyze_model_layer'
+  | 'quantize_layer'
+  | 'assemble_moe'
+  | 'run_reasoning_model'
+  | 'run_yolo_nn'
+  | 'program_weight_space';
+
+export const isModelAction = (act: string): boolean => [
+  'inspect_model',
+  'infer_layer_roles',
+  'trace_layer_execution',
+  'reconstruct_training_samples',
+  'extract_model_layer',
+  'analyze_model_layer',
+  'quantize_layer',
+  'assemble_moe',
+  'run_reasoning_model',
+  'run_yolo_nn',
+  'program_weight_space',
+].includes(act as any);
 
 export interface ReverseToolInput {
   action: ReverseToolAction;
@@ -462,6 +481,11 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           'probe_memorization',
           'extract_model_layer',
           'analyze_model_layer',
+          'quantize_layer',
+          'assemble_moe',
+          'run_reasoning_model',
+          'run_yolo_nn',
+          'program_weight_space',
         ],
       },
     };
@@ -636,9 +660,14 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     'reconstruct_training_samples',
     'extract_model_layer',
     'analyze_model_layer',
+    'quantize_layer',
+    'assemble_moe',
+    'run_reasoning_model',
+    'run_yolo_nn',
+    'program_weight_space',
   ];
 
-  if (modelActions.includes(action)) {
+  if (isModelAction(action)) {
     if (!authorization || !VALID_AUTH.includes(authorization as ReverseAuthorization)) {
       return {
         success: false,
@@ -671,7 +700,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       };
     }
 
-    if (action === 'extract_model_layer' || action === 'analyze_model_layer') {
+    if (action === 'extract_model_layer' || action === 'analyze_model_layer' || action === 'quantize_layer') {
       if (!options?.layer || !String(options.layer).trim()) {
         return {
           success: false,
@@ -712,6 +741,11 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       reconstruct_training_samples: 'reconstruct_samples',
       extract_model_layer: 'extract_layer',
       analyze_model_layer: 'analyze_layer',
+      quantize_layer: 'quantize_layer',
+      assemble_moe: 'assemble_moe',
+      run_reasoning_model: 'run_reasoning_model',
+      run_yolo_nn: 'run_yolo_nn',
+      program_weight_space: 'program_weight_space',
     };
 
     const pyAction = actionMap[action];
@@ -752,6 +786,30 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
     if (options?.steps !== undefined) {
       args.push('--steps', String(options.steps));
+    }
+    if (options?.quantMode || options?.['quant-mode']) {
+      args.push('--quant-mode', String(options.quantMode || options['quant-mode']));
+    }
+    if (options?.prompt) {
+      args.push('--prompt', String(options.prompt));
+    }
+    if (options?.temperature !== undefined) {
+      args.push('--temperature', String(options.temperature));
+    }
+    if (options?.maxTokens !== undefined || options?.max_tokens !== undefined) {
+      args.push('--max-tokens', String(options.maxTokens ?? options.max_tokens));
+    }
+    if (options?.seed !== undefined) {
+      args.push('--seed', String(options.seed));
+    }
+    if (options?.rank !== undefined) {
+      args.push('--rank', String(options.rank));
+    }
+    if (options?.alpha !== undefined) {
+      args.push('--alpha', String(options.alpha));
+    }
+    if (options?.subcommand) {
+      args.push('--subcommand', String(options.subcommand));
     }
 
     const pythonBin = resolvePythonPath();
@@ -862,8 +920,9 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "program_weight_space".`,
   };
 }
 
 export const runReverseTool = reverseTool;
+export const handleReverseTool = reverseTool;

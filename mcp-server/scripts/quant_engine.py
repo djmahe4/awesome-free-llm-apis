@@ -1,4 +1,5 @@
 import sys
+import os
 import json
 import struct
 import math
@@ -200,6 +201,28 @@ def quantize_mxfp8(data_f32):
         "relativeError": rel_error,
         "dequantized": dequantized[:orig_len].tolist()
     }
+
+
+def quantize_tensor(tensor_data, quant_mode="q4_0"):
+    mode = str(quant_mode).lower().replace("-", "_")
+    if mode in ("q4_0", "q4"):
+        return quantize_q4_0(tensor_data)
+    elif mode in ("q8_0", "q8"):
+        return quantize_q8_0(tensor_data)
+    elif mode in ("mxfp8", "fp8"):
+        return quantize_mxfp8(tensor_data)
+    else:
+        raise ValueError(f"Unknown quant mode: {quant_mode}")
+
+
+def save_quantized_layer(output_path, layer_name, quant_res):
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "layer": layer_name,
+            "quantization": quant_res
+        }, f, indent=2)
+    return output_path
 
 
 def main():

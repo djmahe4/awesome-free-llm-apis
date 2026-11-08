@@ -8,6 +8,8 @@ import argparse
 import re
 import pickle
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 try:
     import numpy as np
 except ImportError:
@@ -629,7 +631,7 @@ def analyze_layer(filepath, fmt, layer_name):
 
 def main():
     parser = argparse.ArgumentParser(description="Model Artifact Inspector")
-    parser.add_argument("action", choices=["inspect", "infer_roles", "trace_execution", "extract_layer", "analyze_layer", "reconstruct_samples"])
+    parser.add_argument("action", choices=["inspect", "infer_roles", "trace_execution", "extract_layer", "analyze_layer", "reconstruct_samples", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "program_weight_space"])
     parser.add_argument("--file", required=True, help="Path to model file")
     parser.add_argument("--format", choices=["gguf", "onnx", "pytorch", "auto"], default="auto")
     parser.add_argument("--layer", help="Target tensor/layer name")
@@ -637,6 +639,14 @@ def main():
     parser.add_argument("--cache-dir", help="Directory for intermediate activation caching")
     parser.add_argument("--target-class", type=int, help="Target class ID for inversion")
     parser.add_argument("--steps", type=int, default=50, help="Optimization steps for reconstruction")
+    parser.add_argument("--quant-mode", choices=['q4_0', 'q8_0', 'mxfp8'], default='q4_0')
+    parser.add_argument("--prompt", type=str)
+    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--max-tokens", type=int, default=16)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--rank", type=int, default=1)
+    parser.add_argument("--alpha", type=float, default=1.0)
+    parser.add_argument("--subcommand", choices=['inspect', 'ablate', 'suppress', 'demo'], default='inspect')
     args = parser.parse_args()
 
     fmt = args.format
@@ -668,6 +678,85 @@ def main():
         print(json.dumps(extract_layer(args.file, fmt, args.layer, args.output), indent=2))
     elif args.action == "analyze_layer":
         print(json.dumps(analyze_layer(args.file, fmt, args.layer), indent=2))
+    elif args.action == "quantize_layer":
+        from quant_engine import quantize_tensor, save_quantized_layer
+        data, tensor_info = get_tensor_data(args.file, fmt, args.layer)
+        res = quantize_tensor(data, quant_mode=args.quant_mode)
+        if args.output:
+            save_quantized_layer(args.output, args.layer, res)
+            res["outputPath"] = args.output
+        res["layerName"] = args.layer
+        print(json.dumps(res, indent=2))
+    elif args.action == "assemble_moe":
+        from moe_engine import build_sparse_moe_layer, MoELayerConfig
+        cfg = MoELayerConfig(dim=8, intermediate_dim=16, num_experts=4, top_k=2)
+        moe = build_sparse_moe_layer(cfg)
+        np.random.seed(args.seed if hasattr(args, 'seed') and args.seed is not None else 42)
+        x = np.random.randn(4, 8).astype(np.float32)
+        out, top_k_indices, top_k_probs, aux_loss = moe.forward_grouped(x)
+        expert_load = [int(np.sum(top_k_indices == i)) for i in range(cfg.num_experts)]
+        res = {
+            'status': 'success',
+            'action': 'assemble_moe',
+            'num_experts': cfg.num_experts,
+            'top_k': cfg.top_k,
+            'aux_loss': round(float(aux_loss), 4),
+            'expert_load': expert_load,
+            'output_shape': list(out.shape)
+        }
+        print(json.dumps(res, indent=2))
+    elif args.action == "run_reasoning_model":
+        from reasoning_engine import GGUFReasoningRuntime
+        runtime = GGUFReasoningRuntime(args.file)
+        res = runtime.generate(args.prompt or 'Solve logic puzzle', max_tokens=args.max_tokens, temperature=args.temperature, seed=args.seed)
+        print(json.dumps(res, indent=2))
+    elif args.action == "run_yolo_nn":
+        from yolo_nn_engine import run_yolo_detection
+        res = run_yolo_detection(args.file)
+        print(json.dumps(res, indent=2))
+    elif args.action == "program_weight_space":
+        from weight_space_programmer import load_model_layer, inspect_weight_spectrum, ablate_attractor_direction, suppress_loop_attractor
+        sub = args.subcommand
+        if sub == "inspect":
+            mat, info = load_model_layer(args.file, args.layer)
+            spectrum = inspect_weight_spectrum(mat, top_k=10)
+            res = {
+                "status": "success",
+                "layer_info": info,
+                "spectrum": spectrum
+            }
+            print(json.dumps(res, indent=2))
+        elif sub == "ablate":
+            mat, info = load_model_layer(args.file, args.layer)
+            ablated, meta = ablate_attractor_direction(mat, rank=args.rank, alpha=args.alpha)
+            if args.output:
+                from weight_space_programmer import save_safetensors_layer
+                save_safetensors_layer(args.output, info['name'], ablated, {"rank": args.rank, "alpha": args.alpha})
+            res = {
+                "status": "success",
+                "layer_info": info,
+                "ablation_metadata": meta,
+                "original_spectrum": inspect_weight_spectrum(mat, top_k=5),
+                "ablated_spectrum": inspect_weight_spectrum(ablated, top_k=5)
+            }
+            print(json.dumps(res, indent=2))
+        elif sub == "suppress":
+            mat, info = load_model_layer(args.file, args.layer)
+            dim = mat.shape[1] if mat.ndim > 1 else mat.shape[0]
+            loop_token_vec = np.ones(dim, dtype=np.float32) / np.sqrt(dim)
+            suppressed = suppress_loop_attractor(mat, loop_token_vec, alpha=args.alpha)
+            res = {
+                "status": "success",
+                "layer_info": info,
+                "original_frobenius": float(np.linalg.norm(mat)),
+                "suppressed_frobenius": float(np.linalg.norm(suppressed)),
+                "alpha": args.alpha
+            }
+            print(json.dumps(res, indent=2))
+        elif sub == "demo":
+            from weight_space_programmer import run_demo
+            res = run_demo(dim=64, rank=args.rank, alpha=args.alpha)
+            print(json.dumps(res, indent=2))
 
 if __name__ == '__main__':
     main()

@@ -129,6 +129,24 @@ class MoELayer:
         return out, top_k_indices, top_k_probs, aux_loss
 
 
+class MoELayerConfig:
+    def __init__(self, dim=8, intermediate_dim=16, num_experts=4, top_k=2):
+        self.dim = dim
+        self.intermediate_dim = intermediate_dim
+        self.num_experts = num_experts
+        self.top_k = top_k
+
+
+def build_sparse_moe_layer(config=None, **kwargs):
+    if config is None:
+        dim = kwargs.get('dim', 8)
+        intermediate_dim = kwargs.get('intermediate_dim', dim * 2)
+        num_experts = kwargs.get('num_experts', 4)
+        top_k = kwargs.get('top_k', 2)
+        config = MoELayerConfig(dim, intermediate_dim, num_experts, top_k)
+    return MoELayer(config.dim, config.intermediate_dim, config.num_experts, config.top_k)
+
+
 def assemble_moe_structure(base_weights=None, num_experts=4):
     """
     Assembles a composite MoE structure from dense FFN weights.

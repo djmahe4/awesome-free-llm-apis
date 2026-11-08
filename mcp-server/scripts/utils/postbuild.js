@@ -16,6 +16,11 @@ const copies = [
   { from: 'scripts/utils/update_prompt_json.py', to: 'dist/scripts/update_prompt_json.py' },
   { from: 'scripts/utils/pdf_screenshot.py', to: 'dist/scripts/pdf_screenshot.py' },
   { from: 'scripts/model_inspector.py', to: 'dist/scripts/model_inspector.py' },
+  { from: 'scripts/quant_engine.py', to: 'dist/scripts/quant_engine.py' },
+  { from: 'scripts/moe_engine.py', to: 'dist/scripts/moe_engine.py' },
+  { from: 'scripts/reasoning_engine.py', to: 'dist/scripts/reasoning_engine.py' },
+  { from: 'scripts/yolo_nn_engine.py', to: 'dist/scripts/yolo_nn_engine.py' },
+  { from: 'scripts/weight_space_programmer.py', to: 'dist/scripts/weight_space_programmer.py' },
   { from: 'scripts/sandboxes/python-sandbox-runner.py', to: 'dist/scripts/sandboxes/python-sandbox-runner.py' },
   { from: 'scripts/utils/generate_model_fixtures.py', to: 'dist/scripts/utils/generate_model_fixtures.py' },
 ];

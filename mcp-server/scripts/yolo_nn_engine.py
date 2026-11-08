@@ -346,6 +346,10 @@ def run_yolo_forward(weights_path, channels=3, size=32):
     }
 
 
+def run_yolo_detection(weights_path, channels=3, size=32):
+    return run_yolo_forward(weights_path, channels=channels, size=size)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Pure-NumPy YOLOv8 Inference and Reconstruction Engine')
     parser.add_argument('action', choices=['detect'])

@@ -130,6 +130,11 @@ class GGUFReasoningRuntime:
                 except Exception:
                     pass
 
+        if 'blk.0.attn_q.weight' in weights:
+            self.dim = weights['blk.0.attn_q.weight'].shape[0]
+            self.num_heads = max(1, min(self.num_heads, self.dim))
+            self.head_dim = max(1, self.dim // self.num_heads)
+
         self.w_emb = weights.get('token_embd.weight')
         if self.w_emb is None:
             self.w_emb = np.random.randn(self.vocab_size, self.dim).astype(np.float32) * 0.1

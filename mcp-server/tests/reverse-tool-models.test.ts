@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runReverseTool } from '../src/tools/reverse-tool.js';
+import { runReverseTool, handleReverseTool } from '../src/tools/reverse-tool.js';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
@@ -294,5 +294,52 @@ describe('reverse_tool Model Introspection Actions', () => {
     });
     expect(res.success).toBe(true);
     expect((res.data as any).tensorDataOffset).toBe(256);
+  });
+
+  it('runs quantize_layer through handleReverseTool() with valid authorization', async () => {
+    const res = await handleReverseTool({
+      action: 'quantize_layer',
+      target: ggufFixture,
+      authorization: 'lab',
+      options: { layer: 'blk.0.attn_q.weight', quantMode: 'q4_0' },
+    });
+    expect(res.success).toBe(true);
+    expect((res.data as any).type).toBe('Q4_0');
+    expect((res.data as any).layerName).toBe('blk.0.attn_q.weight');
+  });
+
+  it('runs run_reasoning_model through handleReverseTool() with valid authorization', async () => {
+    const res = await handleReverseTool({
+      action: 'run_reasoning_model',
+      target: ggufFixture,
+      authorization: 'lab',
+      options: { prompt: 'Solve logic puzzle', maxTokens: 8 },
+    });
+    expect(res.success).toBe(true);
+    expect((res.data as any).reasoningTrace).toBeDefined();
+    expect((res.data as any).output).toBeDefined();
+  });
+
+  it('runs run_yolo_nn through handleReverseTool() with valid authorization', async () => {
+    const res = await handleReverseTool({
+      action: 'run_yolo_nn',
+      target: ptFixture,
+      authorization: 'lab',
+    });
+    expect(res.success).toBe(true);
+    expect((res.data as any).modelType).toBe('YOLOv8');
+    expect((res.data as any).detections).toBeDefined();
+  });
+
+  it('runs program_weight_space through handleReverseTool() with valid authorization', async () => {
+    const res = await handleReverseTool({
+      action: 'program_weight_space',
+      target: ggufFixture,
+      authorization: 'lab',
+      options: { layer: 'blk.0.attn_q.weight', subcommand: 'inspect' },
+    });
+    expect(res.success).toBe(true);
+    expect((res.data as any).status).toBe('success');
+    expect((res.data as any).spectrum).toBeDefined();
   });
 });
