@@ -1677,7 +1677,7 @@
           <span class="badge badge-purple ml-step-state" id="ml-step-1-state">to do</span>
         </summary>
         <div class="card-body ml-step-body">
-          <p class="ml-step-lead">Pick a checkpoint file and load it. Press &ldquo;Inspect &amp; Load Model&rdquo;; everything below reads from it. The small test models are fine to start with.</p>
+          <p class="ml-step-lead">Pick a checkpoint file and load it. Press &ldquo;Inspect &amp; Load Model&rdquo;; everything below reads from it. A tiny two-layer model is loaded for you. The sample image is used by vision models (.pt, .onnx); a GGUF text model ignores it.</p>
       <!-- 1. Custom Model Loader & Forward Pass Console Card -->
       <div class="card" style="margin-bottom:18px;">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
@@ -2022,6 +2022,7 @@
             <div class="ml-reassemble-empty" id="ml-reassemble-empty">Add every layer in step 5 to see the finished model here.</div>
             <div id="ml-reassemble-body" style="display:none;">
               <div id="ml-reassemble-summary" style="font-size:.78rem;line-height:1.6;"></div>
+              <div id="ml-reassemble-chain" style="font-size:.78rem;line-height:1.6;margin-top:6px;"></div>
               <table class="qs-table" style="margin-top:8px;"><thead><tr><th>Kind of layer</th><th>How many</th><th>Parameters</th></tr></thead><tbody id="ml-reassemble-rows"></tbody></table>
               <p style="font-size:.68rem;color:var(--text-muted);margin:8px 0 0;" id="ml-reassemble-note"></p>
             </div>

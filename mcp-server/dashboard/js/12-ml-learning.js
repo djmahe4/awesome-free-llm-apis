@@ -12,7 +12,10 @@
   // The dashboard server exposes each tool at POST /api/<tool> and reads the params as the body.
   function toolFetch(init) {
     const call = JSON.parse(init.body);
-    return fetch('/api/' + call.tool, { ...init, body: JSON.stringify(call.params || {}) });
+    const params = call.params || {};
+    // The server keys a reverse_tool run by target, so two calls on one model at once collide (the second answers "running"). Each call gets its own session.
+    if (call.tool === 'reverse_tool' && !params.sessionId) params.sessionId = 'ml-' + String(params.action || 'call') + '-' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
+    return fetch('/api/' + call.tool, { ...init, body: JSON.stringify(params) });
   }
 
   // ─── Color Helpers & Snell Refraction ─────────────────────────────
@@ -865,6 +868,45 @@
     };
   }
 
+  const weightCache = new Map();
+  function weightBox() {
+    let box = document.getElementById('ml-detail-weights');
+    if (!box) {
+      const host = document.getElementById('ml-detail-desc');
+      if (!host || !host.parentElement) return null;
+      box = document.createElement('div');
+      box.id = 'ml-detail-weights';
+      box.style.cssText = 'font-size:.72rem;line-height:1.5;color:var(--text-secondary);margin-top:8px;padding:8px 10px;background:var(--bg-secondary);border-radius:4px;';
+      host.parentElement.appendChild(box);
+    }
+    return box;
+  }
+  async function showWeightStats(node) {
+    const box = weightBox();
+    if (!box || !node) return;
+    const key = window.MLStateBus.model.path + '::' + node.name;
+    const show = (st) => {
+      box.textContent = st
+        ? 'Its weights: ' + st.elementCount + ' numbers, average ' + st.mean + ', spread ' + st.std + ', range ' + st.min + ' to ' + st.max + ', size (Frobenius norm) ' + st.frobeniusNorm + ', ' + (Number(st.sparsity) * 100).toFixed(1) + '% are zero.'
+        : 'Its weights: not available for this model.';
+    };
+    if (weightCache.has(key)) { show(weightCache.get(key)); return; }
+    box.textContent = 'Reading its weights...';
+    try {
+      const res = await toolFetch({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'reverse_tool', params: { action: 'analyze_model_layer', target: window.MLStateBus.model.path, authorization: 'lab', options: { layer: node.name } } })
+      });
+      const json = res.ok ? await res.json() : null;
+      const st = json && json.success !== false && json.data && json.data.elementCount !== undefined ? json.data : null;
+      if (st) weightCache.set(key, st);
+      if (window.MLStateBus.dag.selectedNode === node) show(st);
+    } catch (e) {
+      if (window.MLStateBus.dag.selectedNode === node) show(null);
+    }
+  }
+
   function selectLayerNode(node) {
     if (!node) return;
     window.MLStateBus.dag.selectedNode = node;
@@ -903,6 +945,8 @@
       formulaEl.title = formulaEl.textContent;
       formulaEl.textContent = plainFormula(node.semanticRole);
     }
+
+    showWeightStats(node);
 
     // Update activation stats
     const act = node.activation;
@@ -1019,6 +1063,7 @@
       window.MLStateBus.dag.edges = edges;
       window.MLStateBus.model.layers = rawLayers;
       captureBuild();
+      loadTrace(modelPath);
 
       const nodeCountBadge = document.getElementById('ml-dag-node-count');
       if (nodeCountBadge) nodeCountBadge.textContent = `${rawLayers.length} layers (${nodes.length} mapped)`;
@@ -1689,7 +1734,28 @@
   }
 
   // ─── Guided path: collapsible steps, build-up, reassembly ─────────
-  const build = { nodes: [], edges: [], k: 0 };
+  const build = { nodes: [], edges: [], k: 0, trace: new Map(), traceNote: '' };
+  const TRACE_DIR = '.free-llm-mcp/activation_cache';
+
+  async function loadTrace(modelPath) {
+    build.trace = new Map();
+    build.traceNote = 'Running the model layer by layer...';
+    renderBuild();
+    try {
+      const res = await toolFetch({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'reverse_tool', params: { action: 'trace_layer_execution', target: modelPath, authorization: 'lab', options: { cacheDir: TRACE_DIR } } })
+      });
+      const json = res.ok ? await res.json() : null;
+      const steps = json && json.success !== false && json.data && Array.isArray(json.data.steps) ? json.data.steps : [];
+      steps.forEach((st) => build.trace.set(st.layerName, st));
+      build.traceNote = steps.length ? '' : 'The server could not run this model layer by layer' + (json && json.error ? ': ' + String(json.error).slice(0, 120) : '.');
+    } catch (e) {
+      build.traceNote = 'The server could not run this model layer by layer.';
+    }
+    renderBuild();
+  }
   const paramsOf = (n) => (n && Array.isArray(n.shape) && n.shape.length ? n.shape.reduce((a, b) => a * (Number(b) || 1), 1) : 0);
   const fmtNum = (n) => (n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n));
   const stepEl = (n) => document.getElementById('ml-step-' + n);
@@ -1751,9 +1817,20 @@
           line('Layer ' + build.k + ':', n.name),
           line('What it is:', n.semanticRole || 'layer'),
           line('Its numbers:', n.shapeStr + ' = ' + fmtNum(paramsOf(n)) + ' parameters'),
-          line('What it does:', plainFormula(n.semanticRole)),
-          line('Output after it:', act ? 'average ' + act.mean.toFixed(4) + ', spread ' + act.std.toFixed(4) + ' (from your forward pass)' : 'run a forward pass in step 1 to see this')
+          line('What it does:', plainFormula(n.semanticRole))
         );
+        const st = build.trace.get(n.name);
+        if (st) {
+          const a = st.activationStats || {};
+          now.append(
+            line('Goes in:', '[' + (st.inputShape || []).join(', ') + (build.k > 1 ? ']  (the output of layer ' + (build.k - 1) + ')' : ']  (the starting input)')),
+            line('Comes out:', '[' + (st.outputShape || []).join(', ') + ']  average ' + Number(a.mean).toFixed(4) + ', spread ' + Number(a.std).toFixed(4) + ', range ' + Number(a.min).toFixed(3) + ' to ' + Number(a.max).toFixed(3))
+          );
+        } else if (act) {
+          now.append(line('Output after it:', 'average ' + act.mean.toFixed(4) + ', spread ' + act.std.toFixed(4) + ' (from your forward pass)'));
+        } else {
+          now.append(line('Output after it:', build.traceNote || 'not available for this model'));
+        }
       }
     }
 
@@ -1807,8 +1884,22 @@
     const out = fr ? (fr.detections ? fr.detections.length + ' detections' : (fr.topClass ? 'top class ' + fr.topClass : 'a result')) : null;
     const summary = document.getElementById('ml-reassemble-summary');
     if (summary) summary.textContent = build.nodes.length + ' layers shown, holding ' + fmtNum(sum) + ' parameters in the tensors listed. ' + (out ? 'The forward pass you ran produced ' + out + '.' : 'Run a forward pass in step 1 to see what the whole model produces.');
+    const steps = build.nodes.map((n) => build.trace.get(n.name)).filter(Boolean);
+    const chain = document.getElementById('ml-reassemble-chain');
+    if (chain) {
+      if (steps.length === build.nodes.length && steps.length > 0) {
+        const joined = steps.every((st, i) => i === 0 || (st.receivedFromPreviousLayer === true && JSON.stringify(st.inputShape) === JSON.stringify(steps[i - 1].outputShape)));
+        const last = steps[steps.length - 1];
+        const a = last.activationStats || {};
+        chain.textContent = (joined ? 'Chain check passed: every layer took the previous layer\u2019s output as its input and the shapes line up.' : 'Chain check failed: at least one layer did not take the previous output, or the shapes do not line up.') + ' Final output [' + (last.outputShape || []).join(', ') + '], average ' + Number(a.mean).toFixed(4) + '.';
+        chain.style.color = joined ? 'var(--accent-green)' : 'var(--accent-amber)';
+      } else {
+        chain.textContent = build.traceNote || 'No layer-by-layer trace is available for this model, so the chain was not checked.';
+        chain.style.color = 'var(--text-muted)';
+      }
+    }
     const note = document.getElementById('ml-reassemble-note');
-    if (note) note.textContent = 'The order is the order of tensors in the file, and large models show a sample of their layers. This page does not re-run a partial model, so it cannot prove the rebuilt chain gives the same answer; it shows what the pieces are.';
+    if (note) note.textContent = 'The order is the order of tensors in the file, and large models show a sample of their layers. The chain check comes from the server running the model one layer at a time.';
   }
 
   function refreshBuild() {
