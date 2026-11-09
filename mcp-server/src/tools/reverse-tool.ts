@@ -15,7 +15,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -43,9 +43,14 @@ function resolveModelInspectorPath(): string {
   return found;
 }
 
+let cachedPythonBin: string | null = null;
+
 export function resolvePythonPath(): string {
   if (process.env.PYTHON) {
     return process.env.PYTHON;
+  }
+  if (cachedPythonBin) {
+    return cachedPythonBin;
   }
   const isWin = process.platform === 'win32';
   const pyRel = isWin ? path.join('Scripts', 'python.exe') : path.join('bin', 'python');
@@ -60,9 +65,25 @@ export function resolvePythonPath(): string {
     path.resolve(__dirname, '../../.venv', pyRel),
     path.resolve(__dirname, '../../../venv', pyRel),
     path.resolve(__dirname, '../../../.venv', pyRel),
+    'python',
+    'python3',
   ];
-  const found = candidates.find(c => fs.existsSync(c));
-  return found || 'python';
+  for (const cand of candidates) {
+    if (cand === 'python' || cand === 'python3' || fs.existsSync(cand)) {
+      try {
+        const res = spawnSync(cand, ['-c', 'import torch; print(torch.__version__)'], { timeout: 3000, stdio: 'pipe' });
+        if (res.status === 0) {
+          cachedPythonBin = cand;
+          return cand;
+        }
+      } catch {
+        // continue
+      }
+    }
+  }
+  const found = candidates.find(c => c === 'python' || c === 'python3' || fs.existsSync(c));
+  cachedPythonBin = found || 'python';
+  return cachedPythonBin;
 }
 
 function isSafeAllowedPath(rawPath: string, allowedDirs: string[]): boolean {

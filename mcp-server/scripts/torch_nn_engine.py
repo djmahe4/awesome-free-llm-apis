@@ -632,6 +632,8 @@ def load_checkpoint_safe(filepath):
 
             if 'state_dict' in data and isinstance(data['state_dict'], dict):
                 state_dict.update(extract_tensors(data['state_dict']))
+            elif 'model' in data:
+                state_dict.update(extract_tensors(data['model']))
 
     ext = os.path.splitext(filepath)[1].lower()
     if ext != '.onnx':
@@ -950,9 +952,8 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
             'predictions': cls_res['predictions'],
             'layerActivations': [l for l in layer_activations if l is not None]
         }
-        if real_tensors_used:
-            out['weight_source'] = 'checkpoint_state_dict'
-            out['real_tensors_used'] = real_tensors_used
+        out['weight_source'] = 'checkpoint_state_dict' if state_dict else 'random_init'
+        out['real_tensors_used'] = real_tensors_used
         return out
 
     stride = 2
@@ -984,9 +985,8 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
             'maskPrototypesCount': seg_res['maskPrototypesCount'],
             'layerActivations': [l for l in layer_activations if l is not None]
         }
-        if real_tensors_used:
-            out['weight_source'] = 'checkpoint_state_dict'
-            out['real_tensors_used'] = real_tensors_used
+        out['weight_source'] = 'checkpoint_state_dict' if state_dict else 'random_init'
+        out['real_tensors_used'] = real_tensors_used
         return out
 
     # Detect & Pose heads
@@ -1033,9 +1033,8 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
             'keypoints': [p['keypoints'] for p in poses],
             'layerActivations': [l for l in layer_activations if l is not None]
         }
-        if real_tensors_used:
-            out['weight_source'] = 'checkpoint_state_dict'
-            out['real_tensors_used'] = real_tensors_used
+        out['weight_source'] = 'checkpoint_state_dict' if state_dict else 'random_init'
+        out['real_tensors_used'] = real_tensors_used
         return out
 
     layer_activations.append(make_layer_summary('4_head_regression', reg_out))
@@ -1050,9 +1049,8 @@ def forward_yolo(weights_path, metadata, class_names, task='detect', channels=3,
         'detections': detections,
         'layerActivations': [l for l in layer_activations if l is not None]
     }
-    if real_tensors_used:
-        out['weight_source'] = 'checkpoint_state_dict'
-        out['real_tensors_used'] = real_tensors_used
+    out['weight_source'] = 'checkpoint_state_dict' if state_dict else 'random_init'
+    out['real_tensors_used'] = real_tensors_used
     return out
 
 
@@ -1145,9 +1143,8 @@ def forward_resnet(weights_path, metadata, class_names, channels=3, size=32, ima
         'predictions': cls_res['predictions'],
         'layerActivations': [l for l in layer_activations if l is not None]
     }
-    if real_tensors_used:
-        out['weight_source'] = 'checkpoint_state_dict'
-        out['real_tensors_used'] = real_tensors_used
+    out['weight_source'] = 'checkpoint_state_dict' if state_dict else 'random_init'
+    out['real_tensors_used'] = real_tensors_used
     return out
 
 
@@ -1228,9 +1225,8 @@ def forward_mobilenet(weights_path, metadata, class_names, channels=3, size=32, 
         'predictions': cls_res['predictions'],
         'layerActivations': [l for l in layer_activations if l is not None]
     }
-    if real_tensors_used:
-        out['weight_source'] = 'checkpoint_state_dict'
-        out['real_tensors_used'] = real_tensors_used
+    out['weight_source'] = 'checkpoint_state_dict' if state_dict else 'random_init'
+    out['real_tensors_used'] = real_tensors_used
     return out
 
 
