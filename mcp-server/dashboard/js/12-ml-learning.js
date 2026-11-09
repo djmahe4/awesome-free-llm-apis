@@ -1735,6 +1735,286 @@
     });
   }
 
+  // ─── Pooling Kernel Lab ──────────────────────────────────────────
+  const LAPLACIAN_KERNEL = [
+    [0, -1, 0],
+    [-1, 5, -1],
+    [0, -1, 0]
+  ];
+  const poolState = {
+    operation: 'max_pool',
+    kernelSize: 3,
+    stride: 2,
+    intensity: 0.5,
+    uploadedAbsPath: null,
+    uploadedRelPath: null,
+    resultAbsPath: null,
+    beforeImg: null,
+    afterImg: null
+  };
+  const poolPresets = Array.from(document.querySelectorAll('.ml-pool-preset-btn'));
+  const poolFileInput = document.getElementById('ml-pool-file-input');
+  const poolStatus = document.getElementById('ml-pool-status');
+  const poolKernel = document.getElementById('ml-pool-kernel');
+  const poolStride = document.getElementById('ml-pool-stride');
+  const poolIntensity = document.getElementById('ml-pool-intensity');
+  const poolKernelVal = document.getElementById('ml-pool-kernel-val');
+  const poolStrideVal = document.getElementById('ml-pool-stride-val');
+  const poolIntensityVal = document.getElementById('ml-pool-intensity-val');
+  const poolMatrix = document.getElementById('ml-pool-matrix');
+  const poolMatrixNote = document.getElementById('ml-pool-matrix-note');
+  const poolApplyBtn = document.getElementById('ml-pool-apply-btn');
+  const poolComparator = document.getElementById('ml-pool-comparator');
+  const poolDivider = document.getElementById('ml-pool-divider');
+  const poolBeforeCanvas = document.getElementById('ml-pool-before-canvas');
+  const poolAfterCanvas = document.getElementById('ml-pool-after-canvas');
+  const poolHint = document.getElementById('ml-pool-hint');
+  const poolMetrics = document.getElementById('ml-pool-metrics');
+
+  if (poolMatrix && poolApplyBtn) {
+    function gaussianWeights() {
+      const k = poolState.kernelSize;
+      const sigma = Math.max(poolState.intensity, 0.1) * k;
+      const half = (k - 1) / 2;
+      const weights = [];
+      let total = 0;
+      for (let y = 0; y < k; y++) {
+        weights.push([]);
+        for (let x = 0; x < k; x++) {
+          const dx = x - half;
+          const dy = y - half;
+          const w = Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
+          weights[y].push(w);
+          total += w;
+        }
+      }
+      for (let y = 0; y < k; y++) {
+        for (let x = 0; x < k; x++) {
+          weights[y][x] /= total;
+        }
+      }
+      return weights;
+    }
+
+    function renderPoolMatrix() {
+      let grid;
+      let note;
+      if (poolState.operation === 'laplacian_sharpen') {
+        grid = LAPLACIAN_KERNEL.map(row => row.map(v => String(v)));
+        note = 'Laplacian sharpen — fixed 3x3 (each kernel 1 and 5, negatives pull toward neigborhood)';
+      } else if (poolState.operation === 'gaussian_smooth') {
+        grid = gaussianWeights().map(row => row.map(w => (w * 100).toFixed(1) + '%'));
+        note = 'Gaussian weights — sigma ' + poolState.intensity.toFixed(2) + ', normalized to 100%';
+      } else {
+        const k = poolState.kernelSize;
+        grid = Array.from({ length: k }, () => Array.from({ length: k }, () => '1'));
+        note = poolState.operation + ', ' + k + 'x' + k + ' window, stride ' + poolState.stride;
+      }
+      poolMatrix.style.gridTemplateColumns = 'repeat(' + grid[0].length + ', auto)';
+      poolMatrix.innerHTML = '';
+      grid.forEach(row => {
+        row.forEach(val => {
+          const cell = document.createElement('div');
+          cell.textContent = val;
+          const num = parseFloat(val) || 0;
+          cell.style.cssText = 'padding:3px 7px;border-radius:3px;border:1px solid var(--border-subtle);background:' +
+            (num > 0 ? 'var(--bg-primary)' : 'var(--bg-secondary)') + ';font-size:.62rem;white-space:nowrap;';
+          if (val === '5') cell.style.color = 'var(--accent-cyan)';
+          else if (num < 0) cell.style.color = 'var(--accent-amber)';
+          else if (val === '1') cell.style.color = 'var(--accent-purple)';
+          poolMatrix.appendChild(cell);
+        });
+      });
+      poolMatrixNote.textContent = note;
+    }
+
+    function updatePoolSliderLabels() {
+      poolKernelVal.textContent = String(poolState.kernelSize);
+      poolStrideVal.textContent = String(poolState.stride);
+      poolIntensityVal.textContent = poolState.intensity.toFixed(2);
+    }
+
+    poolPresets.forEach(btn => {
+      btn.addEventListener('click', () => {
+        poolPresets.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        poolState.operation = btn.dataset.op;
+        renderPoolMatrix();
+      });
+    });
+    poolKernel.addEventListener('input', () => {
+      poolState.kernelSize = parseInt(poolKernel.value, 10);
+      updatePoolSliderLabels();
+      renderPoolMatrix();
+    });
+    poolStride.addEventListener('input', () => {
+      poolState.stride = parseInt(poolStride.value, 10);
+      updatePoolSliderLabels();
+      renderPoolMatrix();
+    });
+    poolIntensity.addEventListener('input', () => {
+      poolState.intensity = parseInt(poolIntensity.value, 10) / 100;
+      updatePoolSliderLabels();
+      renderPoolMatrix();
+    });
+    updatePoolSliderLabels();
+    renderPoolMatrix();
+
+    // Split-canvas comparator sweep (drag the divider to reveal after/before)
+    function setPoolSweep(pct) {
+      if (!poolComparator.getBoundingClientRect().width) return;
+      const clamped = Math.min(Math.max(pct, 0), 100);
+      poolDivider.style.left = clamped + '%';
+      poolAfterCanvas.style.clipPath = 'inset(0 ' + (100 - clamped) + '% 0 0)';
+    }
+    let poolSweeping = false;
+    poolDivider.addEventListener('pointerdown', ev => {
+      poolSweeping = true;
+      poolDivider.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    poolDivider.addEventListener('pointermove', ev => {
+      if (!poolSweeping) return;
+      const rect = poolComparator.getBoundingClientRect();
+      setPoolSweep(((ev.clientX - rect.left) / rect.width) * 100);
+    });
+    poolDivider.addEventListener('pointerup', () => { poolSweeping = false; });
+    poolDivider.addEventListener('pointercancel', () => { poolSweeping = false; });
+
+    function drawPoolImages() {
+      const before = poolState.beforeImg;
+      if (!before) return;
+      const maxW = 640;
+      const scale = Math.min(1, maxW / before.naturalWidth) || 1;
+      const w = Math.max(1, Math.round(before.naturalWidth * scale));
+      const h = Math.max(1, Math.round(before.naturalHeight * scale));
+      poolBeforeCanvas.width = w;
+      poolBeforeCanvas.height = h;
+      poolBeforeCanvas.getContext('2d').drawImage(before, 0, 0, w, h);
+      const after = poolState.afterImg;
+      if (after) {
+        poolAfterCanvas.width = w;
+        poolAfterCanvas.height = h;
+        poolAfterCanvas.getContext('2d').drawImage(after, 0, 0, w, h);
+      }
+      poolComparator.style.display = 'block';
+      poolHint.style.display = 'block';
+      setPoolSweep(after ? 50 : 100);
+    }
+
+    function fmtPoolNumber(label, value) {
+      if (typeof value !== 'number' || !isFinite(value)) return null;
+      return { label, text: label === 'elapsed ms' ? value.toFixed(1) : value.toFixed(3) };
+    }
+
+    function renderPoolMetrics(data) {
+      const deltas = (data && data.deltas) || {};
+      const chips = [
+        fmtPoolNumber('Δ max vs avg', deltas.max_vs_avg),
+        fmtPoolNumber('Δ min vs avg', deltas.min_vs_avg),
+        fmtPoolNumber('Δ center dev', deltas.avg_center_dev),
+        fmtPoolNumber('Δ smooth', deltas.smooth_delta),
+        fmtPoolNumber('Δ edge', deltas.edge_delta),
+        fmtPoolNumber('elapsed ms', data && data.elapsed_ms)
+      ].filter(Boolean);
+      if (!chips.length) return;
+      poolMetrics.style.display = 'grid';
+      poolMetrics.style.gridTemplateColumns = 'repeat(auto-fit,minmax(150px,1fr))';
+      poolMetrics.style.gap = '8px';
+      poolMetrics.innerHTML = '';
+      chips.forEach(chip => {
+        const box = document.createElement('div');
+        box.style.cssText = 'background:var(--bg-primary);padding:8px;border-radius:4px;border:1px solid var(--border-subtle);';
+        const lab = document.createElement('div');
+        lab.textContent = chip.label;
+        lab.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--text-muted);";
+        const val = document.createElement('div');
+        val.textContent = chip.text;
+        val.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:.82rem;color:var(--accent-cyan);";
+        box.appendChild(lab);
+        box.appendChild(val);
+        poolMetrics.appendChild(box);
+      });
+    }
+
+    // Upload flow — workspace_root '.' keeps uploads under .mcp-uploads/ inside
+    // the server cwd so both input and output PNGs are served by /api/media/preview.
+    poolFileInput.addEventListener('change', async () => {
+      const file = poolFileInput.files && poolFileInput.files[0];
+      if (!file) return;
+      poolState.resultAbsPath = null;
+      poolState.afterImg = null;
+      poolStatus.textContent = 'Uploading "' + file.name + '" to .mcp-uploads/...';
+      poolStatus.style.color = 'var(--text-muted)';
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('workspace_root', '.');
+        const res = await fetch('/api/upload', { method: 'POST', body: form });
+        const json = await res.json().catch(() => null);
+        if (!json || !json.absPath) throw new Error((json && json.error) || 'upload failed');
+        poolState.uploadedAbsPath = json.absPath;
+        poolState.uploadedRelPath = json.relativePath;
+        poolApplyBtn.disabled = false;
+        poolStatus.textContent = 'Ready: ' + json.relativePath;
+        poolStatus.style.color = 'var(--accent-green)';
+      } catch (err) {
+        poolStatus.textContent = 'Upload failed: ' + String((err && err.message) || err).slice(0, 160);
+        poolStatus.style.color = 'var(--accent-amber)';
+      }
+    });
+
+    // Run kernel — engine op passthrough; only the 5 supported ops are wired.
+    poolApplyBtn.addEventListener('click', async () => {
+      if (!poolState.uploadedAbsPath) return;
+      poolApplyBtn.disabled = true;
+      poolApplyBtn.textContent = '🌀 Running kernel...';
+      poolStatus.textContent = 'Running ' + poolState.operation + ' on the server...';
+      poolStatus.style.color = 'var(--text-muted)';
+      try {
+        const res = await toolFetch({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tool: 'reverse_tool',
+            params: {
+              action: 'run_scene_augmentation',
+              target: poolState.uploadedAbsPath,
+              authorization: 'lab',
+              options: {
+                operation: poolState.operation,
+                kernelSize: poolState.kernelSize,
+                strides: poolState.stride,
+                intensity: poolState.intensity
+              }
+            }
+          })
+        });
+        const json = await res.json().catch(() => null);
+        if (!json || json.success !== true) {
+          throw new Error((json && json.error) || 'the server refused the request');
+        }
+        const data = json.data || json;
+        poolState.resultAbsPath = data.output_path;
+        renderPoolMetrics(data);
+        poolStatus.textContent = 'Output written to ' + String(data.output_path || '').split(/[\\\/]/).pop() + ' — drag the divider to compare.';
+        poolStatus.style.color = 'var(--accent-green)';
+        const img = new Image();
+        img.onload = () => {
+          poolState.afterImg = img;
+          drawPoolImages();
+        };
+        img.src = '/api/media/preview?file=' + encodeURIComponent(data.output_path);
+      } catch (err) {
+        poolStatus.textContent = 'Kernel run failed: ' + String((err && err.message) || err).slice(0, 160);
+        poolStatus.style.color = 'var(--accent-amber)';
+      } finally {
+        poolApplyBtn.disabled = false;
+        poolApplyBtn.textContent = '🌀 Run kernel on image';
+      }
+    });
+  }
+
   // ─── Reset All Presets ───────────────────────────────────────────
   const resetAllBtn = document.getElementById('ml-reset-all-btn');
   if (resetAllBtn) {
