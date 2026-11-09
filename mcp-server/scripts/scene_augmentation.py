@@ -109,7 +109,13 @@ def augment_scene(args):
         )
         sys.exit(2)
 
-    img = Image.open(input_path).convert("RGB")
+    # Defense-in-depth: limit decompression size and image dimensions
+    Image.MAX_IMAGE_PIXELS = 16_000_000
+    with Image.open(input_path) as raw_img:
+        if raw_img.width > 4096 or raw_img.height > 4096:
+            sys.stderr.write("Error: image %dx%d exceeds 4096x4096 limit\n" % (raw_img.width, raw_img.height))
+            sys.exit(2)
+        img = raw_img.convert("RGB")
     arr = np.asarray(img, dtype=np.float32)
     H0, W0, C = arr.shape
     # Start the compute clock only once the image is decoded into a NumPy array.
@@ -139,6 +145,12 @@ def augment_scene(args):
         result_arr = pool_result
         keywords = [operation, "pooling", "scene_augmentation"]
     else:
+        if args.kernel_size < 1:
+            sys.stderr.write("Error: kernel-size must be >= 1\n")
+            sys.exit(2)
+        if H0 < args.kernel_size or W0 < args.kernel_size:
+            sys.stderr.write("Error: kernel-size %d too large for image %dx%d\n" % (args.kernel_size, W0, H0))
+            sys.exit(2)
         intensity = args.intensity if args.intensity is not None else 0.5
         half = max(1, args.kernel_size // 2)
         size = 2 * half + 1
