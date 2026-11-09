@@ -858,6 +858,61 @@
           </div>
         </details>
 
+        <details class="card ml-lab" id="ml-lab-vlm" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">VLM reverse image synthesis &amp; attribution studio <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-cyan" style="font-size:.65rem;">prompt &rarr; pixels &middot; patch attention</span>
+          </summary>
+          <div class="card-body">
+            <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+              <button class="btn btn-secondary btn-sm ml-vlm-preset-btn" data-prompt="Soccer striker shooting penalty kick toward upper corner">Soccer striker</button>
+              <button class="btn btn-secondary btn-sm ml-vlm-preset-btn" data-prompt="Goalkeeper diving across goal line to save ball">Goalkeeper diving</button>
+              <button class="btn btn-secondary btn-sm ml-vlm-preset-btn" data-prompt="Referee gesturing with yellow card near midfield line">Referee yellow card</button>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+              <input type="text" id="ml-vlm-prompt" placeholder="Describe the image the VLM should regenerate..." style="flex:1;min-width:220px;font-size:.75rem;padding:6px 8px;background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--text-secondary);">
+              <button id="ml-vlm-generate-btn" class="btn btn-primary btn-sm">🖼 Synthesize image</button>
+              <span id="ml-vlm-status" style="font-size:.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">Enter a prompt — the engine decomposes it into token attention geometry.</span>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
+              <button class="btn btn-secondary btn-sm ml-vlm-mode-btn active" data-mode="feature_attribution">Feature Attribution Map</button>
+              <button class="btn btn-secondary btn-sm ml-vlm-mode-btn" data-mode="prototype_activation">Class Prototype Synthesis</button>
+              <button class="btn btn-secondary btn-sm ml-vlm-mode-btn" data-mode="patch_attention_energy">Patch Attention Energy</button>
+              <span style="font-size:.72rem;color:var(--text-muted);">Resolution:
+                <select id="ml-vlm-resolution" style="background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--text-secondary);font-size:.72rem;padding:3px 6px;">
+                  <option value="128" selected>128 &middot; 16&times;16 patches</option>
+                  <option value="256">256 &middot; 32&times;32 patches</option>
+                </select>
+              </span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px;">
+              <div>
+                <div style="font-size:.68rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-bottom:4px;">SYNTHESIZED IMAGE</div>
+                <img id="ml-vlm-image" style="display:none;width:100%;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);">
+                <div id="ml-vlm-image-empty" style="aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;background:var(--bg-primary);border:1px dashed var(--border-subtle);border-radius:var(--radius-sm);font-size:.68rem;color:var(--text-muted);">no synthesis yet</div>
+              </div>
+              <div>
+                <div style="font-size:.68rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-bottom:4px;">PATCH ATTENTION HEATMAP <span style="color:hotpink;">(hover for tokens)</span></div>
+                <canvas id="ml-vlm-heatmap" style="display:none;width:100%;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);cursor:crosshair;"></canvas>
+                <div id="ml-vlm-heatmap-empty" style="aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;background:var(--bg-primary);border:1px dashed var(--border-subtle);border-radius:var(--radius-sm);font-size:.68rem;color:var(--text-muted);">no attention map yet</div>
+                <div id="ml-vlm-hover" style="display:none;margin-top:6px;font-size:.68rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;"></div>
+              </div>
+            </div>
+            <div id="ml-vlm-tokens" style="display:none;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
+            <div id="ml-vlm-metrics" style="display:none;margin-top:4px;"></div>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap;">
+              <button id="ml-vlm-send-btn" class="btn btn-primary btn-sm" disabled>📤 Send to Augmentation Lab</button>
+              <span style="font-size:.68rem;color:var(--text-muted);">Pipes the synthesized image into the pooling kernel lab above.</span>
+            </div>
+            <div style="margin-top:14px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px 12px;font-size:.72rem;color:var(--text-muted);line-height:1.5;">
+              <strong style="color:var(--text-secondary);">What this teaches:</strong>
+              Modern Vision-Language Models (Qwen2.5-VL, CLIP-style encoders) never see images directly in their spirit &mdash; each word becomes a high-dimensional token vector, and the attention mechanism asks every image patch <em>&ldquo;how relevant are you to this word?&rdquo;</em>
+              This studio inverts that process: it decomposes your prompt into tokens (striker &rarr; sport, goalkeeper &rarr; person/moving, referee &rarr; person/rules), assigns each a spatial Gaussian region in the 2D latent plane, and rolls a die seeded by the token hash to decide which regions light up &mdash; exactly how a diffusion model decides where to paint a midfield line versus a flying ball.
+              The inverse problem is the deep one: <em>generating images from feature activations</em> (here) versus <em>classifying images into tokens</em> (the forward pass). Both share the same latent space; generation just walks it backward. Hover the heatmap to see which patch attended to which token.
+            </div>
+          </div>
+        </details>
+
         </div>
       </details>
 

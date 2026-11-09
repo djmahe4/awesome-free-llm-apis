@@ -2015,6 +2015,221 @@
     });
   }
 
+  // ─── VLM Reverse Image Synthesis & Attribution Studio ───────────
+  const vlmGenerateBtn = document.getElementById('ml-vlm-generate-btn');
+  if (vlmGenerateBtn) {
+    const vlmPrompt = document.getElementById('ml-vlm-prompt');
+    const vlmStatus = document.getElementById('ml-vlm-status');
+    const vlmImage = document.getElementById('ml-vlm-image');
+    const vlmImageEmpty = document.getElementById('ml-vlm-image-empty');
+    const vlmHeatmap = document.getElementById('ml-vlm-heatmap');
+    const vlmHeatmapEmpty = document.getElementById('ml-vlm-heatmap-empty');
+    const vlmHover = document.getElementById('ml-vlm-hover');
+    const vlmTokens = document.getElementById('ml-vlm-tokens');
+    const vlmMetrics = document.getElementById('ml-vlm-metrics');
+    const vlmSendBtn = document.getElementById('ml-vlm-send-btn');
+    const vlmResolution = document.getElementById('ml-vlm-resolution');
+    const vlmState = { mode: 'feature_attribution', data: null, outputDataUrl: null };
+    let vlmPatchMap = new Map();
+
+    document.querySelectorAll('.ml-vlm-preset-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (vlmPrompt) vlmPrompt.value = btn.dataset.prompt || '';
+        generateVlm();
+      });
+    });
+
+    document.querySelectorAll('.ml-vlm-mode-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.ml-vlm-mode-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        vlmState.mode = btn.dataset.mode || 'feature_attribution';
+        if (vlmState.data) generateVlm();
+      });
+    });
+
+    function drawVlmHeatmap(data) {
+      const grid = data && data.latent_energy_map;
+      const g = Array.isArray(grid) ? grid.length : 0;
+      if (!g) return;
+      const cell = 12;
+      const px = g * cell;
+      vlmHeatmap.width = px;
+      vlmHeatmap.height = px;
+      const ctx = vlmHeatmap.getContext('2d');
+      ctx.clearRect(0, 0, px, px);
+      for (let r = 0; r < g; r++) {
+        for (let c = 0; c < g; c++) {
+          const e = Math.max(0, Math.min(1, Number((grid[r] || [])[c]) || 0));
+          ctx.fillStyle = 'hsl(' + Math.round((1 - e) * 215) + ', 85%, ' + Math.round(64 - e * 40) + '%)';
+          ctx.fillRect(c * cell, r * cell, cell, cell);
+        }
+      }
+      vlmPatchMap = new Map();
+      ((data && data.spatial_patches) || []).forEach((p) => {
+        vlmPatchMap.set(p.row + ',' + p.col, p);
+      });
+    }
+
+    vlmHeatmap.addEventListener('mousemove', (ev) => {
+      if (!vlmState.data) return;
+      const rect = vlmHeatmap.getBoundingClientRect();
+      const g = (vlmState.data.latent_energy_map || []).length || 1;
+      const col = Math.min(g - 1, Math.max(0, Math.floor(((ev.clientX - rect.left) / rect.width) * g)));
+      const row = Math.min(g - 1, Math.max(0, Math.floor(((ev.clientY - rect.top) / rect.height) * g)));
+      const patch = vlmPatchMap.get(row + ',' + col);
+      vlmHover.style.display = 'block';
+      if (patch) {
+        vlmHover.innerHTML = '';
+        vlmHover.textContent = 'patch (' + row + ',' + col + ') — energy ' + Number(patch.energy).toFixed(3) + ' — dominant token: ' + (patch.dominant_token || 'none');
+      } else {
+        vlmHover.textContent = 'patch (' + row + ',' + col + ') — no dominant token (background energy)';
+      }
+    });
+    vlmHeatmap.addEventListener('mouseleave', () => { vlmHover.style.display = 'none'; });
+
+    function fmtVlmNumber(label, value) {
+      if (typeof value !== 'number' || !isFinite(value)) return null;
+      return { label, text: label === 'elapsed ms' ? value.toFixed(1) : value.toFixed(3) };
+    }
+
+    function renderVlmMetrics(data) {
+      const m = (data && data.metrics) || {};
+      const mChips = [
+        { label: 'mode', text: String(m.mode || vlmState.mode) },
+        { label: 'patch grid', text: m.patch_grid + '\u00d7' + m.patch_grid + ' (' + String(m.resolution || '?') + 'px)' },
+        fmtVlmNumber('attention entropy', m.attention_entropy),
+        fmtVlmNumber('peak saliency', m.peak_saliency),
+        { label: 'peak position', text: Array.isArray(m.peak_coords) ? '(' + m.peak_coords.join(',') + ')' : '—' },
+        { label: 'tokens decomposed', text: String(m.token_count != null ? m.token_count : ((data.tokens || []).length)) },
+        fmtVlmNumber('elapsed ms', m.elapsed_ms)
+      ].filter((c) => c && c.text);
+      vlmMetrics.style.display = 'grid';
+      vlmMetrics.style.gridTemplateColumns = 'repeat(auto-fit,minmax(140px,1fr))';
+      vlmMetrics.style.gap = '8px';
+      vlmMetrics.innerHTML = '';
+      mChips.forEach((chip) => {
+        const box = document.createElement('div');
+        box.style.cssText = 'background:var(--bg-primary);padding:8px;border-radius:4px;border:1px solid var(--border-subtle);';
+        const lab = document.createElement('div');
+        lab.textContent = chip.label;
+        lab.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--text-muted);";
+        const val = document.createElement('div');
+        val.textContent = chip.text;
+        val.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:.8rem;color:var(--accent-cyan);";
+        box.appendChild(lab);
+        box.appendChild(val);
+        vlmMetrics.appendChild(box);
+      });
+    }
+
+    function renderVlmTokens(data) {
+      const attribs = (data && data.token_attributions) || [];
+      vlmTokens.style.display = 'flex';
+      vlmTokens.innerHTML = '';
+      attribs.forEach((a) => {
+        const chip = document.createElement('span');
+        chip.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:.66rem;padding:4px 8px;border-radius:99px;background:var(--bg-primary);border:1px solid var(--border-subtle);color:var(--accent-cyan);";
+        chip.textContent = a.token + ' (' + (a.category || 'other') + ') · ' + (Number(a.weight) * 100).toFixed(1) + '%';
+        chip.title = 'centroid (' + (a.centroid || []).join(',') + '), energy share ' + (Number(a.energy_share) * 100).toFixed(1) + '%';
+        vlmTokens.appendChild(chip);
+      });
+    }
+
+    async function generateVlm() {
+      const prompt = (vlmPrompt && vlmPrompt.value || '').trim();
+      if (!prompt) {
+        vlmStatus.textContent = 'Enter a prompt (or tap a preset) first.';
+        vlmStatus.style.color = 'var(--accent-amber)';
+        return;
+      }
+      vlmGenerateBtn.disabled = true;
+      vlmGenerateBtn.textContent = '⏳ Synthesizing...';
+      vlmStatus.textContent = 'Decomposing prompt into token attention geometry...';
+      vlmStatus.style.color = 'var(--text-muted)';
+      try {
+        const res = await toolFetch({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tool: 'reverse_tool',
+            params: {
+              action: 'reverse_vlm_generate',
+              authorization: 'lab',
+              options: {
+                prompt: prompt,
+                mode: vlmState.mode,
+                resolution: Number(vlmResolution.value) || 128,
+                seed: 42
+              }
+            }
+          })
+        });
+        const json = await res.json().catch(() => null);
+        if (!json || json.success !== true) {
+          throw new Error((json && json.error) || 'the server refused the request');
+        }
+        const data = json.data || json;
+        vlmState.data = data;
+        vlmState.outputDataUrl = data.output_base64;
+        vlmImage.src = data.output_base64;
+        vlmImage.onload = () => {
+          vlmImage.style.display = 'block';
+          vlmImageEmpty.style.display = 'none';
+        };
+        drawVlmHeatmap(data);
+        vlmHeatmap.style.display = 'block';
+        vlmHeatmapEmpty.style.display = 'none';
+        renderVlmTokens(data);
+        renderVlmMetrics(data);
+        vlmSendBtn.disabled = false;
+        const m = data.metrics || {};
+        vlmStatus.textContent = String(data.tokens || []).length + ' tokens projected onto a ' + (m.patch_grid || '?') + '\u00d7' + (m.patch_grid || '?') + ' latent grid — hover the heatmap.';
+        vlmStatus.style.color = 'var(--accent-green)';
+      } catch (err) {
+        vlmStatus.textContent = 'Synthesis failed: ' + String((err && err.message) || err).slice(0, 160);
+        vlmStatus.style.color = 'var(--accent-amber)';
+      } finally {
+        vlmGenerateBtn.disabled = false;
+        vlmGenerateBtn.textContent = '🖼 Synthesize image';
+      }
+    }
+    vlmGenerateBtn.addEventListener('click', generateVlm);
+
+    // Send to Augmentation Lab — convert the data URL into a real file
+    // upload so the pooling kernel lab treats it like any uploaded PNG.
+    vlmSendBtn.addEventListener('click', async () => {
+      if (!vlmState.outputDataUrl) return;
+      vlmSendBtn.disabled = true;
+      vlmSendBtn.textContent = '📤 Uploading to lab...';
+      vlmStatus.textContent = 'Uploading synthesized image to .mcp-uploads/...';
+      vlmStatus.style.color = 'var(--text-muted)';
+      try {
+        const blob = await fetch(vlmState.outputDataUrl).then((r) => r.blob());
+        const pngFile = new File([blob], 'vlm-synthesized.png', { type: 'image/png' });
+        const form = new FormData();
+        form.append('file', pngFile);
+        form.append('workspace_root', '.');
+        const res = await fetch('/api/upload', { method: 'POST', body: form });
+        const json = await res.json().catch(() => null);
+        if (!json || !json.absPath) throw new Error((json && json.error) || 'upload failed');
+        poolState.uploadedAbsPath = json.absPath;
+        poolState.uploadedRelPath = json.relativePath;
+        poolStatus.textContent = 'Loaded synthesized image: ' + json.relativePath;
+        poolStatus.style.color = 'var(--accent-green)';
+        vlmStatus.textContent = 'Image piped into the Augmentation Lab — kernel running.';
+        vlmStatus.style.color = 'var(--accent-green)';
+        poolApplyBtn.click();
+      } catch (err) {
+        vlmStatus.textContent = 'Pipe to lab failed: ' + String((err && err.message) || err).slice(0, 160);
+        vlmStatus.style.color = 'var(--accent-amber)';
+      } finally {
+        vlmSendBtn.disabled = false;
+        vlmSendBtn.textContent = '📤 Send to Augmentation Lab';
+      }
+    });
+  }
+
   // ─── Reset All Presets ───────────────────────────────────────────
   const resetAllBtn = document.getElementById('ml-reset-all-btn');
   if (resetAllBtn) {
