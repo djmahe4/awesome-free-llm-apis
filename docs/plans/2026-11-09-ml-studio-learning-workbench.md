@@ -15,7 +15,7 @@
 
 ## Plan Structure & Commit Rhythm
 
-Commits occur strictly every **2 tasks**, followed immediately by pushing to `origin/feat/reasoning-moe-yolo-reconstruction`:
+Commits occur strictly every **2 tasks**, followed immediately by pushing to `origin/feat/ml-studio-learning-workbench`:
 
 - **Wave 1 (Tasks 1 & 2)**: Scene Augmentation & Pooling Kernel Lab -> **Commit 1 & 2 + Push**
 - **Wave 2 (Tasks 3 & 4)**: Reverse VLM Image Synthesis & Attribution Studio -> **Commit 3 & 4 + Push**
@@ -167,7 +167,7 @@ git add mcp-server/scripts/scene_augmentation.py mcp-server/src/tools/reverse-to
 git commit -m "feat(ml-studio): add scientific scene augmentation and pooling engine"
 git add mcp-server/dashboard/partials/13b-ml-learning.html mcp-server/dashboard/js/12-ml-learning.js mcp-server/dashboard/index.html
 git commit -m "feat(ml-studio): add interactive augmentation lab with split-view comparator and kernel visualizer"
-git push origin feat/reasoning-moe-yolo-reconstruction
+git push origin feat/ml-studio-learning-workbench
 ```
 
 ---
@@ -305,7 +305,7 @@ git add mcp-server/scripts/vlm_reverse_generator.py mcp-server/src/tools/reverse
 git commit -m "feat(ml-studio): add reverse VLM image generation and semantic attribution engine"
 git add mcp-server/dashboard/partials/13b-ml-learning.html mcp-server/dashboard/js/12-ml-learning.js mcp-server/dashboard/index.html
 git commit -m "feat(ml-studio): add interactive VLM reverse image synthesis studio with latent patch inspector"
-git push origin feat/reasoning-moe-yolo-reconstruction
+git push origin feat/ml-studio-learning-workbench
 ```
 
 ---
@@ -426,7 +426,7 @@ git add mcp-server/scripts/audio_separator.py mcp-server/src/tools/reverse-tool.
 git commit -m "feat(ml-studio): add multi-band audio stem separation and spectral decomposition engine"
 git add mcp-server/dashboard/partials/13b-ml-learning.html mcp-server/dashboard/js/12-ml-learning.js mcp-server/dashboard/index.html
 git commit -m "feat(ml-studio): add interactive 4-stem mixer with Web Audio playback and waveform visualizers"
-git push origin feat/reasoning-moe-yolo-reconstruction
+git push origin feat/ml-studio-learning-workbench
 ```
 
 ---
@@ -541,7 +541,7 @@ git add mcp-server/scripts/ocr_engine.py mcp-server/src/tools/reverse-tool.ts mc
 git commit -m "feat(ml-studio): add OCR token bounding and spatial layout inspection engine"
 git add mcp-server/dashboard/partials/13b-ml-learning.html mcp-server/dashboard/js/12-ml-learning.js mcp-server/dashboard/index.html
 git commit -m "feat(ml-studio): add interactive OCR token bounding studio with bidirectional hover grounding"
-git push origin feat/reasoning-moe-yolo-reconstruction
+git push origin feat/ml-studio-learning-workbench
 ```
 
 ---
@@ -562,4 +562,4 @@ npm --prefix mcp-server test -- \
   tests/ocr-token-inspection.test.ts
 ```
 Expected: 100% PASS (9 test files, >46 tests passing).
-Verify git log has cleanly paired commits (2 tasks per commit) and remote `origin/feat/reasoning-moe-yolo-reconstruction` is completely in sync.
+Verify git log has cleanly paired commits (2 tasks per commit) and remote `origin/feat/ml-studio-learning-workbench` is completely in sync.
