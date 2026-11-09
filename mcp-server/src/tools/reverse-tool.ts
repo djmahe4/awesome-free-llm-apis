@@ -43,6 +43,24 @@ function resolveModelInspectorPath(): string {
   return found;
 }
 
+/** Media/engine sub-scripts that ship next to model_inspector.py (ML Studio engines). */
+function resolveEngineScriptPath(scriptName: string): string {
+  const candidates = [
+    path.resolve(__dirname, '../scripts', scriptName),
+    path.resolve(__dirname, '../../scripts', scriptName),
+    path.resolve(__dirname, '../../../scripts', scriptName),
+    path.resolve(process.cwd(), 'scripts', scriptName),
+    path.resolve(process.cwd(), 'mcp-server/scripts', scriptName),
+    path.resolve(process.cwd(), 'dist/scripts', scriptName),
+    path.resolve(process.cwd(), 'mcp-server/dist/scripts', scriptName),
+  ];
+  const found = candidates.find(c => fs.existsSync(c));
+  if (!found) {
+    throw new Error(`Engine script (${scriptName}) not found in candidates: ` + candidates.join(', '));
+  }
+  return found;
+}
+
 let cachedPythonBin: string | null = null;
 
 export function resolvePythonPath(): string {
@@ -121,6 +139,7 @@ export type ReverseToolAction =
   | 'run_reasoning_model'
   | 'run_yolo_nn'
   | 'run_torch_nn'
+  | 'run_scene_augmentation'
   | 'program_weight_space';
 
 export const isModelAction = (act: string): boolean => [
@@ -135,6 +154,7 @@ export const isModelAction = (act: string): boolean => [
   'run_reasoning_model',
   'run_yolo_nn',
   'run_torch_nn',
+  'run_scene_augmentation',
   'program_weight_space',
 ].includes(act as any);
 
@@ -760,7 +780,9 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
 
     let scriptPath: string;
     try {
-      scriptPath = resolveModelInspectorPath();
+      scriptPath = action === 'run_scene_augmentation'
+        ? resolveEngineScriptPath('scene_augmentation.py')
+        : resolveModelInspectorPath();
     } catch (err: any) {
       return {
         success: false,
@@ -782,6 +804,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       run_reasoning_model: 'run_reasoning_model',
       run_yolo_nn: 'run_yolo_nn',
       run_torch_nn: 'run_torch_nn',
+      run_scene_augmentation: 'augment_scene',
       program_weight_space: 'program_weight_space',
     };
 
@@ -850,6 +873,30 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
     if (options?.task) {
       args.push('--task', String(options.task));
+    }
+    if (options?.operation) {
+      args.push('--operation', String(options.operation));
+    }
+    if (options?.kernelSize !== undefined) {
+      args.push('--kernel-size', String(options.kernelSize));
+    }
+    if (options?.strides !== undefined) {
+      args.push('--strides', String(options.strides));
+    }
+    if (options?.intensity !== undefined) {
+      args.push('--intensity', String(options.intensity));
+    }
+    if (options?.aspect) {
+      args.push('--aspect', String(options.aspect));
+    }
+    if (options?.bins) {
+      args.push('--bins', String(options.bins));
+    }
+    if (options?.stems) {
+      args.push('--stems', String(options.stems));
+    }
+    if (options?.buckets) {
+      args.push('--buckets', String(options.buckets));
     }
     const imagePath = options?.image ?? options?.image_path;
     if (imagePath) {
@@ -974,7 +1021,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "program_weight_space".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "run_scene_augmentation", "program_weight_space".`,
   };
 }
 
