@@ -140,6 +140,7 @@ export type ReverseToolAction =
   | 'run_yolo_nn'
   | 'run_torch_nn'
   | 'run_scene_augmentation'
+  | 'run_depth_parallax'
   | 'program_weight_space';
 
 export const isModelAction = (act: string): boolean => [
@@ -155,6 +156,7 @@ export const isModelAction = (act: string): boolean => [
   'run_yolo_nn',
   'run_torch_nn',
   'run_scene_augmentation',
+  'run_depth_parallax',
   'program_weight_space',
 ].includes(act as any);
 
@@ -782,7 +784,9 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     try {
       scriptPath = action === 'run_scene_augmentation'
         ? resolveEngineScriptPath('scene_augmentation.py')
-        : resolveModelInspectorPath();
+        : action === 'run_depth_parallax'
+          ? resolveEngineScriptPath('depth_parallax_engine.py')
+          : resolveModelInspectorPath();
     } catch (err: any) {
       return {
         success: false,
@@ -805,6 +809,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       run_yolo_nn: 'run_yolo_nn',
       run_torch_nn: 'run_torch_nn',
       run_scene_augmentation: 'augment_scene',
+      run_depth_parallax: 'parallax',
       program_weight_space: 'program_weight_space',
     };
 
@@ -897,6 +902,33 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
     if (options?.buckets) {
       args.push('--buckets', String(options.buckets));
+    }
+    if (options?.target) {
+      args.push('--target', String(options.target));
+    }
+    if (options?.maskType || options?.['mask-type']) {
+      args.push('--mask-type', String(options.maskType || options['mask-type']));
+    }
+    if (options?.yaw !== undefined) {
+      args.push('--yaw', String(options.yaw));
+    }
+    if (options?.pitch !== undefined) {
+      args.push('--pitch', String(options.pitch));
+    }
+    if (options?.roll !== undefined) {
+      args.push('--roll', String(options.roll));
+    }
+    if (options?.bbox) {
+      args.push('--bbox', Array.isArray(options.bbox) ? options.bbox.join(',') : String(options.bbox));
+    }
+    if (options?.dolly !== undefined) {
+      args.push('--dolly', String(options.dolly));
+    }
+    if (options?.pan !== undefined) {
+      args.push('--pan', String(options.pan));
+    }
+    if (options?.shiftY !== undefined || options?.['shift-y'] !== undefined) {
+      args.push('--shift-y', String(options.shiftY ?? options['shift-y']));
     }
     const imagePath = options?.image ?? options?.image_path;
     if (imagePath) {
@@ -1021,7 +1053,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "run_scene_augmentation", "program_weight_space".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "run_scene_augmentation", "run_depth_parallax", "program_weight_space".`,
   };
 }
 
