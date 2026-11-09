@@ -141,6 +141,7 @@ export type ReverseToolAction =
   | 'run_torch_nn'
   | 'run_scene_augmentation'
   | 'run_depth_parallax'
+  | 'animate_still'
   | 'program_weight_space';
 
 export const isModelAction = (act: string): boolean => [
@@ -157,6 +158,7 @@ export const isModelAction = (act: string): boolean => [
   'run_torch_nn',
   'run_scene_augmentation',
   'run_depth_parallax',
+  'animate_still',
   'program_weight_space',
 ].includes(act as any);
 
@@ -784,7 +786,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     try {
       scriptPath = action === 'run_scene_augmentation'
         ? resolveEngineScriptPath('scene_augmentation.py')
-        : action === 'run_depth_parallax'
+        : (action === 'run_depth_parallax' || action === 'animate_still')
           ? resolveEngineScriptPath('depth_parallax_engine.py')
           : resolveModelInspectorPath();
     } catch (err: any) {
@@ -810,6 +812,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       run_torch_nn: 'run_torch_nn',
       run_scene_augmentation: 'augment_scene',
       run_depth_parallax: 'parallax',
+      animate_still: 'animate_still',
       program_weight_space: 'program_weight_space',
     };
 
@@ -903,6 +906,12 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     if (options?.buckets) {
       args.push('--buckets', String(options.buckets));
     }
+    if (options?.mode) {
+      args.push('--mode', String(options.mode));
+    }
+    if (options?.depthLayers !== undefined || options?.['depth-layers'] !== undefined) {
+      args.push('--depth-layers', String(options.depthLayers ?? options['depth-layers']));
+    }
     if (options?.target) {
       args.push('--target', String(options.target));
     }
@@ -929,6 +938,27 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
     if (options?.shiftY !== undefined || options?.['shift-y'] !== undefined) {
       args.push('--shift-y', String(options.shiftY ?? options['shift-y']));
+    }
+    if (options?.frames !== undefined) {
+      args.push('--frames', String(options.frames));
+    }
+    if (options?.fps !== undefined) {
+      args.push('--fps', String(options.fps));
+    }
+    if (options?.trajectory) {
+      args.push('--trajectory', String(options.trajectory));
+    }
+    if (options?.azimuthAmp !== undefined || options?.['azimuth-amp'] !== undefined) {
+      args.push('--azimuth-amp', String(options.azimuthAmp ?? options['azimuth-amp']));
+    }
+    if (options?.elevationAmp !== undefined || options?.['elevation-amp'] !== undefined) {
+      args.push('--elevation-amp', String(options.elevationAmp ?? options['elevation-amp']));
+    }
+    if (options?.dollyAmp !== undefined || options?.['dolly-amp'] !== undefined) {
+      args.push('--dolly-amp', String(options.dollyAmp ?? options['dolly-amp']));
+    }
+    if (options?.panAmp !== undefined || options?.['pan-amp'] !== undefined) {
+      args.push('--pan-amp', String(options.panAmp ?? options['pan-amp']));
     }
     const imagePath = options?.image ?? options?.image_path;
     if (imagePath) {
@@ -1053,7 +1083,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "run_scene_augmentation", "run_depth_parallax", "program_weight_space".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "run_scene_augmentation", "run_depth_parallax", "animate_still", "program_weight_space".`,
   };
 }
 

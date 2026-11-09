@@ -142,6 +142,59 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
     expect(fs.existsSync(outImg)).toBe(true);
   }, 30000);
 
+  it('runs animate_still generating multi-frame orbital pseudo-3D sequence GIF', async () => {
+    const outGif = path.join(outDir, 'test_animate_still_orbit.gif');
+    const res = await handleReverseTool({
+      action: 'animate_still',
+      target: frame0050,
+      authorization: 'lab',
+      options: {
+        frames: 6,
+        fps: 6,
+        trajectory: 'orbit',
+        azimuthAmp: 4.0,
+        elevationAmp: 1.5,
+        output: outGif,
+      },
+    });
+
+    expect(res.success).toBe(true);
+    const data = res.data as any;
+    expect(data.ok).toBe(true);
+    expect(data.operation).toBe('animate_still');
+    expect(data.frames_count).toBe(6);
+    expect(data.fps).toBe(6);
+    expect(data.duration_sec).toBe(1.0);
+    expect(data.output_base64).toBeDefined();
+    expect(data.metrics.file_size_bytes).toBeGreaterThan(1000);
+    expect(fs.existsSync(outGif)).toBe(true);
+  }, 40000);
+
+  it('runs animate_still with target="ball" generating volumetric spherical 3D rotation sequence', async () => {
+    const outGif = path.join(outDir, 'test_animate_still_ball.gif');
+    const res = await handleReverseTool({
+      action: 'animate_still',
+      target: frame0050,
+      authorization: 'lab',
+      options: {
+        mode: 'object_3d_rotation',
+        target: 'ball',
+        frames: 6,
+        fps: 6,
+        trajectory: 'object_spin',
+        output: outGif,
+      },
+    });
+
+    expect(res.success).toBe(true);
+    const data = res.data as any;
+    expect(data.ok).toBe(true);
+    expect(data.operation).toBe('animate_still');
+    expect(data.frames_count).toBe(6);
+    expect(data.output_base64).toBeDefined();
+    expect(fs.existsSync(outGif)).toBe(true);
+  }, 40000);
+
   it('handles invalid file and path traversal securely', async () => {
     const res = await handleReverseTool({
       action: 'run_depth_parallax',
