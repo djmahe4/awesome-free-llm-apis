@@ -189,17 +189,54 @@ def create_object_mask(
         else:
             mask_type = "rect"
 
-    if mask_type in ("sphere", "circle"):
+    if mask_type in ("sphere", "circle", "ball") and HAS_OPENCV:
+        roi = img_np[y1:y2, x1:x2].astype(np.float32)
+        rh, rw, _ = roi.shape
+        awareness = compute_pooling_pixel_awareness(roi)
+
+        # Contrast segmentation against local surroundings
+        pad_bg = min(30, y1)
+        bg_sample = img_np[max(0, y1 - pad_bg):y1, x1:x2].astype(np.float32)
+        if bg_sample.size > 0:
+            bg_mean = np.mean(bg_sample, axis=(0, 1))
+            color_dist = np.linalg.norm(roi - bg_mean, axis=2)
+        else:
+            color_dist = awareness * 100.0
+
+        candidates = ((color_dist > 35.0) | (awareness > 0.30)).astype(np.uint8)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        clean = cv2.morphologyEx(candidates, cv2.MORPH_CLOSE, kernel)
+        clean = cv2.morphologyEx(clean, cv2.MORPH_OPEN, kernel)
+
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(clean)
+        center_pt = np.array([rw / 2.0, rh / 2.0])
+        best_lbl = 1
+        min_d = 999999.0
+        for lbl in range(1, num_labels):
+            if stats[lbl, cv2.CC_STAT_AREA] > 300:
+                d = np.linalg.norm(centroids[lbl] - center_pt)
+                if d < min_d:
+                    min_d = d
+                    best_lbl = lbl
+
+        if num_labels > 1 and stats[best_lbl, cv2.CC_STAT_AREA] > 300:
+            obj_mask = (labels == best_lbl).astype(np.float32)
+        else:
+            obj_mask = clean.astype(np.float32)
+
+        obj_feather = cv2.GaussianBlur(obj_mask, (7, 7), 1.5)
+        final_canvas_mask = np.zeros((h, w), dtype=np.float32)
+        final_canvas_mask[y1:y2, x1:x2] = obj_feather
+        return np.clip(final_canvas_mask, 0.0, 1.0)
+
+    elif mask_type in ("sphere", "circle", "ball"):
+        # Pure-NumPy edge-smoothed boundary fallback
         y_idx, x_idx = np.ogrid[:h, :w]
         rx = bw / 2.0
         ry = bh / 2.0
         norm_dist = ((x_idx - cx) / rx) ** 2 + ((y_idx - cy) / ry) ** 2
-        mask_binary = (norm_dist <= 1.0).astype(np.float32)
-        if HAS_OPENCV:
-            mask_feather = cv2.GaussianBlur(mask_binary, (9, 9), 2.5)
-        else:
-            mask_feather = np.clip((1.05 - norm_dist) / 0.15, 0.0, 1.0)
-            mask_feather[norm_dist > 1.05] = 0.0
+        mask_feather = np.clip((1.05 - norm_dist) / 0.15, 0.0, 1.0)
+        mask_feather[norm_dist > 1.05] = 0.0
         return np.clip(mask_feather, 0.0, 1.0)
 
     elif mask_type in ("fullbody", "grabcut") and HAS_OPENCV:
@@ -306,36 +343,67 @@ def inpaint_revealed_background(
     return bg_clean
 
 
-def run_volumetric_sphere_3d_rotation(
+def run_boundary_aware_3d_volumetric_transform(
     img_np: np.ndarray,
     bbox: tuple[int, int, int, int],
     yaw: float = 30.0,
     pitch: float = 10.0,
     roll: float = 0.0,
     target: str = "ball",
-    mask_type: str = "circle"
+    mask_type: str = "circle",
+    inpaint_background: bool = True
 ) -> tuple[np.ndarray, dict]:
     """
-    True 3D spherical volumetric surface rotation:
-    Computes genuine hemisphere geometry Z = sqrt(R^2 - r^2) and ray-traces backward
-    onto unrotated spherical texture. Wraps textures around the sphere in 3D.
+    True Mask & Boundary-Aware 3D Volumetric Transformation.
+    Replaces naive circular lens distortion with boundary-anchored surface depth regression.
+
+    1. Extracts real segmented entity mask from pixels (NOT an idealized geometric circle).
+    2. Computes Euclidean Distance Field D(x, y) from the true irregular boundary dOmega.
+    3. Regresses continuous 3D surface depth Z(x, y) = sqrt(max(0, 2*D_max*D - D^2)),
+       which rigorously anchors Z = 0 at every point on the silhouette boundary.
+    4. Rotates local 3D points [x - cx, y - cy, Z(x, y)] under 3D Euler rotation R(yaw, pitch, roll).
+    5. Warps via sub-pixel Lanczos4 inverse ray remapping without artificial circular shearing.
     """
     h, w, c = img_np.shape
     x1, y1, x2, y2 = bbox
-    cx = (x1 + x2) / 2.0
-    cy = (y1 + y2) / 2.0
-    R = min(x2 - x1, y2 - y1) / 2.0
 
-    pad = 5
-    bx1 = max(0, int(cx - R - pad))
-    by1 = max(0, int(cy - R - pad))
-    bx2 = min(w, int(cx + R + pad))
-    by2 = min(h, int(cy + R + pad))
+    pad = max(10, int(0.15 * max(x2 - x1, y2 - y1)))
+    bx1 = max(0, x1 - pad)
+    by1 = max(0, y1 - pad)
+    bx2 = min(w, x2 + pad)
+    by2 = min(h, y2 + pad)
 
     patch = img_np[by1:by2, bx1:bx2].copy()
     ph, pw, _ = patch.shape
-    pcx = (pw - 1) / 2.0
-    pcy = (ph - 1) / 2.0
+
+    full_mask = create_object_mask(img_np, (x1, y1, x2, y2), mask_type=mask_type)
+    patch_mask = full_mask[by1:by2, bx1:bx2]
+    binary_mask = (patch_mask > 0.15).astype(np.uint8)
+
+    if HAS_OPENCV:
+        dist_map = cv2.distanceTransform(binary_mask, cv2.DIST_L2, 5)
+        d_max = float(dist_map.max())
+        if d_max > 1.0:
+            z_surface = np.sqrt(np.maximum(0.0, 2.0 * d_max * dist_map - dist_map**2))
+        else:
+            z_surface = np.zeros((ph, pw), dtype=np.float32)
+
+        M = cv2.moments(binary_mask)
+        if M["m00"] > 1e-4:
+            pcx = M["m10"] / M["m00"]
+            pcy = M["m01"] / M["m00"]
+        else:
+            pcx = (pw - 1) / 2.0
+            pcy = (ph - 1) / 2.0
+    else:
+        y_idx, x_idx = np.indices((ph, pw), dtype=np.float32)
+        pcx = (pw - 1) / 2.0
+        pcy = (ph - 1) / 2.0
+        r_approx = min(pw, ph) / 2.0
+        norm_r = np.sqrt((x_idx - pcx)**2 + (y_idx - pcy)**2) / max(r_approx, 1.0)
+        dist_map = np.clip(1.0 - norm_r, 0.0, 1.0) * r_approx * patch_mask
+        d_max = float(dist_map.max())
+        z_surface = np.sqrt(np.maximum(0.0, 2.0 * d_max * dist_map - dist_map**2))
 
     ry = math.radians(yaw)
     rx = math.radians(pitch)
@@ -346,60 +414,73 @@ def run_volumetric_sphere_3d_rotation(
     Rz_inv = np.array([[math.cos(-rz), -math.sin(-rz), 0], [math.sin(-rz), math.cos(-rz), 0], [0, 0, 1]], dtype=np.float32)
     R_inv = Ry_inv @ Rx_inv @ Rz_inv
 
-    rot_sphere = np.zeros_like(patch)
-    sphere_mask = np.zeros((ph, pw), dtype=np.float32)
+    y_coords, x_coords = np.indices((ph, pw), dtype=np.float32)
+    dx = x_coords - pcx
+    dy = y_coords - pcy
+    dz = z_surface
 
-    for y in range(ph):
-        for x in range(pw):
-            dx = x - pcx
-            dy = y - pcy
-            r2 = dx * dx + dy * dy
-            if r2 <= R * R:
-                dz = math.sqrt(max(0.0, R * R - r2))
-                P_rot = np.array([dx, dy, dz], dtype=np.float32)
-                P_src = R_inv @ P_rot
-                if P_src[2] > 0:
-                    sx = pcx + P_src[0]
-                    sy = pcy + P_src[1]
-                    if 0 <= sx < pw - 1 and 0 <= sy < ph - 1:
-                        isx, isy = int(sx), int(sy)
-                        fx, fy = sx - isx, sy - isy
-                        c00 = patch[isy, isx]
-                        c10 = patch[isy, min(pw - 1, isx + 1)]
-                        c01 = patch[min(ph - 1, isy + 1), isx]
-                        c11 = patch[min(ph - 1, isy + 1), min(pw - 1, isx + 1)]
-                        rot_sphere[y, x] = (1 - fx) * (1 - fy) * c00 + fx * (1 - fy) * c10 + (1 - fx) * fy * c01 + fx * fy * c11
-                        sphere_mask[y, x] = 1.0
+    P_rot = np.stack([dx, dy, dz], axis=-1)
+    P_src = np.einsum('ij,hwj->hwi', R_inv, P_rot)
+
+    sx = pcx + P_src[:, :, 0]
+    sy = pcy + P_src[:, :, 1]
+    front = (P_src[:, :, 2] >= -1.0) & (patch_mask > 0.08) & (sx >= 0) & (sx < pw - 1) & (sy >= 0) & (sy < ph - 1)
 
     if HAS_OPENCV:
-        sphere_mask_feather = cv2.GaussianBlur(sphere_mask, (5, 5), 1.2)[:, :, None]
+        map_x = np.where(front, sx, 0.0).astype(np.float32)
+        map_y = np.where(front, sy, 0.0).astype(np.float32)
+        rot_patch = cv2.remap(patch.astype(np.uint8), map_x, map_y, cv2.INTER_LANCZOS4)
+        valid_mask = front.astype(np.float32) * patch_mask
+        feather_mask = cv2.GaussianBlur(valid_mask, (5, 5), 1.2)[:, :, None]
     else:
-        sphere_mask_feather = sphere_mask[:, :, None]
+        xs_clip = np.clip(sx, 0, pw - 2)
+        ys_clip = np.clip(sy, 0, ph - 2)
+        x0 = np.floor(xs_clip).astype(int)
+        x1 = x0 + 1
+        y0 = np.floor(ys_clip).astype(int)
+        y1 = y0 + 1
+        wx = (xs_clip - x0)[:, :, None]
+        wy = (ys_clip - y0)[:, :, None]
+        top = patch[y0, x0] * (1 - wx) + patch[y0, x1] * wx
+        bottom = patch[y1, x0] * (1 - wx) + patch[y1, x1] * wx
+        rot_patch = np.clip(top * (1 - wy) + bottom * wy, 0, 255).astype(np.uint8)
+        valid_mask = front.astype(np.float32) * patch_mask
+        feather_mask = valid_mask[:, :, None]
 
-    # Inpaint background footprint
-    full_mask = np.zeros((h, w), dtype=np.float32)
-    full_mask[by1:by2, bx1:bx2] = sphere_mask
-    bg_clean = inpaint_revealed_background(img_np, full_mask, bbox)
+    if inpaint_background:
+        footprint_mask = np.zeros((h, w), dtype=np.float32)
+        footprint_mask[by1:by2, bx1:bx2] = valid_mask
+        bg_clean = inpaint_revealed_background(img_np, footprint_mask, bbox)
+    else:
+        bg_clean = img_np.copy()
 
     final_composite = bg_clean.copy()
-    final_composite[by1:by2, bx1:bx2] = (1.0 - sphere_mask_feather) * bg_clean[by1:by2, bx1:bx2] + sphere_mask_feather * rot_sphere
+    bg_patch = bg_clean[by1:by2, bx1:bx2]
+    final_composite[by1:by2, bx1:bx2] = (1.0 - feather_mask) * bg_patch + feather_mask * rot_patch
     final_composite = np.clip(final_composite, 0, 255).astype(np.uint8)
 
-    outside = full_mask < 0.01
+    footprint_full = np.zeros((h, w), dtype=bool)
+    footprint_full[by1:by2, bx1:bx2] = valid_mask > 0.05
+    outside = ~footprint_full
     stability = round(float(np.mean(np.isclose(final_composite[outside], img_np[outside], atol=2))), 4)
 
     metrics = {
         "mode": "object_3d_rotation",
-        "target": target,
+        "target": target or "custom",
         "target_bbox": [int(x1), int(y1), int(x2), int(y2)],
         "mask_type": mask_type if mask_type != "auto" else "circle",
         "pooling_pixel_awareness": True,
+        "boundary_aware_regression": True,
+        "boundary_distance_max": round(d_max, 2),
         "rotation_angles": {"yaw": float(yaw), "pitch": float(pitch), "roll": float(roll)},
-        "object_pixels_transformed": int(np.sum(sphere_mask > 0.05)),
+        "object_pixels_transformed": int(np.sum(valid_mask > 0.05)),
         "background_stability_score": stability,
-        "disocclusion_ratio": round(float(np.sum(sphere_mask > 0.1)) / float((x2 - x1) * (y2 - y1)), 4)
+        "disocclusion_ratio": round(float(np.sum(valid_mask > 0.05)) / float(max((x2 - x1) * (y2 - y1), 1)), 4)
     }
     return final_composite, metrics
+
+# Backward compatibility alias
+run_volumetric_sphere_3d_rotation = run_boundary_aware_3d_volumetric_transform
 
 
 def run_continuous_pseudo3d_parallax(
@@ -484,9 +565,8 @@ def run_isolated_object_3d_rotation(
     inpaint_background: bool = True
 ) -> tuple[np.ndarray, dict]:
     """
-    Executes true 3D perspective rotation on an isolated foreground object:
-    Routes spherical targets (ball) to true volumetric sphere rotation,
-    and full-body targets (goalkeeper, referee) to non-truncated pooling-aware 3D rotation.
+    Executes true 3D perspective rotation on an isolated foreground object
+    using mask & boundary-aware depth surface regression.
     """
     h, w, c = img_np.shape
 
@@ -500,133 +580,16 @@ def run_isolated_object_3d_rotation(
     else:
         x1, y1, x2, y2 = 480, 30, 1060, 1080
 
-    bw = max(x2 - x1, 10)
-    bh = max(y2 - y1, 10)
-    cx = (x1 + x2) / 2.0
-    cy = (y1 + y2) / 2.0
-
-    # Spherical objects route to volumetric spherical surface rotation
-    if mask_type in ("sphere", "circle") or target == "ball":
-        return run_volumetric_sphere_3d_rotation(
-            img_np, (x1, y1, x2, y2), yaw=yaw, pitch=pitch, roll=roll, target=target or "ball", mask_type=mask_type
-        )
-
-    # 1. Object Alpha Matte with Pooling-Driven Pixel Awareness
-    mask_feather = create_object_mask(img_np, (x1, y1, x2, y2), mask_type=mask_type)
-
-    # 2. Inpaint Background Footprint
-    if inpaint_background:
-        bg_clean = inpaint_revealed_background(img_np, mask_feather, (x1, y1, x2, y2))
-    else:
-        bg_clean = img_np.copy()
-
-    # 3. 3D Euler Rotation Matrix [Ry(yaw) @ Rx(pitch) @ Rz(roll)]
-    r_yaw = math.radians(yaw)
-    r_pitch = math.radians(pitch)
-    r_roll = math.radians(roll)
-
-    Ry = np.array([
-        [math.cos(r_yaw), 0, math.sin(r_yaw)],
-        [0, 1, 0],
-        [-math.sin(r_yaw), 0, math.cos(r_yaw)]
-    ], dtype=np.float32)
-
-    Rx = np.array([
-        [1, 0, 0],
-        [0, math.cos(r_pitch), -math.sin(r_pitch)],
-        [0, math.sin(r_pitch), math.cos(r_pitch)]
-    ], dtype=np.float32)
-
-    Rz = np.array([
-        [math.cos(r_roll), -math.sin(r_roll), 0],
-        [math.sin(r_roll), math.cos(r_roll), 0],
-        [0, 0, 1]
-    ], dtype=np.float32)
-
-    R = Ry @ Rx @ Rz
-
-    # 4. Perspective Projection of Object Bounding Box Corners
-    src_pts = np.array([
-        [x1, y1],
-        [x2, y1],
-        [x2, y2],
-        [x1, y2]
-    ], dtype=np.float32)
-
-    dst_pts = []
-    for pt in src_pts:
-        P_obj = np.array([pt[0] - cx, pt[1] - cy, 0.0], dtype=np.float32)
-        P_cam = np.array([0, 0, camera_dist], dtype=np.float32) + R @ P_obj
-        z_safe = max(float(P_cam[2]), 10.0)
-        u = focal_length * (P_cam[0] / z_safe) + cx
-        v = focal_length * (P_cam[1] / z_safe) + cy
-        dst_pts.append([u, v])
-    dst_pts = np.array(dst_pts, dtype=np.float32)
-
-    # 5. Isolate Foreground & Warp via Perspective Homography
-    fg_isolated = img_np.copy().astype(np.float32) * mask_feather[:, :, None]
-
-    if HAS_OPENCV:
-        H = cv2.getPerspectiveTransform(src_pts, dst_pts)
-        warped_fg = cv2.warpPerspective(fg_isolated, H, (w, h), flags=cv2.INTER_LANCZOS4)
-        warped_mask = cv2.warpPerspective(mask_feather, H, (w, h), flags=cv2.INTER_LINEAR)
-        warped_mask = np.clip(warped_mask, 0.0, 1.0)[:, :, None]
-    else:
-        margin_x = int(bw * 0.45 + abs(yaw) * 3.0)
-        margin_y = int(bh * 0.45 + abs(pitch) * 3.0)
-        dst_x1 = max(0, x1 - margin_x)
-        dst_x2 = min(w, x2 + margin_x)
-        dst_y1 = max(0, y1 - margin_y)
-        dst_y2 = min(h, y2 + margin_y)
-
-        R_inv = np.linalg.inv(R)
-        warped_fg = np.zeros_like(img_np)
-        warped_mask = np.zeros((h, w, 1), dtype=np.float32)
-
-        for yd in range(dst_y1, dst_y2):
-            for xd in range(dst_x1, dst_x2):
-                ray_cam = np.array([(xd - cx) / focal_length, (yd - cy) / focal_length, 1.0], dtype=np.float32)
-                ray_obj = R_inv @ ray_cam
-                if abs(ray_obj[2]) > 1e-5:
-                    offset_obj = R_inv @ np.array([0, 0, camera_dist], dtype=np.float32)
-                    lam = offset_obj[2] / ray_obj[2]
-                    if lam > 0:
-                        P_obj = lam * ray_obj - offset_obj
-                        xs = cx + P_obj[0]
-                        ys = cy + P_obj[1]
-                        if 0 <= xs < w - 1 and 0 <= ys < h - 1:
-                            ix, iy = int(xs), int(ys)
-                            fx, fy = xs - ix, ys - iy
-                            c00 = fg_isolated[iy, ix]
-                            c10 = fg_isolated[iy, min(w - 1, ix + 1)]
-                            c01 = fg_isolated[min(h - 1, iy + 1), ix]
-                            c11 = fg_isolated[min(h - 1, iy + 1), min(w - 1, ix + 1)]
-                            warped_fg[yd, xd] = (1 - fx) * (1 - fy) * c00 + fx * (1 - fy) * c10 + (1 - fx) * fy * c01 + fx * fy * c11
-                            warped_mask[yd, xd, 0] = mask_feather[iy, ix]
-
-    # 6. Composite cleanly onto stable background
-    final_composite = (1.0 - warped_mask) * bg_clean.astype(np.float32) + warped_mask * warped_fg
-    final_composite = np.clip(final_composite, 0, 255).astype(np.uint8)
-
-    transformed_pixels = int(np.sum(warped_mask > 0.05))
-    outside_obj_mask = (mask_feather < 0.01) & (warped_mask[:, :, 0] < 0.01)
-    if np.any(outside_obj_mask):
-        stability_score = round(float(np.mean(np.isclose(final_composite[outside_obj_mask], img_np[outside_obj_mask], atol=2))), 4)
-    else:
-        stability_score = 0.995
-
-    metrics = {
-        "mode": "object_3d_rotation",
-        "target": target or "custom",
-        "target_bbox": [int(x1), int(y1), int(x2), int(y2)],
-        "mask_type": mask_type,
-        "pooling_pixel_awareness": True,
-        "rotation_angles": {"yaw": float(yaw), "pitch": float(pitch), "roll": float(roll)},
-        "object_pixels_transformed": transformed_pixels,
-        "background_stability_score": stability_score,
-        "disocclusion_ratio": round(float(np.sum(mask_feather > 0.1)) / float(bw * bh), 4)
-    }
-    return final_composite, metrics
+    return run_boundary_aware_3d_volumetric_transform(
+        img_np,
+        (x1, y1, x2, y2),
+        yaw=yaw,
+        pitch=pitch,
+        roll=roll,
+        target=target or "custom",
+        mask_type=mask_type,
+        inpaint_background=inpaint_background
+    )
 
 
 def run_depth_parallax(
