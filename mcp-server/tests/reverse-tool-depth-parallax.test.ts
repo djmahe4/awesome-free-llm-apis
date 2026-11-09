@@ -59,6 +59,7 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
     expect(data.mode).toBe('object_3d_rotation');
     expect(data.metrics.target).toBe('ball');
     expect(data.metrics.mask_type).toBe('circle');
+    expect(data.metrics.pooling_pixel_awareness).toBe(true);
     expect(data.metrics.object_pixels_transformed).toBeGreaterThan(1000);
     expect(data.metrics.background_stability_score).toBeGreaterThan(0.99);
     expect(fs.existsSync(outImg)).toBe(true);
@@ -84,6 +85,7 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
     expect(data.ok).toBe(true);
     expect(data.mode).toBe('object_3d_rotation');
     expect(data.metrics.target).toBe('pedestal');
+    expect(data.metrics.pooling_pixel_awareness).toBe(true);
     expect(data.metrics.object_pixels_transformed).toBeGreaterThan(5000);
     expect(data.metrics.background_stability_score).toBeGreaterThan(0.99);
     expect(fs.existsSync(outImg)).toBe(true);
@@ -108,6 +110,7 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
     expect(data.ok).toBe(true);
     expect(data.mode).toBe('object_3d_rotation');
     expect(data.metrics.target).toBe('goalkeeper');
+    expect(data.metrics.pooling_pixel_awareness).toBe(true);
     expect(data.metrics.object_pixels_transformed).toBeGreaterThan(20000);
     expect(data.metrics.background_stability_score).toBeGreaterThan(0.99);
     expect(fs.existsSync(outImg)).toBe(true);
@@ -133,6 +136,7 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
     expect(data.ok).toBe(true);
     expect(data.mode).toBe('object_3d_rotation');
     expect(data.metrics.target_bbox).toEqual([540, 50, 960, 750]);
+    expect(data.metrics.pooling_pixel_awareness).toBe(true);
     expect(data.metrics.object_pixels_transformed).toBeGreaterThan(50000);
     expect(data.metrics.background_stability_score).toBeGreaterThan(0.99);
     expect(fs.existsSync(outImg)).toBe(true);

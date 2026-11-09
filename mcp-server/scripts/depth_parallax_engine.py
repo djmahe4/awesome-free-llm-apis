@@ -40,7 +40,7 @@ TARGET_PRESETS = {
         "description": "Copa Del Rey Official Match Ball"
     },
     "goalkeeper": {
-        "bbox": (1530, 360, 1750, 750),
+        "bbox": (1500, 340, 1715, 820),
         "mask_type": "grabcut",
         "description": "Goalkeeper in Orange Kit (Ter Stegen/Peña)"
     },
@@ -50,7 +50,7 @@ TARGET_PRESETS = {
         "description": "Copa Del Rey Red Branding Pedestal"
     },
     "referee": {
-        "bbox": (540, 50, 960, 750),
+        "bbox": (520, 50, 980, 800),
         "mask_type": "grabcut",
         "description": "Main Official Referee (Head and Torso)"
     },
@@ -123,6 +123,56 @@ def find_salient_object_bbox(img_np: np.ndarray) -> tuple[int, int, int, int]:
     return x1, y1, x2, y2
 
 
+def compute_pooling_pixel_awareness(roi_np: np.ndarray) -> np.ndarray:
+    """
+    Computes dense multi-scale pooling-driven pixel awareness for foreground entity isolation.
+    Extracts receptive field responses across kernel scales (3, 7, 15, 31) comparing
+    MaxPool (salient foreground features) and AvgPool (ambient background field).
+    """
+    rh, rw, _ = roi_np.shape
+    if HAS_OPENCV:
+        gray = cv2.cvtColor(roi_np.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+        pool_diffs = []
+        for k in [3, 7, 15, 31]:
+            if k >= min(rh, rw):
+                continue
+            kernel = np.ones((k, k), np.uint8)
+            max_p = cv2.dilate(gray, kernel)
+            min_p = cv2.erode(gray, kernel)
+            avg_p = cv2.blur(gray, (k, k))
+            # Structural pooling dynamic range modulated by ambient deviation
+            diff = (max_p - min_p) * (1.0 + np.abs(gray - avg_p))
+            pool_diffs.append(diff)
+        if not pool_diffs:
+            return np.ones((rh, rw), dtype=np.float32)
+        pool_energy = np.mean(pool_diffs, axis=0)
+        pool_energy = (pool_energy - pool_energy.min()) / max(pool_energy.max() - pool_energy.min(), 1e-6)
+
+        # Ambient background suppression from perimeter border sampling
+        border_mask = np.zeros((rh, rw), dtype=bool)
+        border_mask[:, :max(1, int(rw * 0.03))] = True
+        border_mask[:, -max(1, int(rw * 0.04)):] = True
+        border_mask[:max(1, int(rh * 0.02)), :] = True
+        bg_samples = roi_np[border_mask]
+        if len(bg_samples) > 0:
+            bg_color = np.median(bg_samples, axis=0)
+            color_dist = np.linalg.norm(roi_np - bg_color, axis=2)
+            color_dist = (color_dist - color_dist.min()) / max(color_dist.max() - color_dist.min(), 1e-6)
+        else:
+            color_dist = np.ones((rh, rw), dtype=np.float32)
+
+        # Center weighting prior
+        y_idx, x_idx = np.ogrid[:rh, :rw]
+        center_prior = np.exp(-(((x_idx - rw * 0.5) / (rw * 0.45)) ** 2 + ((y_idx - rh * 0.5) / (rh * 0.48)) ** 2))
+
+        awareness = 0.45 * pool_energy + 0.35 * color_dist + 0.20 * center_prior
+        return np.clip((awareness - awareness.min()) / max(awareness.max() - awareness.min(), 1e-6), 0.0, 1.0)
+    else:
+        # Pure NumPy fallback
+        y_idx, x_idx = np.ogrid[:rh, :rw]
+        return np.exp(-(((x_idx - rw * 0.5) / (rw * 0.45)) ** 2 + ((y_idx - rh * 0.5) / (rh * 0.48)) ** 2))
+
+
 def create_object_mask(
     img_np: np.ndarray,
     bbox: tuple[int, int, int, int],
@@ -130,8 +180,9 @@ def create_object_mask(
 ) -> np.ndarray:
     """
     Creates a high-fidelity alpha matte for the specified entity bounding box.
-    Supports: 'circle' (spherical objects like balls), 'rect' (rectangular banners),
-    'grabcut' (human silhouettes/complex shapes via OpenCV GrabCut), and 'auto'.
+    Uses multi-scale pooling-driven pixel awareness to eliminate background bleed.
+    Supports: 'circle' (spherical objects), 'rect' (structural banners),
+    'grabcut' (pixel-aware human silhouettes via OpenCV GrabCut), and 'auto'.
     """
     h, w, _ = img_np.shape
     x1, y1, x2, y2 = bbox
@@ -164,16 +215,47 @@ def create_object_mask(
 
     elif mask_type == "grabcut" and HAS_OPENCV:
         try:
-            mask = np.zeros((h, w), np.uint8)
+            roi = img_np[y1:y2, x1:x2].astype(np.float32)
+            awareness = compute_pooling_pixel_awareness(roi)
+
+            gc_mask = np.full((h, w), cv2.GC_BGD, dtype=np.uint8)
+            roi_gc = np.full((bh, bw), cv2.GC_PR_BGD, dtype=np.uint8)
+
+            # Pooling-driven pixel awareness states
+            roi_gc[awareness > 0.25] = cv2.GC_PR_FGD
+            roi_gc[awareness > 0.48] = cv2.GC_FGD
+            roi_gc[awareness < 0.12] = cv2.GC_BGD
+
+            # Definite background borders to suppress adjacent pillars and crowd
+            edge_w = max(2, int(bw * 0.03))
+            roi_gc[:, :edge_w] = cv2.GC_BGD
+            roi_gc[:, -edge_w:] = cv2.GC_BGD
+            gc_mask[y1:y2, x1:x2] = roi_gc
+
             bgd_model = np.zeros((1, 65), np.float64)
             fgd_model = np.zeros((1, 65), np.float64)
-            rect = (int(x1), int(y1), int(bw), int(bh))
-            cv2.grabCut(img_np.astype(np.uint8), mask, rect, bgd_model, fgd_model, 2, cv2.GC_INIT_WITH_RECT)
-            mask_binary = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 1.0, 0.0).astype(np.float32)
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            mask_binary = cv2.morphologyEx(mask_binary, cv2.MORPH_CLOSE, kernel)
-            mask_feather = cv2.GaussianBlur(mask_binary, (7, 7), 2.0)
-            return np.clip(mask_feather, 0.0, 1.0)
+            cv2.grabCut(img_np.astype(np.uint8), gc_mask, None, bgd_model, fgd_model, 3, cv2.GC_INIT_WITH_MASK)
+
+            fg_mask_raw = np.where((gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD), 1.0, 0.0).astype(np.float32)
+
+            # Morphological bridge to connect entity parts (head, torso, limbs)
+            bridge_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 15))
+            clean_roi = cv2.morphologyEx(fg_mask_raw[y1:y2, x1:x2], cv2.MORPH_CLOSE, bridge_k)
+
+            # Filter connected components: keep central entity components, reject detached background borders
+            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats((clean_roi > 0.5).astype(np.uint8))
+            final_roi = np.zeros_like(clean_roi)
+            for lbl in range(1, num_labels):
+                area = stats[lbl, cv2.CC_STAT_AREA]
+                cx_lbl = centroids[lbl][0]
+                if area > 800 and 0.12 * bw < cx_lbl < 0.88 * bw:
+                    final_roi[labels == lbl] = 1.0
+
+            # Modulate boundary feathering with pooling awareness
+            final_roi = cv2.GaussianBlur(final_roi, (5, 5), 1.5)
+            final_canvas_mask = np.zeros((h, w), dtype=np.float32)
+            final_canvas_mask[y1:y2, x1:x2] = final_roi
+            return np.clip(final_canvas_mask, 0.0, 1.0)
         except Exception:
             mask_type = "rect"
 
@@ -385,6 +467,7 @@ def run_isolated_object_3d_rotation(
         "target": target or "custom",
         "target_bbox": [int(x1), int(y1), int(x2), int(y2)],
         "mask_type": mask_type,
+        "pooling_pixel_awareness": True,
         "rotation_angles": {"yaw": float(yaw), "pitch": float(pitch), "roll": float(roll)},
         "object_pixels_transformed": transformed_pixels,
         "background_stability_score": stability_score,
