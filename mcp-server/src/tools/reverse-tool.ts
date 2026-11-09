@@ -140,6 +140,7 @@ export type ReverseToolAction =
   | 'run_yolo_nn'
   | 'run_torch_nn'
   | 'run_scene_augmentation'
+  | 'reverse_vlm_generate'
   | 'program_weight_space';
 
 export const isModelAction = (act: string): boolean => [
@@ -155,6 +156,7 @@ export const isModelAction = (act: string): boolean => [
   'run_yolo_nn',
   'run_torch_nn',
   'run_scene_augmentation',
+  'reverse_vlm_generate',
   'program_weight_space',
 ].includes(act as any);
 
@@ -782,7 +784,9 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     try {
       scriptPath = action === 'run_scene_augmentation'
         ? resolveEngineScriptPath('scene_augmentation.py')
-        : resolveModelInspectorPath();
+        : action === 'reverse_vlm_generate'
+          ? resolveEngineScriptPath('vlm_reverse_generator.py')
+          : resolveModelInspectorPath();
     } catch (err: any) {
       return {
         success: false,
@@ -805,6 +809,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       run_yolo_nn: 'run_yolo_nn',
       run_torch_nn: 'run_torch_nn',
       run_scene_augmentation: 'augment_scene',
+      reverse_vlm_generate: 'reverse_generate',
       program_weight_space: 'program_weight_space',
     };
 
@@ -891,6 +896,12 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
     if (options?.bins) {
       args.push('--bins', String(options.bins));
+    }
+    if (options?.mode) {
+      args.push('--mode', String(options.mode));
+    }
+    if (options?.resolution !== undefined) {
+      args.push('--resolution', String(options.resolution));
     }
     if (options?.stems) {
       args.push('--stems', String(options.stems));
