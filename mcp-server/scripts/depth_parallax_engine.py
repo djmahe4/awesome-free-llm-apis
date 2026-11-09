@@ -168,6 +168,7 @@ def run_depth_parallax(
     depth_layers: int = 8,
     dolly: float = 15.0,
     pan: float = 0.0,
+    shift_y: float = 0.0,
     near: float = 20.0,
     far: float = 100.0,
     output_path: str | None = None
@@ -206,13 +207,14 @@ def run_depth_parallax(
 
         # Disparity ~ 1 / z
         disparity = 1.0 / z
-        # Pan shift
+        # Pan and vertical shift
         shift_x = pan * disparity * 100.0
+        shift_y_layer = shift_y * disparity * 100.0
         # Dolly zoom factor (near objects expand more than far objects)
         scale = 1.0 + (dolly / 100.0) * disparity * 20.0
         scale = max(scale, 0.01)
 
-        warped_layer, valid_warped = warp_layer(img_np, layer_mask, scale, shift_x)
+        warped_layer, valid_warped = warp_layer(img_np, layer_mask, scale, shift_x, shift_y_layer)
 
         # Painter's algorithm: write over background
         mask_3d = valid_warped[:, :, None]
@@ -257,6 +259,7 @@ def main():
     parser.add_argument("--depth-layers", type=int, default=8, help="Number of depth layers")
     parser.add_argument("--dolly", type=float, default=15.0, help="Dolly translation in mm/arbitrary units")
     parser.add_argument("--pan", type=float, default=0.0, help="Pan translation in pixels/units")
+    parser.add_argument("--shift-y", type=float, default=0.0, help="Vertical tilt / shift in pixels/units")
     parser.add_argument("--near", type=float, default=20.0, help="Near plane depth")
     parser.add_argument("--far", type=float, default=100.0, help="Far plane depth")
     parser.add_argument("--output", type=str, default=None, help="Output image file path")
@@ -269,6 +272,7 @@ def main():
             depth_layers=args.depth_layers,
             dolly=args.dolly,
             pan=args.pan,
+            shift_y=args.shift_y,
             near=args.near,
             far=args.far,
             output_path=args.output
