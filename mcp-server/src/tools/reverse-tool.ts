@@ -819,6 +819,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       run_scene_augmentation: 'augment_scene',
       separate_audio_stems: 'separate_audio_stems',
       reverse_vlm_generate: 'reverse_generate',
+      inspect_ocr_tokens: 'inspect_ocr_tokens',
       program_weight_space: 'program_weight_space',
     };
 
