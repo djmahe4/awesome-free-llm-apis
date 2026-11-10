@@ -2924,6 +2924,227 @@
   }
   setupGuide();
 
+  // ─── OCR Decision Studio (Task 8) ─────────────────────────────
+  const ocrFileInput = document.getElementById('ml-ocr-file-input');
+  const ocrLoadBtn = document.getElementById('ml-ocr-load-btn');
+  const ocrSampleBtn = document.getElementById('ml-ocr-sample-btn');
+  const ocrInspectBtn = document.getElementById('ml-ocr-inspect-btn');
+  const ocrStatusEl = document.getElementById('ml-ocr-status');
+  const ocrViewport = document.getElementById('ml-ocr-viewport');
+  const ocrEmpty = document.getElementById('ml-ocr-empty');
+  const ocrStage = document.getElementById('ml-ocr-stage');
+  const ocrImg = document.getElementById('ml-ocr-img');
+  const ocrOverlay = document.getElementById('ml-ocr-overlay');
+  const ocrTokenList = document.getElementById('ml-ocr-token-list');
+  const ocrLegend = document.getElementById('ml-ocr-legend');
+  const ocrSummary = document.getElementById('ml-ocr-summary');
+  const ocrState = { filePath: null, data: null, tokens: [], blocks: [], activeToken: -1, previewImage: false };
+
+  function ocrSetStatus(msg, busy) {
+    ocrStatusEl.textContent = msg;
+    ocrStatusEl.style.color = busy ? 'var(--accent-cyan)' : 'var(--text-muted)';
+  }
+  function ocrConfColor(c) {
+    return c > 0.9 ? getComputedStyle(document.documentElement).getPropertyValue('--accent-green')
+      : c >= 0.7 ? getComputedStyle(document.documentElement).getPropertyValue('--accent-amber')
+      : getComputedStyle(document.documentElement).getPropertyValue('--accent-red');
+  }
+  function ocrHighlightToken(i) {
+    ocrState.activeToken = i;
+    ocrTokenList.querySelectorAll('[data-ocr-token]').forEach((row) => {
+      const idx = Number(row.getAttribute('data-ocr-token'));
+      row.style.background = (i >= 0 && idx === i) ? 'rgba(34,211,238,.18)' : 'transparent';
+    });
+    ocrDrawOverlay();
+  }
+
+  function ocrDrawOverlay() {
+    if (!ocrOverlay || !ocrState.tokens.length) return;
+    let scaleX = 1, scaleY = 1, offX = 0, offY = 0;
+    if (ocrState.previewImage && ocrImg.naturalWidth) {
+      ocrOverlay.width = ocrImg.naturalWidth;
+      ocrOverlay.height = ocrImg.naturalHeight;
+    } else {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      ocrState.tokens.forEach((t) => {
+        const [x, y, w, h] = t.bbox;
+        minX = Math.min(minX, x); minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+      });
+      if (!isFinite(minX)) return;
+      const spanX = Math.max(maxX - minX, 1), spanY = Math.max(maxY - minY, 1);
+      ocrOverlay.width = 720; ocrOverlay.height = Math.max(240, Math.round(240 * spanY / spanX));
+      offX = minX - spanX * 0.05; offY = minY - spanY * 0.05;
+      scaleX = ocrOverlay.width / (spanX * 1.1); scaleY = ocrOverlay.height / (spanY * 1.1);
+    }
+    const octx = ocrOverlay.getContext('2d');
+    octx.clearRect(0, 0, ocrOverlay.width, ocrOverlay.height);
+    octx.lineWidth = Math.max(1.5, ocrOverlay.width / 500);
+
+    ocrState.blocks.forEach((blk) => {
+      const [x, y, w, h] = blk.bbox;
+      octx.save();
+      octx.setLineDash([6, 4]);
+      octx.strokeStyle = 'rgba(34,211,238,.55)';
+      octx.strokeRect((x - offX) * scaleX, (y - offY) * scaleY, w * scaleX, h * scaleY);
+      octx.restore();
+    });
+
+    ocrState.tokens.forEach((tk, i) => {
+      const [x, y, w, h] = tk.bbox;
+      const color = ocrConfColor(tk.confidence);
+      const active = i === ocrState.activeToken;
+      octx.save();
+      octx.globalAlpha = active ? 0.28 : 0.12;
+      octx.fillStyle = color;
+      octx.fillRect((x - offX) * scaleX, (y - offY) * scaleY, w * scaleX, h * scaleY);
+      octx.globalAlpha = 1;
+      octx.strokeStyle = color;
+      octx.lineWidth = active ? octx.lineWidth * 2 : octx.lineWidth;
+      octx.strokeRect((x - offX) * scaleX, (y - offY) * scaleY, w * scaleX, h * scaleY);
+      octx.fillStyle = color;
+      octx.font = Math.max(9, octx.lineWidth * 5) + 'px monospace';
+      octx.fillText(String(i), (x - offX) * scaleX, Math.max(9, (y - offY) * scaleY - 2));
+      octx.restore();
+    });
+  }
+  ocrOverlay.addEventListener('mousemove', (ev) => {
+    if (!ocrState.tokens.length || (ocrState.previewImage && !ocrImg.naturalWidth)) return;
+    const rect = ocrOverlay.getBoundingClientRect();
+    let showX = ev.offsetX, showY = ev.offsetY;
+    const canvasX = ev.offsetX * (ocrOverlay.width / rect.width);
+    const canvasY = ev.offsetY * (ocrOverlay.height / rect.height);
+    let hit = -1;
+    if (ocrState.previewImage) { showX = canvasX; showY = canvasY; }
+    ocrState.tokens.forEach((tk, i) => {
+      const [x, y, w, h] = tk.bbox;
+      let mx = canvasX, my = canvasY;
+      if (!ocrState.previewImage) {
+        let minX = Infinity, minY = Infinity;
+        ocrState.tokens.forEach((o) => { minX = Math.min(minX, o.bbox[0]); minY = Math.min(minY, o.bbox[1]); });
+        const xs = ocrState.tokens.map((o) => o.bbox[0] + o.bbox[2]), ys = ocrState.tokens.map((o) => o.bbox[1] + o.bbox[3]);
+        mx = minX - (Math.max(...xs) - minX) * 0.05 + canvasX / (ocrOverlay.width / ((Math.max(...xs) - minX) * 1.1));
+        my = minY - (Math.max(...ys) - minY) * 0.05 + canvasY / (ocrOverlay.height / ((Math.max(...ys) - minY) * 1.1));
+      }
+      if (mx >= x && mx <= x + w && my >= y && my <= y + h) hit = i;
+    });
+    if (hit !== ocrState.activeToken) ocrHighlightToken(hit);
+  });
+  ocrOverlay.addEventListener('mouseleave', () => ocrHighlightToken(-1));
+
+  function ocrRenderTokenList() {
+    ocrTokenList.innerHTML = '';
+    if (!ocrState.tokens.length) {
+      ocrTokenList.textContent = 'No structured tokens returned.';
+      return;
+    }
+    ocrState.tokens.forEach((tk, i) => {
+      const row = document.createElement('div');
+      row.setAttribute('data-ocr-token', String(i));
+      row.style.cssText = 'padding:4px 6px;border-radius:4px;cursor:pointer;border-bottom:1px solid var(--border-subtle);';
+      row.innerHTML = '<div style="display:flex;justify-content:space-between;gap:6px;align-items:center;">' +
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;' +
+        'color:' + ocrConfColor(tk.confidence) + ';">"' + (tk.text || '').replace(/[<>&]/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[ch])) + '"</span>' +
+        '<span style="color:var(--text-muted);font-size:.6rem;">#' + i + '</span></div>' +
+        '<div style="background:var(--bg-secondary);border-radius:3px;height:4px;margin:2px 0;">' +
+        '<div style="width:' + Math.min(100, Math.round((tk.confidence || 0) * 100)) + '%;background:' + ocrConfColor(tk.confidence) + ';height:4px;border-radius:3px;"></div></div>' +
+        '<div style="color:var(--text-muted);font-size:.58rem;">conf ' + (tk.confidence || 0).toFixed(2) + ' · [' + tk.bbox.map((v) => Math.round(v)).join(', ') + '] · ' + (tk.source || '') +
+        (tk.ocr_psm ? ' · psm ' + tk.ocr_psm : '') + '</div>';
+      row.addEventListener('mouseenter', () => ocrHighlightToken(i));
+      row.addEventListener('mouseleave', () => ocrHighlightToken(-1));
+      ocrTokenList.appendChild(row);
+    });
+  }
+
+  function ocrRunInspection(target) {
+    ocrInspectBtn.disabled = true;
+    ocrSetStatus('Inspecting via /api/tools/call → inspect_ocr_tokens...(' + target + ')', true);
+    toolFetch({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tool: 'reverse_tool',
+        params: { action: 'inspect_ocr_tokens', authorization: 'lab', target: target }
+      })
+    }).then(async (res) => {
+      const json = await res.json().catch(() => null);
+      const data = json && json.data;
+      if (!json || json.success === false || !data) {
+        throw new Error(((json && json.error) || ('HTTP ' + res.status + ' — server refused the call')));
+      }
+      ocrState.data = data;
+      ocrState.tokens = Array.isArray(data.tokens) ? data.tokens : [];
+      ocrState.blocks = Array.isArray(data.layout_blocks) ? data.layout_blocks : [];
+      ocrRenderTokenList();
+      ocrDrawOverlay();
+      ocrOverlay.style.display = 'block';
+      ocrLegend.style.display = 'flex';
+      ocrSummary.style.display = 'block';
+      ocrSummary.textContent = data.tokens.length + ' tokens · ' + ocrState.blocks.length + ' layout blocks · ' +
+        (data.learning_notes || []).join(' · ');
+      ocrSetStatus('Done: ' + ocrState.tokens.length + ' tokens found.', false);
+      ocrInspectBtn.disabled = false;
+    }).catch((err) => {
+      const message = (err && err.message) ? err.message.slice(0, 160) : String(err);
+      ocrSetStatus('Failed: ' + message, false);
+      ocrInspectBtn.disabled = false;
+    });
+  }
+
+  if (ocrLoadBtn && ocrFileInput) {
+    ocrLoadBtn.addEventListener('click', () => ocrFileInput.click());
+    ocrFileInput.addEventListener('change', async () => {
+      const file = ocrFileInput.files && ocrFileInput.files[0];
+      if (!file) return;
+      ocrLoadBtn.disabled = true;
+      ocrSetStatus('Uploading "' + file.name + '" to .mcp-uploads/...', true);
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('workspace_root', '.');
+        const response = await fetch('/api/upload', { method: 'POST', body: form });
+        const json = await response.json();
+        if (!json || !json.absPath) throw new Error('Upload did not return absPath.');
+        ocrState.filePath = json.absPath;
+        ocrState.previewImage = /^image\//.test(file.type || '');
+        if (ocrState.previewImage) {
+          ocrImg.src = URL.createObjectURL(file);
+          ocrImg.style.display = 'block';
+          ocrEmpty.style.display = 'none';
+          ocrStage.style.display = 'inline-block';
+        } else {
+          ocrImg.removeAttribute('src');
+          ocrImg.style.display = 'none';
+          ocrStage.style.display = 'none';
+          ocrEmpty.style.display = 'block';
+        }
+        ocrLoadBtn.disabled = false;
+        ocrInspectBtn.disabled = false;
+        ocrSetStatus('Ready: ' + file.name + '. Click "Run Token Inspection" to extract bboxes.', false);
+      } catch (err) {
+        ocrLoadBtn.disabled = false;
+        ocrSetStatus('Upload failed: ' + ((err && err.message) || String(err)).slice(0, 140), false);
+      }
+    });
+  }
+  if (ocrSampleBtn) {
+    ocrSampleBtn.addEventListener('click', () => {
+      ocrState.filePath = 'tests/fixtures/media/frames/frame_0050.jpg';
+      ocrState.previewImage = false;
+      ocrImg.removeAttribute('src');
+      ocrImg.style.display = 'none';
+      ocrStage.style.display = 'none';
+      ocrEmpty.style.display = 'block';
+      ocrInspectBtn.disabled = false;
+      ocrSetStatus('Fixture loaded (frame_0050.jpg). Run Token Inspection — overlay normalizes to bbox extents.', false);
+    });
+  }
+  if (ocrInspectBtn) {
+    ocrInspectBtn.addEventListener('click', () => {
+      ocrRunInspection(ocrState.filePath || 'tests/fixtures/media/frames/frame_0050.jpg');
+    });
+  }
+
   // ─── Initial Boot ────────────────────────────────────────────────
   recalculateMatrix();
   renderSvdBars();

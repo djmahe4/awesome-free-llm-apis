@@ -2447,20 +2447,42 @@
               </div>
             </div>
 
-            <!-- OCR & Decision Scratchpad -->
+            <!-- OCR Decision Studio (Task 8) -->
             <div id="ml-media-preset-ocr" class="ml-media-subpanel" style="display:none;">
-              <div style="font-size:.78rem;font-weight:600;margin-bottom:6px;">Bounding Decision &amp; Token Classification:</div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;font-family:'JetBrains Mono',monospace;font-size:.7rem;">
-                <div style="background:var(--bg-primary);padding:8px;border-radius:4px;">
-                  <span style="color:var(--accent-purple);">[BBOX #0]</span> [x: 42, y: 18, w: 120, h: 28] &rarr; "ML STUDIO" (conf: 0.998)
-                  <br>
-                  <span style="color:var(--accent-cyan);">[BBOX #1]</span> [x: 180, y: 18, w: 94, h: 28] &rarr; "WAVEFRONT" (conf: 0.984)
+              <div style="font-size:.78rem;font-weight:600;margin-bottom:6px;">OCR Token Bounding &amp; Spatial Layout Inspection:</div>
+              <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+                <input type="file" id="ml-ocr-file-input" accept="image/*,.pdf" style="display:none;">
+                <button id="ml-ocr-load-btn" class="btn btn-secondary btn-sm">📂 Load Image / PDF</button>
+                <button id="ml-ocr-sample-btn" class="btn btn-secondary btn-sm" title="Run against the committed frame_0050.jpg fixture">🧪 Use Fixture</button>
+                <button id="ml-ocr-inspect-btn" class="btn btn-primary btn-sm" disabled>🔍 Run Token Inspection</button>
+                <span id="ml-ocr-status" style="font-size:.7rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">Load an image or PDF to enable spatial token inspection.</span>
+              </div>
+              <div style="display:grid;grid-template-columns:minmax(280px,1.4fr) minmax(220px,1fr);gap:12px;">
+                <div>
+                  <div id="ml-ocr-viewport" style="background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:6px;padding:10px;min-height:240px;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+                    <div id="ml-ocr-empty" style="font-size:.7rem;color:var(--text-muted);padding:20px;text-align:center;">Viewport &mdash; token boxes and layout-group overlays render here after inspection.</div>
+                    <div id="ml-ocr-stage" style="position:relative;display:none;max-width:100%;">
+                      <img id="ml-ocr-img" style="display:block;max-width:100%;max-height:300px;" alt="OCR target">
+                      <canvas id="ml-ocr-overlay" style="position:absolute;inset:0;width:100%;height:100%;display:none;"></canvas>
+                    </div>
+                  </div>
+                  <div id="ml-ocr-legend" style="display:none;margin-top:6px;flex-wrap:wrap;font-size:.65rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;gap:12px;">
+                    <span><span style="color:var(--accent-green);">■</span> token conf &gt; 0.9</span>
+                    <span><span style="color:var(--accent-amber);">■</span> 0.7 &ndash; 0.9</span>
+                    <span><span style="color:var(--accent-red);">■</span> &lt; 0.7</span>
+                    <span><span style="color:var(--accent-cyan);">⊞</span> dashed = layout block grouping</span>
+                  </div>
                 </div>
-                <div style="background:var(--bg-primary);padding:8px;border-radius:4px;">
-                  <span style="color:var(--accent-green);">[DECISION]</span> Modality: Vision-Language Alignment
-                  <br>
-                  <span style="color:var(--accent-amber);">[TOKEN PROB]</span> Max entropy threshold: 0.042
+                <div id="ml-ocr-token-list" style="max-height:300px;overflow-y:auto;background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:6px;padding:8px;font-family:'JetBrains Mono',monospace;font-size:.66rem;color:var(--text-muted);">
+                  Token list with confidence meters renders here.
                 </div>
+              </div>
+              <div id="ml-ocr-summary" style="display:none;margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--accent-cyan);background:var(--bg-primary);padding:6px 10px;border-radius:4px;"></div>
+              <div style="margin-top:10px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px 12px;font-size:.72rem;color:var(--text-muted);line-height:1.5;">
+                <strong style="color:var(--text-secondary);">What This Teaches:</strong>
+                Document-VQA models (DocVQA, LayoutLM, Qwen-VL) need <em>2D structure</em>, not just text. Unlike stem mixing or depth warps &mdash; where cross-attention attends along a 1D token timeline &mdash; OCR grounding feeds every LLM word a
+                <code style="color:var(--accent-cyan);">(x, y, w, h)</code> bbox and a reading-order rank, so cross-attention fuses glyphs with layout geometry. The color bands above mirror the confidence thresholds real mediators use to decide
+                when to trust an extracted field versus re-ask the user.
               </div>
             </div>
           </div>
