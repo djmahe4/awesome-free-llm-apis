@@ -1,0 +1,810 @@
+    <!-- ══════════════════════════════════════════════════════════
+         TAB: ML LEARNING, NEURAL OPTICS & REVERSE ENGINEERING
+    ══════════════════════════════════════════════════════════ -->
+    <section class="tab-panel" id="panel-ml-learning" role="tabpanel" aria-labelledby="tab-ml-learning">
+      <!-- Tab Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h2 style="font-size:1.25rem;font-weight:700;letter-spacing:-.5px;display:flex;align-items:center;gap:8px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-purple"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.93 4.93l2.12 2.12m9.9 9.9l2.12 2.12M4.93 19.07l2.12-2.12m9.9-9.9l2.12-2.12"/></svg>
+            ML Learning, Neural Optics &amp; Reverse Engineering Studio
+          </h2>
+          <p style="font-size:.8rem;color:var(--text-muted);margin-top:2px;">Wavefront optics metaphor, interactive layer DAG with zoom/pan, forward pass mechanics, matrix math, weight-space surgery, and media transforms.</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="badge badge-purple" id="ml-engine-status">Engine: Interactive</span>
+          <button id="ml-reset-all-btn" class="btn btn-secondary btn-sm" style="display:flex;align-items:center;gap:6px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            Reset Presets
+          </button>
+        </div>
+      </div>
+
+
+      <!-- Guided path -->
+      <div class="card ml-path" id="ml-path" style="margin-bottom:14px;">
+        <div class="card-body" style="padding:14px 16px;">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div style="max-width:620px;">
+              <div style="font-weight:700;font-size:.9rem;margin-bottom:4px;">Learn a neural network one layer at a time</div>
+              <p style="font-size:.78rem;color:var(--text-muted);line-height:1.5;margin:0;">
+                A model is a stack of small steps. Load one, look at its layers, open a single layer and do its math by hand, then add the layers back one at a time and watch what each one changes. Follow steps 1 to 6 in order; each opens when you press its button. The labs at the bottom are optional.
+              </p>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button type="button" class="btn btn-secondary btn-sm" id="ml-expand-all">Expand all</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="ml-collapse-all">Collapse all</button>
+            </div>
+          </div>
+          <div class="ml-path-strip" id="ml-path-strip">
+            <button type="button" class="ml-path-dot" data-ml-goto="1"><b>1</b> Load</button>
+            <button type="button" class="ml-path-dot" data-ml-goto="2"><b>2</b> Layers</button>
+            <button type="button" class="ml-path-dot" data-ml-goto="3"><b>3</b> One layer</button>
+            <button type="button" class="ml-path-dot" data-ml-goto="4"><b>4</b> Its math</button>
+            <button type="button" class="ml-path-dot" data-ml-goto="5"><b>5</b> Build up</button>
+            <button type="button" class="ml-path-dot" data-ml-goto="6"><b>6</b> Reassemble</button>
+          </div>
+        </div>
+      </div>
+
+      <details class="card ml-step" id="ml-step-1" data-step="1" open>
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num">1</span>
+            <span>Load a model</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-purple ml-step-state" id="ml-step-1-state">to do</span>
+        </summary>
+        <div class="card-body ml-step-body">
+          <p class="ml-step-lead">Pick a checkpoint file and load it. Press &ldquo;Inspect &amp; Load Model&rdquo;; everything below reads from it. A tiny image classifier is loaded for you, with a sample image. Without PyTorch on the server a tiny two-layer text model is loaded instead, which ignores the image.</p>
+      <!-- 1. Custom Model Loader & Forward Pass Console Card -->
+      <div class="card" style="margin-bottom:18px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+            <span>Custom Model Inspector &amp; Forwarding Mechanics Hub</span>
+          </span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="badge badge-cyan" id="ml-loaded-model-badge">Model: Not Loaded</span>
+            <span class="badge badge-purple" id="ml-forward-status-badge">Forward: Ready</span>
+          </div>
+        </div>
+        <div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:14px;">
+          <!-- Model Selection Row -->
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
+              <label for="ml-model-path-input" style="font-size:.75rem;font-weight:600;color:var(--text-secondary);">Model Checkpoint Path (.pt / .onnx / .gguf):</label>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny_cnn.pt" style="font-size:.68rem;padding:2px 8px;">&#127793; Tiny CNN (start here, needs PyTorch)</button>
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny.gguf" style="font-size:.68rem;padding:2px 8px;">&#128220; Tiny GGUF (2 layers, no PyTorch)</button>
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny.pt" style="font-size:.68rem;padding:2px 8px;">📦 YOLO tiny.pt</button>
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny_resnet.pt" style="font-size:.68rem;padding:2px 8px;">🧬 ResNet18 tiny</button>
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/tiny_mobilenet.pt" style="font-size:.68rem;padding:2px 8px;">📱 MobileNetV2</button>
+                <button type="button" class="btn btn-secondary btn-sm ml-model-pill" data-path="tests/fixtures/models/reasoning_tiny.gguf" style="font-size:.68rem;padding:2px 8px;">🧠 Reasoning GGUF</button>
+              </div>
+            </div>
+            <div style="display:flex;gap:10px;">
+              <input type="text" id="ml-model-path-input" value="tests/fixtures/models/tiny_cnn.pt" placeholder="Enter path to model checkpoint (.pt, .onnx, .gguf)" style="flex:1;font-size:.78rem;padding:7px 12px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;">
+              <button id="ml-inspect-model-btn" class="btn btn-primary btn-sm" style="display:flex;align-items:center;gap:6px;white-space:nowrap;padding:7px 14px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <span>Inspect &amp; Load Model</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Forward Pass Input Controls Row -->
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:14px;background:var(--bg-secondary);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);">
+            <div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <label for="ml-image-path-input" style="font-size:.75rem;font-weight:600;color:var(--text-secondary);">Image Input Stimulus:</label>
+                <div style="display:flex;gap:6px;">
+                  <button type="button" class="btn btn-secondary btn-sm ml-image-pill" data-path="tests/fixtures/media/frames/frame_0050.jpg" style="font-size:.65rem;padding:1px 6px;">Frame 50</button>
+                  <button type="button" class="btn btn-secondary btn-sm ml-image-pill" data-path="tests/fixtures/media/frames/frame_0001.jpg" style="font-size:.65rem;padding:1px 6px;">Frame 1</button>
+                  <button type="button" class="btn btn-secondary btn-sm ml-image-pill" data-path="" style="font-size:.65rem;padding:1px 6px;">Without Image</button>
+                </div>
+              </div>
+              <input type="text" id="ml-image-path-input" value="tests/fixtures/media/frames/frame_0050.jpg" placeholder="Leave empty for 'Without Image' mode (baseline prior)" style="width:100%;font-size:.75rem;padding:6px 10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:4px;font-family:'JetBrains Mono',monospace;">
+            </div>
+
+            <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+              <div>
+                <label style="font-size:.72rem;color:var(--text-muted);display:block;margin-bottom:4px;">Inference Task:</label>
+                <select id="ml-forward-task-select" style="font-size:.75rem;padding:5px 10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:4px;">
+                  <option value="detect">Detect (Bounding Boxes &amp; DFL)</option>
+                  <option value="pose">Pose (Keypoint Estimation)</option>
+                  <option value="classify">Classify (Top-K Probabilities)</option>
+                  <option value="segment">Segment (Proto Masks)</option>
+                </select>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:8px;">
+                <button id="ml-run-forward-btn" class="btn btn-primary btn-sm" style="display:flex;align-items:center;gap:6px;padding:6px 14px;background:linear-gradient(135deg,var(--accent-cyan),var(--accent-purple));border:none;font-weight:600;">
+                  <span>⚡ Run Forward Pass</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+          <div class="ml-step-nav"><button type="button" class="btn btn-primary btn-sm" data-ml-next="1">Next: see its layers &rarr;</button></div>
+        </div>
+      </details>
+
+      <details class="card ml-step" id="ml-step-2" data-step="2">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num">2</span>
+            <span>See its layers</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-purple ml-step-state" id="ml-step-2-state">to do</span>
+        </summary>
+        <div class="card-body ml-step-body">
+          <p class="ml-step-lead">A model is a list of named tensors. Each box is one layer; drag to move, scroll to zoom, click one to open it.</p>
+      <!-- 2. Interactive Zoomable Layer DAG & Wavefront Graph (Harness-style with Zoom/Pan) -->
+      <div class="card" style="margin-bottom:18px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <div>
+            <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--accent-cyan);">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M6 9v6M9 6h6M9 18h6M18 9v6"/></svg>
+              <span>Interactive Layer DAG &amp; Forwarding Wavefront Visualizer</span>
+            </span>
+            <span style="font-size:.72rem;color:var(--text-muted);display:block;margin-top:2px;">Dynamic node layout of inspected layers. Drag to pan, scroll wheel to zoom, click any node to deep dive.</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button id="ml-dag-zoom-in" class="btn btn-secondary btn-sm" title="Zoom In" style="padding:4px 8px;font-weight:bold;">+</button>
+            <button id="ml-dag-zoom-out" class="btn btn-secondary btn-sm" title="Zoom Out" style="padding:4px 8px;font-weight:bold;">&minus;</button>
+            <button id="ml-dag-fit-view" class="btn btn-secondary btn-sm" title="Fit to View" style="padding:4px 8px;font-size:.75rem;">[ ] Fit</button>
+            <button id="ml-dag-reset-view" class="btn btn-secondary btn-sm" title="Reset View" style="padding:4px 8px;font-size:.75rem;">1:1</button>
+            <button id="ml-dag-wavefront-toggle" class="btn btn-secondary btn-sm" style="padding:4px 8px;font-size:.72rem;">Wavefront: ON</button>
+            <span id="ml-dag-node-count" class="badge badge-purple" style="font-size:.7rem;">0 layers</span>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0;position:relative;background:radial-gradient(ellipse at center, rgba(14,14,26,0.95) 0%, rgba(7,7,15,1) 100%);overflow:hidden;border-radius:0 0 var(--radius-sm) var(--radius-sm);">
+          <canvas id="ml-dag-canvas" style="width:100%;height:360px;display:block;cursor:grab;"></canvas>
+          <div id="ml-dag-tooltip" style="position:absolute;display:none;background:rgba(14,14,26,0.96);border:1px solid var(--accent-cyan);padding:8px 12px;border-radius:var(--radius-sm);font-size:.75rem;pointer-events:none;z-index:20;box-shadow:0 4px 20px rgba(0,0,0,0.6);backdrop-filter:blur(8px);max-width:300px;"></div>
+          <div style="position:absolute;bottom:8px;left:12px;font-size:.68rem;color:rgba(255,255,255,0.6);pointer-events:none;display:flex;gap:12px;">
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#06b6d4;margin-right:4px;"></span>Conv</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:4px;"></span>BatchNorm</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#8b5cf6;margin-right:4px;"></span>C2f / Bottleneck</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:4px;"></span>Attention / SPPF</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f43f5e;margin-right:4px;"></span>Head / Classify</span>
+          </div>
+        </div>
+      </div>
+
+
+          <div class="ml-step-nav"><button type="button" class="btn btn-primary btn-sm" data-ml-next="2">Next: open one layer &rarr;</button></div>
+        </div>
+      </details>
+
+      <details class="card ml-step" id="ml-step-3" data-step="3">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num">3</span>
+            <span>Open one layer</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-purple ml-step-state" id="ml-step-3-state">to do</span>
+        </summary>
+        <div class="card-body ml-step-body">
+          <p class="ml-step-lead">Click a layer in step 2. This shows what it is for, the formula it computes, the size of its numbers and, after a forward pass, what it produced.</p>
+      <!-- 3. Layer Deep Dive & Activation Mechanics Inspector -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(360px, 1fr));gap:16px;margin-bottom:18px;">
+        <!-- Left: Layer Architecture & Mathematical Formulation -->
+        <div class="card" style="display:flex;flex-direction:column;">
+          <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-purple"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+              <span>Selected Layer Architecture &amp; Formula</span>
+            </span>
+            <span class="badge badge-purple" id="ml-detail-role-badge">Select a node</span>
+          </div>
+          <div class="card-body" style="flex:1;display:flex;flex-direction:column;gap:12px;padding:16px;" id="ml-detail-container">
+            <div>
+              <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:2px;">Layer Identifier:</div>
+              <div id="ml-detail-name" style="font-family:'JetBrains Mono',monospace;font-size:.85rem;color:var(--accent-cyan);font-weight:600;word-break:break-all;">(Click any layer in the DAG above)</div>
+            </div>
+
+            <div style="background:var(--bg-secondary);padding:10px 12px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-purple);">
+              <div style="font-size:.7rem;color:var(--text-muted);margin-bottom:4px;">Mathematical Transfer Function:</div>
+              <div id="ml-detail-formula" style="font-family:'JetBrains Mono',monospace;font-size:.78rem;color:var(--text-primary);line-height:1.4;">
+                Y = \sigma(\text{BN}(W * X + b))
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:.75rem;">
+              <div style="background:var(--bg-secondary);padding:8px 10px;border-radius:4px;">
+                <div style="color:var(--text-muted);font-size:.68rem;">Tensor Shape:</div>
+                <div id="ml-detail-shape" style="font-family:'JetBrains Mono',monospace;color:var(--accent-green);font-weight:600;">--</div>
+              </div>
+              <div style="background:var(--bg-secondary);padding:8px 10px;border-radius:4px;">
+                <div style="color:var(--text-muted);font-size:.68rem;">Data Type:</div>
+                <div id="ml-detail-dtype" style="font-family:'JetBrains Mono',monospace;color:var(--accent-amber);font-weight:600;">--</div>
+              </div>
+            </div>
+
+            <div>
+              <div style="font-size:.7rem;color:var(--text-muted);margin-bottom:3px;">Functional Description:</div>
+              <div id="ml-detail-desc" style="font-size:.75rem;color:var(--text-secondary);line-height:1.4;">
+                Select a layer in the graph to inspect its semantic role, structural connectivity, and weight matrices.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Live Forwarding Activation & Feature Map Heatmap -->
+        <div class="card" style="display:flex;flex-direction:column;">
+          <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="M3 9h18M9 21V9"/></svg>
+              <span>Live Forwarding Mechanics: Image vs Bias Manifold</span>
+            </span>
+            <span class="badge badge-green" id="ml-activation-source-badge">Source: Ready</span>
+          </div>
+          <div class="card-body" style="flex:1;display:flex;flex-direction:column;gap:12px;padding:16px;">
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:.72rem;text-align:center;">
+              <div style="background:var(--bg-secondary);padding:8px 4px;border-radius:4px;">
+                <div style="color:var(--text-muted);font-size:.65rem;">Mean Act.</div>
+                <div id="ml-act-mean" style="font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);font-weight:600;">--</div>
+              </div>
+              <div style="background:var(--bg-secondary);padding:8px 4px;border-radius:4px;">
+                <div style="color:var(--text-muted);font-size:.65rem;">Std Dev</div>
+                <div id="ml-act-std" style="font-family:'JetBrains Mono',monospace;color:var(--accent-purple);font-weight:600;">--</div>
+              </div>
+              <div style="background:var(--bg-secondary);padding:8px 4px;border-radius:4px;">
+                <div style="color:var(--text-muted);font-size:.65rem;">Min / Max</div>
+                <div id="ml-act-minmax" style="font-family:'JetBrains Mono',monospace;color:var(--accent-amber);font-weight:600;">--</div>
+              </div>
+              <div style="background:var(--bg-secondary);padding:8px 4px;border-radius:4px;">
+                <div style="color:var(--text-muted);font-size:.65rem;">Sparsity</div>
+                <div id="ml-act-sparsity" style="font-family:'JetBrains Mono',monospace;color:var(--accent-green);font-weight:600;">--</div>
+              </div>
+            </div>
+
+            <!-- 2D Spatial Heatmap Canvas -->
+            <div style="background:var(--bg-secondary);border-radius:var(--radius-sm);padding:12px;display:flex;align-items:center;gap:14px;">
+              <canvas id="ml-layer-heatmap-canvas" width="128" height="128" style="background:#020617;border-radius:4px;border:1px solid var(--border-subtle);width:128px;height:128px;image-rendering:pixelated;flex-shrink:0;cursor:crosshair;"></canvas>
+              <div style="flex:1;font-size:.72rem;line-height:1.4;">
+                <div style="font-weight:600;color:var(--text-primary);margin-bottom:3px;">2D Activation Receptive Slice</div>
+                <div style="color:var(--text-muted);margin-bottom:6px;">
+                  Spatial feature map projection downsampled to 16&times;16 receptive grid.
+                </div>
+                <div id="ml-heatmap-hover-info" style="font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);background:rgba(0,0,0,0.3);padding:4px 8px;border-radius:4px;font-size:.7rem;">
+                  Hover cells to read activation intensity
+                </div>
+              </div>
+            </div>
+
+            <div style="font-size:.7rem;color:var(--text-muted);line-height:1.35;background:rgba(255,255,255,0.02);padding:8px 10px;border-radius:4px;border-left:3px solid var(--accent-cyan);">
+              💡 <strong>Mechanics Duality</strong>: <em>With Image</em> isolates high-frequency spatial gradients (player contours, boundaries). <em>Without Image</em> follows genuine model execution across learned weight matrices, isolating folded BatchNorm biases ($b_{\text{fused}}$) and anchor defaults.
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+          <div class="ml-step-nav"><button type="button" class="btn btn-primary btn-sm" data-ml-next="3">Next: do its math &rarr;</button></div>
+        </div>
+      </details>
+
+      <details class="card ml-step" id="ml-step-4" data-step="4">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num">4</span>
+            <span>Do its math yourself</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-purple ml-step-state" id="ml-step-4-state">to do</span>
+        </summary>
+        <div class="card-body ml-step-body">
+          <p class="ml-step-lead">Almost every layer is a matrix multiply followed by a squashing function. Change the sizes and the function and click a result cell to see exactly which numbers made it.</p>
+      <!-- 6. Matrix Simulation & Transformation Workbench -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(360px, 1fr));gap:16px;margin-bottom:18px;">
+        <!-- Left: Interactive Matrix Multiplication Visualizer (Y = X W^T) -->
+        <div class="card" style="display:flex;flex-direction:column;">
+          <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
+              <span class="c-cyan" style="font-family:'JetBrains Mono',monospace;">Y = &sigma;(X &times; W<sup>T</sup>)</span>
+              <span>Matrix Multiplication Visualizer</span>
+            </span>
+            <span class="badge badge-cyan" id="ml-matrix-flops">24 FLOPs</span>
+          </div>
+          <div class="card-body" style="flex:1;display:flex;flex-direction:column;gap:12px;padding:16px;">
+            <!-- Dimension Sliders -->
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);">
+              <div>
+                <label style="font-size:.7rem;color:var(--text-muted);display:block;margin-bottom:4px;">Tokens M (Rows): <strong id="ml-lbl-dim-m" style="color:var(--text-primary);">2</strong></label>
+                <input type="range" id="ml-dim-m" min="1" max="4" value="2" style="width:100%;">
+              </div>
+              <div>
+                <label style="font-size:.7rem;color:var(--text-muted);display:block;margin-bottom:4px;">In-Dim K (Cols): <strong id="ml-lbl-dim-k" style="color:var(--text-primary);">3</strong></label>
+                <input type="range" id="ml-dim-k" min="2" max="5" value="3" style="width:100%;">
+              </div>
+              <div>
+                <label style="font-size:.7rem;color:var(--text-muted);display:block;margin-bottom:4px;">Out-Dim N: <strong id="ml-lbl-dim-n" style="color:var(--text-primary);">3</strong></label>
+                <input type="range" id="ml-dim-n" min="2" max="5" value="3" style="width:100%;">
+              </div>
+            </div>
+
+            <!-- Activation Function Selector -->
+            <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap;">
+              <span style="font-size:.75rem;color:var(--text-muted);">Non-Linear Activation &sigma;:</span>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button class="btn btn-secondary btn-sm ml-act-btn active" data-act="silu">SiLU</button>
+                <button class="btn btn-secondary btn-sm ml-act-btn" data-act="relu">ReLU</button>
+                <button class="btn btn-secondary btn-sm ml-act-btn" data-act="softmax">Softmax</button>
+                <button class="btn btn-secondary btn-sm ml-act-btn" data-act="swiglu">SwiGLU</button>
+              </div>
+            </div>
+
+            <!-- Matrix Visual Display Grid -->
+            <div id="ml-matrix-grid-container" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 0;overflow-x:auto;">
+              <!-- Populated by 12-ml-learning.js -->
+            </div>
+
+            <div id="ml-matrix-dot-product-info" style="font-size:.72rem;font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);background:rgba(6,182,212,0.06);padding:6px 10px;border-radius:4px;text-align:center;">
+              Hover or click any cell in Y to inspect dot product $\sum_{k} X_{i,k} W_{j,k}$
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+          <div class="ml-step-nav"><button type="button" class="btn btn-primary btn-sm" data-ml-next="4">Next: build the model up &rarr;</button></div>
+        </div>
+      </details>
+
+      <details class="card ml-step" id="ml-step-5" data-step="5">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num">5</span>
+            <span>Build the model up, layer by layer</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-purple ml-step-state" id="ml-step-5-state">to do</span>
+        </summary>
+        <div class="card-body ml-step-body">
+          <p class="ml-step-lead">Start from nothing and add the layers back in order. After each one you see what it is and how many numbers it adds.</p>
+
+          <div class="ml-buildup" id="ml-buildup">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+              <button type="button" class="btn btn-secondary btn-sm" id="ml-build-reset">&#9198; Start over</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="ml-build-back">&#9664; Remove last layer</button>
+              <button type="button" class="btn btn-primary btn-sm" id="ml-build-next">Add next layer &#9654;</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="ml-build-all">Add all &#9197;</button>
+              <span class="badge badge-cyan" id="ml-build-progress">0 of 0 layers</span>
+            </div>
+            <div class="ml-build-now" id="ml-build-now">Load a model in step 1, then press &ldquo;Add next layer&rdquo;.</div>
+            <div class="ml-build-bars" id="ml-build-bars" aria-label="Size of each added layer"></div>
+            <p style="font-size:.68rem;color:var(--text-muted);margin:6px 0 0;">Each bar is how many numbers (parameters) that layer holds. The graph in step 2 shows only the layers you have added so far.</p>
+          </div>
+
+          <div class="ml-step-nav"><button type="button" class="btn btn-primary btn-sm" data-ml-next="5">Next: reassemble &rarr;</button></div>
+        </div>
+      </details>
+
+      <details class="card ml-step" id="ml-step-6" data-step="6">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num">6</span>
+            <span>Reassemble and compare</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-purple ml-step-state" id="ml-step-6-state">to do</span>
+        </summary>
+        <div class="card-body ml-step-body">
+          <p class="ml-step-lead">With every layer added, here is the whole model: how many layers of each kind, how many numbers, and what a forward pass produced.</p>
+
+          <div class="ml-reassemble" id="ml-reassemble">
+            <div class="ml-reassemble-empty" id="ml-reassemble-empty">Add every layer in step 5 to see the finished model here.</div>
+            <div id="ml-reassemble-body" style="display:none;">
+              <div id="ml-reassemble-summary" style="font-size:.78rem;line-height:1.6;"></div>
+              <div id="ml-reassemble-chain" style="font-size:.78rem;line-height:1.6;margin-top:6px;"></div>
+              <table class="qs-table" style="margin-top:8px;"><thead><tr><th>Kind of layer</th><th>How many</th><th>Parameters</th></tr></thead><tbody id="ml-reassemble-rows"></tbody></table>
+              <p style="font-size:.68rem;color:var(--text-muted);margin:8px 0 0;" id="ml-reassemble-note"></p>
+            </div>
+          </div>
+
+
+        </div>
+      </details>
+
+      <details class="card ml-step ml-advanced" id="ml-advanced" data-step="adv">
+        <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span class="section-title" style="margin:0;font-size:.9rem;display:flex;align-items:center;gap:10px;">
+            <span class="ml-step-num" style="background:var(--bg-secondary);color:var(--text-muted);">+</span>
+            <span>Optional labs</span>
+            <span class="collapse-toggle-icon">&#9662;</span>
+          </span>
+          <span class="badge badge-amber">illustrations and experiments</span>
+        </summary>
+        <div class="card-body">
+          <p class="ml-step-lead">These are not part of the path. Some are pictures that explain an idea and do not read your model; each one says which.</p>
+
+        <details class="card ml-lab" id="ml-lab-metaphor" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">Light and lenses: a way to picture layers <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-amber" style="font-size:.65rem;">illustration</span>
+          </summary>
+          <div class="card-body">
+      <!-- 4. Optics Metaphor Banner -->
+      <div class="card" style="margin-bottom:18px;background:linear-gradient(135deg,rgba(139,92,246,0.08),rgba(6,182,212,0.06));border-color:rgba(139,92,246,0.25);">
+        <div class="card-header" style="padding:10px 16px;">
+          <span class="card-title" style="font-size:.85rem;display:flex;align-items:center;gap:8px;">
+            <span style="font-size:1.1rem;">🌈</span> Refractive Layers Metaphor: Light &amp; Photons Passing Through Neural Optics
+          </span>
+          <span class="badge badge-cyan" style="font-size:.65rem;">Optics &harr; Weights Duality</span>
+        </div>
+        <div class="card-body" style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;font-size:.78rem;">
+          <div style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-cyan);">
+            <div style="font-weight:600;color:var(--accent-cyan);margin-bottom:3px;">🌊 Photon Wavefronts</div>
+            <div style="color:var(--text-muted);line-height:1.35;">Latent activations represented as phase-coherent beams of light propagating across refractive boundaries.</div>
+          </div>
+          <div style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-purple);">
+            <div style="font-weight:600;color:var(--accent-purple);margin-bottom:3px;">🔺 Conv Prisms</div>
+            <div style="color:var(--text-muted);line-height:1.35;">Spatial convolutions act as multi-frequency prisms, decomposing spatial wavelengths into phase-shifted feature bands.</div>
+          </div>
+          <div style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-amber);">
+            <div style="font-weight:600;color:var(--accent-amber);margin-bottom:3px;">💠 MoE Spectral Dividers</div>
+            <div style="color:var(--text-muted);line-height:1.35;">Gating routing acts as dichroic beam splitters, shunting specific wavelengths into specialized sparse expert prisms.</div>
+          </div>
+          <div style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-sm);border-left:3px solid var(--accent-green);">
+            <div style="font-weight:600;color:var(--accent-green);margin-bottom:3px;">🎯 Unembedding Focus</div>
+            <div style="color:var(--text-muted);line-height:1.35;">Final unembedding linear layer functions as an achromatic lens condensing logits onto the vocabulary sensor plane.</div>
+          </div>
+        </div>
+      </div>
+
+
+          </div>
+        </details>
+
+
+        <details class="card ml-lab" id="ml-lab-optics" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">2.5D wavefront stage <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-amber" style="font-size:.65rem;">illustration, numbers are not measured</span>
+          </summary>
+          <div class="card-body">
+      <!-- 5. 2.5D Optics Canvas Stage -->
+      <div class="card" style="margin-bottom:18px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            <span>2.5D Neural Optics Wavefront Stage</span>
+          </span>
+          <div style="display:flex;align-items:center;gap:12px;font-size:.72rem;color:var(--text-muted);">
+            <span>Phase Coherence: <strong id="ml-optics-coherence" style="color:var(--accent-cyan);">94.2%</strong></span>
+            <span>Refraction Index &eta;: <strong id="ml-optics-eta" style="color:var(--accent-purple);">1.48</strong></span>
+            <span>Photon Flux: <strong id="ml-optics-flux" style="color:var(--accent-green);">128 &mu;W</strong></span>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0;position:relative;background:#030712;overflow:hidden;border-radius:0 0 var(--radius-sm) var(--radius-sm);">
+          <canvas id="ml-optics-canvas" width="900" height="320" style="display:block;width:100%;height:320px;cursor:crosshair;"></canvas>
+          <div id="ml-optics-overlay" style="position:absolute;bottom:10px;left:14px;font-size:.7rem;font-family:'JetBrains Mono',monospace;color:rgba(255,255,255,0.7);pointer-events:none;">
+            Beam Angle: <span id="ml-lbl-angle">0&deg;</span> | &lambda;: <span id="ml-lbl-wavelength">520nm</span> | Photons: <span id="ml-lbl-photons">64</span>
+          </div>
+        </div>
+        <!-- Optics Beam Controls -->
+        <div style="padding:12px 16px;background:var(--bg-secondary);border-top:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="ml-optics-play-btn" class="btn btn-primary btn-sm">⏸ Pause</button>
+            <button id="ml-optics-step-btn" class="btn btn-secondary btn-sm">⏭ Step</button>
+            <button id="ml-optics-reset-btn" class="btn btn-secondary btn-sm">🔄 Reset Beam</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:.75rem;">
+              <span>Wavelength &lambda;:</span>
+              <input type="range" id="ml-optics-wavelength" min="380" max="750" value="520" style="width:110px;">
+              <span id="ml-val-wavelength" style="font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--accent-cyan);">520nm</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:.75rem;">
+              <span>Beam Angle:</span>
+              <input type="range" id="ml-optics-angle" min="-45" max="45" value="0" style="width:90px;">
+              <span id="ml-val-angle" style="font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--accent-purple);">0&deg;</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:.75rem;">
+              <span>Lens Profile:</span>
+              <select id="ml-optics-profile" style="font-size:.72rem;padding:3px 8px;border-radius:4px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);">
+                <option value="transformer">Transformer Stack (Attn &rarr; MoE &rarr; Head)</option>
+                <option value="conv">Convolutional Deep Prism</option>
+                <option value="svd">Spectral SVD Filter</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </div>
+
+
+          </div>
+        </details>
+
+
+        <details class="card ml-lab" id="ml-lab-inversion" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">Layer inversion lab <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-cyan" style="font-size:.65rem;">needs a model on the server</span>
+          </summary>
+          <div class="card-body">
+        <!-- Right: Layer Inversion Lab (Activation Maximization) -->
+        <div class="card" style="display:flex;flex-direction:column;">
+          <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-purple"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+              <span>Layer Inversion Lab (Activation Maximization)</span>
+            </span>
+            <span class="badge badge-purple" id="ml-inversion-badge">Target: Ball (0)</span>
+          </div>
+          <div class="card-body" style="flex:1;display:flex;flex-direction:column;gap:12px;padding:16px;">
+            <p style="font-size:.75rem;color:var(--text-muted);line-height:1.4;margin:0;">
+              Synthesize canonical class exemplar prototypes via gradient ascent in pixel/token space with Total Variation (TV) regularization to probe training data memorization.
+            </p>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div>
+                <label style="font-size:.7rem;color:var(--text-muted);display:block;margin-bottom:4px;">Target Class:</label>
+                <select id="ml-inversion-target-class" style="width:100%;font-size:.75rem;padding:5px 8px;border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-subtle);">
+                  <option value="0">Class 0 &mdash; Ball</option>
+                  <option value="1">Class 1 &mdash; Box / Cube</option>
+                  <option value="2">Class 2 &mdash; Cylinder</option>
+                  <option value="3">Class 3 &mdash; Adversarial Prototype</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:.7rem;color:var(--text-muted);display:block;margin-bottom:4px;">Total Variation (TV) Reg: <span id="ml-val-tv" style="color:var(--accent-purple);">0.015</span></label>
+                <input type="range" id="ml-inversion-tv" min="1" max="100" value="15" style="width:100%;">
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+              <label style="font-size:.72rem;color:var(--text-muted);">
+                Descent Steps:
+                <input type="number" id="ml-inversion-steps" value="15" min="5" max="100" style="width:60px;padding:3px 6px;margin-left:4px;font-size:.75rem;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:4px;">
+              </label>
+              <button id="ml-inversion-run-btn" class="btn btn-primary btn-sm" style="display:flex;align-items:center;gap:6px;">
+                <span>🔬 Synthesize Prototype</span>
+              </button>
+            </div>
+
+            <!-- Inversion Visualizer Stage -->
+            <div style="background:var(--bg-secondary);border-radius:var(--radius-sm);padding:10px;display:flex;align-items:center;gap:14px;">
+              <canvas id="ml-inversion-canvas" width="120" height="120" style="background:#020617;border-radius:4px;border:1px solid var(--border-subtle);width:120px;height:120px;image-rendering:pixelated;"></canvas>
+              <div style="flex:1;font-size:.72rem;line-height:1.4;">
+                <div style="font-weight:600;margin-bottom:2px;display:flex;justify-content:space-between;">
+                  <span>Reconstructed Vector:</span>
+                  <span id="ml-inversion-loss" style="color:var(--accent-green);font-family:'JetBrains Mono',monospace;">Loss: 0.0412</span>
+                </div>
+                <div id="ml-inversion-vector-display" style="font-family:'JetBrains Mono',monospace;color:var(--accent-cyan);word-break:break-all;background:rgba(0,0,0,0.2);padding:4px 6px;border-radius:4px;margin-bottom:4px;">
+                  [0.824, -0.412, 0.991, -0.105]
+                </div>
+                <div style="display:flex;justify-content:space-between;color:var(--text-muted);">
+                  <span>Memorization Risk:</span>
+                  <span id="ml-inversion-risk" class="badge badge-green" style="font-size:.62rem;">Low (0.18)</span>
+                </div>
+                <div id="ml-inversion-disclaimer" style="font-size:.65rem;color:var(--text-muted);font-style:italic;margin-top:4px;">
+                  Prototype represents optimization centroid; private training points bounded.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+          </div>
+        </details>
+
+
+        <details class="card ml-lab" id="ml-lab-surgery" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">Weight-space surgery <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-amber" style="font-size:.65rem;">bars are a demo spectrum</span>
+          </summary>
+          <div class="card-body">
+      <div class="card" style="margin-bottom:18px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-amber"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            <span>Weight-Space Programming Studio (Attractor Rank-1 Surgery &amp; SVD Spectral Shifts)</span>
+          </span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="badge badge-amber" id="ml-svd-rank-badge">Eff. Rank: 18.4 / 64</span>
+            <span class="badge badge-purple" id="ml-svd-frobenius">||W||_F: 14.82</span>
+          </div>
+        </div>
+        <div class="card-body" style="padding:16px;">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:20px;align-items:center;">
+            <!-- Left: SVD Singular Spectrum Visualization -->
+            <div>
+              <div style="font-size:.75rem;font-weight:600;margin-bottom:8px;display:flex;justify-content:space-between;">
+                <span>Singular Values Spectrum (&sigma;<sub>0</sub> &hellip; &sigma;<sub>7</sub>):</span>
+                <span style="color:var(--accent-amber);font-size:.7rem;" id="ml-top1-concentration">Top-1 Energy: 62.4%</span>
+              </div>
+              <div id="ml-svd-bars" style="display:flex;align-items:flex-end;gap:8px;height:120px;background:var(--bg-secondary);padding:10px 14px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);">
+                <!-- Rendered dynamically by js/12-ml-learning.js -->
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:.65rem;color:var(--text-muted);margin-top:4px;padding:0 4px;">
+                <span>&sigma;<sub>0</sub> (Attractor)</span>
+                <span>&sigma;<sub>1</sub></span>
+                <span>&sigma;<sub>2</sub></span>
+                <span>&sigma;<sub>3</sub></span>
+                <span>&sigma;<sub>4</sub></span>
+                <span>&sigma;<sub>5</sub></span>
+                <span>&sigma;<sub>6</sub></span>
+                <span>&sigma;<sub>7</sub></span>
+              </div>
+            </div>
+
+            <!-- Right: Surgery & Ablation Controls -->
+            <div style="display:flex;flex-direction:column;gap:12px;background:var(--bg-secondary);padding:14px;border-radius:var(--radius-sm);">
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:.75rem;margin-bottom:4px;">
+                  <span style="font-weight:600;">Rank-1 Attractor Ablation (&alpha;):</span>
+                  <span id="ml-val-alpha" style="font-family:'JetBrains Mono',monospace;color:var(--accent-amber);">0.50 (50% damped)</span>
+                </div>
+                <input type="range" id="ml-surgery-alpha" min="0" max="100" value="50" style="width:100%;">
+                <p style="font-size:.68rem;color:var(--text-muted);margin-top:3px;margin-bottom:0;">
+                  Suppresses planted memorization attractor $W \leftarrow W - \alpha \sigma_0 u_0 v_0^T$ while preserving orthogonal subspaces.
+                </p>
+              </div>
+
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button id="ml-surgery-shift-up" class="btn btn-secondary btn-sm" style="flex:1;">&uarr; Boost Low Rank</button>
+                <button id="ml-surgery-shift-down" class="btn btn-secondary btn-sm" style="flex:1;">&darr; Dampen Low Rank</button>
+                <button id="ml-surgery-zero-grad" class="btn btn-secondary btn-sm" style="flex:1;">🛡 Zero-Grad Guard</button>
+              </div>
+
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:4px;">
+                <span id="ml-surgery-summary" style="font-size:.7rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">&Delta; Rank: +12.3 | &Delta; Frobenius: -2.4</span>
+                <button id="ml-weight-surgery-btn" class="btn btn-primary btn-sm" style="background:var(--accent-amber);border-color:var(--accent-amber);color:#000;font-weight:600;">
+                  ⚡ Execute Surgery
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+          </div>
+        </details>
+
+
+        <details class="card ml-lab" id="ml-lab-media" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">Media transforms scratchpad <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-amber" style="font-size:.65rem;">presets, not live output</span>
+          </summary>
+          <div class="card-body">
+      <div class="card" style="margin-bottom:18px;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <span class="card-title" style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="c-cyan"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+            <span>Future Media Transforms Scratchpad (Bridging movie_tool &amp; reverse_tool)</span>
+          </span>
+          <span class="badge badge-cyan" id="ml-media-status">Preset: Demucs 4-Stem</span>
+        </div>
+        <div class="card-body" style="padding:16px;">
+          <!-- Preset Switcher -->
+          <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-sm ml-media-tab-btn active" data-preset="demucs">🎵 Audio Stems (Demucs 4-Stem)</button>
+            <button class="btn btn-secondary btn-sm ml-media-tab-btn" data-preset="depth">📐 3D Parallax Warp (Depth Anything V2)</button>
+            <button class="btn btn-secondary btn-sm ml-media-tab-btn" data-preset="tts">🗣 TTS Synth (Kokoro Vocoder)</button>
+            <button class="btn btn-secondary btn-sm ml-media-tab-btn" data-preset="ocr">🔍 OCR &amp; Token Bounding Decisions</button>
+          </div>
+
+          <!-- Preset Panels Container -->
+          <div id="ml-media-panel-container" style="background:var(--bg-secondary);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);min-height:160px;">
+            <!-- Demucs 4-Stem Scratchpad -->
+            <div id="ml-media-preset-demucs" class="ml-media-subpanel">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                <span style="font-size:.78rem;font-weight:600;">Separated Audio Source Stems:</span>
+                <span style="font-size:.7rem;color:var(--text-muted);">48kHz Float32 STFT Isolation</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:12px;">
+                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;text-align:center;">
+                  <div style="font-size:.72rem;color:var(--accent-purple);font-weight:600;margin-bottom:6px;">🎤 Vocals</div>
+                  <input type="range" id="ml-stem-vocals" min="0" max="100" value="85" style="width:100%;">
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-vocals-val">0.85 dB</div>
+                </div>
+                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;text-align:center;">
+                  <div style="font-size:.72rem;color:var(--accent-cyan);font-weight:600;margin-bottom:6px;">🥁 Drums</div>
+                  <input type="range" id="ml-stem-drums" min="0" max="100" value="70" style="width:100%;">
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-drums-val">0.70 dB</div>
+                </div>
+                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;text-align:center;">
+                  <div style="font-size:.72rem;color:var(--accent-green);font-weight:600;margin-bottom:6px;">🎸 Bass</div>
+                  <input type="range" id="ml-stem-bass" min="0" max="100" value="90" style="width:100%;">
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-bass-val">0.90 dB</div>
+                </div>
+                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;text-align:center;">
+                  <div style="font-size:.72rem;color:var(--accent-amber);font-weight:600;margin-bottom:6px;">🎹 Other / Synths</div>
+                  <input type="range" id="ml-stem-other" min="0" max="100" value="60" style="width:100%;">
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-other-val">0.60 dB</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Depth Anything V2 3D Parallax Scratchpad -->
+            <div id="ml-media-preset-depth" class="ml-media-subpanel" style="display:none;">
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:14px;align-items:center;">
+                <div>
+                  <div style="font-size:.78rem;font-weight:600;margin-bottom:6px;">Relative Depth Field Map:</div>
+                  <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label style="font-size:.72rem;color:var(--text-muted);">
+                      Near Plane Disparity: <strong id="ml-val-near" style="color:var(--accent-cyan);">0.2m</strong>
+                      <input type="range" id="ml-depth-near" min="1" max="50" value="20" style="width:100%;">
+                    </label>
+                    <label style="font-size:.72rem;color:var(--text-muted);">
+                      Far Plane Cutoff: <strong id="ml-val-far" style="color:var(--accent-purple);">10.0m</strong>
+                      <input type="range" id="ml-depth-far" min="50" max="200" value="100" style="width:100%;">
+                    </label>
+                    <label style="font-size:.72rem;color:var(--text-muted);">
+                      Camera Parallax Dolly: <strong id="ml-val-dolly" style="color:var(--accent-amber);">15 mm</strong>
+                      <input type="range" id="ml-depth-dolly" min="-30" max="30" value="15" style="width:100%;">
+                    </label>
+                  </div>
+                </div>
+                <div style="text-align:center;">
+                  <canvas id="ml-depth-preview-canvas" width="200" height="120" style="background:#0a0f1d;border-radius:4px;border:1px solid var(--border-subtle);display:inline-block;"></canvas>
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;">Ray-marched 2.5D disparity grid</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TTS Kokoro Synth Scratchpad -->
+            <div id="ml-media-preset-tts" class="ml-media-subpanel" style="display:none;">
+              <div style="font-size:.78rem;font-weight:600;margin-bottom:6px;">Neural Vocoder &amp; Style Embedding:</div>
+              <div style="display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
+                <input type="text" id="ml-tts-input" value="Refractive neural optics unify linear representations with wave dynamics." style="flex:1;min-width:240px;font-size:.75rem;padding:6px 10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:4px;">
+                <select id="ml-tts-voice" style="font-size:.75rem;padding:6px 10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:4px;">
+                  <option value="af_heart">Kokoro &mdash; af_heart</option>
+                  <option value="af_bella">Kokoro &mdash; af_bella</option>
+                  <option value="am_michael">Kokoro &mdash; am_michael</option>
+                </select>
+              </div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--accent-cyan);background:var(--bg-primary);padding:6px 10px;border-radius:4px;">
+                Phonemes: /rɪfr&aelig;ktɪv nj&ubreve;r&euml;l &alpha;ptɪks j&ubreve;nɪfaɪ lɪni&euml;r r&epsilon;prɪz&epsilon;nteɪʃ&euml;nz/
+              </div>
+            </div>
+
+            <!-- OCR & Decision Scratchpad -->
+            <div id="ml-media-preset-ocr" class="ml-media-subpanel" style="display:none;">
+              <div style="font-size:.78rem;font-weight:600;margin-bottom:6px;">Bounding Decision &amp; Token Classification:</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;font-family:'JetBrains Mono',monospace;font-size:.7rem;">
+                <div style="background:var(--bg-primary);padding:8px;border-radius:4px;">
+                  <span style="color:var(--accent-purple);">[BBOX #0]</span> [x: 42, y: 18, w: 120, h: 28] &rarr; "ML STUDIO" (conf: 0.998)
+                  <br>
+                  <span style="color:var(--accent-cyan);">[BBOX #1]</span> [x: 180, y: 18, w: 94, h: 28] &rarr; "WAVEFRONT" (conf: 0.984)
+                </div>
+                <div style="background:var(--bg-primary);padding:8px;border-radius:4px;">
+                  <span style="color:var(--accent-green);">[DECISION]</span> Modality: Vision-Language Alignment
+                  <br>
+                  <span style="color:var(--accent-amber);">[TOKEN PROB]</span> Max entropy threshold: 0.042
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dispatch Bar -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;flex-wrap:wrap;gap:8px;">
+            <div style="font-size:.72rem;color:var(--text-muted);" id="ml-media-call-status">
+              Ready to dispatch transform pipeline to <code style="color:var(--accent-cyan);">/api/tools/call</code>
+            </div>
+            <button id="ml-media-dispatch-btn" class="btn btn-primary btn-sm" style="display:flex;align-items:center;gap:6px;">
+              <span>🚀 Dispatch Transform Job</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+          </div>
+        </details>
+
+        </div>
+      </details>
+
+    </section>
+  </main>

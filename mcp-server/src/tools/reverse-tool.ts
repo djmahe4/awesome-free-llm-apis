@@ -15,7 +15,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -23,6 +23,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const reverseToolResultsCache = new BoundedMap<string, ReverseToolResult>(100);
+/** The session of the latest run for each target, so status and abort given only a target find it. */
+const latestSessionByTarget = new BoundedMap<string, string>(200);
 
 function resolveModelInspectorPath(): string {
   const candidates = [
@@ -41,9 +43,14 @@ function resolveModelInspectorPath(): string {
   return found;
 }
 
+let cachedPythonBin: string | null = null;
+
 export function resolvePythonPath(): string {
   if (process.env.PYTHON) {
     return process.env.PYTHON;
+  }
+  if (cachedPythonBin) {
+    return cachedPythonBin;
   }
   const isWin = process.platform === 'win32';
   const pyRel = isWin ? path.join('Scripts', 'python.exe') : path.join('bin', 'python');
@@ -58,9 +65,25 @@ export function resolvePythonPath(): string {
     path.resolve(__dirname, '../../.venv', pyRel),
     path.resolve(__dirname, '../../../venv', pyRel),
     path.resolve(__dirname, '../../../.venv', pyRel),
+    'python',
+    'python3',
   ];
-  const found = candidates.find(c => fs.existsSync(c));
-  return found || 'python';
+  for (const cand of candidates) {
+    if (cand === 'python' || cand === 'python3' || fs.existsSync(cand)) {
+      try {
+        const res = spawnSync(cand, ['-c', 'import torch; print(torch.__version__)'], { timeout: 3000, stdio: 'pipe' });
+        if (res.status === 0) {
+          cachedPythonBin = cand;
+          return cand;
+        }
+      } catch {
+        // continue
+      }
+    }
+  }
+  const found = candidates.find(c => c === 'python' || c === 'python3' || fs.existsSync(c));
+  cachedPythonBin = found || 'python';
+  return cachedPythonBin;
 }
 
 function isSafeAllowedPath(rawPath: string, allowedDirs: string[]): boolean {
@@ -92,7 +115,28 @@ export type ReverseToolAction =
   | 'trace_layer_execution'
   | 'reconstruct_training_samples'
   | 'extract_model_layer'
-  | 'analyze_model_layer';
+  | 'analyze_model_layer'
+  | 'quantize_layer'
+  | 'assemble_moe'
+  | 'run_reasoning_model'
+  | 'run_yolo_nn'
+  | 'run_torch_nn'
+  | 'program_weight_space';
+
+export const isModelAction = (act: string): boolean => [
+  'inspect_model',
+  'infer_layer_roles',
+  'trace_layer_execution',
+  'reconstruct_training_samples',
+  'extract_model_layer',
+  'analyze_model_layer',
+  'quantize_layer',
+  'assemble_moe',
+  'run_reasoning_model',
+  'run_yolo_nn',
+  'run_torch_nn',
+  'program_weight_space',
+].includes(act as any);
 
 export interface ReverseToolInput {
   action: ReverseToolAction;
@@ -156,7 +200,14 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     action = 'reconstruct_training_samples';
   }
 
-  const effectiveSessionId = input.sessionId || (options?.sessionId as string) || (target ? `rev-${target.replace(/[^\w.-]/g, '_')}` : undefined);
+  const namedSession = input.sessionId || (options?.sessionId as string);
+  const targetSession = target ? `rev-${target.replace(/[^\w.-]/g, '_')}` : undefined;
+  // Without a named session a run is keyed by target and action, so two different actions on one model do not collide;
+  // status and abort given only a target use the latest run for it.
+  const readsRun = action === 'status' || action === 'abort';
+  const effectiveSessionId = namedSession
+    || (targetSession && readsRun ? (latestSessionByTarget.get(targetSession) ?? targetSession) : undefined)
+    || (targetSession && !readsRun ? `${targetSession}:${action}` : undefined);
   const runKey = effectiveSessionId ? `reverse_tool:${effectiveSessionId}` : undefined;
 
   if (action === 'abort') {
@@ -462,6 +513,12 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           'probe_memorization',
           'extract_model_layer',
           'analyze_model_layer',
+          'quantize_layer',
+          'assemble_moe',
+          'run_reasoning_model',
+          'run_yolo_nn',
+  'run_torch_nn',
+          'program_weight_space',
         ],
       },
     };
@@ -636,9 +693,15 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     'reconstruct_training_samples',
     'extract_model_layer',
     'analyze_model_layer',
+    'quantize_layer',
+    'assemble_moe',
+    'run_reasoning_model',
+    'run_yolo_nn',
+  'run_torch_nn',
+    'program_weight_space',
   ];
 
-  if (modelActions.includes(action)) {
+  if (isModelAction(action)) {
     if (!authorization || !VALID_AUTH.includes(authorization as ReverseAuthorization)) {
       return {
         success: false,
@@ -658,6 +721,8 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
 
     const allowedRoots = [
       process.cwd(),
+      path.resolve(process.cwd(), '..'),
+      path.resolve(process.cwd(), '../..'),
       os.tmpdir(),
       ...(options?.workspaceRoot ? [String(options.workspaceRoot)] : []),
     ];
@@ -671,7 +736,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       };
     }
 
-    if (action === 'extract_model_layer' || action === 'analyze_model_layer') {
+    if (action === 'extract_model_layer' || action === 'analyze_model_layer' || action === 'quantize_layer') {
       if (!options?.layer || !String(options.layer).trim()) {
         return {
           success: false,
@@ -712,6 +777,12 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       reconstruct_training_samples: 'reconstruct_samples',
       extract_model_layer: 'extract_layer',
       analyze_model_layer: 'analyze_layer',
+      quantize_layer: 'quantize_layer',
+      assemble_moe: 'assemble_moe',
+      run_reasoning_model: 'run_reasoning_model',
+      run_yolo_nn: 'run_yolo_nn',
+      run_torch_nn: 'run_torch_nn',
+      program_weight_space: 'program_weight_space',
     };
 
     const pyAction = actionMap[action];
@@ -753,6 +824,46 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     if (options?.steps !== undefined) {
       args.push('--steps', String(options.steps));
     }
+    if (options?.quantMode || options?.['quant-mode']) {
+      args.push('--quant-mode', String(options.quantMode || options['quant-mode']));
+    }
+    if (options?.prompt) {
+      args.push('--prompt', String(options.prompt));
+    }
+    if (options?.temperature !== undefined) {
+      args.push('--temperature', String(options.temperature));
+    }
+    if (options?.maxTokens !== undefined || options?.max_tokens !== undefined) {
+      args.push('--max-tokens', String(options.maxTokens ?? options.max_tokens));
+    }
+    if (options?.seed !== undefined) {
+      args.push('--seed', String(options.seed));
+    }
+    if (options?.rank !== undefined) {
+      args.push('--rank', String(options.rank));
+    }
+    if (options?.alpha !== undefined) {
+      args.push('--alpha', String(options.alpha));
+    }
+    if (options?.subcommand) {
+      args.push('--subcommand', String(options.subcommand));
+    }
+    if (options?.task) {
+      args.push('--task', String(options.task));
+    }
+    const imagePath = options?.image ?? options?.image_path;
+    if (imagePath) {
+      const imgStr = String(imagePath);
+      if (!isSafeAllowedPath(imgStr, allowedRoots)) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'Path traversal disallowed in options.image.',
+        };
+      }
+      args.push('--image', path.resolve(imgStr));
+    }
 
     const pythonBin = resolvePythonPath();
     const isAsync = options?.async === true;
@@ -775,6 +886,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
 
     const runInfo = runKey ? RunRegistry.start(runKey) : undefined;
+    if (targetSession && effectiveSessionId) latestSessionByTarget.set(targetSession, effectiveSessionId);
 
     const executeAction = async (): Promise<ReverseToolResult> => {
       try {
@@ -862,8 +974,9 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "program_weight_space".`,
   };
 }
 
 export const runReverseTool = reverseTool;
+export const handleReverseTool = reverseTool;

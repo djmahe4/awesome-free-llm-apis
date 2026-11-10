@@ -112,6 +112,7 @@
               <tr><td><code>edits</code></td><td>array&lt;{file, anchor, anchorIsPrefix, position, lines}&gt;</td><td></td><td>Exact changes as data, applied by script with no model call. List each file in <code>targetFiles</code> too</td></tr>
               <tr><td><code>requireRed</code></td><td>boolean</td><td></td><td>Report a green check as <code>unverified</code> when it was already green before the edit (default: false)</td></tr>
               <tr><td><code>hasPostConditions</code></td><td>boolean</td><td></td><td>Set when you verify the result with your own probes, so an already-green check still counts under <code>requireRed</code></td></tr>
+              <tr><td><code>pauseBeforeMultiFile</code></td><td>boolean</td><td></td><td>Default <code>true</code>. Pause implicit multi-file edits and execute one</code> file-scoped task per <code>resume</code>; set <code>false</code> for batch behavior</td></tr>
             </tbody>
           </table>
         </details>
@@ -181,10 +182,13 @@
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td><code>image_path</code></td><td>string</td><td>✓</td><td><code>file:///</code> URI to local image file</td></tr>
-              <tr><td><code>prompt</code></td><td>string</td><td></td><td>Analysis prompt accompanying the image</td></tr>
+              <tr><td><code>image_path</code></td><td>string</td><td>Run only</td><td><code>file:///</code> URI to a local image or PDF; suffix a PDF path with <code>:3</code> to analyze page 3</td></tr>
+              <tr><td><code>prompt</code></td><td>string</td><td></td><td>Analysis prompt accompanying the image/page</td></tr>
               <tr><td><code>model</code></td><td>string</td><td></td><td>Explicit vision model override</td></tr>
               <tr><td><code>workspace_root</code></td><td>string</td><td></td><td>Workspace boundary check</td></tr>
+              <tr><td><code>action</code></td><td>string</td><td></td><td><code>run</code> (default), <code>status</code>, <code>continue</code> to retry a failed/timed-out task, or <code>abort</code></td></tr>
+              <tr><td><code>taskId</code></td><td>string</td><td>Status/continue/abort</td><td>Task ID returned by run; response includes progress and explicit failure/PDF metadata</td></tr>
+              <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Optional alias for <code>taskId</code></td></tr>
             </tbody>
           </table>
         </details>
@@ -299,7 +303,7 @@
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td><code>action</code></td><td>enum: status | abort | list_capabilities | analyze_javascript | analyze_artifact | get_evidence | scan_github | inspect_model | infer_layer_roles | trace_layer_execution | reconstruct_training_samples | extract_model_layer | analyze_model_layer</td><td>✓</td><td>Analysis action to execute</td></tr>
+              <tr><td><code>action</code></td><td>enum: status | abort | list_capabilities | analyze_javascript | analyze_artifact | get_evidence | scan_github | inspect_model | infer_layer_roles | trace_layer_execution | reconstruct_training_samples | extract_model_layer | analyze_model_layer | quantize_layer | assemble_moe | run_reasoning_model | run_yolo_nn | program_weight_space</td><td>✓</td><td>Analysis action to execute</td></tr>
               <tr><td><code>target</code></td><td>string</td><td>for analyze / get / scan_github / model actions</td><td>Target file path, model artifact (.gguf, .pt, .onnx), evidence ID (ev-*), or GitHub repo ("owner/repo")</td></tr>
               <tr><td><code>authorization</code></td><td>enum: ctf | lab | consent</td><td>for analyze / target list / scan_github / model actions</td><td>Mandatory security authorization framing</td></tr>
               <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session identifier for async polling and status retrieval</td></tr>

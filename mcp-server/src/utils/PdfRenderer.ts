@@ -26,7 +26,11 @@ export interface PdfRenderResult {
  * Shared by resolvePdfRef (on-demand single-page lookups) and pdf-wiki.ts's bounded
  * multi-page extraction loop, so both stay in sync with the script's invocation contract.
  */
-export async function renderPdfPage(absPdfPath: string, pageNum: number): Promise<PdfRenderResult | null> {
+export async function renderPdfPage(
+  absPdfPath: string,
+  pageNum: number,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
+): Promise<PdfRenderResult | null> {
   const serverRoot = path.resolve(__dirname, '../..');
   const hasServerVenv = await fs.pathExists(path.join(serverRoot, 'venv'));
   const pythonPath = process.platform === 'win32'
@@ -45,7 +49,15 @@ export async function renderPdfPage(absPdfPath: string, pageNum: number): Promis
   }
 
   try {
-    const { stdout } = await execFileAsync(pythonPath, [scriptPath, absPdfPath, String(pageNum)]);
+    const { stdout } = await execFileAsync(
+      pythonPath,
+      [scriptPath, absPdfPath, String(pageNum)],
+      {
+        timeout: options.timeoutMs,
+        signal: options.signal,
+        killSignal: 'SIGTERM',
+      },
+    );
     const result = JSON.parse(stdout);
     if (result.error) {
       console.error(`[renderPdfPage] Python script error: ${result.error}`);

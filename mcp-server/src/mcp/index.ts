@@ -148,16 +148,19 @@ export async function createMCPServer(): Promise<Server> {
       },
       {
         name: 'vision_tool',
-        description: 'Analyze a local image using a vision-capable model via use_free_llm.',
+        description: 'Analyze a local image or a selected PDF page with a vision-capable model. Returns the final analysis when it finishes within 25 seconds; otherwise returns a taskId. Poll with action:"status", retry a failed/timed-out task with action:"continue", or cancel with action:"abort". PDF rendering and provider fallback share a 60-second task deadline; responses include validation errors and PDF extraction/visual-page metadata.',
         inputSchema: {
           type: 'object' as const,
           properties: {
             workspace_root: { type: 'string', description: 'Absolute workspace path' },
-            image_path: { type: 'string', description: 'Image URI using file:/// scheme' },
+            image_path: { type: 'string', description: 'Required for action:"run"; file:/// URI to an image or PDF. Add :<page> to select a PDF page.' },
             prompt: { type: 'string', description: 'Optional analysis prompt' },
             model: { type: 'string', description: 'Optional vision model id' },
+            action: { type: 'string', enum: ['run', 'status', 'continue', 'abort'], description: 'run (default) starts/executes analysis; status polls a task; continue retries a failed or timed-out task; abort cancels it.' },
+            taskId: { type: 'string', description: 'Task ID returned by run; required for status, continue, and abort.' },
+            sessionId: { type: 'string', description: 'Optional alias for taskId.' },
           },
-          required: ['workspace_root', 'image_path'],
+          required: [],
         },
       },
        {
@@ -787,6 +790,7 @@ export async function createMCPServer(): Promise<Server> {
             verifyReport: { type: 'object', description: 'Output of a check YOU ran (used when an edit changed tests, so the agent did not run them, or was withheld). { exitCode, output, command? }. A failure comes back as result.verification.repairBrief (a debugger-style brief); nothing on disk changes.', properties: { exitCode: { type: 'number' }, output: { type: 'string' }, command: { type: 'string' } }, required: ['exitCode', 'output'] },
             feedback: { type: 'string', description: 'Debugger brief from a previous failed attempt (result.verification.repairBrief); appended to the goal so the retry fixes the production code instead of starting blind.' },
             pauseOnTaskPlan: { type: 'boolean', description: 'Same effect as action:"plan" — decompose the goal into tasks.md and pause instead of executing' },
+            pauseBeforeMultiFile: { type: 'boolean', description: 'Pause by default before implicit multi-file edits; review tasks.md and resume one file-scoped task at a time. Set false for explicit batch behavior.' },
             astEditOps: {
               type: 'array',
               description: 'Structural ast-grep-style rewrites ($$$VAR pattern matching) to apply instead of LLM generation for this call — deterministic, no local/cloud model involved',
@@ -957,6 +961,11 @@ export async function createMCPServer(): Promise<Server> {
           '  - reconstruct_training_samples: Activation maximization prototype synthesis and memorization probing (consent-gated).',
           '  - extract_model_layer: Slice layer tensor to standalone SafeTensors binary.',
           '  - analyze_model_layer: Statistical weight profiling (Frobenius norm, sparsity, mean, std).',
+          '  - quantize_layer: Block quantization of model layer weights (Q4_0, Q8_0, MXFP8).',
+          '  - assemble_moe: Mixture-of-Experts composite routing and SwiGLU forward execution.',
+          '  - run_reasoning_model: Autoregressive reasoning runtime with RoPE and thinking trace generation.',
+          '  - run_yolo_nn: Pure-NumPy YOLOv8 neural network forward pass and detection decoding.',
+          '  - program_weight_space: Spectral SVD analysis, attractor ablation, and loop suppression in weight space.',
         ].join('\n'),
         inputSchema: {
           type: 'object' as const,
@@ -976,7 +985,12 @@ export async function createMCPServer(): Promise<Server> {
                 'trace_layer_execution',
                 'reconstruct_training_samples',
                 'extract_model_layer',
-                'analyze_model_layer'
+                'analyze_model_layer',
+                'quantize_layer',
+                'assemble_moe',
+                'run_reasoning_model',
+                'run_yolo_nn',
+                'program_weight_space'
               ],
               description: 'Reverse engineering action to perform'
             },
@@ -1027,7 +1041,7 @@ export async function createMCPServer(): Promise<Server> {
       } else if (name === 'vision_tool') {
         const result = await visionTool(args as any);
         response = {
-          content: [{ type: 'text' as const, text: toMarkdownResponse(result.response) }],
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         };
       } else if (name === 'load_skill_prompt') {
         const result = await loadSkillPrompt(args as any);

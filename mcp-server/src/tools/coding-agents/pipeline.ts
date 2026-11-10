@@ -510,6 +510,36 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       result.relevantFiles = matchedPaths.length > 0 ? matchedPaths : codeFiles.slice(0, topK);
     }
 
+    // Multi-file edits are intentionally interactive by default. A single model
+    // call cannot reliably coordinate several dependent files without feedback;
+    // create a file-scoped plan and let the caller resume one task at a time.
+    if (input.pauseBeforeMultiFile !== false
+      && input.action !== 'resume'
+      && !dryRun
+      && !input.edits?.length
+      && result.relevantFiles.length > 1) {
+      const planned = await decomposeGoalIntelligently(activeGoal, workspaceRoot, result.relevantFiles, sessionId);
+      const tasks = result.relevantFiles.map((file, index) => {
+        const candidate = planned[index];
+        return {
+          id: 'task-' + (index + 1),
+          task: candidate?.task || 'Implement the requested change in ' + file,
+          status: 'pending' as const,
+          targetFile: file,
+          context: candidate?.context || 'Keep this task scoped to the target file. Review the result before resuming the next task.',
+          log: [],
+        };
+      });
+      await fs.writeFile(tasksFilePath, serializeTasksMarkdown(input.goal, tasks), 'utf-8');
+      result.pipelineStage = 'completed';
+      result.tasksPlan = tasks;
+      result.tasksFile = 'tasks.md';
+      result.isPaused = true;
+      result.status = 'paused';
+      result.patchSummary = 'Paused before editing ' + result.relevantFiles.length + ' files. Review tasks.md, then call action="resume" to execute one file-scoped task at a time and provide feedback between tasks.';
+      return finalizeResult();
+    }
+
     // ── Step 2b: Automatic Wiring Discovery for New Files ────────────────────
     const discoveredWiring: string[] = [];
     const wiringSnippets: string[] = [];

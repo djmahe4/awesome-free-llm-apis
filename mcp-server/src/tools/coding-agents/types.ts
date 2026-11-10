@@ -132,6 +132,8 @@ export interface CodingAgentsInput {
   review?: boolean;
   action?: 'plan' | 'execute' | 'resume' | 'status' | 'abort';
   pauseOnTaskPlan?: boolean;
+  /** Pause before implicit multi-file edits so each file-scoped task can be reviewed and resumed independently. */
+  pauseBeforeMultiFile?: boolean;
 }
 
 export interface RepairAttempt {

@@ -45,6 +45,7 @@ describe('dashboard index.html assembly', () => {
       '/js/09-dag-memory.js',
       '/js/10-harness-telemetry.js',
       '/js/11-relay-canvas.js',
+      '/js/12-ml-learning.js',
     ]);
   });
 });

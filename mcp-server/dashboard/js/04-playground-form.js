@@ -16,9 +16,12 @@ const TOOLS = [
     id: 'vision_tool', label: 'vision_tool', icon: '👁',
     tag: 'Vision / VLM',
     fields: [
-      { id: 'image_path', label: 'Image Path', type: 'text', placeholder: 'file:///C:/path/to/screenshot.png' },
-      { id: 'prompt',     label: 'Analysis Prompt', type: 'textarea', placeholder: 'Describe the UI layout' },
-      { id: 'model',      label: 'Model Override', type: 'model-picker' },
+      { id: 'image_path', label: 'Image Path', type: 'text', placeholder: 'file:///C:/path/to/screenshot.png', showFor: ['', 'run', 'continue'] },
+      { id: 'prompt',     label: 'Analysis Prompt', type: 'textarea', placeholder: 'Describe the UI layout', showFor: ['', 'run', 'continue'] },
+      { id: 'model',      label: 'Model Override', type: 'model-picker', showFor: ['', 'run', 'continue'] },
+      { id: 'action',     label: 'Task Action', type: 'select', options: ['', 'run', 'status', 'continue', 'abort'] },
+      { id: 'taskId',     label: 'Vision Task ID', type: 'text', placeholder: 'Use returned taskId for status/continue/abort', showFor: ['status', 'continue', 'abort'] },
+      { id: 'sessionId',  label: 'Task ID Alias', type: 'text', placeholder: 'Optional taskId alias', showFor: ['status', 'continue', 'abort'] },
     ]
   },
   {
@@ -168,6 +171,7 @@ const TOOLS = [
       { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'coding-session-1' },
       { id: 'action', label: 'Action', type: 'select', options: ['', 'plan', 'execute', 'resume', 'status', 'abort'] },
       { id: 'pauseOnTaskPlan', label: 'Pause On Task Plan', type: 'toggle', showFor: ['', 'execute'] },
+      { id: 'pauseBeforeMultiFile', label: 'Pause Before Multi-File Edits', type: 'toggle', default: true, showFor: ['', 'execute'] },
       { id: 'verifyCommand', label: 'Verify Command (rolls back on regression)', type: 'text', placeholder: 'npx vitest run tests/a.test.ts', showFor: ['', 'execute', 'resume'] },
       { id: 'edits', label: 'Exact Edits JSON (applied by script, no model)', type: 'textarea', placeholder: '[{"file":"src/a.ts","anchor":"const a = 1;","position":"after","lines":["const b = 2;"]}]', showFor: ['', 'execute', 'resume'] },
       { id: 'requireRed', label: 'Require Red (an already-green check is unverified)', type: 'toggle', showFor: ['', 'execute', 'resume'] },
@@ -232,11 +236,11 @@ const TOOLS = [
     id: 'reverse_tool', label: 'reverse_tool', icon: '🔍',
     tag: 'Reverse Engineering Analyzer',
     fields: [
-      { id: 'action', label: 'Action', type: 'select', options: ['status', 'abort', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
-      { id: 'target', label: 'Target File / Evidence ID', type: 'text', placeholder: 'path/to/target.js, owner/repo, or ev-123', showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
-      { id: 'authorization', label: 'Authorization Framing', type: 'select', options: ['', 'ctf', 'lab', 'consent'], showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
-      { id: 'sessionId', label: 'Session ID (Async)', type: 'text', placeholder: 'sess-123', showFor: ['status', 'abort', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] },
-      { id: 'options', label: 'Analysis Options (JSON)', type: 'textarea', placeholder: '{"workspaceRoot": "./"}', showFor: ['analyze_javascript', 'analyze_artifact', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer'] }
+      { id: 'action', label: 'Action', type: 'select', options: ['status', 'abort', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer', 'quantize_layer', 'assemble_moe', 'run_reasoning_model', 'run_yolo_nn', 'program_weight_space'] },
+      { id: 'target', label: 'Target File / Evidence ID', type: 'text', placeholder: 'path/to/target.js, owner/repo, or ev-123', showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer', 'quantize_layer', 'assemble_moe', 'run_reasoning_model', 'run_yolo_nn', 'program_weight_space'] },
+      { id: 'authorization', label: 'Authorization Framing', type: 'select', options: ['', 'ctf', 'lab', 'consent'], showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer', 'quantize_layer', 'assemble_moe', 'run_reasoning_model', 'run_yolo_nn', 'program_weight_space'] },
+      { id: 'sessionId', label: 'Session ID (Async)', type: 'text', placeholder: 'sess-123', showFor: ['status', 'abort', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer', 'quantize_layer', 'assemble_moe', 'run_reasoning_model', 'run_yolo_nn', 'program_weight_space'] },
+      { id: 'options', label: 'Analysis Options (JSON)', type: 'textarea', placeholder: '{"workspaceRoot": "./"}', showFor: ['analyze_javascript', 'analyze_artifact', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer', 'quantize_layer', 'assemble_moe', 'run_reasoning_model', 'run_yolo_nn', 'program_weight_space'] }
     ]
   }
 ];
