@@ -3058,7 +3058,7 @@
 
   function ocrRunInspection(target) {
     ocrInspectBtn.disabled = true;
-    ocrSetStatus('Inspecting via /api/tools/call → inspect_ocr_tokens...(' + target + ')', true);
+    ocrSetStatus('Inspecting via /api/reverse_tool → inspect_ocr_tokens...(' + target + ')', true);
     toolFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
