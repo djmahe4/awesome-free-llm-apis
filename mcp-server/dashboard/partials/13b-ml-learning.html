@@ -697,33 +697,86 @@
 
           <!-- Preset Panels Container -->
           <div id="ml-media-panel-container" style="background:var(--bg-secondary);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);min-height:160px;">
-            <!-- Demucs 4-Stem Scratchpad -->
+            <!-- Demucs 4-Stem Workbench -->
             <div id="ml-media-preset-demucs" class="ml-media-subpanel">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                <span style="font-size:.78rem;font-weight:600;">Separated Audio Source Stems:</span>
-                <span style="font-size:.7rem;color:var(--text-muted);">48kHz Float32 STFT Isolation</span>
+                <span style="font-size:.78rem;font-weight:600;">Demucs 4-Stem Separation Workbench:</span>
+                <span style="font-size:.7rem;color:var(--text-muted);">STFT time-frequency masking &middot; spectral decomposition</span>
               </div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:12px;">
-                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;text-align:center;">
-                  <div style="font-size:.72rem;color:var(--accent-purple);font-weight:600;margin-bottom:6px;">🎤 Vocals</div>
-                  <input type="range" id="ml-stem-vocals" min="0" max="100" value="85" style="width:100%;">
-                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-vocals-val">0.85 dB</div>
+              <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+                <button id="ml-stem-file-btn" class="btn btn-secondary btn-sm">📂 Load Audio File</button>
+                <button class="btn btn-secondary btn-sm ml-stem-preset-btn" data-audio="tests/fixtures/media/audio/sample_match_audio.wav">Sample Audio</button>
+                <input type="file" id="ml-stem-file-input" accept="audio/*" style="font-size:.72rem;color:var(--text-muted);display:none;">
+                <button id="ml-stem-dispatch-btn" class="btn btn-primary btn-sm">🔬 Separate Stems</button>
+                <button id="ml-stem-play-btn" class="btn btn-secondary btn-sm" disabled>▶ Play Mix</button>
+                <button id="ml-stem-stop-btn" class="btn btn-secondary btn-sm" disabled>■ Stop</button>
+                <span id="ml-stem-status" style="font-size:.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">Load or pick sample audio, then run separation.</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:12px;">
+                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;" data-stem="vocals">
+                  <div style="font-size:.72rem;color:var(--accent-purple);font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                    <span>🎤 Vocals</span>
+                    <span style="display:flex;gap:4px;">
+                      <button class="ml-stem-mute-btn" data-stem="vocals" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">M</button>
+                      <button class="ml-stem-solo-btn" data-stem="vocals" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">S</button>
+                    </span>
+                  </div>
+                  <canvas id="ml-stem-waveform-vocals" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;"></canvas>
+                  <canvas id="ml-stem-spectrum-vocals" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;margin-top:4px;"></canvas>
+                  <input type="range" id="ml-stem-vocals" min="0" max="100" value="85" style="width:100%;margin-top:6px;">
+                  <div id="ml-stem-metrics-vocals" style="font-size:.62rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-top:4px;">—</div>
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-vocals-val">0.85 gain</div>
                 </div>
-                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;text-align:center;">
-                  <div style="font-size:.72rem;color:var(--accent-cyan);font-weight:600;margin-bottom:6px;">🥁 Drums</div>
-                  <input type="range" id="ml-stem-drums" min="0" max="100" value="70" style="width:100%;">
-                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-drums-val">0.70 dB</div>
+                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;" data-stem="drums">
+                  <div style="font-size:.72rem;color:var(--accent-cyan);font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                    <span>🥁 Drums</span>
+                    <span style="display:flex;gap:4px;">
+                      <button class="ml-stem-mute-btn" data-stem="drums" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">M</button>
+                      <button class="ml-stem-solo-btn" data-stem="drums" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">S</button>
+                    </span>
+                  </div>
+                  <canvas id="ml-stem-waveform-drums" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;"></canvas>
+                  <canvas id="ml-stem-spectrum-drums" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;margin-top:4px;"></canvas>
+                  <input type="range" id="ml-stem-drums" min="0" max="100" value="70" style="width:100%;margin-top:6px;">
+                  <div id="ml-stem-metrics-drums" style="font-size:.62rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-top:4px;">—</div>
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-drums-val">0.70 gain</div>
                 </div>
-                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;text-align:center;">
-                  <div style="font-size:.72rem;color:var(--accent-green);font-weight:600;margin-bottom:6px;">🎸 Bass</div>
-                  <input type="range" id="ml-stem-bass" min="0" max="100" value="90" style="width:100%;">
-                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-bass-val">0.90 dB</div>
+                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;" data-stem="bass">
+                  <div style="font-size:.72rem;color:var(--accent-green);font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                    <span>🎸 Bass</span>
+                    <span style="display:flex;gap:4px;">
+                      <button class="ml-stem-mute-btn" data-stem="bass" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">M</button>
+                      <button class="ml-stem-solo-btn" data-stem="bass" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">S</button>
+                    </span>
+                  </div>
+                  <canvas id="ml-stem-waveform-bass" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;"></canvas>
+                  <canvas id="ml-stem-spectrum-bass" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;margin-top:4px;"></canvas>
+                  <input type="range" id="ml-stem-bass" min="0" max="100" value="90" style="width:100%;margin-top:6px;">
+                  <div id="ml-stem-metrics-bass" style="font-size:.62rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-top:4px;">—</div>
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-bass-val">0.90 gain</div>
                 </div>
-                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;text-align:center;">
-                  <div style="font-size:.72rem;color:var(--accent-amber);font-weight:600;margin-bottom:6px;">🎹 Other / Synths</div>
-                  <input type="range" id="ml-stem-other" min="0" max="100" value="60" style="width:100%;">
-                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-other-val">0.60 dB</div>
+                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;" data-stem="other">
+                  <div style="font-size:.72rem;color:var(--accent-amber);font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                    <span>🎹 Other / Synths</span>
+                    <span style="display:flex;gap:4px;">
+                      <button class="ml-stem-mute-btn" data-stem="other" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">M</button>
+                      <button class="ml-stem-solo-btn" data-stem="other" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">S</button>
+                    </span>
+                  </div>
+                  <canvas id="ml-stem-waveform-other" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;"></canvas>
+                  <canvas id="ml-stem-spectrum-other" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;margin-top:4px;"></canvas>
+                  <input type="range" id="ml-stem-other" min="0" max="100" value="60" style="width:100%;margin-top:6px;">
+                  <div id="ml-stem-metrics-other" style="font-size:.62rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-top:4px;">—</div>
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-other-val">0.60 gain</div>
                 </div>
+              </div>
+              <canvas id="ml-stem-master-canvas" width="512" height="48" style="width:100%;height:48px;background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:3px;display:block;margin-top:12px;"></canvas>
+              <div style="margin-top:4px;">
+                <span style="font-size:.65rem;color:var(--text-muted);">mixed master output (post-fader sum)</span>
+              </div>
+              <div id="ml-stem-notes" style="display:none;margin-top:10px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px 12px;font-size:.72rem;color:var(--text-muted);line-height:1.5;">
+                <strong style="color:var(--text-secondary);">Engine notes:</strong>
+                <span id="ml-stem-notes-body"></span>
               </div>
             </div>
 
@@ -907,65 +960,6 @@
             <div style="margin-top:14px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px 12px;font-size:.72rem;color:var(--text-muted);line-height:1.5;">
               <strong style="color:var(--text-secondary);">What this teaches:</strong>
               Modern Vision-Language Models (Qwen2.5-VL, CLIP-style encoders) never see images directly in their spirit &mdash; each word becomes a high-dimensional token vector, and the attention mechanism asks every image patch <em>&ldquo;how relevant are you to this word?&rdquo;</em>
-            </div>
-
-            <!-- Demucs 4-Stem Workbench -->
-            <details class="card ml-lab" id="ml-lab-stems" style="margin-bottom:12px;">
-              <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-                <span class="section-title" style="margin:0;font-size:.82rem;">Demucs 4-Stem Separation & Spectral Decomposition</span>
-                <span class="badge badge-cyan" style="font-size:.65rem;">vocals & drums & bass & other</span>
-              </summary>
-              <div class="card-body">
-                <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-                  <button class="btn btn-secondary btn-sm ml-stem-preset-btn" data-audio="tests/fixtures/media/audio/sample_match_audio.wav">Sample Audio</button>
-                  <input type="file" id="ml-stem-file-input" accept="audio/*" style="font-size:.72rem;color:var(--text-muted);display:none;">
-                </div>
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px;font-size:.72rem;color:var(--text-muted);">
-                  <div>
-                    <span>Vocals</span>
-                    <input type="range" id="ml-stem-vocals" min="0" max="100" value="85" style="width:100%;">
-                    <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-vocals-val">0.85</div>
-                  </div>
-                  <div>
-                    <span>Drums</span>
-                    <input type="range" id="ml-stem-drums" min="0" max="100" value="70" style="width:100%;">
-                    <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-drums-val">0.70</div>
-                  </div>
-                  <div>
-                    <span>Bass</span>
-                    <input type="range" id="ml-stem-bass" min="0" max="100" value="90" style="width:100%;">
-                    <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-bass-val">0.90</div>
-                  </div>
-                  <div>
-                    <span>Other</span>
-                    <input type="range" id="ml-stem-other" min="0" max="100" value="60" style="width:100%;">
-                    <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-other-val">0.60</div>
-                  </div>
-                </div>
-                <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-                  <button id="ml-stem-dispatch-btn" class="btn btn-primary btn-sm">🔬 Separate Stems</button>
-                  <span id="ml-stem-status" style="font-size:.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">Upload an audio file to enable stem separation.</span>
-                </div>
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:12px;">
-                  <div>
-                    <canvas id="ml-stem-waveform-vocals" style="height:80px;border:1px solid var(--border-subtle);border-radius:4px;"></canvas>
-                    <div style="font-size:.68rem;color:var(--text-muted);">Waveform</div>
-                  </div>
-                  <div>
-                    <canvas id="ml-stem-spectrum-vocals" style="height:80px;border:1px solid var(--border-subtle);border-radius:4px;"></canvas>
-                    <div style="font-size:.68rem;color:var(--text-muted);">Spectrum</div>
-                  </div>
-                </div>
-                <div style="display:flex;flex-direction:column;height:200px;">
-                  <div style="height:100%;background:var(--bg-primary);overflow:auto;">
-                    <div id="ml-stem-output-vocals" style="height:25%;background:rgba(255,0,0,0.1);"></div>
-                    <div id="ml-stem-output-drums" style="height:25%;background:rgba(0,255,0,0.1);"></div>
-                    <div id="ml-stem-output-bass" style="height:25%;background:rgba(0,0,255,0.1);"></div>
-                    <div id="ml-stem-output-other" style="height:25%;background:rgba(255,255,0,0.1);"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
               This studio inverts that process: it decomposes your prompt into tokens (striker &rarr; sport, goalkeeper &rarr; person/moving, referee &rarr; person/rules), assigns each a spatial Gaussian region in the 2D latent plane, and rolls a die seeded by the token hash to decide which regions light up &mdash; exactly how a diffusion model decides where to paint a midfield line versus a flying ball.
               The inverse problem is the deep one: <em>generating images from feature activations</em> (here) versus <em>classifying images into tokens</em> (the forward pass). Both share the same latent space; generation just walks it backward. Hover the heatmap to see which patch attended to which token.
             </div>

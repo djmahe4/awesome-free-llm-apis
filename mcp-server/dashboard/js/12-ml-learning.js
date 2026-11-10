@@ -1642,17 +1642,6 @@
     });
   });
 
-  ['vocals', 'drums', 'bass', 'other'].forEach(stem => {
-    const input = document.getElementById(`ml-stem-${stem}`);
-    const valElem = document.getElementById(`ml-stem-${stem}-val`);
-    if (input) {
-      input.addEventListener('input', (e) => {
-        const val = Number(e.target.value) / 100;
-        if (valElem) valElem.textContent = `${val.toFixed(2)} dB`;
-      });
-    }
-  });
-
   function renderDepthMap() {
     if (!depthCanvas) return;
     const dctx = depthCanvas.getContext('2d');
@@ -2197,118 +2186,438 @@
     vlmGenerateBtn.addEventListener('click', generateVlm);
 
     // Demucs 4-Stem Separation
-    const stemPresetBtns = document.querySelectorAll('.ml-stem-preset-btn');
-    stemPresetBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const audioPath = btn.getAttribute('data-audio');
-        if (audioPath) {
-          loadAndSeparateAudio(audioPath);
+    const stemState = {
+      audioContext: null,
+      masterGain: null,
+      masterAnalyser: null,
+      sourcePath: null,
+      payload: null,
+      buffers: {},
+      gains: {},
+      analysers: {},
+      sources: {},
+      playing: false,
+      rafId: null
+    };
+    const stemColors = { vocals: '#c084fc', drums: '#38bdf8', bass: '#4ade80', other: '#fbbf24' };
+
+    function setStemStatus(message, ok) {
+      const status = document.getElementById('ml-stem-status');
+      if (!status) return;
+      status.textContent = String(message || '').slice(0, 160);
+      status.style.color = ok ? 'var(--accent-green)' : 'var(--accent-amber)';
+    }
+
+    function separateStems(sourcePath) {
+      if (!sourcePath) {
+        setStemStatus('No audio source selected.', false);
+        return;
+      }
+      stemState.sourcePath = sourcePath;
+      setStemStatus('Dispatching reverse_tool handle...', true);
+      toolFetch({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tool: 'reverse_tool',
+          params: {
+            action: 'separate_audio_stems',
+            target: sourcePath,
+            authorization: 'lab',
+            options: {
+              method: 'spectral_multiband',
+              stems: ['vocals', 'drums', 'bass', 'other']
+            }
+          }
+        })
+      }).then(json => {
+        if (json && json.success && json.data) {
+          stemState.payload = json.data;
+          loadStemPayload(json.data);
+        } else {
+          const message = (json && json.error) || 'Separation request was rejected.';
+          setStemStatus(message, false);
+          stopStemMix();
         }
+      }).catch(err => {
+        setStemStatus((err && err.message) ? err.message.slice(0, 160) : String(err), false);
+        stopStemMix();
       });
-    });
+    }
 
-    const stemFileInput = document.getElementById('ml-stem-file-input');
-    stemFileInput.addEventListener('change', (e) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        const url = URL.createObjectURL(file);
-        loadAndSeparateAudio(url);
+    function ensureStemAudio() {
+      if (!stemState.audioContext) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        stemState.audioContext = new AudioCtx();
       }
-    });
+      return stemState.audioContext;
+    }
 
-    const stemRangeInputs = [
-      'ml-stem-vocals', 'ml-stem-drums', 'ml-stem-bass', 'ml-stem-other'
-    ];
-    stemRangeInputs.forEach(id => {
-      const input = document.getElementById(id);
-      if (input) {
-        input.addEventListener('input', () => {
-          const val = Math.round(input.value);
-          const labelId = id.replace('ml-stem-', '') + '-val';
-          const label = document.getElementById(labelId);
-          if (label) label.textContent = val / 100;
-        });
-      }
-    });
+    async function decodeStemAudio(name, dataUrl) {
+      const ctx = ensureStemAudio();
+      if (!dataUrl) throw new Error(`No audio payload for ${name}.`);
+      const base64 = dataUrl.includes(',') ? dataUrl.slice(dataUrl.indexOf(',') + 1) : dataUrl;
+      const bytes = Uint8Array.from(atob(base64), ch => ch.charCodeAt(0));
+      return await ctx.decodeAudioData(bytes.buffer);
+    }
 
-    const stemDispatchBtn = document.getElementById('ml-stem-dispatch-btn');
-    const stemStatus = document.getElementById('ml-stem-status');
-    let stemContext = null;
+    function renderStemNotes(names, perStem, payload) {
+      const container = document.getElementById('ml-stem-notes');
+      const body = document.getElementById('ml-stem-notes-body');
+      if (!container || !body) return;
+      const notes = Array.isArray(payload.learning_notes) ? payload.learning_notes : [];
+      const noteLines = notes.slice(0, 6).map(note => {
+        if (typeof note === 'string') return `<li>${note.slice(0, 160)}</li>`;
+        const text = (note && (note.text || note.message || note.title)) || JSON.stringify(note).slice(0, 160);
+        return `<li>${text}</li>`;
+      }).join('');
+      const srcName = stemState.sourcePath ? stemState.sourcePath.split(/[/\\]/).pop() : 'sample fixture';
+      body.innerHTML = `
+        <p>Source: <strong>${srcName}</strong> - method: spectral multiband - stems: ${names.join(', ')}.</p>
+        <p>The bundled previews are 200 ms 440 Hz calibration snippets (osynthesis of the cargo), not the decoded stem audio. Full-layer playback comes from the returned WAV payloads.</p>
+        ${noteLines ? '<ul>' + noteLines + '</ul>' : ''}`;
+      container.style.display = 'block';
+    }
 
-    async function loadAndSeparateAudio(audioPath) {
-      stemStatus.textContent = 'Loading audio file...';
-      stemStatus.style.color = 'var(--text-muted)';
+    function renderStemMetrics(names, perStem) {
+      names.forEach(name => {
+        const stem = (perStem && perStem[name]) || {};
+        const metricsEl = document.getElementById(`ml-stem-metrics-${name}`);
+        if (!metricsEl) return;
+        const rms = typeof stem.rms_power === 'number' ? stem.rms_power.toFixed(2) : 'n/a';
+        const centroid = typeof stem.spectral_centroid === 'number' ? `${stem.spectral_centroid.toFixed(0)} Hz` : 'n/a';
+        metricsEl.innerHTML = `
+          <div>Phase 1/3 - RMS: <strong>${rms}</strong></div>
+          <div>Phase 2/3 - Centroid: <strong>${centroid}</strong></div>
+          <div>Preview: 200 ms calibration snippet, not the full stem.</div>`;
+      });
+    }
 
+    async function loadStemPayload(payload) {
+      setStemStatus('Decoding stems...', true);
       try {
-        const res = await runReverseTool({
-          action: 'separate_audio_stems',
-          args: { audio_path: audioPath }
-        });
-
-        if (!res.success) throw new Error(res.error || 'Unknown error');
-
-        stemContext = res.data;
-        stemStatus.textContent = 'Separation complete — adjust stem volumes below.';
-
-        // Render waveforms
-        renderStemWaveforms(stemContext);
-
-        // Render output level controls
-        renderStemOutputs(stemContext);
+        const names = ['vocals', 'drums', 'bass', 'other'];
+        const perStem = (payload && payload.per_stem) ? payload.per_stem : (payload || {});
+        const decoded = {};
+        for (const name of names) {
+          const stem = perStem[name] || {};
+          decoded[name] = await decodeStemAudio(name, stem.audio_base64);
+        }
+        stemState.buffers = decoded;
+        renderStemNotes(names, perStem, payload);
+        renderStemMetrics(names, perStem);
+        const playBtn = document.getElementById('ml-stem-play-btn');
+        const stopBtn = document.getElementById('ml-stem-stop-btn');
+        if (playBtn) playBtn.disabled = false;
+        if (stopBtn) stopBtn.disabled = false;
+        drawStemsFlat();
+        setStemStatus(`Ready - ${names.length} stems loaded via spectral multiband separation.`, true);
       } catch (err) {
-        console.error('Stem separation failed:', err);
-        stemStatus.textContent = 'Separation failed: ' + String((err && err.message) || err).slice(0, 120);
-        stemStatus.style.color = 'var(--accent-amber)';
+        console.error('Stem payload decode failed:', err);
+        const message = (err && err.message) ? err.message.slice(0, 160) : String(err);
+        setStemStatus(message, false);
       }
     }
 
-    function renderStemWaveforms(ctx) {
-      const colors = {
-        vocals: 'rgba(255,0,0,0.6)',
-        drums: 'rgba(0,255,0,0.6)',
-        bass: 'rgba(0,0,255,0.6)',
-        other: 'rgba(255,255,0,0.6)'
-      };
+    function stemFaderValue(name) {
+      const input = document.getElementById(`ml-stem-${name}`);
+      if (!input) return 100;
+      const value = Number(input.value);
+      return Number.isFinite(value) ? value : 100;
+    }
 
-      Object.keys(ctx.stems).forEach(name => {
-        const canvas = document.getElementById('ml-stem-waveform-' + name);
-        if (!canvas || !ctx.stems[name]) return;
-        const ws = ctx.stems[name].waveform;
-        if (!ws) return;
-        const c = canvas.getContext('2d');
-        c.clearRect(0, 0, canvas.width, canvas.height);
-        c.strokeStyle = colors[name];
-        c.lineWidth = 2;
-        const height = canvas.height;
-        const step = Math.max(1, ws.length / canvas.width);
-        for (let i = 0; i < canvas.width; i++) {
-          const idx = Math.min(ws.length - 1, Math.floor(i * step));
-          const amp = ws[idx];
-          const y = height / 2 * (1 - amp);
-          if (i === 0) c.moveTo(i, y); else c.lineTo(i, y);
-        }
-        c.stroke();
+    function stemMuted(name) {
+      const btn = document.querySelector(`.ml-stem-mute-btn[data-stem="${name}"]`);
+      return !!(btn && btn.classList.contains('active'));
+    }
+
+    function stemSoloObscured(name) {
+      const anySolo = ['vocals', 'drums', 'bass', 'other'].some(other => {
+        if (other === name) return false;
+        const btn = document.querySelector(`.ml-stem-solo-btn[data-stem="${other}"]`);
+        return !!(btn && btn.classList.contains('active'));
+      });
+      if (!anySolo) return false;
+      const own = document.querySelector(`.ml-stem-solo-btn[data-stem="${name}"]`);
+      return !(own && own.classList.contains('active'));
+    }
+
+    function stemEffectiveGain(name) {
+      if (stemMuted(name) || stemSoloObscured(name)) return 0;
+      return stemFaderValue(name) / 100;
+    }
+
+    function updateStemButtonVisuals() {
+      ['vocals', 'drums', 'bass', 'other'].forEach(name => {
+        ['mute', 'solo'].forEach(kind => {
+          const btn = document.querySelector(`.ml-stem-${kind}-btn[data-stem="${name}"]`);
+          if (!btn) return;
+          if (btn.classList.contains('active')) {
+            btn.style.background = stemColors[name];
+            btn.style.color = '#0b0f1a';
+          } else {
+            btn.style.background = '';
+            btn.style.color = '';
+          }
+        });
       });
     }
 
-    function renderStemOutputs(ctx) {
-      const colors = {
-        vocals: 'rgba(255,0,0,0.15)',
-        drums: 'rgba(0,255,0,0.15)',
-        bass: 'rgba(0,0,255,0.15)',
-        other: 'rgba(255,255,0,0.15)'
-      };
+    function applyStemGains() {
+      ['vocals', 'drums', 'bass', 'other'].forEach(name => {
+        const gain = stemState.gains[name];
+        if (gain) gain.gain.value = stemEffectiveGain(name);
+      });
+      updateStemButtonVisuals();
+      if (!stemState.playing) drawStemsFlat();
+    }
 
+    function drawFlatLine(canvas, color) {
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, canvas.height / 2);
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.stroke();
+    }
+
+    function drawStemsFlat() {
+      ['vocals', 'drums', 'bass', 'other'].forEach(name => {
+        drawFlatLine(document.getElementById(`ml-stem-waveform-${name}`), stemColors[name]);
+      });
+      drawFlatLine(document.getElementById('ml-stem-master-canvas'), '#e2e8f0');
+    }
+
+    function stopOneSource(source) {
+      try {
+        source.stop();
+      } catch (err) {
+        return false;
+      }
+      return true;
+    }
+
+    function stopStemSources() {
+      Object.values(stemState.sources).forEach(source => stopOneSource(source));
+      stemState.sources = {};
+    }
+
+    function stopStemMix() {
+      stopStemSources();
+      stemState.playing = false;
+      if (stemState.rafId) {
+        cancelAnimationFrame(stemState.rafId);
+        stemState.rafId = null;
+      }
+      const hasBuffers = Object.keys(stemState.buffers).length > 0;
+      const playBtn = document.getElementById('ml-stem-play-btn');
+      const stopBtn = document.getElementById('ml-stem-stop-btn');
+      if (playBtn) playBtn.disabled = !hasBuffers;
+      if (stopBtn) stopBtn.disabled = true;
+      drawStemsFlat();
+    }
+
+    async function playStemMix() {
       const names = ['vocals', 'drums', 'bass', 'other'];
-      const containers = ['ml-stem-output-vocals', 'ml-stem-output-drums', 'ml-stem-output-bass', 'ml-stem-output-other'];
+      if (Object.keys(stemState.buffers).length === 0) {
+        setStemStatus('Run the separation first - no stems to play.', false);
+        return;
+      }
+      stopStemSources();
+      const ctx = ensureStemAudio();
+      if (ctx.state === 'suspended') await ctx.resume();
+      names.forEach(name => {
+        const buffer = stemState.buffers[name];
+        if (!buffer) return;
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+        if (!stemState.gains[name]) {
+          stemState.gains[name] = ctx.createGain();
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 512;
+          stemState.analysers[name] = analyser;
+          stemState.gains[name].connect(stemState.analysers[name]);
+          stemState.analysers[name].connect(stemState.masterGain);
+        }
+        source.connect(stemState.gains[name]);
+        stemState.gains[name].gain.value = stemEffectiveGain(name);
+        source.start();
+        stemState.sources[name] = source;
+      });
+      stemState.playing = true;
+      const playBtn = document.getElementById('ml-stem-play-btn');
+      const stopBtn = document.getElementById('ml-stem-stop-btn');
+      if (playBtn) playBtn.disabled = true;
+      if (stopBtn) stopBtn.disabled = false;
+      setStemStatus('Playing stems. Use faders, mute and solo to compare layers.', true);
+      if (stemState.rafId) cancelAnimationFrame(stemState.rafId);
+      stemState.rafId = requestAnimationFrame(drawStemsLoop);
+    }
 
-      names.forEach((name, i) => {
-        const container = document.getElementById(containers[i]);
-        if (!container || !ctx.stems) return;
-        const level = ctx.stems[name] ? Math.round(ctx.stems[name].level * 100) / 100 : 0;
-        container.style.background = colors[name] + Math.round((1 - level) * 100) / 100 + ';';
+    function drawStemsFrame() {
+      ['vocals', 'drums', 'bass', 'other'].forEach(name => {
+        const analyser = stemState.analysers[name];
+        const canvas = document.getElementById(`ml-stem-waveform-${name}`);
+        if (!analyser || !canvas) return;
+        const ctx = canvas.getContext('2d');
+        const data = new Uint8Array(analyser.fftSize);
+        analyser.getByteTimeDomainData(data);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = stemColors[name];
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        const step = canvas.width / data.length;
+        for (let i = 0; i < data.length; i++) {
+          const y = ((data[i] - 128) / 128) * (canvas.height / 2) + canvas.height / 2;
+          if (i === 0) ctx.moveTo(0, y);
+          else ctx.lineTo(i * step, y);
+        }
+        ctx.stroke();
+        const spectrumCanvas = document.getElementById(`ml-stem-spectrum-${name}`);
+        if (spectrumCanvas) {
+          const specCtx = spectrumCanvas.getContext('2d');
+          const freq = new Uint8Array(analyser.frequencyBinCount);
+          analyser.getByteFrequencyData(freq);
+          specCtx.clearRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
+          specCtx.fillStyle = stemColors[name];
+          const bars = 32;
+          const chunk = Math.max(1, Math.floor(freq.length / bars));
+          const barWidth = spectrumCanvas.width / bars;
+          for (let i = 0; i < bars; i++) {
+            let sum = 0;
+            for (let j = 0; j < chunk; j++) sum += freq[i * chunk + j] || 0;
+            const barHeight = (sum / chunk / 255) * spectrumCanvas.height;
+            specCtx.fillRect(i * barWidth + 1, spectrumCanvas.height - barHeight, barWidth - 2, barHeight);
+          }
+        }
+      });
+      const masterCanvas = document.getElementById('ml-stem-master-canvas');
+      if (masterCanvas && stemState.masterAnalyser) {
+        const ctx = masterCanvas.getContext('2d');
+        const data = new Uint8Array(stemState.masterAnalyser.fftSize);
+        stemState.masterAnalyser.getByteTimeDomainData(data);
+        ctx.clearRect(0, 0, masterCanvas.width, masterCanvas.height);
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        const step = masterCanvas.width / data.length;
+        for (let i = 0; i < data.length; i++) {
+          const y = ((data[i] - 128) / 128) * (masterCanvas.height / 2) + masterCanvas.height / 2;
+          if (i === 0) ctx.moveTo(0, y);
+          else ctx.lineTo(i * step, y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    function drawStemsLoop() {
+      if (!stemState.playing) return;
+      drawStemsFrame();
+      stemState.rafId = requestAnimationFrame(drawStemsLoop);
+    }
+
+    function ensureStemMasterChain() {
+      const ctx = ensureStemAudio();
+      if (stemState.masterGain) return ctx;
+      stemState.masterAnalyser = ctx.createAnalyser();
+      stemState.masterAnalyser.fftSize = 512;
+      stemState.masterGain = ctx.createGain();
+      stemState.masterGain.gain.value = 0.9;
+      stemState.masterGain.connect(stemState.masterAnalyser);
+      stemState.masterAnalyser.connect(ctx.destination);
+      return ctx;
+    }
+
+    function wireStemFader(name) {
+      const fader = document.getElementById(`ml-stem-${name}`);
+      const label = document.getElementById(`ml-stem-${name}-val`);
+      if (!fader || !label) return;
+      label.textContent = `${(stemFaderValue(name) / 100).toFixed(2)} gain`;
+      fader.addEventListener('input', () => {
+        label.textContent = `${(stemFaderValue(name) / 100).toFixed(2)} gain`;
+        applyStemGains();
       });
     }
+
+    function wireStemToggles(name) {
+      const muteBtn = document.querySelector(`.ml-stem-mute-btn[data-stem="${name}"]`);
+      if (muteBtn) {
+        muteBtn.addEventListener('click', () => {
+          muteBtn.classList.toggle('active');
+          applyStemGains();
+        });
+      }
+      const soloBtn = document.querySelector(`.ml-stem-solo-btn[data-stem="${name}"]`);
+      if (soloBtn) {
+        soloBtn.addEventListener('click', () => {
+          soloBtn.classList.toggle('active');
+          applyStemGains();
+        });
+      }
+    }
+
+    function wireStemWorkbench() {
+      const fileBtn = document.getElementById('ml-stem-file-btn');
+      const fileInput = document.getElementById('ml-stem-file-input');
+      const dispatchBtn = document.getElementById('ml-stem-dispatch-btn');
+      const playBtn = document.getElementById('ml-stem-play-btn');
+      const stopBtn = document.getElementById('ml-stem-stop-btn');
+
+      if (fileBtn && fileInput) {
+        fileBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async () => {
+          const file = fileInput.files && fileInput.files[0];
+          if (!file) return;
+          fileBtn.disabled = true;
+          setStemStatus('Uploading audio...', true);
+          try {
+            const form = new FormData();
+            form.append('file', file);
+            form.append('workspace_root', '.');
+            const response = await fetch('/api/upload', { method: 'POST', body: form });
+            const json = await response.json();
+            if (!json || !json.absPath) throw new Error('Upload did not return absPath.');
+            fileBtn.disabled = false;
+            const localName = json.absPath;
+            separateStems(localName);
+          } catch (err) {
+            fileBtn.disabled = false;
+            const message = (err && err.message) ? err.message.slice(0, 160) : String(err);
+            setStemStatus(message, false);
+          }
+        });
+      }
+
+      document.querySelectorAll('.ml-stem-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const audioPath = btn.getAttribute('data-audio');
+          if (audioPath) separateStems(audioPath);
+        });
+      });
+
+      if (dispatchBtn) {
+        dispatchBtn.addEventListener('click', () => {
+          separateStems(stemState.sourcePath || 'tests/fixtures/media/audio/sample_match_audio.wav');
+        });
+      }
+      if (playBtn) playBtn.addEventListener('click', playStemMix);
+      if (stopBtn) stopBtn.addEventListener('click', stopStemMix);
+
+      ['vocals', 'drums', 'bass', 'other'].forEach(name => {
+        wireStemFader(name);
+        wireStemToggles(name);
+      });
+      applyStemGains();
+      drawStemsFlat();
+    }
+
+
+    ensureStemMasterChain();
+    wireStemWorkbench();
 
     // Send to Augmentation Lab — convert the data URL into a real file
     // upload so the pooling kernel lab treats it like any uploaded PNG.
