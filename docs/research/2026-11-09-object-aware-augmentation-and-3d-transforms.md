@@ -1,7 +1,7 @@
 # Deep Research Report: Object-Aware Augmentation via Boundary-Aware Segmentation and 2.5D/3D Parallax Transforms
 
-**Target System:** `awesome-free-llm-apis` — `reverse_tool` & `movie_tool` Learning Engine  
-**References:** 
+**Target System:** `awesome-free-llm-apis` — `reverse_tool` & `movie_tool` Learning Engine
+**References:**
 - `docs/plans/rev_tool.md` (§0 Ground Rules, §5.2 `animate_still`, §7 Phases 6-7)
 - `docs/plans/rev_tool.v1-original.md` (Semantic Entity Extraction, SlimSAM, Depth Anything V2)
 - Academic Foundations: Depth Anything V2 (Yang et al., 2024), Segment Anything in High Quality (HQ-SAM, 2023), 3D Photography using Context-aware Layered Depth Inpainting (Shih et al., IEEE CVPR).
@@ -14,7 +14,7 @@ While global kernel transformations (min-pooling, max-pooling, Gaussian smoothin
 1. **Edge Bleeding:** Background texture bleeds into salient foreground subjects during pooling and smoothing operations.
 2. **Rubber-Sheet Smearing:** Warping an image using a single monolithic depth map stretches foreground boundaries across distant background pixels, causing severe tearing ("flying pixel artifacts").
 
-This research investigates the design of an **Object-Aware 3D Augmentation Pipeline** that combines **lightweight semantic segmentation (SlimSAM / MobileSAM)** with **relative metric depth estimation (Depth Anything V2 Small)** and **layered depth inpainting (OpenCV Telea / LaMa)**. The entire pipeline operates strictly under the **6 GB VRAM budget** with a **100% CPU-native fallback**, adhering directly to `rev_tool.md` Ground Rule 1.
+This report is a design proposal, not a measured or fully implemented pipeline. Current code uses local Depth Anything V2 Small only when `DEPTH_ANYTHING_MODEL_PATH` is configured, OpenCV GrabCut for explicit-bbox masking, and a depth-guided inverse warp. Model inference is CPU-only today. Missing weights return `not_available`; heuristic depth requires explicit opt-in. No 6 GB VRAM, 100% CPU fallback, or reconstruction-quality guarantee is claimed.
 
 ---
 
@@ -46,7 +46,7 @@ This research investigates the design of an **Object-Aware 3D Augmentation Pipel
 ```
 
 ### 1.1 The Rubber-Sheet Boundary Problem
-When a depth map $D(u, v)$ is treated as a continuous surface mesh, pixels at the transition boundary between a foreground person ($d_{fg} \approx 1.5\text{m}$) and the background ($d_{bg} \approx 20\text{m}$) form steep synthetic triangles. During camera rotation or horizontal translation ($t_x$), these triangles stretch, projecting foreground color onto background coordinates.
+Relative-depth values are not metric distances. Treating them as a continuous surface can still stretch foreground colors into background pixels during image warping.
 
 ### 1.2 The Object-Aware Solution: Layered Depth Representation (LDR)
 By segmenting the salient entity into a distinct binary mask $M_{fg}$, the scene is decomposed into:
@@ -59,28 +59,27 @@ By segmenting the salient entity into a distinct binary mask $M_{fg}$, the scene
 ## 2. Technical Component Architecture
 
 ### 2.1 Component 1: Lightweight Semantic Segmentation
-To stay within the memory and licensing constraints (`rev_tool.md` §0 & §1):
+Candidate shortlist only. No candidate is integrated. Parameter counts, weight sizes, licenses, VRAM, and latency are omitted until verified against exact model revisions and measured locally.
 
-| Model | Parameter Count | Weight Footprint | License | VRAM Peak | CPU Latency (512x512) |
-|---|---|---|---|---|---|
-| **Zigeng/SlimSAM-uniform** | 38.9M | ~150 MB (ONNX) | Apache-2.0 | ~0.6 GB | ~280 ms |
-| **MobileSAM** | 9.66M | ~39 MB | Apache-2.0 | ~0.4 GB | ~120 ms |
-| **BiRefNet-general-lite** | 12.8M | ~52 MB | MIT | ~0.5 GB | ~95 ms |
-| *SAM-2 Large (Excluded)* | 224M | ~900 MB | Non-comm | >3.2 GB | >2100 ms |
+| Candidate | Current status |
+|---|---|
+| **Zigeng/SlimSAM-uniform** | Not integrated; verify code and weight licenses before use. |
+| **MobileSAM** | Not integrated; verify code and weight licenses before use. |
+| **BiRefNet-general-lite** | Not integrated; verify code and weight licenses before use. |
+| *SAM-2 Large* | Excluded; no license or memory claim made here. |
 
-**Selection:** **MobileSAM** or **SlimSAM** via ONNX Runtime. 
-- Prompting Strategy: Bounding box derived from YOLOv8 object detection head (`detect` or `pose` head already implemented in `torch_nn_engine.py`), or automatic grid point prompt.
+The current implementation uses a caller-supplied bounding box and OpenCV GrabCut where available. It does not load these segmentation candidates or connect YOLO detections to segmentation.
 
-### 2.2 Component 2: Relative Metric Depth Estimation
-`Depth Anything V2 Small` (Apache-2.0, ~24.8M parameters, ~137 MB FP16 weights):
-- **Input:** RGB image scaled to $518 \times 518$ (or $392 \times 392$ on low-resource CPU).
-- **Output:** Dense relative disparity map $d \in [0.0, 1.0]$, where $1.0$ is the near camera plane and $0.0$ is the optical infinity cutoff.
-- **Quantization:** ONNX FP16 / INT8 quantization reduces disk footprint to ~68 MB.
+### 2.2 Component 2: Relative Depth Estimation
+`Depth Anything V2 Small` is loaded only from a user-configured local checkpoint. Verify its license against the exact checkpoint revision before deployment.
+- **Input:** The image is capped to a 2048-pixel long edge before the Hugging Face image processor applies checkpoint-configured preprocessing. No fixed 518-pixel or 392-pixel input size is guaranteed.
+- **Output:** Relative depth is normalized per image using the 1st and 99th percentiles. It is not metric depth and does not represent physical near/far planes.
+- **Quantization:** ONNX FP16 / INT8 conversion is not implemented or benchmarked in this project.
 
 ### 2.3 Component 3: Disocclusion Inpainting
 When the foreground layer translates by $\Delta x = f \cdot \frac{t_x}{Z}$, it reveals background pixels previously obscured.
-- **Method A (Pure CPU / Zero-Dependency):** OpenCV Fast Marching Method (`cv2.inpaint(img, mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)`). Runs in ~35 ms for typical human silhouette disocclusion.
-- **Method B (Neural Inpainting, Opt-In):** LaMa (Large Mask Inpainting, Apache-2.0, ONNX runtime, 196 MB weights). Produces sharper structural continuation for complex backgrounds (stadium pitch markings, architectural lines).
+- **Method A (CPU):** OpenCV Telea is used for filling the selected object footprint. Prior timing figures were unsupported and are withdrawn; measure on representative images.
+- **Method B (not implemented):** LaMa remains an optional research candidate. Verify exact weight licence, local-only loading, memory, and quality before integration.
 
 ### 2.4 Component 4: Boundary-Aware 2.5D Homography Warping
 For each depth plane $k \in \{1, \dots, N\}$, the projective homography $H_k$ mapping source pixel coordinates $(u, v, 1)^T$ to novel camera coordinates $(u', v', 1)^T$ is:
@@ -93,48 +92,40 @@ Where:
 - $t = [t_x, t_y, t_z]^T$ represents horizontal dolly, vertical crane, and zoom translation.
 - $n_k = [0, 0, 1]^T$ is the plane normal vector, and $d_k$ is the quantized depth value.
 
-Because $H_k$ is a $3 \times 3$ matrix transformation, the warping step executes at **>60 FPS using pure NumPy vectorized grid bilinear interpolation** (`cv2.warpPerspective` or `scipy.ndimage.map_coordinates`).
+This is a theoretical plane-warp reference, not the current implementation. Current renderer uses depth-quantized inverse remapping; no FPS claim is made.
 
 ---
 
 ## 3. Comparative Benchmark: Resource & Compute Budget
 
-Execution metrics measured under CPU-only and lightweight GPU configurations:
+No reproducible project measurements or hardware logs are available for these stages. Values previously shown here were unsupported estimates and are withdrawn:
 
-| Stage | Backend / Engine | VRAM (Peak) | Host RAM | Latency (CPU i7/Ryzen) | Latency (RTX 3060 6GB) |
-|---|---|---|---|---|---|
-| **Segmentation** | MobileSAM (ONNX) | 0 MB (CPU) / 410 MB (GPU) | ~320 MB | ~140 ms | ~24 ms |
-| **Depth Estimation** | Depth Anything V2 Small (ONNX) | 0 MB (CPU) / 580 MB (GPU) | ~420 MB | ~210 ms | ~32 ms |
-| **Disocclusion Inpainting** | OpenCV Telea | 0 MB (CPU) | ~80 MB | ~45 ms | ~45 ms |
-| **Layer Splitting & Matting** | NumPy vectorized | 0 MB | ~60 MB | ~12 ms | ~4 ms |
-| **Warp & Composite (1 frame)** | 2.5D Homography Mesh | 0 MB | ~40 MB | ~8 ms | ~1.5 ms |
-| **Total (Single Frame View)** | End-to-End Pipeline | **0 MB (CPU) / 990 MB (GPU)** | **~920 MB** | **~415 ms** | **~106 ms** |
-| **Total (60-Frame Sequence)** | Streaming Warper | **0 MB (CPU) / 990 MB (GPU)** | **~980 MB** | **~1.1 s** | **~280 ms** |
+| Stage | Backend / Engine | Peak VRAM | Host RAM | CPU latency | 6 GB GPU latency |
+|---|---|---:|---:|---:|---:|
+| Segmentation | Local mask backend | Not measured | Not measured | Not measured | Not measured |
+| Depth estimation | Depth Anything V2 Small, local checkpoint | Not measured | Not measured | Not measured | Not measured |
+| Inpainting | OpenCV Telea | Not measured | Not measured | Not measured | Not measured |
+| Warp/composite | NumPy/OpenCV | Not measured | Not measured | Not measured | Not measured |
+| End-to-end | Current branch implementation | Not measured | Not measured | Not measured | Not measured |
 
-> [!NOTE]
-> Peak VRAM is **~0.99 GB**, well beneath the **6.0 GB ceiling** established in `rev_tool.md` Ground Rule 1. CPU execution takes ~1.1s for a 60-frame trajectory, making it feasible for local interactive experimentation without server timeouts.
+Do not infer performance or budget compliance from model parameter count or weight-file size. Record hardware, model revision, input dimensions, peak RSS/VRAM, warmup policy, and repeated latency samples before making a budget claim.
 
----
+### 3.1 Current sample and backend status
+
+- Audio sample `Je pense à toi.m4a`: ffprobe reports AAC, stereo, 44.1 kHz, 295.056 s, 4,775,958 bytes. The configured Python 3.11 script correctly returns `not_available` because no local Demucs `htdemucs` checkpoint is configured. This is not an audio-separation quality benchmark; no stems were generated, so SDR/SIR/SAR or listening evaluation cannot be claimed.
+- Depth Anything V2 Small weights are not cached/configured. Default model mode returns `not_available`; the test suite exercises heuristic mode only when explicitly requested. No ML-depth latency/VRAM or object reconstruction quality was measured.
+- Base64 previews are presentation data, not evaluation evidence. Output PNG/WAV/GIF artifacts must be persisted and inspected; audio quality needs a real separation run and an objective/listening comparison against the original.
 
 ## 4. Retrospective Wiring Plan: Connecting to Existing Codebase
 
 The architecture aligns directly with existing structures in `mcp-server`:
 
 ### 4.1 Integration with YOLO Detection / Pose (`torch_nn_engine.py`)
-`torch_nn_engine.py` already outputs detected bounding boxes and keypoints for subjects (e.g. footballer pitch players). These boxes provide instantaneous, zero-cost prompt bounding boxes for MobileSAM, eliminating the need for an expensive automatic grid generation step.
+A caller-supplied object bounding box can be connected to an object mask. No YOLO-to-segmentation integration is currently implemented; no domain-specific preset is assumed.
 
-### 4.2 Integration with ML Studio Dashboard (`13b-ml-learning.html` & `12-ml-learning.js`)
-In the ML Studio tab, Section 7 already contains the HTML container:
-- ID `#ml-media-preset-depth`
-- Controls: `#ml-depth-near`, `#ml-depth-far`, `#ml-depth-dolly`
-- Canvas: `#ml-depth-preview-canvas` (width 200, height 120)
+### 4.2 Current ML Studio Dashboard wiring
 
-Currently, `12-ml-learning.js` attempts to call a phantom action `parallax_warp` on `movie_tool`.  
-**Recommended Fix:**
-1. Expose a unified Python engine `mcp-server/scripts/depth_parallax_engine.py`.
-2. Register action `run_3d_parallax_augmentation` in `reverse-tool.ts` (or `animate_still` in `movie_tool.ts` per `rev_tool.md` §5.2).
-3. Connect the frontend sliders (`near`, `far`, `dolly`) to dispatch `/api/tools/call` with parameters `{ action: 'animate_still', options: { depthLayers: 16, dolly: 15, pan: 5 } }`.
-4. Stream or return the base64 frames to render live in `#ml-depth-preview-canvas`.
+The depth panel uploads a caller-selected image through `/api/upload`, then invokes `reverse_tool` action `run_depth_parallax`. It renders the returned preview and displays the persisted output path. Default mode requires local Depth Anything V2 Small weights. Heuristic depth is a separate, unchecked opt-in. Audio dispatch requires an ownership/licence attestation and consumes persisted WAV stem paths; it does not synthesize previews.
 
 ---
 
@@ -142,4 +133,4 @@ Currently, `12-ml-learning.js` attempts to call a phantom action `parallax_warp`
 
 1. **Keep 2D Kernel Augmentations Fast & Independent:** Task 1 (`scene_augmentation.py`) serves as the foundational educational lab for linear spatial convolutions (pooling, smoothing, sharpening).
 2. **Layer Object-Awareness on Top:** Rather than replacing Task 1, object-aware augmentation and 3D parallax represent the natural progression into multi-modal spatial reasoning (Phase 7 in `rev_tool.md`).
-3. **Hardware Compatibility Guarantee:** By combining MobileSAM ONNX + Depth Anything V2 Small ONNX + Multi-Plane Homography warping, the system achieves commercial-safe, Apache-2.0 compliant pseudo-3D transforms on any standard laptop CPU without exceeding 1 GB RAM.
+3. **Hardware claim:** None. Measure the selected local model, image size, and render path on target hardware before asserting VRAM, RAM, latency, or compatibility.
