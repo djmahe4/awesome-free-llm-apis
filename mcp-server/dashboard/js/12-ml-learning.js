@@ -2196,6 +2196,120 @@
     }
     vlmGenerateBtn.addEventListener('click', generateVlm);
 
+    // Demucs 4-Stem Separation
+    const stemPresetBtns = document.querySelectorAll('.ml-stem-preset-btn');
+    stemPresetBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const audioPath = btn.getAttribute('data-audio');
+        if (audioPath) {
+          loadAndSeparateAudio(audioPath);
+        }
+      });
+    });
+
+    const stemFileInput = document.getElementById('ml-stem-file-input');
+    stemFileInput.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        const url = URL.createObjectURL(file);
+        loadAndSeparateAudio(url);
+      }
+    });
+
+    const stemRangeInputs = [
+      'ml-stem-vocals', 'ml-stem-drums', 'ml-stem-bass', 'ml-stem-other'
+    ];
+    stemRangeInputs.forEach(id => {
+      const input = document.getElementById(id);
+      if (input) {
+        input.addEventListener('input', () => {
+          const val = Math.round(input.value);
+          const labelId = id.replace('ml-stem-', '') + '-val';
+          const label = document.getElementById(labelId);
+          if (label) label.textContent = val / 100;
+        });
+      }
+    });
+
+    const stemDispatchBtn = document.getElementById('ml-stem-dispatch-btn');
+    const stemStatus = document.getElementById('ml-stem-status');
+    let stemContext = null;
+
+    async function loadAndSeparateAudio(audioPath) {
+      stemStatus.textContent = 'Loading audio file...';
+      stemStatus.style.color = 'var(--text-muted)';
+
+      try {
+        const res = await runReverseTool({
+          action: 'separate_audio_stems',
+          args: { audio_path: audioPath }
+        });
+
+        if (!res.success) throw new Error(res.error || 'Unknown error');
+
+        stemContext = res.data;
+        stemStatus.textContent = 'Separation complete — adjust stem volumes below.';
+
+        // Render waveforms
+        renderStemWaveforms(stemContext);
+
+        // Render output level controls
+        renderStemOutputs(stemContext);
+      } catch (err) {
+        console.error('Stem separation failed:', err);
+        stemStatus.textContent = 'Separation failed: ' + String((err && err.message) || err).slice(0, 120);
+        stemStatus.style.color = 'var(--accent-amber)';
+      }
+    }
+
+    function renderStemWaveforms(ctx) {
+      const colors = {
+        vocals: 'rgba(255,0,0,0.6)',
+        drums: 'rgba(0,255,0,0.6)',
+        bass: 'rgba(0,0,255,0.6)',
+        other: 'rgba(255,255,0,0.6)'
+      };
+
+      Object.keys(ctx.stems).forEach(name => {
+        const canvas = document.getElementById('ml-stem-waveform-' + name);
+        if (!canvas || !ctx.stems[name]) return;
+        const ws = ctx.stems[name].waveform;
+        if (!ws) return;
+        const c = canvas.getContext('2d');
+        c.clearRect(0, 0, canvas.width, canvas.height);
+        c.strokeStyle = colors[name];
+        c.lineWidth = 2;
+        const height = canvas.height;
+        const step = Math.max(1, ws.length / canvas.width);
+        for (let i = 0; i < canvas.width; i++) {
+          const idx = Math.min(ws.length - 1, Math.floor(i * step));
+          const amp = ws[idx];
+          const y = height / 2 * (1 - amp);
+          if (i === 0) c.moveTo(i, y); else c.lineTo(i, y);
+        }
+        c.stroke();
+      });
+    }
+
+    function renderStemOutputs(ctx) {
+      const colors = {
+        vocals: 'rgba(255,0,0,0.15)',
+        drums: 'rgba(0,255,0,0.15)',
+        bass: 'rgba(0,0,255,0.15)',
+        other: 'rgba(255,255,0,0.15)'
+      };
+
+      const names = ['vocals', 'drums', 'bass', 'other'];
+      const containers = ['ml-stem-output-vocals', 'ml-stem-output-drums', 'ml-stem-output-bass', 'ml-stem-output-other'];
+
+      names.forEach((name, i) => {
+        const container = document.getElementById(containers[i]);
+        if (!container || !ctx.stems) return;
+        const level = ctx.stems[name] ? Math.round(ctx.stems[name].level * 100) / 100 : 0;
+        container.style.background = colors[name] + Math.round((1 - level) * 100) / 100 + ';';
+      });
+    }
+
     // Send to Augmentation Lab — convert the data URL into a real file
     // upload so the pooling kernel lab treats it like any uploaded PNG.
     vlmSendBtn.addEventListener('click', async () => {

@@ -158,6 +158,8 @@ export const isModelAction = (act: string): boolean => [
   'run_scene_augmentation',
   'reverse_vlm_generate',
   'program_weight_space',
+  'separate_audio_stems',
+  'inspect_ocr_tokens',
 ].includes(act as any);
 
 export interface ReverseToolInput {
@@ -758,6 +760,26 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       };
     }
 
+    let scriptPath: string;
+    try {
+      scriptPath = action === 'run_scene_augmentation'
+        ? resolveEngineScriptPath('scene_augmentation.py')
+        : action === 'reverse_vlm_generate'
+          ? resolveEngineScriptPath('vlm_reverse_generator.py')
+          : action === 'separate_audio_stems'
+            ? resolveEngineScriptPath('audio_separator.py')
+          : action === 'inspect_ocr_tokens'
+            ? resolveEngineScriptPath('ocr_engine.py')
+            : resolveModelInspectorPath();
+    } catch (err: any) {
+      return {
+        success: false,
+        action,
+        target,
+        error: err.message || String(err),
+      };
+    }
+
     if (action === 'extract_model_layer' || action === 'analyze_model_layer' || action === 'quantize_layer') {
       if (!options?.layer || !String(options.layer).trim()) {
         return {
@@ -778,22 +800,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           error: 'Reconstruction of training samples requires explicit authorization: "consent" and options.explicitConsentAck: true due to potential training data privacy boundaries.',
         };
       }
-    }
-
-    let scriptPath: string;
-    try {
-      scriptPath = action === 'run_scene_augmentation'
-        ? resolveEngineScriptPath('scene_augmentation.py')
-        : action === 'reverse_vlm_generate'
-          ? resolveEngineScriptPath('vlm_reverse_generator.py')
-          : resolveModelInspectorPath();
-    } catch (err: any) {
-      return {
-        success: false,
-        action,
-        target,
-        error: err.message || String(err),
-      };
     }
 
     const actionMap: Record<string, string> = {
