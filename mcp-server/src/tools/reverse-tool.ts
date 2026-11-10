@@ -89,7 +89,7 @@ export function resolvePythonPath(): string {
   for (const cand of candidates) {
     if (cand === 'python' || cand === 'python3' || fs.existsSync(cand)) {
       try {
-        const res = spawnSync(cand, ['-c', 'import torch; print(torch.__version__)'], { timeout: 3000, stdio: 'pipe' });
+        const res = spawnSync(cand, ['-c', 'import torch; print(torch.__version__)'], { timeout: 30000, stdio: 'pipe' });
         if (res.status === 0) {
           cachedPythonBin = cand;
           return cand;
@@ -142,6 +142,9 @@ export type ReverseToolAction =
   | 'run_scene_augmentation'
   | 'run_depth_parallax'
   | 'animate_still'
+  | 'reverse_vlm_generate'
+  | 'separate_audio_stems'
+  | 'inspect_ocr_tokens'
   | 'program_weight_space';
 
 export const isModelAction = (act: string): boolean => [
@@ -159,7 +162,10 @@ export const isModelAction = (act: string): boolean => [
   'run_scene_augmentation',
   'run_depth_parallax',
   'animate_still',
+  'reverse_vlm_generate',
   'program_weight_space',
+  'separate_audio_stems',
+  'inspect_ocr_tokens',
 ].includes(act as any);
 
 export interface ReverseToolInput {
@@ -760,6 +766,37 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       };
     }
 
+    if (action === 'separate_audio_stems' && (authorization !== 'consent' || options?.explicitConsentAck !== true)) {
+      return {
+        success: false,
+        action,
+        target,
+        error: 'Audio stem separation requires authorization: "consent" and options.explicitConsentAck: true, confirming you own or are licensed to process this audio.',
+      };
+    }
+
+    let scriptPath: string;
+    try {
+      scriptPath = action === 'run_scene_augmentation'
+        ? resolveEngineScriptPath('scene_augmentation.py')
+        : (action === 'run_depth_parallax' || action === 'animate_still')
+          ? resolveEngineScriptPath('depth_parallax_engine.py')
+          : action === 'reverse_vlm_generate'
+            ? resolveEngineScriptPath('vlm_reverse_generator.py')
+          : action === 'separate_audio_stems'
+            ? resolveEngineScriptPath('audio_separator.py')
+          : action === 'inspect_ocr_tokens'
+            ? resolveEngineScriptPath('ocr_engine.py')
+            : resolveModelInspectorPath();
+    } catch (err: any) {
+      return {
+        success: false,
+        action,
+        target,
+        error: err.message || String(err),
+      };
+    }
+
     if (action === 'extract_model_layer' || action === 'analyze_model_layer' || action === 'quantize_layer') {
       if (!options?.layer || !String(options.layer).trim()) {
         return {
@@ -782,22 +819,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       }
     }
 
-    let scriptPath: string;
-    try {
-      scriptPath = action === 'run_scene_augmentation'
-        ? resolveEngineScriptPath('scene_augmentation.py')
-        : (action === 'run_depth_parallax' || action === 'animate_still')
-          ? resolveEngineScriptPath('depth_parallax_engine.py')
-          : resolveModelInspectorPath();
-    } catch (err: any) {
-      return {
-        success: false,
-        action,
-        target,
-        error: err.message || String(err),
-      };
-    }
-
     const actionMap: Record<string, string> = {
       inspect_model: 'inspect',
       infer_layer_roles: 'infer_roles',
@@ -813,6 +834,9 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       run_scene_augmentation: 'augment_scene',
       run_depth_parallax: 'parallax',
       animate_still: 'animate_still',
+      separate_audio_stems: 'separate_audio_stems',
+      reverse_vlm_generate: 'reverse_generate',
+      inspect_ocr_tokens: 'inspect_ocr_tokens',
       program_weight_space: 'program_weight_space',
     };
 
@@ -900,8 +924,30 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     if (options?.bins) {
       args.push('--bins', String(options.bins));
     }
+    if (options?.mode) {
+      args.push('--mode', String(options.mode));
+    }
+    if (options?.depthMode || options?.['depth-mode']) {
+      args.push('--depth-mode', String(options.depthMode || options['depth-mode']));
+    }
+    if (options?.resolution !== undefined) {
+      args.push('--resolution', String(options.resolution));
+    }
     if (options?.stems) {
       args.push('--stems', String(options.stems));
+    }
+    if (action === 'separate_audio_stems') {
+      args.push('--method', String(options?.method ?? 'htdemucs'));
+      const outputDir = options?.outputDir ?? options?.['output-dir'];
+      const outputDirPath = outputDir === undefined
+        ? path.join(process.cwd(), '.mcp-uploads', 'audio-stems')
+        : String(outputDir);
+      if (!isSafeAllowedPath(outputDirPath, allowedRoots)) {
+        return { success: false, action, target, error: 'Path traversal disallowed in options.outputDir.' };
+      }
+      args.push('--output-dir', path.resolve(outputDirPath));
+      const maxDuration = options?.maxDurationSeconds ?? options?.['max-duration-seconds'];
+      if (maxDuration !== undefined) args.push('--max-duration-seconds', String(maxDuration));
     }
     if (options?.buckets) {
       args.push('--buckets', String(options.buckets));
@@ -1001,7 +1047,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       try {
         const { stdout } = await execFileAsync(pythonBin, args, {
           maxBuffer: 10 * 1024 * 1024,
-          timeout: 120_000,
+          timeout: action === 'separate_audio_stems' ? 15 * 60_000 : 120_000,
           encoding: 'utf8',
           signal: runInfo?.controller?.signal,
         });
@@ -1083,7 +1129,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "run_scene_augmentation", "run_depth_parallax", "animate_still", "program_weight_space".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "run_scene_augmentation", "run_depth_parallax", "animate_still", "reverse_vlm_generate", "separate_audio_stems", "inspect_ocr_tokens", "program_weight_space".`,
   };
 }
 

@@ -1021,11 +1021,11 @@
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td><code>action</code></td><td>enum: status | abort | list_capabilities | analyze_javascript | analyze_artifact | get_evidence | scan_github | inspect_model | infer_layer_roles | trace_layer_execution | reconstruct_training_samples | extract_model_layer | analyze_model_layer | quantize_layer | assemble_moe | run_reasoning_model | run_yolo_nn | program_weight_space</td><td>✓</td><td>Analysis action to execute</td></tr>
+              <tr><td><code>action</code></td><td>enum: status | abort | list_capabilities | analyze_javascript | analyze_artifact | get_evidence | scan_github | inspect_model | infer_layer_roles | trace_layer_execution | reconstruct_training_samples | extract_model_layer | analyze_model_layer | quantize_layer | assemble_moe | run_reasoning_model | run_yolo_nn | run_scene_augmentation | run_depth_parallax | animate_still | reverse_vlm_generate | separate_audio_stems | inspect_ocr_tokens | program_weight_space</td><td>✓</td><td>Analysis action to execute</td></tr>
               <tr><td><code>target</code></td><td>string</td><td>for analyze / get / scan_github / model actions</td><td>Target file path, model artifact (.gguf, .pt, .onnx), evidence ID (ev-*), or GitHub repo ("owner/repo")</td></tr>
               <tr><td><code>authorization</code></td><td>enum: ctf | lab | consent</td><td>for analyze / target list / scan_github / model actions</td><td>Mandatory security authorization framing</td></tr>
               <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session identifier for async polling and status retrieval</td></tr>
-              <tr><td><code>options</code></td><td>object</td><td></td><td>Analysis parameters (ref, limit, query, storageDir, workspaceRoot, etc.)</td></tr>
+              <tr><td><code>options</code></td><td>object</td><td></td><td>Analysis parameters; depth uses DEPTH_ANYTHING_MODEL_PATH locally (or explicit depthMode=heuristic); audio requires local DEMUCS_MODEL_PATH and explicitConsentAck=true</td></tr>
             </tbody>
           </table>
           <div class="qs-guide-body" style="padding: 8px 12px; font-size: 0.78rem;">
@@ -2321,60 +2321,114 @@
 
           <!-- Preset Panels Container -->
           <div id="ml-media-panel-container" style="background:var(--bg-secondary);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);min-height:160px;">
-            <!-- Demucs 4-Stem Scratchpad -->
+            <!-- Demucs 4-Stem Workbench -->
             <div id="ml-media-preset-demucs" class="ml-media-subpanel">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                <span style="font-size:.78rem;font-weight:600;">Separated Audio Source Stems:</span>
-                <span style="font-size:.7rem;color:var(--text-muted);">48kHz Float32 STFT Isolation</span>
+                <span style="font-size:.78rem;font-weight:600;">Demucs 4-Stem Separation Workbench:</span>
+                <span style="font-size:.7rem;color:var(--text-muted);">Local Demucs only &middot; no synthetic fallback</span>
               </div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:12px;">
-                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;text-align:center;">
-                  <div style="font-size:.72rem;color:var(--accent-purple);font-weight:600;margin-bottom:6px;">🎤 Vocals</div>
-                  <input type="range" id="ml-stem-vocals" min="0" max="100" value="85" style="width:100%;">
-                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-vocals-val">0.85 dB</div>
+              <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+                <button id="ml-stem-file-btn" class="btn btn-secondary btn-sm">📂 Load Audio File</button>
+                <input type="file" id="ml-stem-file-input" accept="audio/*" style="font-size:.72rem;color:var(--text-muted);display:none;">
+                <button id="ml-stem-dispatch-btn" class="btn btn-primary btn-sm">🔬 Separate Stems</button>
+                <button id="ml-stem-play-btn" class="btn btn-secondary btn-sm" disabled>▶ Play Mix</button>
+                <button id="ml-stem-stop-btn" class="btn btn-secondary btn-sm" disabled>■ Stop</button>
+                <span id="ml-stem-status" style="font-size:.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">Load audio, attest ownership or licence, then run local separation.</span>
+              </div>
+              <label style="display:block;font-size:.7rem;color:var(--text-muted);margin:0 0 10px;">
+                <input type="checkbox" id="ml-stem-consent">
+                I own this audio or hold a licence permitting local stem separation.
+              </label>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:12px;">
+                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;" data-stem="vocals">
+                  <div style="font-size:.72rem;color:var(--accent-purple);font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                    <span>🎤 Vocals</span>
+                    <span style="display:flex;gap:4px;">
+                      <button class="ml-stem-mute-btn" data-stem="vocals" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">M</button>
+                      <button class="ml-stem-solo-btn" data-stem="vocals" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">S</button>
+                    </span>
+                  </div>
+                  <canvas id="ml-stem-waveform-vocals" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;"></canvas>
+                  <canvas id="ml-stem-spectrum-vocals" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;margin-top:4px;"></canvas>
+                  <input type="range" id="ml-stem-vocals" min="0" max="100" value="85" style="width:100%;margin-top:6px;">
+                  <div id="ml-stem-metrics-vocals" style="font-size:.62rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-top:4px;">—</div>
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-vocals-val">0.85 gain</div>
                 </div>
-                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;text-align:center;">
-                  <div style="font-size:.72rem;color:var(--accent-cyan);font-weight:600;margin-bottom:6px;">🥁 Drums</div>
-                  <input type="range" id="ml-stem-drums" min="0" max="100" value="70" style="width:100%;">
-                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-drums-val">0.70 dB</div>
+                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;" data-stem="drums">
+                  <div style="font-size:.72rem;color:var(--accent-cyan);font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                    <span>🥁 Drums</span>
+                    <span style="display:flex;gap:4px;">
+                      <button class="ml-stem-mute-btn" data-stem="drums" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">M</button>
+                      <button class="ml-stem-solo-btn" data-stem="drums" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">S</button>
+                    </span>
+                  </div>
+                  <canvas id="ml-stem-waveform-drums" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;"></canvas>
+                  <canvas id="ml-stem-spectrum-drums" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;margin-top:4px;"></canvas>
+                  <input type="range" id="ml-stem-drums" min="0" max="100" value="70" style="width:100%;margin-top:6px;">
+                  <div id="ml-stem-metrics-drums" style="font-size:.62rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-top:4px;">—</div>
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-drums-val">0.70 gain</div>
                 </div>
-                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;text-align:center;">
-                  <div style="font-size:.72rem;color:var(--accent-green);font-weight:600;margin-bottom:6px;">🎸 Bass</div>
-                  <input type="range" id="ml-stem-bass" min="0" max="100" value="90" style="width:100%;">
-                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-bass-val">0.90 dB</div>
+                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;" data-stem="bass">
+                  <div style="font-size:.72rem;color:var(--accent-green);font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                    <span>🎸 Bass</span>
+                    <span style="display:flex;gap:4px;">
+                      <button class="ml-stem-mute-btn" data-stem="bass" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">M</button>
+                      <button class="ml-stem-solo-btn" data-stem="bass" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">S</button>
+                    </span>
+                  </div>
+                  <canvas id="ml-stem-waveform-bass" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;"></canvas>
+                  <canvas id="ml-stem-spectrum-bass" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;margin-top:4px;"></canvas>
+                  <input type="range" id="ml-stem-bass" min="0" max="100" value="90" style="width:100%;margin-top:6px;">
+                  <div id="ml-stem-metrics-bass" style="font-size:.62rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-top:4px;">—</div>
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-bass-val">0.90 gain</div>
                 </div>
-                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;text-align:center;">
-                  <div style="font-size:.72rem;color:var(--accent-amber);font-weight:600;margin-bottom:6px;">🎹 Other / Synths</div>
-                  <input type="range" id="ml-stem-other" min="0" max="100" value="60" style="width:100%;">
-                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-other-val">0.60 dB</div>
+                <div style="background:var(--bg-primary);padding:10px;border-radius:4px;" data-stem="other">
+                  <div style="font-size:.72rem;color:var(--accent-amber);font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                    <span>🎹 Other / Synths</span>
+                    <span style="display:flex;gap:4px;">
+                      <button class="ml-stem-mute-btn" data-stem="other" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">M</button>
+                      <button class="ml-stem-solo-btn" data-stem="other" style="font-size:.6rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:3px;background:var(--bg-primary);color:var(--text-muted);cursor:pointer;">S</button>
+                    </span>
+                  </div>
+                  <canvas id="ml-stem-waveform-other" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;"></canvas>
+                  <canvas id="ml-stem-spectrum-other" width="256" height="48" style="width:100%;height:48px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:3px;display:block;margin-top:4px;"></canvas>
+                  <input type="range" id="ml-stem-other" min="0" max="100" value="60" style="width:100%;margin-top:6px;">
+                  <div id="ml-stem-metrics-other" style="font-size:.62rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-top:4px;">—</div>
+                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;" id="ml-stem-other-val">0.60 gain</div>
                 </div>
+              </div>
+              <canvas id="ml-stem-master-canvas" width="512" height="48" style="width:100%;height:48px;background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:3px;display:block;margin-top:12px;"></canvas>
+              <div style="margin-top:4px;">
+                <span style="font-size:.65rem;color:var(--text-muted);">mixed master output (post-fader sum)</span>
+              </div>
+              <div id="ml-stem-notes" style="display:none;margin-top:10px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px 12px;font-size:.72rem;color:var(--text-muted);line-height:1.5;">
+                <strong style="color:var(--text-secondary);">Engine notes:</strong>
+                <span id="ml-stem-notes-body"></span>
               </div>
             </div>
 
             <!-- Depth Anything V2 3D Parallax Scratchpad -->
             <div id="ml-media-preset-depth" class="ml-media-subpanel" style="display:none;">
-              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:14px;align-items:center;">
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                <input type="file" id="ml-depth-file-input" accept="image/*" style="display:none;">
+                <button id="ml-depth-file-btn" class="btn btn-secondary btn-sm">Load image</button>
+                <button id="ml-depth-run-btn" class="btn btn-primary btn-sm" disabled>Render pseudo-3D</button>
+                <span id="ml-depth-status" style="font-size:.7rem;color:var(--text-muted);">Depth Anything V2 Small must be installed locally; no download occurs.</span>
+              </div>
+              <label style="display:block;font-size:.7rem;color:var(--text-muted);margin-bottom:10px;">
+                <input type="checkbox" id="ml-depth-heuristic-opt-in">
+                Explicitly opt into non-ML heuristic depth if local model is unavailable.
+              </label>
+              <label style="display:block;font-size:.72rem;color:var(--text-muted);max-width:320px;">
+                Camera parallax dolly: <strong id="ml-val-dolly" style="color:var(--accent-amber);">15 px</strong>
+                <input type="range" id="ml-depth-dolly" min="-30" max="30" value="15" style="width:100%;">
+              </label>
+              <div style="display:grid;grid-template-columns:minmax(180px, 1fr) minmax(180px, 1fr);gap:12px;align-items:start;margin-top:12px;">
                 <div>
-                  <div style="font-size:.78rem;font-weight:600;margin-bottom:6px;">Relative Depth Field Map:</div>
-                  <div style="display:flex;flex-direction:column;gap:8px;">
-                    <label style="font-size:.72rem;color:var(--text-muted);">
-                      Near Plane Disparity: <strong id="ml-val-near" style="color:var(--accent-cyan);">0.2m</strong>
-                      <input type="range" id="ml-depth-near" min="1" max="50" value="20" style="width:100%;">
-                    </label>
-                    <label style="font-size:.72rem;color:var(--text-muted);">
-                      Far Plane Cutoff: <strong id="ml-val-far" style="color:var(--accent-purple);">10.0m</strong>
-                      <input type="range" id="ml-depth-far" min="50" max="200" value="100" style="width:100%;">
-                    </label>
-                    <label style="font-size:.72rem;color:var(--text-muted);">
-                      Camera Parallax Dolly: <strong id="ml-val-dolly" style="color:var(--accent-amber);">15 mm</strong>
-                      <input type="range" id="ml-depth-dolly" min="-30" max="30" value="15" style="width:100%;">
-                    </label>
-                  </div>
+                  <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:4px;">Rendered image artifact preview</div>
+                  <canvas id="ml-depth-preview-canvas" width="512" height="320" style="width:100%;max-width:512px;background:#0a0f1d;border-radius:4px;border:1px solid var(--border-subtle);display:block;"></canvas>
                 </div>
-                <div style="text-align:center;">
-                  <canvas id="ml-depth-preview-canvas" width="200" height="120" style="background:#0a0f1d;border-radius:4px;border:1px solid var(--border-subtle);display:inline-block;"></canvas>
-                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;">Ray-marched 2.5D disparity grid</div>
-                </div>
+                <div id="ml-depth-artifact" style="font-size:.68rem;color:var(--text-muted);overflow-wrap:anywhere;"></div>
               </div>
             </div>
 
@@ -2394,20 +2448,42 @@
               </div>
             </div>
 
-            <!-- OCR & Decision Scratchpad -->
+            <!-- OCR Decision Studio (Task 8) -->
             <div id="ml-media-preset-ocr" class="ml-media-subpanel" style="display:none;">
-              <div style="font-size:.78rem;font-weight:600;margin-bottom:6px;">Bounding Decision &amp; Token Classification:</div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;font-family:'JetBrains Mono',monospace;font-size:.7rem;">
-                <div style="background:var(--bg-primary);padding:8px;border-radius:4px;">
-                  <span style="color:var(--accent-purple);">[BBOX #0]</span> [x: 42, y: 18, w: 120, h: 28] &rarr; "ML STUDIO" (conf: 0.998)
-                  <br>
-                  <span style="color:var(--accent-cyan);">[BBOX #1]</span> [x: 180, y: 18, w: 94, h: 28] &rarr; "WAVEFRONT" (conf: 0.984)
+              <div style="font-size:.78rem;font-weight:600;margin-bottom:6px;">OCR Token Bounding &amp; Spatial Layout Inspection:</div>
+              <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+                <input type="file" id="ml-ocr-file-input" accept="image/*,.pdf" style="display:none;">
+                <button id="ml-ocr-load-btn" class="btn btn-secondary btn-sm">📂 Load Image / PDF</button>
+                <button id="ml-ocr-sample-btn" class="btn btn-secondary btn-sm" title="Run against the committed frame_0050.jpg fixture">🧪 Use Fixture</button>
+                <button id="ml-ocr-inspect-btn" class="btn btn-primary btn-sm" disabled>🔍 Run Token Inspection</button>
+                <span id="ml-ocr-status" style="font-size:.7rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">Load an image or PDF to enable spatial token inspection.</span>
+              </div>
+              <div style="display:grid;grid-template-columns:minmax(280px,1.4fr) minmax(220px,1fr);gap:12px;">
+                <div>
+                  <div id="ml-ocr-viewport" style="background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:6px;padding:10px;min-height:240px;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+                    <div id="ml-ocr-empty" style="font-size:.7rem;color:var(--text-muted);padding:20px;text-align:center;">Viewport &mdash; token boxes and layout-group overlays render here after inspection.</div>
+                    <div id="ml-ocr-stage" style="position:relative;display:none;max-width:100%;">
+                      <img id="ml-ocr-img" style="display:block;max-width:100%;max-height:300px;" alt="OCR target">
+                      <canvas id="ml-ocr-overlay" style="position:absolute;inset:0;width:100%;height:100%;display:none;"></canvas>
+                    </div>
+                  </div>
+                  <div id="ml-ocr-legend" style="display:none;margin-top:6px;flex-wrap:wrap;font-size:.65rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;gap:12px;">
+                    <span><span style="color:var(--accent-green);">■</span> token conf &gt; 0.9</span>
+                    <span><span style="color:var(--accent-amber);">■</span> 0.7 &ndash; 0.9</span>
+                    <span><span style="color:var(--accent-red);">■</span> &lt; 0.7</span>
+                    <span><span style="color:var(--accent-cyan);">⊞</span> dashed = layout block grouping</span>
+                  </div>
                 </div>
-                <div style="background:var(--bg-primary);padding:8px;border-radius:4px;">
-                  <span style="color:var(--accent-green);">[DECISION]</span> Modality: Vision-Language Alignment
-                  <br>
-                  <span style="color:var(--accent-amber);">[TOKEN PROB]</span> Max entropy threshold: 0.042
+                <div id="ml-ocr-token-list" style="max-height:300px;overflow-y:auto;background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:6px;padding:8px;font-family:'JetBrains Mono',monospace;font-size:.66rem;color:var(--text-muted);">
+                  Token list with confidence meters renders here.
                 </div>
+              </div>
+              <div id="ml-ocr-summary" style="display:none;margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--accent-cyan);background:var(--bg-primary);padding:6px 10px;border-radius:4px;"></div>
+              <div style="margin-top:10px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px 12px;font-size:.72rem;color:var(--text-muted);line-height:1.5;">
+                <strong style="color:var(--text-secondary);">What This Teaches:</strong>
+                Document-VQA models (DocVQA, LayoutLM, Qwen-VL) need <em>2D structure</em>, not just text. Unlike stem mixing or depth warps &mdash; where cross-attention attends along a 1D token timeline &mdash; OCR grounding feeds every LLM word a
+                <code style="color:var(--accent-cyan);">(x, y, w, h)</code> bbox and a reading-order rank, so cross-attention fuses glyphs with layout geometry. The color bands above mirror the confidence thresholds real mediators use to decide
+                when to trust an extracted field versus re-ask the user.
               </div>
             </div>
           </div>
@@ -2424,6 +2500,116 @@
         </div>
       </div>
 
+          </div>
+        </details>
+
+        <details class="card ml-lab" id="ml-lab-pooling" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">Pooling kernel lab <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-cyan" style="font-size:.65rem;">min/max/avg &middot; gaussian &middot; laplacian</span>
+          </summary>
+          <div class="card-body">
+            <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+              <button class="btn btn-secondary btn-sm ml-pool-preset-btn active" data-op="max_pool">Max Pool</button>
+              <button class="btn btn-secondary btn-sm ml-pool-preset-btn" data-op="min_pool">Min Pool</button>
+              <button class="btn btn-secondary btn-sm ml-pool-preset-btn" data-op="avg_pool">Avg Pool</button>
+              <button class="btn btn-secondary btn-sm ml-pool-preset-btn" data-op="gaussian_smooth">Gaussian Smooth</button>
+              <button class="btn btn-secondary btn-sm ml-pool-preset-btn" data-op="laplacian_sharpen">Laplacian Sharpen</button>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+              <input type="file" id="ml-pool-file-input" accept="image/*" style="font-size:.72rem;color:var(--text-muted);">
+              <span id="ml-pool-status" style="font-size:.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">Upload an image to enable the before/after comparator.</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:12px;font-size:.72rem;color:var(--text-muted);">
+              <div>
+                <label for="ml-pool-kernel">Kernel size: <span id="ml-pool-kernel-val">3</span></label>
+                <input type="range" id="ml-pool-kernel" min="2" max="7" value="3" style="width:100%;">
+              </div>
+              <div>
+                <label for="ml-pool-stride">Stride: <span id="ml-pool-stride-val">2</span></label>
+                <input type="range" id="ml-pool-stride" min="1" max="4" value="2" style="width:100%;">
+              </div>
+              <div>
+                <label for="ml-pool-intensity">Intensity / sigma: <span id="ml-pool-intensity-val">0.50</span></label>
+                <input type="range" id="ml-pool-intensity" min="0" max="100" value="50" style="width:100%;">
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+              <span style="font-size:.72rem;color:var(--text-muted);">Kernel matrix:</span>
+              <div id="ml-pool-matrix" style="display:grid;gap:2px;"></div>
+              <span id="ml-pool-matrix-note" style="font-size:.68rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;"></span>
+            </div>
+            <button id="ml-pool-apply-btn" class="btn btn-primary btn-sm" disabled>🌀 Run kernel on image</button>
+            <div id="ml-pool-comparator" style="display:none;position:relative;max-width:640px;margin-top:14px;border:1px solid var(--border-subtle);border-radius:6px;overflow:hidden;">
+              <canvas id="ml-pool-before-canvas" style="display:block;width:100%;"></canvas>
+              <canvas id="ml-pool-after-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;"></canvas>
+              <div id="ml-pool-divider" style="position:absolute;top:0;bottom:0;left:50%;width:3px;background:var(--accent-cyan);cursor:ew-resize;z-index:2;box-sizing:border-box;"></div>
+              <span style="position:absolute;top:6px;left:8px;font-size:.62rem;font-family:'JetBrains Mono',monospace;background:rgba(0,0,0,.55);color:#fff;padding:2px 6px;border-radius:3px;z-index:1;">BEFORE</span>
+              <span style="position:absolute;top:6px;right:8px;font-size:.62rem;font-family:'JetBrains Mono',monospace;background:var(--accent-cyan);color:#000;padding:2px 6px;border-radius:3px;z-index:1;">AFTER</span>
+            </div>
+            <p id="ml-pool-hint" style="display:none;font-size:.7rem;color:var(--text-muted);margin-top:6px;">Drag the cyan divider to sweep between the original image and the kernel output.</p>
+            <div id="ml-pool-metrics" style="display:none;margin-top:10px;"></div>
+            <div style="margin-top:14px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px 12px;font-size:.72rem;color:var(--text-muted);line-height:1.5;">
+              <strong style="color:var(--text-secondary);">What this teaches:</strong>
+              Max pooling keeps the brightest pixel in each window (edge-preserving downscale), min keeps the darkest, and average blends toward a blur while downscaling.
+              Gaussian smoothing trades exactness for softness &mdash; its weights fall off from the window center and sigma grows with the intensity slider.
+              A Laplacian kernel subtracts each pixel from its neighborhood so strong local differences (edges) light up &mdash; the same sharpen kernel many photo editors ship.
+            </div>
+          </div>
+        </details>
+
+        <details class="card ml-lab" id="ml-lab-vlm" style="margin-bottom:12px;">
+          <summary class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-title" style="margin:0;font-size:.82rem;">VLM reverse image synthesis &amp; attribution studio <span class="collapse-toggle-icon">&#9662;</span></span>
+            <span class="badge badge-cyan" style="font-size:.65rem;">prompt &rarr; pixels &middot; patch attention</span>
+          </summary>
+          <div class="card-body">
+            <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+              <button class="btn btn-secondary btn-sm ml-vlm-preset-btn" data-prompt="Soccer striker shooting penalty kick toward upper corner">Soccer striker</button>
+              <button class="btn btn-secondary btn-sm ml-vlm-preset-btn" data-prompt="Goalkeeper diving across goal line to save ball">Goalkeeper diving</button>
+              <button class="btn btn-secondary btn-sm ml-vlm-preset-btn" data-prompt="Referee gesturing with yellow card near midfield line">Referee yellow card</button>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+              <input type="text" id="ml-vlm-prompt" placeholder="Describe the image the VLM should regenerate..." style="flex:1;min-width:220px;font-size:.75rem;padding:6px 8px;background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--text-secondary);">
+              <button id="ml-vlm-generate-btn" class="btn btn-primary btn-sm">🖼 Synthesize image</button>
+              <span id="ml-vlm-status" style="font-size:.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">Enter a prompt — the engine decomposes it into token attention geometry.</span>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
+              <button class="btn btn-secondary btn-sm ml-vlm-mode-btn active" data-mode="feature_attribution">Feature Attribution Map</button>
+              <button class="btn btn-secondary btn-sm ml-vlm-mode-btn" data-mode="prototype_activation">Class Prototype Synthesis</button>
+              <button class="btn btn-secondary btn-sm ml-vlm-mode-btn" data-mode="patch_attention_energy">Patch Attention Energy</button>
+              <span style="font-size:.72rem;color:var(--text-muted);">Resolution:
+                <select id="ml-vlm-resolution" style="background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--text-secondary);font-size:.72rem;padding:3px 6px;">
+                  <option value="128" selected>128 &middot; 16&times;16 patches</option>
+                  <option value="256">256 &middot; 32&times;32 patches</option>
+                </select>
+              </span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px;">
+              <div>
+                <div style="font-size:.68rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-bottom:4px;">SYNTHESIZED IMAGE</div>
+                <img id="ml-vlm-image" style="display:none;width:100%;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);">
+                <div id="ml-vlm-image-empty" style="aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;background:var(--bg-primary);border:1px dashed var(--border-subtle);border-radius:var(--radius-sm);font-size:.68rem;color:var(--text-muted);">no synthesis yet</div>
+              </div>
+              <div>
+                <div style="font-size:.68rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-bottom:4px;">PATCH ATTENTION HEATMAP <span style="color:hotpink;">(hover for tokens)</span></div>
+                <canvas id="ml-vlm-heatmap" style="display:none;width:100%;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);cursor:crosshair;"></canvas>
+                <div id="ml-vlm-heatmap-empty" style="aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;background:var(--bg-primary);border:1px dashed var(--border-subtle);border-radius:var(--radius-sm);font-size:.68rem;color:var(--text-muted);">no attention map yet</div>
+                <div id="ml-vlm-hover" style="display:none;margin-top:6px;font-size:.68rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;"></div>
+              </div>
+            </div>
+            <div id="ml-vlm-tokens" style="display:none;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
+            <div id="ml-vlm-metrics" style="display:none;margin-top:4px;"></div>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap;">
+              <button id="ml-vlm-send-btn" class="btn btn-primary btn-sm" disabled>📤 Send to Augmentation Lab</button>
+              <span style="font-size:.68rem;color:var(--text-muted);">Pipes the synthesized image into the pooling kernel lab above.</span>
+            </div>
+            <div style="margin-top:14px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px 12px;font-size:.72rem;color:var(--text-muted);line-height:1.5;">
+              <strong style="color:var(--text-secondary);">What this teaches:</strong>
+              Modern Vision-Language Models (Qwen2.5-VL, CLIP-style encoders) never see images directly in their spirit &mdash; each word becomes a high-dimensional token vector, and the attention mechanism asks every image patch <em>&ldquo;how relevant are you to this word?&rdquo;</em>
+              This studio inverts that process: it decomposes your prompt into tokens (striker &rarr; sport, goalkeeper &rarr; person/moving, referee &rarr; person/rules), assigns each a spatial Gaussian region in the 2D latent plane, and rolls a die seeded by the token hash to decide which regions light up &mdash; exactly how a diffusion model decides where to paint a midfield line versus a flying ball.
+              The inverse problem is the deep one: <em>generating images from feature activations</em> (here) versus <em>classifying images into tokens</em> (the forward pass). Both share the same latent space; generation just walks it backward. Hover the heatmap to see which patch attended to which token.
+            </div>
           </div>
         </details>
 

@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
-"""
-scripts/depth_parallax_engine.py
-Object-Aware 3D Augmentation & Volumetric Pseudo-3D Parallax Engine.
-Aligned with docs/plans/rev_tool.md Section 5.2 (animate_still / pseudo-3D parallax).
+"""Local depth-guided pseudo-3D image warp and bbox-selected object transform.
 
-Features:
-1. Continuous 2.5D/3D Pseudo-Parallax (mode='continuous_parallax' or 'scene_parallax'):
-   Edge-aligned bilateral depth field with continuous camera motion (azimuth, elevation, dolly, pan).
-   Zero discrete staircase contour tearing, zero cardboard cutoffs, 100% intact hairlines and full anatomy.
-2. Volumetric Spherical 3D Rotation (target='ball' or mask_type='sphere'):
-   True 3D spherical surface geometry Z = sqrt(R^2 - r^2) with texture-wrapped Euler rotation.
-3. Full-Body Entity 3D Parallax (target='goalkeeper' or 'referee'):
-   Non-truncated full body geometry (hairline to cleats) with pooling-layer pixel awareness and Telea inpainting.
-
-Pure NumPy / OpenCV / PIL fallback (zero heavy GPU requirements, <6GB budget).
+Depth Anything V2 Small weights must already exist locally. Heuristic depth is
+available only by explicit opt-in. Single-image warps do not reconstruct hidden
+surfaces and are not true 3D scene reconstruction.
 """
 
 import sys
@@ -35,40 +25,9 @@ except ImportError:
     HAS_OPENCV = False
 
 
-TARGET_PRESETS = {
-    "ball": {
-        "bbox": (680, 440, 860, 640),
-        "mask_type": "circle",
-        "description": "Copa Del Rey Official Match Ball (Volumetric Spherical Relief)"
-    },
-    "goalkeeper": {
-        "bbox": (1470, 330, 1730, 990),
-        "mask_type": "fullbody",
-        "description": "Goalkeeper Ter Stegen/Peña (Full Body Hairline to Cleats)"
-    },
-    "referee": {
-        "bbox": (480, 30, 1060, 1080),
-        "mask_type": "fullbody",
-        "description": "Main Official Referee (Full Body Hairline to Cleats)"
-    },
-    "pedestal": {
-        "bbox": (1040, 665, 1180, 990),
-        "mask_type": "rect",
-        "description": "Copa Del Rey Red Branding Pedestal"
-    },
-    "arch": {
-        "bbox": (420, 130, 1720, 330),
-        "mask_type": "rect",
-        "description": "Copa Del Rey MAPFRE Arch Header"
-    }
-}
-
-
 def generate_relative_depth(img_np: np.ndarray) -> np.ndarray:
     """
-    Computes a continuous relative depth map [0.0 (far), 1.0 (near)]
-    using multi-scale edge gradient, vertical atmospheric perspective, and central focus priors.
-    Edge-aligned via bilateral filter to preserve sharp anatomical depth boundaries.
+    Explicit heuristic fallback only; this is not machine-learned depth.
     """
     h, w, _ = img_np.shape
     y_coords, x_coords = np.indices((h, w), dtype=np.float32)
@@ -108,6 +67,46 @@ def generate_relative_depth(img_np: np.ndarray) -> np.ndarray:
     return depth.astype(np.float32)
 
 
+class DepthModelUnavailable(RuntimeError):
+    pass
+
+
+def estimate_depth_map(img_np: np.ndarray, depth_mode: str = "model") -> tuple[np.ndarray, dict]:
+    """Estimate relative depth from a configured local model, or explicit heuristic mode."""
+    if depth_mode == "heuristic":
+        return generate_relative_depth(img_np), {"backend": "heuristic", "weights": "none"}
+    if depth_mode != "model":
+        raise ValueError("depth_mode must be 'model' or explicitly opted-in 'heuristic'")
+    model_path = os.environ.get("DEPTH_ANYTHING_MODEL_PATH", "").strip()
+    if not model_path or not os.path.isdir(model_path):
+        raise DepthModelUnavailable(
+            "Depth Anything V2 Small unavailable: set DEPTH_ANYTHING_MODEL_PATH to a local model directory; no weights were downloaded."
+        )
+    try:
+        import torch
+        import torch.nn.functional as torch_functional
+        from transformers import AutoImageProcessor, AutoModelForDepthEstimation
+        processor = AutoImageProcessor.from_pretrained(model_path, local_files_only=True)
+        model = AutoModelForDepthEstimation.from_pretrained(model_path, local_files_only=True)
+        model.to("cpu")
+        model.eval()
+        image = Image.fromarray(np.clip(img_np, 0, 255).astype(np.uint8), mode="RGB")
+        inputs = processor(images=image, return_tensors="pt")
+        with torch.inference_mode():
+            prediction = model(**inputs).predicted_depth
+            prediction = torch_functional.interpolate(
+                prediction.unsqueeze(1), size=image.size[::-1], mode="bicubic", align_corners=False
+            ).squeeze()
+        depth = prediction.detach().cpu().numpy().astype(np.float32)
+    except Exception as exc:
+        raise DepthModelUnavailable("Local Depth Anything V2 Small could not run: " + str(exc)) from exc
+    low, high = np.percentile(depth, [1, 99])
+    if not np.isfinite(low) or not np.isfinite(high) or high - low < 1e-6:
+        raise DepthModelUnavailable("Depth model returned a constant or non-finite depth map")
+    normalized = np.clip((depth - low) / (high - low), 0.0, 1.0)
+    return normalized.astype(np.float32), {"backend": "Depth Anything V2 Small", "weights": "local"}
+
+
 def compute_depth_entropy(depth_map: np.ndarray, bins: int = 32) -> float:
     counts, _ = np.histogram(depth_map, bins=bins, range=(0.0, 1.0))
     probs = counts[counts > 0].astype(np.float32) / float(depth_map.size)
@@ -122,7 +121,7 @@ def compute_pooling_pixel_awareness(roi_np: np.ndarray) -> np.ndarray:
     """
     rh, rw, _ = roi_np.shape
     if HAS_OPENCV:
-        gray = cv2.cvtColor(roi_np.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+        gray = cv2.cvtColor(roi_np.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
         pool_diffs = []
         for k in [3, 7, 15, 31]:
             if k >= min(rh, rw):
@@ -181,13 +180,7 @@ def create_object_mask(
     cy = (y1 + y2) / 2.0
 
     if mask_type == "auto":
-        aspect = bw / float(bh)
-        if 0.75 < aspect < 1.33 and max(bw, bh) < 320:
-            mask_type = "sphere"
-        elif HAS_OPENCV:
-            mask_type = "fullbody"
-        else:
-            mask_type = "rect"
+        mask_type = "fullbody" if HAS_OPENCV else "rect"
 
     if mask_type in ("sphere", "circle", "ball") and HAS_OPENCV:
         roi = img_np[y1:y2, x1:x2].astype(np.float32)
@@ -281,8 +274,8 @@ def create_object_mask(
             final_canvas_mask = np.zeros((h, w), dtype=np.float32)
             final_canvas_mask[y1:y2, x1:x2] = final_roi
             return np.clip(final_canvas_mask, 0.0, 1.0)
-        except Exception:
-            mask_type = "rect"
+        except Exception as exc:
+            raise RuntimeError("GrabCut mask extraction failed: " + str(exc)) from exc
 
     # Rectangular mask with feathered borders
     mask = np.zeros((h, w), dtype=np.float32)
@@ -343,31 +336,31 @@ def inpaint_revealed_background(
     return bg_clean
 
 
-def run_boundary_aware_3d_volumetric_transform(
+def run_bbox_object_pseudo3d_transform(
     img_np: np.ndarray,
     bbox: tuple[int, int, int, int],
     yaw: float = 30.0,
     pitch: float = 10.0,
     roll: float = 0.0,
-    target: str = "ball",
-    mask_type: str = "circle",
-    inpaint_background: bool = True
+    target: str = "user_bbox",
+    mask_type: str = "auto",
+    inpaint_background: bool = True,
+    depth_map: np.ndarray | None = None
 ) -> tuple[np.ndarray, dict]:
-    """
-    True Mask & Boundary-Aware 3D Volumetric Transformation.
-    Replaces naive circular lens distortion with boundary-anchored surface depth regression.
-
-    1. Extracts real segmented entity mask from pixels (NOT an idealized geometric circle).
-    2. Computes Euclidean Distance Field D(x, y) from the true irregular boundary dOmega.
-    3. Regresses continuous 3D surface depth Z(x, y) = sqrt(max(0, 2*D_max*D - D^2)),
-       which rigorously anchors Z = 0 at every point on the silhouette boundary.
-    4. Rotates local 3D points [x - cx, y - cy, Z(x, y)] under 3D Euler rotation R(yaw, pitch, roll).
-    5. Warps via sub-pixel Lanczos4 inverse ray remapping without artificial circular shearing.
-    """
+    """Apply bbox-mask-constrained 2.5D relief; hidden surfaces are not reconstructed."""
     h, w, c = img_np.shape
-    x1, y1, x2, y2 = bbox
+    x1, y1, x2, y2 = (int(v) for v in bbox)
+    x1, x2 = max(0, x1), min(w, x2)
+    y1, y2 = max(0, y1), min(h, y2)
+    if x2 - x1 < 4 or y2 - y1 < 4:
+        raise ValueError("bbox must overlap image and be at least 4x4 pixels")
 
-    pad = max(10, int(0.15 * max(x2 - x1, y2 - y1)))
+    if max(abs(yaw), abs(pitch), abs(roll)) > 45:
+        raise ValueError("Object pseudo-3D rotation angles must stay within +/-45 degrees")
+    box_w, box_h = x2 - x1, y2 - y1
+    angle = math.radians(max(abs(yaw), abs(pitch), abs(roll)))
+    rotated_extent = abs(math.cos(angle)) * max(box_w, box_h) + abs(math.sin(angle)) * min(box_w, box_h)
+    pad = max(10, int(math.ceil((rotated_extent - max(box_w, box_h)) / 2 + 0.20 * max(box_w, box_h))))
     bx1 = max(0, x1 - pad)
     by1 = max(0, y1 - pad)
     bx2 = min(w, x2 + pad)
@@ -383,7 +376,12 @@ def run_boundary_aware_3d_volumetric_transform(
     if HAS_OPENCV:
         dist_map = cv2.distanceTransform(binary_mask, cv2.DIST_L2, 5)
         d_max = float(dist_map.max())
-        if d_max > 1.0:
+        if depth_map is not None:
+            local_depth = np.clip(depth_map[by1:by2, bx1:bx2], 0.0, 1.0)
+            d_low, d_high = np.percentile(local_depth[binary_mask > 0], [1, 99]) if np.any(binary_mask) else (0.0, 1.0)
+            z_surface = np.clip((local_depth - d_low) / max(float(d_high - d_low), 1e-6), 0.0, 1.0)
+            z_surface *= float(min(ph, pw)) * 0.20 * binary_mask
+        elif d_max > 1.0:
             z_surface = np.sqrt(np.maximum(0.0, 2.0 * d_max * dist_map - dist_map**2))
         else:
             z_surface = np.zeros((ph, pw), dtype=np.float32)
@@ -403,7 +401,11 @@ def run_boundary_aware_3d_volumetric_transform(
         norm_r = np.sqrt((x_idx - pcx)**2 + (y_idx - pcy)**2) / max(r_approx, 1.0)
         dist_map = np.clip(1.0 - norm_r, 0.0, 1.0) * r_approx * patch_mask
         d_max = float(dist_map.max())
-        z_surface = np.sqrt(np.maximum(0.0, 2.0 * d_max * dist_map - dist_map**2))
+        if depth_map is not None:
+            local_depth = np.clip(depth_map[by1:by2, bx1:bx2], 0.0, 1.0)
+            z_surface = local_depth * float(min(ph, pw)) * 0.20 * binary_mask
+        else:
+            z_surface = np.sqrt(np.maximum(0.0, 2.0 * d_max * dist_map - dist_map**2))
 
     ry = math.radians(yaw)
     rx = math.radians(pitch)
@@ -424,13 +426,17 @@ def run_boundary_aware_3d_volumetric_transform(
 
     sx = pcx + P_src[:, :, 0]
     sy = pcy + P_src[:, :, 1]
-    front = (P_src[:, :, 2] >= -1.0) & (patch_mask > 0.08) & (sx >= 0) & (sx < pw - 1) & (sy >= 0) & (sy < ph - 1)
+    front = (P_src[:, :, 2] >= -1.0) & (sx >= 0) & (sx < pw - 1) & (sy >= 0) & (sy < ph - 1)
 
     if HAS_OPENCV:
         map_x = np.where(front, sx, 0.0).astype(np.float32)
         map_y = np.where(front, sy, 0.0).astype(np.float32)
         rot_patch = cv2.remap(patch.astype(np.uint8), map_x, map_y, cv2.INTER_LANCZOS4)
-        valid_mask = front.astype(np.float32) * patch_mask
+        source_alpha = cv2.remap(
+            patch_mask.astype(np.float32), map_x, map_y, cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT, borderValue=0,
+        )
+        valid_mask = front.astype(np.float32) * source_alpha
         feather_mask = cv2.GaussianBlur(valid_mask, (5, 5), 1.2)[:, :, None]
     else:
         xs_clip = np.clip(sx, 0, pw - 2)
@@ -444,7 +450,10 @@ def run_boundary_aware_3d_volumetric_transform(
         top = patch[y0, x0] * (1 - wx) + patch[y0, x1] * wx
         bottom = patch[y1, x0] * (1 - wx) + patch[y1, x1] * wx
         rot_patch = np.clip(top * (1 - wy) + bottom * wy, 0, 255).astype(np.uint8)
-        valid_mask = front.astype(np.float32) * patch_mask
+        alpha_top = patch_mask[y0, x0] * (1 - (xs_clip - x0)) + patch_mask[y0, x1] * (xs_clip - x0)
+        alpha_bottom = patch_mask[y1, x0] * (1 - (xs_clip - x0)) + patch_mask[y1, x1] * (xs_clip - x0)
+        source_alpha = alpha_top * (1 - (ys_clip - y0)) + alpha_bottom * (ys_clip - y0)
+        valid_mask = front.astype(np.float32) * source_alpha
         feather_mask = valid_mask[:, :, None]
 
     if inpaint_background:
@@ -461,178 +470,87 @@ def run_boundary_aware_3d_volumetric_transform(
     footprint_full = np.zeros((h, w), dtype=bool)
     footprint_full[by1:by2, bx1:bx2] = valid_mask > 0.05
     outside = (full_mask < 0.01) & ~(footprint_full)
-    stability = round(float(np.mean(np.isclose(final_composite[outside], img_np[outside], atol=2))), 4)
+    stability = round(float(np.mean(np.isclose(final_composite[outside], img_np[outside], atol=2))), 4) if np.any(outside) else 1.0
 
+    source_pixels = max(int(np.sum(patch_mask > 0.05)), 1)
+    transformed_pixels = int(np.sum(valid_mask > 0.05))
     metrics = {
-        "mode": "object_3d_rotation",
-        "target": target or "custom",
+        "mode": "pseudo_3d_object_rotation",
+        "render_type": "2.5D; hidden surfaces are not reconstructed",
+        "depth_source": "Depth Anything V2 Small" if depth_map is not None else "mask_shape_prior",
+        "target": target or "user_bbox",
         "target_bbox": [int(x1), int(y1), int(x2), int(y2)],
-        "mask_type": mask_type if mask_type != "auto" else "circle",
-        "pooling_pixel_awareness": True,
-        "boundary_aware_regression": True,
+        "mask_type": mask_type,
+        "mask_backend": "opencv_grabcut" if mask_type in ("auto", "fullbody", "grabcut") and HAS_OPENCV else ("bbox_rect" if mask_type == "auto" else mask_type),
         "boundary_distance_max": round(d_max, 2),
         "rotation_angles": {"yaw": float(yaw), "pitch": float(pitch), "roll": float(roll)},
-        "object_pixels_transformed": int(np.sum(valid_mask > 0.05)),
+        "object_pixels_transformed": transformed_pixels,
+        "foreground_retention_ratio": round(transformed_pixels / source_pixels, 4),
         "background_stability_score": stability,
-        "disocclusion_ratio": round(float(np.sum(valid_mask > 0.05)) / float(max((x2 - x1) * (y2 - y1), 1)), 4)
+        "disocclusion_ratio": None,
+        "disocclusion_status": "not_measured_by_single-image-warp",
     }
     return final_composite, metrics
 
-# Backward compatibility alias
-run_volumetric_sphere_3d_rotation = run_boundary_aware_3d_volumetric_transform
+# Compatibility alias; output remains pseudo-3D, not volumetric reconstruction.
+run_volumetric_sphere_3d_rotation = run_bbox_object_pseudo3d_transform
 
 
 def run_continuous_pseudo3d_parallax(
     img_np: np.ndarray,
+    depth_map: np.ndarray,
     azimuth: float = 3.0,
     elevation: float = -1.0,
     dolly: float = 15.0,
     pan: float = 0.0,
     shift_y: float = 0.0,
-    z_focus: float = 800.0,
-    z_near: float = 400.0,
-    z_far: float = 1600.0,
+    depth_layers: int = 16,
+    depth_source: str = "model",
     mode: str = "continuous_parallax"
 ) -> tuple[np.ndarray, dict]:
-    """
-    Multi-Seed Points Ground Homography & Anatomical Relationship Engine.
-    Aligned with docs/plans/rev_tool.md Section 5.2.
-
-    1. Projective Ground Plane Homography:
-       Pitch surface converges to vanishing horizon line y_horizon.
-       Parallax flow on grass scales with ground foreshortening distance.
-    2. Multi-Seed Contact Anchors & Player Foot Angles:
-       Enforces zero-slip at cleats and ball contact points.
-       Upright torso/head parallax scales with relative height above the ground anchor.
-    3. Seamless Sub-Pixel Lanczos4 Remapping:
-       Zero stepped tears, zero planar shears, full anatomical preservation.
-    """
+    """Render explicitly labelled pseudo-3D parallax using estimated relative depth."""
     h, w, _ = img_np.shape
-    cx, cy = w / 2.0, h / 2.0
-
-    r_az = math.radians(azimuth)
-    r_el = math.radians(elevation)
-
-    # 1. Pitch vanishing horizon line (~26% of frame height)
-    y_horizon = int(0.26 * h)
-
-    # 2. Base Ground Homography Field
+    if depth_map.shape != (h, w):
+        raise ValueError("Depth map dimensions do not match input image")
+    if depth_layers < 2 or depth_layers > 64:
+        raise ValueError("depth_layers must be between 2 and 64")
+    depth = np.clip(np.asarray(depth_map, dtype=np.float32), 0.0, 1.0)
+    depth = np.round(depth * (depth_layers - 1)) / float(depth_layers - 1)
     y_coords, x_coords = np.indices((h, w), dtype=np.float32)
-    eta = np.clip((y_coords - y_horizon) / float(max(h - y_horizon, 1)), 0.0, 1.0)
-
-    # Ground plane homography displacement
-    flow_x = np.where(
-        y_coords >= y_horizon,
-        pan * eta + math.tan(r_az) * (x_coords - cx) * eta,
-        pan * 0.15 + math.tan(r_az) * (x_coords - cx) * 0.15
-    )
-    flow_y = np.where(
-        y_coords >= y_horizon,
-        shift_y * eta + math.tan(r_el) * (y_coords - y_horizon) * eta,
-        shift_y * 0.15
-    )
-
-    # 3. Multi-Seed Entity Anchors (scale normalized to current w, h)
-    scale_x = w / 1920.0
-    scale_y = h / 1080.0
-    multiseed_anchors = [
-        # Referee: standing on pitch, foot contact at y~960, head at y~45
-        {
-            "name": "referee",
-            "bbox": (int(480 * scale_x), int(30 * scale_y), int(1060 * scale_x), int(1080 * scale_y)),
-            "contact_y": int(960 * scale_y),
-            "head_y": int(45 * scale_y),
-            "anchor_x": int(770 * scale_x),
-            "upright_factor": 0.40
-        },
-        # Ball: resting on pitch at y~635
-        {
-            "name": "ball",
-            "bbox": (int(680 * scale_x), int(440 * scale_y), int(860 * scale_x), int(640 * scale_y)),
-            "contact_y": int(635 * scale_y),
-            "head_y": int(445 * scale_y),
-            "anchor_x": int(770 * scale_x),
-            "upright_factor": 0.10
-        },
-        # Goalkeeper: standing on pitch, foot contact at y~985, head at y~330
-        {
-            "name": "goalkeeper",
-            "bbox": (int(1470 * scale_x), int(330 * scale_y), int(1730 * scale_x), int(990 * scale_y)),
-            "contact_y": int(985 * scale_y),
-            "head_y": int(330 * scale_y),
-            "anchor_x": int(1600 * scale_x),
-            "upright_factor": 0.35
-        }
-    ]
-
-    # Enforce zero-slip ground contact + upright anatomical parallax
-    for ent in multiseed_anchors:
-        bx1, by1, bx2, by2 = ent["bbox"]
-        cy_contact = ent["contact_y"]
-        cy_head = ent["head_y"]
-        ent_h = max(cy_contact - cy_head, 10)
-
-        # Ground displacement at the contact anchor
-        eta_contact = (cy_contact - y_horizon) / float(max(h - y_horizon, 1))
-        gx_contact = pan * eta_contact + math.tan(r_az) * (ent["anchor_x"] - cx) * eta_contact
-        gy_contact = shift_y * eta_contact + math.tan(r_el) * (cy_contact - y_horizon) * eta_contact
-
-        roi_y = y_coords[by1:by2, bx1:bx2]
-        # Relative height above ground contact: 0.0 at cleats, 1.0 at head
-        h_rel = np.clip((cy_contact - roi_y) / float(ent_h), 0.0, 1.0)
-
-        # Upright anatomical lever arm (cleats stay locked to grass, head tilts in 3D perspective)
-        ent_flow_x = gx_contact + math.tan(r_az) * ent_h * ent["upright_factor"] * h_rel
-        ent_flow_y = gy_contact + math.tan(r_el) * ent_h * (ent["upright_factor"] * 0.5) * h_rel
-
-        # Smooth horizontal blend to match ground homography at lateral boundaries
-        roi_x = x_coords[by1:by2, bx1:bx2]
-        half_w = max((bx2 - bx1) / 2.0, 1.0)
-        wx = np.clip(1.0 - np.abs(roi_x - ent["anchor_x"]) / half_w, 0.0, 1.0)
-        wx_smooth = np.sin(wx * (math.pi / 2.0)) ** 2
-        blend_weight = wx_smooth * np.clip(h_rel * 1.2, 0.0, 1.0)
-
-        flow_x[by1:by2, bx1:bx2] = (1.0 - blend_weight) * flow_x[by1:by2, bx1:bx2] + blend_weight * ent_flow_x
-        flow_y[by1:by2, bx1:bx2] = (1.0 - blend_weight) * flow_y[by1:by2, bx1:bx2] + blend_weight * ent_flow_y
-
-    # 4. Dolly zoom perspective scaling
-    scale = np.maximum(1.0 + (dolly / 100.0) * (0.15 + 0.85 * eta), 0.01)
-
+    cx, cy = w / 2.0, h / 2.0
+    r_az, r_el = math.radians(azimuth), math.radians(elevation)
+    flow_x = pan * depth + math.tan(r_az) * (x_coords - cx) * depth
+    flow_y = shift_y * depth + math.tan(r_el) * (y_coords - cy) * depth
+    scale = np.maximum(1.0 + (dolly / 100.0) * depth, 0.05)
     map_x = ((x_coords - cx) / scale + cx - flow_x).astype(np.float32)
     map_y = ((y_coords - cy) / scale + cy - flow_y).astype(np.float32)
-
+    valid = (map_x >= 0) & (map_x < w) & (map_y >= 0) & (map_y < h)
     if HAS_OPENCV:
-        warped = cv2.remap(img_np.astype(np.uint8), map_x, map_y, cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REFLECT)
-        final_canvas = warped
+        canvas = cv2.remap(
+            img_np.astype(np.uint8), map_x, map_y, cv2.INTER_LANCZOS4,
+            borderMode=cv2.BORDER_REFLECT,
+        )
     else:
-        xs_clip = np.clip(map_x, 0, w - 1)
-        ys_clip = np.clip(map_y, 0, h - 1)
-        x0 = np.floor(xs_clip).astype(int)
-        x1 = np.clip(x0 + 1, 0, w - 1)
-        y0 = np.floor(ys_clip).astype(int)
-        y1 = np.clip(y0 + 1, 0, h - 1)
-        wx = (xs_clip - x0)[:, :, None]
-        wy = (ys_clip - y0)[:, :, None]
+        xs = np.clip(map_x, 0, w - 1)
+        ys = np.clip(map_y, 0, h - 1)
+        x0, y0 = np.floor(xs).astype(int), np.floor(ys).astype(int)
+        x1, y1 = np.clip(x0 + 1, 0, w - 1), np.clip(y0 + 1, 0, h - 1)
+        wx, wy = (xs - x0)[:, :, None], (ys - y0)[:, :, None]
         top = img_np[y0, x0] * (1 - wx) + img_np[y0, x1] * wx
         bottom = img_np[y1, x0] * (1 - wx) + img_np[y1, x1] * wx
-        final_canvas = np.clip(top * (1 - wy) + bottom * wy, 0, 255).astype(np.uint8)
-
-    depth_entropy = compute_depth_entropy(eta)
-    disocclusion_ratio = float(np.mean(np.abs(flow_x) + np.abs(flow_y)) / float(max(w, h)))
-
+        canvas = np.clip(top * (1 - wy) + bottom * wy, 0, 255).astype(np.uint8)
     metrics = {
-        "mode": mode,
-        "azimuth": float(azimuth),
-        "elevation": float(elevation),
-        "dolly": float(dolly),
-        "pan": float(pan),
-        "shift_y": float(shift_y),
-        "depth_entropy": round(depth_entropy, 4),
-        "disocclusion_ratio": round(disocclusion_ratio, 4),
-        "multiseed_regression": True,
-        "ground_horizon_y": y_horizon
+        "mode": "pseudo_3d_parallax",
+        "depth_source": depth_source,
+        "depth_layers": int(depth_layers),
+        "depth_entropy_bits": round(compute_depth_entropy(depth), 4),
+        "mean_flow_pixels": round(float(np.mean(np.hypot(flow_x, flow_y))), 4),
+        "out_of_frame_ratio": round(float(np.mean(~valid)), 6),
+        "disocclusion_ratio": None,
+        "disocclusion_status": "not_measured_by_inverse_warp",
+        "camera": {"azimuth": float(azimuth), "elevation": float(elevation), "dolly": float(dolly), "pan": float(pan), "shift_y": float(shift_y)},
     }
-    return final_canvas, metrics
+    return canvas, metrics
 
 
 def run_isolated_object_3d_rotation(
@@ -645,43 +563,16 @@ def run_isolated_object_3d_rotation(
     mask_type: str = "auto",
     focal_length: float = 1200.0,
     camera_dist: float = 1200.0,
-    inpaint_background: bool = True
+    inpaint_background: bool = True,
+    depth_map: np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict]:
-    """
-    Executes true 3D perspective rotation on an isolated foreground object
-    using mask & boundary-aware depth surface regression.
-    """
-    h, w, c = img_np.shape
-
-    scale_x = w / 1920.0
-    scale_y = h / 1080.0
-
-    if target and target in TARGET_PRESETS:
-        preset = TARGET_PRESETS[target]
-        px1, py1, px2, py2 = preset["bbox"]
-        x1 = int(round(px1 * scale_x))
-        y1 = int(round(py1 * scale_y))
-        x2 = int(round(px2 * scale_x))
-        y2 = int(round(py2 * scale_y))
-        if mask_type == "auto":
-            mask_type = preset.get("mask_type", "auto")
-    elif bbox is not None:
-        x1, y1, x2, y2 = bbox
-    else:
-        x1 = int(round(480 * scale_x))
-        y1 = int(round(30 * scale_y))
-        x2 = int(round(1060 * scale_x))
-        y2 = int(round(1080 * scale_y))
-
-    return run_boundary_aware_3d_volumetric_transform(
-        img_np,
-        (x1, y1, x2, y2),
-        yaw=yaw,
-        pitch=pitch,
-        roll=roll,
-        target=target or "custom",
-        mask_type=mask_type,
-        inpaint_background=inpaint_background
+    """Apply bbox-constrained pseudo-3D foreground rotation; this is not full 3D reconstruction."""
+    if bbox is None:
+        raise ValueError("Object-aware rotation requires an explicit bbox [x1,y1,x2,y2]")
+    return run_bbox_object_pseudo3d_transform(
+        img_np, bbox, yaw=yaw, pitch=pitch, roll=roll,
+        target=target or "user_bbox", mask_type=mask_type,
+        inpaint_background=inpaint_background, depth_map=depth_map,
     )
 
 
@@ -691,8 +582,6 @@ def run_depth_parallax(
     dolly: float = 15.0,
     pan: float = 0.0,
     shift_y: float = 0.0,
-    near: float = 20.0,
-    far: float = 100.0,
     mode: str = "continuous_parallax",
     yaw: float = 0.0,
     pitch: float = 0.0,
@@ -700,60 +589,61 @@ def run_depth_parallax(
     bbox: tuple[int, int, int, int] | None = None,
     target: str | None = None,
     mask_type: str = "auto",
-    output_path: str | None = None
+    output_path: str | None = None,
+    depth_mode: str = "model",
 ) -> dict:
-    if not os.path.exists(img_path):
+    if not os.path.isfile(img_path):
         raise FileNotFoundError(f"Input image not found: {img_path}")
-
     Image.MAX_IMAGE_PIXELS = 16_000_000
-    pil_img = Image.open(img_path).convert("RGB")
-    orig_w, orig_h = pil_img.width, pil_img.height
-    scale_factor = 1.0
-    if max(orig_w, orig_h) > 2048:
-        scale_factor = 2048.0 / max(orig_w, orig_h)
-        new_w, new_h = int(orig_w * scale_factor), int(orig_h * scale_factor)
-        pil_img = pil_img.resize((new_w, new_h), Image.Resampling.BILINEAR)
-
+    with Image.open(img_path) as source_image:
+        if source_image.width * source_image.height > 16_000_000:
+            raise ValueError("Input image exceeds the 16 megapixel limit")
+        pil_img = source_image.convert("RGB")
+    original_size = pil_img.size
+    scale_factor = min(1.0, 2048.0 / max(pil_img.size))
+    if scale_factor < 1.0:
+        pil_img = pil_img.resize((int(pil_img.width * scale_factor), int(pil_img.height * scale_factor)), Image.Resampling.BILINEAR)
     img_np = np.asarray(pil_img, dtype=np.float32)
-
     scaled_bbox = None
     if bbox is not None:
-        scaled_bbox = (
-            int(round(bbox[0] * scale_factor)),
-            int(round(bbox[1] * scale_factor)),
-            int(round(bbox[2] * scale_factor)),
-            int(round(bbox[3] * scale_factor))
-        )
-
+        scaled_bbox = tuple(int(round(value * scale_factor)) for value in bbox)
+    try:
+        depth_map, depth_info = estimate_depth_map(img_np, depth_mode)
+    except DepthModelUnavailable as exc:
+        return {"ok": False, "status": "not_available", "operation": "depth_parallax", "error": str(exc)}
     if mode == "object_3d_rotation" or target is not None:
         final_canvas, metrics = run_isolated_object_3d_rotation(
-            img_np, yaw=yaw, pitch=pitch, roll=roll, bbox=scaled_bbox, target=target, mask_type=mask_type
+            img_np, yaw=yaw, pitch=pitch, roll=roll, bbox=scaled_bbox,
+            target=target, mask_type=mask_type, depth_map=depth_map,
         )
     else:
-        # Continuous 2.5D/3D Pseudo-Parallax (aligned with rev_tool.md Section 5.2)
         final_canvas, metrics = run_continuous_pseudo3d_parallax(
-            img_np, azimuth=yaw, elevation=pitch, dolly=dolly, pan=pan, shift_y=shift_y, mode=mode
+            img_np, depth_map=depth_map, azimuth=yaw, elevation=pitch,
+            dolly=dolly, pan=pan, shift_y=shift_y, depth_layers=depth_layers,
+            depth_source=depth_info["backend"], mode=mode,
         )
-
     out_pil = Image.fromarray(final_canvas)
-    if output_path:
-        out_dir = os.path.dirname(output_path)
-        if out_dir:
-            os.makedirs(out_dir, exist_ok=True)
-        out_pil.save(output_path, format="PNG")
-
+    if not output_path:
+        fd, output_path = tempfile.mkstemp(prefix="depth-parallax-", suffix=".png")
+        os.close(fd)
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    out_pil.save(output_path, format="PNG")
     buf = io.BytesIO()
     out_pil.save(buf, format="PNG")
-    b64_str = base64.b64encode(buf.getvalue()).decode("utf-8")
-
     return {
         "ok": True,
-        "operation": "object_3d_parallax" if (mode == "object_3d_rotation" or target is not None) else "parallax_warp",
-        "mode": metrics.get("mode", mode),
+        "status": "ok",
+        "operation": "pseudo_3d_object_transform" if (mode == "object_3d_rotation" or target is not None) else "pseudo_3d_parallax",
+        "render_type": "single-image pseudo-3D; hidden surfaces are not reconstructed",
+        "input_size": {"width": original_size[0], "height": original_size[1]},
+        "depth_backend": depth_info["backend"],
+        "depth_mode": depth_mode,
         "layers_count": int(depth_layers),
-        "dolly_mm": float(dolly),
-        "output_base64": b64_str,
-        "metrics": metrics
+        "output_path": os.path.abspath(output_path),
+        "output_base64": base64.b64encode(buf.getvalue()).decode("utf-8"),
+        "metrics": metrics,
     }
 
 
@@ -770,7 +660,8 @@ def run_animate_still(
     elevation_amp: float = 2.0,
     dolly_amp: float = 15.0,
     pan_amp: float = 10.0,
-    output_path: str | None = None
+    output_path: str | None = None,
+    depth_mode: str = "model",
 ) -> dict:
     """
     Renders multi-frame pseudo-3D parallax or object 3D rotation camera trajectories.
@@ -781,7 +672,10 @@ def run_animate_still(
         raise FileNotFoundError(f"Input image not found: {img_path}")
 
     Image.MAX_IMAGE_PIXELS = 16_000_000
-    pil_img = Image.open(img_path).convert("RGB")
+    with Image.open(img_path) as source_image:
+        if source_image.width * source_image.height > 16_000_000:
+            raise ValueError("Input image exceeds the 16 megapixel limit")
+        pil_img = source_image.convert("RGB")
     orig_w, orig_h = pil_img.width, pil_img.height
     scale_factor = 1.0
     if max(orig_w, orig_h) > 1280:
@@ -790,6 +684,10 @@ def run_animate_still(
         pil_img = pil_img.resize((new_w, new_h), Image.Resampling.BILINEAR)
 
     img_np = np.asarray(pil_img, dtype=np.float32)
+    try:
+        depth_map, depth_info = estimate_depth_map(img_np, depth_mode)
+    except DepthModelUnavailable as exc:
+        return {"ok": False, "status": "not_available", "operation": "animate_still", "error": str(exc)}
 
     scaled_bbox = None
     if bbox is not None:
@@ -800,8 +698,10 @@ def run_animate_still(
             int(round(bbox[3] * scale_factor))
         )
 
+    if fps < 1 or fps > 60:
+        raise ValueError("fps must be between 1 and 60")
     frame_list = []
-    frames = max(2, min(frames, 120))
+    frames = max(2, min(frames, 60))
 
     for i in range(frames):
         tau = 2.0 * math.pi * (i / float(frames))
@@ -841,7 +741,7 @@ def run_animate_still(
             elevation = 0.0
             dolly = 0.0
             pan = 0.0
-            yaw_obj = (360.0 * (i / float(frames))) if (target == "ball" or mask_type in ("circle", "sphere")) else (azimuth_amp * 2.0 * sin_t)
+            yaw_obj = 360.0 * (i / float(frames))
             pitch_obj = elevation_amp * cos_t
         else:
             azimuth = azimuth_amp * sin_t
@@ -859,11 +759,14 @@ def run_animate_still(
                 roll=0.0,
                 bbox=scaled_bbox,
                 target=target,
-                mask_type=mask_type
+                mask_type=mask_type,
+                depth_map=depth_map,
             )
         else:
             canvas, _ = run_continuous_pseudo3d_parallax(
                 img_np,
+                depth_map=depth_map,
+                depth_source=depth_info["backend"],
                 azimuth=azimuth,
                 elevation=elevation,
                 dolly=dolly,
@@ -902,8 +805,11 @@ def run_animate_still(
         "frames_count": len(frame_list),
         "fps": int(fps),
         "duration_sec": round(len(frame_list) / float(fps), 2),
-        "output_path": output_path,
+        "output_path": os.path.abspath(output_path),
         "output_base64": b64_str,
+        "depth_backend": depth_info["backend"],
+        "depth_mode": depth_mode,
+        "render_type": "single-image pseudo-3D; hidden surfaces are not reconstructed",
         "metrics": {
             "trajectory": trajectory,
             "azimuth_amp": float(azimuth_amp),
@@ -921,7 +827,7 @@ def main():
     parser.add_argument("action", nargs="?", default="parallax", help="Optional action positional argument")
     parser.add_argument("--file", required=True, help="Input image file path")
     parser.add_argument("--mode", choices=["continuous_parallax", "scene_parallax", "object_3d_rotation"], default="continuous_parallax")
-    parser.add_argument("--target", choices=["ball", "goalkeeper", "pedestal", "referee", "arch"], default=None, help="Preset target object")
+    parser.add_argument("--target", type=str, default=None, help="Optional label for an object selected by explicit bbox")
     parser.add_argument("--mask-type", choices=["auto", "sphere", "circle", "fullbody", "rect", "grabcut"], default="auto", help="Mask extraction mode")
     parser.add_argument("--depth-layers", type=int, default=16, help="Number of depth layers")
     parser.add_argument("--dolly", type=float, default=15.0, help="Dolly translation in mm")
@@ -931,8 +837,6 @@ def main():
     parser.add_argument("--pitch", type=float, default=0.0, help="3D object pitch / camera elevation in degrees")
     parser.add_argument("--roll", type=float, default=0.0, help="3D object roll spin in degrees")
     parser.add_argument("--bbox", type=str, default=None, help="Object bounding box x1,y1,x2,y2")
-    parser.add_argument("--near", type=float, default=20.0, help="Near plane depth")
-    parser.add_argument("--far", type=float, default=100.0, help="Far plane depth")
     parser.add_argument("--frames", type=int, default=1, help="Number of animation frames")
     parser.add_argument("--fps", type=int, default=12, help="Frames per second")
     parser.add_argument("--trajectory", choices=["orbit", "dolly_zoom", "pan_horizontal", "tilt_vertical", "object_spin"], default="orbit", help="Camera trajectory")
@@ -941,6 +845,7 @@ def main():
     parser.add_argument("--dolly-amp", type=float, default=15.0, help="Dolly amplitude in mm")
     parser.add_argument("--pan-amp", type=float, default=10.0, help="Pan amplitude in pixels")
     parser.add_argument("--output", type=str, default=None, help="Output file path (.png or .gif)")
+    parser.add_argument("--depth-mode", choices=["model", "heuristic"], default="model", help="Use local Depth Anything weights, or explicitly opt into heuristic depth")
 
     args = parser.parse_args()
 
@@ -965,7 +870,8 @@ def main():
                 elevation_amp=args.elevation_amp,
                 dolly_amp=args.dolly_amp,
                 pan_amp=args.pan_amp,
-                output_path=args.output
+                output_path=args.output,
+                depth_mode=args.depth_mode,
             )
         else:
             res = run_depth_parallax(
@@ -974,8 +880,6 @@ def main():
                 dolly=args.dolly,
                 pan=args.pan,
                 shift_y=args.shift_y,
-                near=args.near,
-                far=args.far,
                 mode=args.mode,
                 yaw=args.yaw,
                 pitch=args.pitch,
@@ -983,7 +887,8 @@ def main():
                 bbox=parsed_bbox,
                 target=args.target,
                 mask_type=args.mask_type,
-                output_path=args.output
+                output_path=args.output,
+                depth_mode=args.depth_mode,
             )
         print(json.dumps(res, indent=2))
     except Exception as exc:

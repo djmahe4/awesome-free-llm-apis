@@ -1,70 +1,86 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { removeDir } from './helpers/temp-dir.js';
 
-describe('2.5D Layered Depth Parallax Engine', () => {
-  const scriptPath = path.resolve(__dirname, '../scripts/depth_parallax_engine.py');
-  const tmpDir = path.resolve(__dirname, 'tmp');
-  const fixtureImg = path.join(tmpDir, 'parallax_sample.png');
-  const outImg = path.join(tmpDir, 'parallax_output.png');
-  const pythonBin = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+const pythonBin = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+const scriptPath = path.resolve(__dirname, '../scripts/depth_parallax_engine.py');
+let tmpDir: string;
+let fixtureImg: string;
+let outImg: string;
 
-  beforeAll(() => {
-    if (!fs.existsSync(tmpDir)) {
-      fs.mkdirSync(tmpDir, { recursive: true });
-    }
-    // Generate a minimal test PNG fixture using python PIL
-    const makeFixturePy = [
-      'from PIL import Image',
-      'import numpy as np',
-      'arr = np.zeros((64, 64, 3), dtype=np.uint8)',
-      'arr[16:48, 16:48] = [255, 100, 50]',
-      'arr[32:60, 32:60] = [50, 200, 255]',
-      `Image.fromarray(arr).save(r"""${fixtureImg}""")`
-    ].join('\n');
-    execFileSync(pythonBin, ['-c', makeFixturePy], { timeout: 15000, encoding: 'utf8' });
+beforeAll(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'depth-parallax-test-'));
+  fixtureImg = path.join(tmpDir, 'fixture.png');
+  outImg = path.join(tmpDir, 'output.png');
+  const makeFixturePy = [
+    'from PIL import Image',
+    'import numpy as np',
+    'arr = np.zeros((64, 64, 3), dtype=np.uint8)',
+    'arr[8:56, 8:56] = [50, 100, 150]',
+    'arr[20:44, 20:44] = [220, 80, 40]',
+    `Image.fromarray(arr).save(r"""${fixtureImg}""")`,
+  ].join('\n');
+  execFileSync(pythonBin, ['-c', makeFixturePy], { timeout: 15000, encoding: 'utf8' });
+});
+
+afterAll(async () => {
+  if (tmpDir) await removeDir(tmpDir);
+});
+
+describe('Depth-guided pseudo-3D engine', () => {
+  it('honestly reports unavailable when local Depth Anything weights are absent', () => {
+    const raw = execFileSync(pythonBin, [scriptPath, '--file', fixtureImg, '--output', outImg], {
+      timeout: 20000,
+      encoding: 'utf8',
+      env: { ...process.env, DEPTH_ANYTHING_MODEL_PATH: '' },
+    });
+    const result = JSON.parse(raw);
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('not_available');
+    expect(result.error).toContain('no weights were downloaded');
+    expect(fs.existsSync(outImg)).toBe(false);
   });
 
-  it('executes parallax warp CLI and returns valid JSON structure with metrics', () => {
+  it('uses explicitly selected heuristic depth and persists inspectable image artifact', () => {
     const raw = execFileSync(pythonBin, [
-      scriptPath,
-      '--file', fixtureImg,
-      '--depth-layers', '8',
-      '--dolly', '15',
-      '--pan', '0',
-      '--near', '20',
-      '--far', '100',
-      '--output', outImg
+      scriptPath, '--file', fixtureImg, '--depth-mode', 'heuristic', '--depth-layers', '8',
+      '--dolly', '15', '--pan', '2', '--output', outImg,
     ], { timeout: 20000, encoding: 'utf8' });
-
     const result = JSON.parse(raw);
     expect(result.ok).toBe(true);
-    expect(result.operation).toBe('parallax_warp');
-    expect(result.layers_count).toBe(8);
-    expect(result.dolly_mm).toBe(15);
-    expect(typeof result.output_base64).toBe('string');
+    expect(result.operation).toBe('pseudo_3d_parallax');
+    expect(result.depth_backend).toBe('heuristic');
+    expect(result.output_path).toBe(outImg);
     expect(result.output_base64.length).toBeGreaterThan(50);
-    expect(result.metrics).toBeDefined();
-    expect(result.metrics.disocclusion_ratio).toBeGreaterThanOrEqual(0.0);
-    expect(result.metrics.disocclusion_ratio).toBeLessThanOrEqual(1.0);
-    expect(result.metrics.depth_entropy).toBeGreaterThan(0.0);
-
-    expect(fs.existsSync(outImg)).toBe(true);
+    expect(fs.statSync(outImg).size).toBeGreaterThan(100);
+    expect(result.metrics.depth_entropy_bits).toBeGreaterThan(0);
+    expect(result.metrics.mean_flow_pixels).toBeGreaterThan(0);
+    expect(result.metrics.disocclusion_ratio).toBeNull();
+    expect(result.metrics.disocclusion_status).toContain('not_measured');
   });
 
-  it('fails with non-zero exit code when input file does not exist', () => {
-    const nonExistent = path.join(tmpDir, 'non_existent.png');
-    expect(() => {
-      execFileSync(pythonBin, [
-        scriptPath,
-        '--file', nonExistent,
-        '--depth-layers', '8',
-        '--dolly', '15',
-        '--pan', '0',
-        '--near', '20',
-        '--far', '100'
-      ], { timeout: 15000, encoding: 'utf8' });
-    }).toThrow();
+  it('rotates only an explicitly selected bbox and labels hidden-surface limits', () => {
+    const raw = execFileSync(pythonBin, [
+      scriptPath, '--file', fixtureImg, '--depth-mode', 'heuristic',
+      '--mode', 'object_3d_rotation', '--mask-type', 'rect', '--bbox', '12,12,52,52',
+      '--yaw', '10', '--output', outImg,
+    ], { timeout: 20000, encoding: 'utf8' });
+    const result = JSON.parse(raw);
+    expect(result.ok).toBe(true);
+    expect(result.operation).toBe('pseudo_3d_object_transform');
+    expect(result.metrics.mode).toBe('pseudo_3d_object_rotation');
+    expect(result.metrics.target_bbox).toEqual([12, 12, 52, 52]);
+    expect(result.metrics.foreground_retention_ratio).toBeGreaterThan(0);
+    expect(result.metrics.disocclusion_ratio).toBeNull();
+    expect(result.render_type).toContain('hidden surfaces are not reconstructed');
+  });
+
+  it('rejects object rotation without an explicit bbox', () => {
+    expect(() => execFileSync(pythonBin, [
+      scriptPath, '--file', fixtureImg, '--depth-mode', 'heuristic', '--mode', 'object_3d_rotation',
+    ], { timeout: 15000, encoding: 'utf8' })).toThrow();
   });
 });
