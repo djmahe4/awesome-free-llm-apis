@@ -3080,8 +3080,11 @@
       ocrOverlay.style.display = 'block';
       ocrLegend.style.display = 'flex';
       ocrSummary.style.display = 'block';
+      const notes = Array.isArray(data.learning_notes)
+        ? data.learning_notes
+        : String(data.learning_notes || '').split('\n').map((n) => n.trim()).filter(Boolean);
       ocrSummary.textContent = data.tokens.length + ' tokens · ' + ocrState.blocks.length + ' layout blocks · ' +
-        (data.learning_notes || []).join(' · ');
+        notes.join(' · ');
       ocrSetStatus('Done: ' + ocrState.tokens.length + ' tokens found.', false);
       ocrInspectBtn.disabled = false;
     }).catch((err) => {
