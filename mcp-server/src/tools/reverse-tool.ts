@@ -89,7 +89,7 @@ export function resolvePythonPath(): string {
   for (const cand of candidates) {
     if (cand === 'python' || cand === 'python3' || fs.existsSync(cand)) {
       try {
-        const res = spawnSync(cand, ['-c', 'import torch; print(torch.__version__)'], { timeout: 3000, stdio: 'pipe' });
+        const res = spawnSync(cand, ['-c', 'import torch; print(torch.__version__)'], { timeout: 30000, stdio: 'pipe' });
         if (res.status === 0) {
           cachedPythonBin = cand;
           return cand;
@@ -141,6 +141,8 @@ export type ReverseToolAction =
   | 'run_torch_nn'
   | 'run_scene_augmentation'
   | 'reverse_vlm_generate'
+  | 'separate_audio_stems'
+  | 'inspect_ocr_tokens'
   | 'program_weight_space';
 
 export const isModelAction = (act: string): boolean => [
@@ -815,6 +817,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       run_yolo_nn: 'run_yolo_nn',
       run_torch_nn: 'run_torch_nn',
       run_scene_augmentation: 'augment_scene',
+      separate_audio_stems: 'separate_audio_stems',
       reverse_vlm_generate: 'reverse_generate',
       program_weight_space: 'program_weight_space',
     };
@@ -1038,7 +1041,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "run_scene_augmentation", "program_weight_space".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "run_scene_augmentation", "separate_audio_stems", "program_weight_space".`,
   };
 }
 

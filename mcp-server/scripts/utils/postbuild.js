@@ -23,6 +23,11 @@ const copies = [
   { from: 'scripts/yolo_nn_engine.py', to: 'dist/scripts/yolo_nn_engine.py' },
   { from: 'scripts/torch_nn_engine.py', to: 'dist/scripts/torch_nn_engine.py' },
   { from: 'scripts/weight_space_programmer.py', to: 'dist/scripts/weight_space_programmer.py' },
+  { from: 'scripts/scene_augmentation.py', to: 'dist/scripts/scene_augmentation.py' },
+  { from: 'scripts/vlm_reverse_generator.py', to: 'dist/scripts/vlm_reverse_generator.py' },
+  { from: 'scripts/audio_separator.py', to: 'dist/scripts/audio_separator.py' },
+  { from: 'scripts/depth_parallax_engine.py', to: 'dist/scripts/depth_parallax_engine.py' },
+  { from: 'scripts/headless_media_compiler.py', to: 'dist/scripts/headless_media_compiler.py' },
   { from: 'scripts/sandboxes/python-sandbox-runner.py', to: 'dist/scripts/sandboxes/python-sandbox-runner.py' },
   { from: 'scripts/utils/generate_model_fixtures.py', to: 'dist/scripts/utils/generate_model_fixtures.py' },
 ];
