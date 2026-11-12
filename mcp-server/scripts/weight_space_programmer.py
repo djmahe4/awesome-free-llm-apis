@@ -8,7 +8,12 @@ import os
 import json
 import struct
 import argparse
-import numpy as np
+
+try:
+    import numpy as np
+except ImportError:
+    sys.stderr.write("Error: NumPy is required for weight_space_programmer.py\n")
+    sys.exit(1)
 
 try:
     from model_inspector import get_tensor_data, inspect_gguf, resolve_model_path

@@ -20,7 +20,11 @@ import os
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    sys.stderr.write("Error: NumPy is required for ocr_engine.py\n")
+    sys.exit(1)
 
 try:
     import cv2

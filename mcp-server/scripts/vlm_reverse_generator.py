@@ -120,8 +120,6 @@ CATEGORY_COLOR = {
     "sport": (120, 255, 160),
 }
 
-_START = time.time()
-
 
 def _token_rng(token, seed):
     """Deterministic per-token RNG derived from the token text itself."""
@@ -299,6 +297,7 @@ def synthesize(meta_list, weights, energy, G, mode, resolution, seed):
 
 
 def reverse_generate(args):
+    start_time = time.time()
     prompt = args.prompt or "synthetic visual scene"
     mode = args.mode
     resolution = max(64, min(int(args.resolution), 512))
@@ -365,7 +364,7 @@ def reverse_generate(args):
     entropy = float(-(ents * np.log(ents + 1e-12)).sum() / math.log(G * G))
     peak_pos = int(flat.argmax())
     peak_row, peak_col = divmod(peak_pos, G)
-    elapsed_ms = round4((time.time() - _START) * 1000.0)
+    elapsed_ms = round4((time.time() - start_time) * 1000.0)
 
     output_path = getattr(args, "output", None)
     if not output_path:
