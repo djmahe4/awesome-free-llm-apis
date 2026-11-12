@@ -1,4 +1,5 @@
 import { RunRegistry } from '../pipeline/middlewares/RunRegistry.js';
+import path from 'node:path';
 import { ContextManager } from '../utils/ContextManager.js';
 import { HarnessStore } from './store.js';
 import { loadHarnessDeclaration, selectRole } from './declaration.js';
@@ -9,11 +10,24 @@ import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
 import { buildHandoff, validateHandoff, type Handoff } from './handoff.js';
 import { createReasoningStrategy, type LessonNode, type StepFailure } from './reasoning.js';
 import { validateThoughtDeviation, enforceDeviationPolicy, type LayaValidationResult } from './laya-bridge.js';
+import { ThoughtDatasetWriter, type DatasetRow } from './thought-dataset-writer.js';
+import type { ThoughtBundle } from './context-injection-hook.js';
 import { MonitorRegistry } from './monitor.js';
 import { appendSessionMemory, buildSessionMemoryPromptBlock, parseTurnMemory, recentSessionMemory } from './session-memory.js';
 import type { HarnessDeclaration, HarnessRun } from './types.js';
 
 const contextManager = new ContextManager();
+
+let thoughtDatasetWriter: ThoughtDatasetWriter | undefined;
+function datasetWriter(): ThoughtDatasetWriter {
+  if (!thoughtDatasetWriter) {
+    const override = process.env.THOUGHT_DATASET_DIR;
+    const home = process.env.FREE_LLM_MCP_HOME;
+    const base = home ? home : process.cwd();
+    thoughtDatasetWriter = new ThoughtDatasetWriter({ outputDir: override ?? path.join(base, '.free-llm-mcp', 'thought-dataset') });
+  }
+  return thoughtDatasetWriter;
+}
 
 /**
  * Reuses coding_agents' own tasks.md blackboard (see store.ts's
@@ -755,7 +769,7 @@ export async function checkThoughtDeviation(
   goal: string,
   proposed: string,
   callId: string,
-): Promise<boolean> {
+): Promise<LayaValidationResult | null> {
   try {
     const events = await store.readTrace();
     const trace = events.slice(-3).map(e => ({ text: `${e.type}: ${JSON.stringify(e.data ?? {}).slice(0, 200)}` }));
@@ -767,9 +781,9 @@ export async function checkThoughtDeviation(
       type: 'deviation',
       data: { callId, policy, alignment: result.alignment, drift_prob: result.drift_prob, unsafe_prob: result.unsafe_prob, latency_ms: result.latency_ms },
     }).catch(() => {});
-    return policy === 'halt';
+    return result;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -991,7 +1005,8 @@ async function runSteps(
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
 
-      if (await checkThoughtDeviation(store, run, role, originalGoal, stepGoal, callId)) {
+      const deviationResult = await checkThoughtDeviation(store, run, role, originalGoal, stepGoal, callId);
+      if (deviationResult && enforceDeviationPolicy(deviationResult) === 'halt') {
         run.status = 'failed';
         run.error = `Deviation guard: proposed step '${callId}' drifted from the goal (laya drift > 0.5)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
@@ -1066,6 +1081,26 @@ async function runSteps(
           await appendSessionMemory(store.runDirPath, { runId: run.runId, role, ...parsedTurn }).catch(() => {});
         }
       }
+
+      const thought: ThoughtBundle = {
+        id: `${run.runId}:${callId}`,
+        text: stepGoal.slice(0, 2000),
+        source: 'rea',
+        timestamp: Date.now(),
+        tool: dispatch.toolName,
+        action: callId,
+        goal: originalGoal,
+      };
+      const row: DatasetRow = {
+        thought,
+        tool: dispatch.toolName,
+        action: callId,
+        goal: originalGoal,
+        alignment: deviationResult?.alignment ?? 'not_available',
+        drift_prob: deviationResult?.drift_prob ?? 0,
+        expert_label: ThoughtDatasetWriter.expertLabel(dispatch.toolName),
+      };
+      await datasetWriter().append(row).catch(() => {});
     }
 
     await endTaskAttempt(store, originalGoal, stepId, taskOutcomeFor(run.status), `step ${callId}: ${run.status}${run.error ? ` (${run.error})` : ''}`);
