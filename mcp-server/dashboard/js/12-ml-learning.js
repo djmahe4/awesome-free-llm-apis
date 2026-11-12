@@ -18,6 +18,34 @@
     return fetch('/api/' + call.tool, { ...init, body: JSON.stringify(params) });
   }
 
+  async function reverseToolWithPolling(params, { onRunning, timeoutMs = 150_000 } = {}) {
+    const startedAt = Date.now();
+    const send = async requestParams => {
+      const response = await toolFetch({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'reverse_tool', params: requestParams })
+      });
+      let result;
+      try { result = await response.json(); }
+      catch { throw new Error('Reverse tool returned invalid JSON (' + response.status + ').'); }
+      if (!response.ok) throw new Error(String((result && result.error) || 'Reverse tool request failed (' + response.status + ').'));
+      return result;
+    };
+
+    let result = await send(params);
+    while (result && result.data && result.data.status === 'running') {
+      const sessionId = result.data.sessionId;
+      if (!sessionId) throw new Error('Reverse tool started background work without a sessionId.');
+      if (onRunning) onRunning(result.data);
+      const remaining = timeoutMs - (Date.now() - startedAt);
+      if (remaining <= 0) throw new Error('Reverse tool polling timed out. Background job may still be running.');
+      await new Promise(resolve => setTimeout(resolve, Math.min(1500, remaining)));
+      result = await send({ action: 'status', sessionId });
+    }
+    return result;
+  }
+
   // ─── Color Helpers & Snell Refraction ─────────────────────────────
   function wavelengthToRGB(wl) {
     let r = 0, g = 0, b = 0;
@@ -106,8 +134,6 @@
     },
     media: {
       preset: 'demucs',
-      depthNear: 20,
-      depthFar: 100,
       depthDolly: 15
     }
   };
@@ -1610,119 +1636,85 @@
     });
   }
 
-  // ─── Future Media Transforms Scratchpad ─────────────────────────
+  // ─── Local media model workbenches ────────────────────────────────
   const mediaTabBtns = document.querySelectorAll('.ml-media-tab-btn');
   const mediaSubpanels = document.querySelectorAll('.ml-media-subpanel');
-  const mediaStatusBadge = document.getElementById('ml-media-status');
-  const mediaDispatchBtn = document.getElementById('ml-media-dispatch-btn');
+  let depthImagePath = null;
+  mediaTabBtns.forEach(btn => btn.addEventListener('click', () => {
+    mediaTabBtns.forEach(item => item.classList.remove('active'));
+    btn.classList.add('active');
+    const preset = btn.dataset.preset;
+    window.MLStateBus.media.preset = preset;
+    mediaSubpanels.forEach(panel => {
+      panel.style.display = panel.id === `ml-media-preset-${preset}` ? 'block' : 'none';
+    });
+    const badge = document.getElementById('ml-media-status');
+    if (badge) badge.textContent = preset === 'depth' ? 'Preset: local depth model' : 'Preset: ' + preset;
+  }));
+
+  const depthFileBtn = document.getElementById('ml-depth-file-btn');
+  const depthFileInput = document.getElementById('ml-depth-file-input');
+  const depthRunBtn = document.getElementById('ml-depth-run-btn');
   const depthCanvas = document.getElementById('ml-depth-preview-canvas');
-
-  mediaTabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      mediaTabBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const preset = btn.dataset.preset;
-      window.MLStateBus.media.preset = preset;
-
-      mediaSubpanels.forEach(p => {
-        p.style.display = p.id === `ml-media-preset-${preset}` ? 'block' : 'none';
-      });
-
-      if (mediaStatusBadge) {
-        const labels = {
-          demucs: 'Preset: Demucs 4-Stem',
-          depth: 'Preset: Depth Anything V2 Parallax',
-          tts: 'Preset: Kokoro Neural Vocoder',
-          ocr: 'Preset: OCR Token Bounding'
-        };
-        mediaStatusBadge.textContent = labels[preset] || 'Preset: Custom';
-      }
-
-      if (preset === 'depth') renderDepthMap();
-    });
-  });
-
-  function renderDepthMap() {
-    if (!depthCanvas) return;
-    const dctx = depthCanvas.getContext('2d');
-    const w = depthCanvas.width;
-    const h = depthCanvas.height;
-    dctx.clearRect(0, 0, w, h);
-
-    const dolly = (Number(document.getElementById('ml-depth-dolly')?.value || 15) / 30) * 20;
-
-    dctx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
-    dctx.lineWidth = 1;
-    for (let z = 10; z < h; z += 12) {
-      dctx.beginPath();
-      dctx.moveTo(w / 2 - (z * 1.5) + dolly, z);
-      dctx.lineTo(w / 2 + (z * 1.5) + dolly, z);
-      dctx.stroke();
-    }
-
-    dctx.fillStyle = '#8b5cf6';
-    dctx.fillRect(w / 2 - 25 + dolly * 1.5, h / 2 - 20, 50, 40);
-
-    dctx.fillStyle = '#06b6d4';
-    dctx.beginPath();
-    dctx.arc(w / 2 + 45 + dolly * 0.8, h / 2 + 10, 16, 0, Math.PI * 2);
-    dctx.fill();
-  }
-
-  ['ml-depth-near', 'ml-depth-far', 'ml-depth-dolly'].forEach(id => {
-    const inp = document.getElementById(id);
-    if (inp) {
-      inp.addEventListener('input', () => {
-        const near = document.getElementById('ml-depth-near')?.value;
-        const far = document.getElementById('ml-depth-far')?.value;
-        const dolly = document.getElementById('ml-depth-dolly')?.value;
-        const valNear = document.getElementById('ml-val-near');
-        const valFar = document.getElementById('ml-val-far');
-        const valDolly = document.getElementById('ml-val-dolly');
-        if (valNear) valNear.textContent = `${(near / 100).toFixed(1)}m`;
-        if (valFar) valFar.textContent = `${(far / 10).toFixed(1)}m`;
-        if (valDolly) valDolly.textContent = `${dolly} mm`;
-        renderDepthMap();
-      });
-    }
-  });
-
-  if (mediaDispatchBtn) {
-    mediaDispatchBtn.addEventListener('click', async () => {
-      const statusElem = document.getElementById('ml-media-call-status');
-      const preset = window.MLStateBus.media.preset;
-      mediaDispatchBtn.disabled = true;
-      mediaDispatchBtn.textContent = '🚀 Dispatching...';
-
+  const depthStatus = document.getElementById('ml-depth-status');
+  const depthArtifact = document.getElementById('ml-depth-artifact');
+  const depthDolly = document.getElementById('ml-depth-dolly');
+  const depthDollyValue = document.getElementById('ml-val-dolly');
+  if (depthDolly && depthDollyValue) depthDolly.addEventListener('input', () => { depthDollyValue.textContent = depthDolly.value + ' px'; });
+  if (depthFileBtn && depthFileInput) {
+    depthFileBtn.addEventListener('click', () => depthFileInput.click());
+    depthFileInput.addEventListener('change', async () => {
+      const file = depthFileInput.files && depthFileInput.files[0];
+      if (!file) return;
+      depthFileBtn.disabled = true;
+      if (depthStatus) depthStatus.textContent = 'Uploading image to workspace...';
       try {
-        if (statusElem) statusElem.textContent = `Sending the ${preset} request to the server...`;
-        const mediaRes = await toolFetch({
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tool: preset === 'depth' || preset === 'demucs' ? 'movie_tool' : 'reverse_tool',
-            params: {
-              action: preset === 'depth' ? 'parallax_warp' : (preset === 'demucs' ? 'stem_split' : 'status'),
-              options: { preset }
-            }
-          })
-        }).catch(() => null);
-
-        let mediaJson = null;
-        try { mediaJson = mediaRes && mediaRes.ok ? await mediaRes.json() : null; } catch (e) { mediaJson = null; }
-        const mediaOk = !!mediaJson && mediaJson.success !== false;
-        if (statusElem) {
-          statusElem.textContent = mediaOk
-            ? 'Server accepted the ' + preset + ' request.'
-            : 'Not run: ' + String((mediaJson && mediaJson.error) || (mediaRes ? 'the server refused the request (it needs real media input)' : 'the server could not be reached')).slice(0, 160);
-          statusElem.style.color = mediaOk ? 'var(--accent-green)' : 'var(--accent-amber)';
-        }
-      } finally {
-        mediaDispatchBtn.disabled = false;
-        mediaDispatchBtn.textContent = '🚀 Dispatch Transform Job';
-      }
+        const form = new FormData();
+        form.append('file', file);
+        form.append('workspace_root', '.');
+        const response = await fetch('/api/upload', { method: 'POST', body: form });
+        const uploaded = await response.json();
+        if (!response.ok || !uploaded || !uploaded.absPath) throw new Error((uploaded && uploaded.error) || 'Image upload failed.');
+        depthImagePath = uploaded.absPath;
+        if (depthRunBtn) depthRunBtn.disabled = false;
+        if (depthStatus) depthStatus.textContent = 'Image ready. Uses local weights or explicit heuristic opt-in.';
+      } catch (err) {
+        if (depthStatus) depthStatus.textContent = String(err && err.message || err).slice(0, 160);
+      } finally { depthFileBtn.disabled = false; }
     });
   }
+  if (depthRunBtn) depthRunBtn.addEventListener('click', async () => {
+    if (!depthImagePath) return;
+    depthRunBtn.disabled = true;
+    if (depthStatus) depthStatus.textContent = 'Estimating depth and rendering...';
+    try {
+      const result = await reverseToolWithPolling({
+        action: 'run_depth_parallax', target: depthImagePath, authorization: 'consent',
+        options: {
+          mode: 'continuous_parallax', dolly: Number(depthDolly && depthDolly.value || 15), depthLayers: 16,
+          depthMode: document.getElementById('ml-depth-heuristic-opt-in')?.checked ? 'heuristic' : 'model'
+        }
+      }, { onRunning: () => { if (depthStatus) depthStatus.textContent = 'Depth render running...'; } });
+      const data = result && result.data;
+      if (!result || result.success === false || !data || data.ok === false) {
+        if (depthStatus) depthStatus.textContent = String((data && data.error) || (result && result.error) || 'Depth render unavailable.').slice(0, 200);
+        return;
+      }
+      if (depthCanvas && data.output_base64) {
+        const image = new Image();
+        image.onload = () => {
+          const ctx = depthCanvas.getContext('2d');
+          ctx.clearRect(0, 0, depthCanvas.width, depthCanvas.height);
+          ctx.drawImage(image, 0, 0, depthCanvas.width, depthCanvas.height);
+        };
+        image.src = 'data:image/png;base64,' + data.output_base64;
+      }
+      if (depthArtifact) depthArtifact.textContent = 'Artifact: ' + String(data.output_path || 'not returned') + ' | depth: ' + String(data.depth_backend || 'unknown') + ' | ' + String(data.render_type || 'pseudo-3D');
+      if (depthStatus) depthStatus.textContent = 'Render saved. ' + String(data.depth_backend || '') + ' depth output.';
+    } catch (err) {
+      if (depthStatus) depthStatus.textContent = String(err && err.message || err).slice(0, 200);
+    } finally { depthRunBtn.disabled = !depthImagePath; }
+  });
 
   // ─── Pooling Kernel Lab ──────────────────────────────────────────
   const LAPLACIAN_KERNEL = [
@@ -2213,30 +2205,30 @@
         setStemStatus('No audio source selected.', false);
         return;
       }
+      const consent = document.getElementById('ml-stem-consent');
+      if (!consent || !consent.checked) {
+        setStemStatus('Confirm ownership or licence before local stem separation.', false);
+        return;
+      }
       stemState.sourcePath = sourcePath;
-      setStemStatus('Dispatching reverse_tool handle...', true);
-      toolFetch({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tool: 'reverse_tool',
-          params: {
-            action: 'separate_audio_stems',
-            target: sourcePath,
-            authorization: 'lab',
-            options: {
-              method: 'spectral_multiband',
-              stems: ['vocals', 'drums', 'bass', 'other']
-            }
-          }
-        })
-      }).then(json => {
-        if (json && json.success && json.data) {
-          stemState.payload = json.data;
-          loadStemPayload(json.data);
+      setStemStatus('Dispatching local Demucs separation...', true);
+      reverseToolWithPolling({
+        action: 'separate_audio_stems', target: sourcePath, authorization: 'consent',
+        options: {
+          method: 'htdemucs', stems: ['vocals', 'drums', 'bass', 'other'],
+          explicitConsentAck: true, maxDurationSeconds: 600
+        }
+      }, {
+        timeoutMs: 15 * 60_000 + 30_000,
+        onRunning: progress => setStemStatus(progress.message || 'Local Demucs separation running...', true)
+      }).then(async result => {
+        const data = result && result.data;
+        if (result && result.success && data && data.status === 'ok') {
+          stemState.payload = data;
+          await loadStemPayload(data);
         } else {
-          const message = (json && json.error) || 'Separation request was rejected.';
-          setStemStatus(message, false);
+          const message = (data && data.error) || (result && result.error) || 'Local Demucs backend unavailable.';
+          setStemStatus(String(message).slice(0, 160), false);
           stopStemMix();
         }
       }).catch(err => {
@@ -2253,29 +2245,20 @@
       return stemState.audioContext;
     }
 
-    async function decodeStemAudio(name, dataUrl) {
+    async function decodeStemFile(filePath) {
       const ctx = ensureStemAudio();
-      if (!dataUrl) throw new Error(`No audio payload for ${name}.`);
-      const base64 = dataUrl.includes(',') ? dataUrl.slice(dataUrl.indexOf(',') + 1) : dataUrl;
-      const bytes = Uint8Array.from(atob(base64), ch => ch.charCodeAt(0));
-      return await ctx.decodeAudioData(bytes.buffer);
+      if (!filePath) throw new Error('No persisted WAV path returned for stem.');
+      const response = await fetch('/api/media/preview?file=' + encodeURIComponent(filePath));
+      if (!response.ok) throw new Error('Could not load persisted WAV stem (' + response.status + ').');
+      return await ctx.decodeAudioData(await response.arrayBuffer());
     }
 
     function renderStemNotes(names, perStem, payload) {
       const container = document.getElementById('ml-stem-notes');
       const body = document.getElementById('ml-stem-notes-body');
       if (!container || !body) return;
-      const notes = Array.isArray(payload.learning_notes) ? payload.learning_notes : [];
-      const noteLines = notes.slice(0, 6).map(note => {
-        if (typeof note === 'string') return `<li>${note.slice(0, 160)}</li>`;
-        const text = (note && (note.text || note.message || note.title)) || JSON.stringify(note).slice(0, 160);
-        return `<li>${text}</li>`;
-      }).join('');
-      const srcName = stemState.sourcePath ? stemState.sourcePath.split(/[/\\]/).pop() : 'sample fixture';
-      body.innerHTML = `
-        <p>Source: <strong>${srcName}</strong> - method: spectral multiband - stems: ${names.join(', ')}.</p>
-        <p>The bundled previews are 200 ms 440 Hz calibration snippets (osynthesis of the cargo), not the decoded stem audio. Full-layer playback comes from the returned WAV payloads.</p>
-        ${noteLines ? '<ul>' + noteLines + '</ul>' : ''}`;
+      const srcName = stemState.sourcePath ? stemState.sourcePath.split(String.fromCharCode(92)).pop().split('/').pop() : 'audio file';
+      body.textContent = 'Source: ' + srcName + ' | backend: ' + String(payload.backend || 'Demucs') + ' | stems: ' + names.join(', ') + '. ' + String(payload.learning_notes || 'Local separation completed.');
       container.style.display = 'block';
     }
 
@@ -2289,7 +2272,7 @@
         metricsEl.innerHTML = `
           <div>Phase 1/3 - RMS: <strong>${rms}</strong></div>
           <div>Phase 2/3 - Centroid: <strong>${centroid}</strong></div>
-          <div>Preview: 200 ms calibration snippet, not the full stem.</div>`;
+          <div>Metrics use separated WAV; playback loads complete persisted stem.</div>`;
       });
     }
 
@@ -2297,12 +2280,10 @@
       setStemStatus('Decoding stems...', true);
       try {
         const names = ['vocals', 'drums', 'bass', 'other'];
-        const perStem = (payload && payload.per_stem) ? payload.per_stem : (payload || {});
+        const perStem = (payload && payload.stems) ? payload.stems : {};
+        if (names.some(name => !perStem[name] || !perStem[name].path)) throw new Error('Demucs did not return all four WAV stem files.');
         const decoded = {};
-        for (const name of names) {
-          const stem = perStem[name] || {};
-          decoded[name] = await decodeStemAudio(name, stem.audio_base64);
-        }
+        for (const name of names) decoded[name] = await decodeStemFile(perStem[name].path);
         stemState.buffers = decoded;
         renderStemNotes(names, perStem, payload);
         renderStemMetrics(names, perStem);
@@ -2311,7 +2292,7 @@
         if (playBtn) playBtn.disabled = false;
         if (stopBtn) stopBtn.disabled = false;
         drawStemsFlat();
-        setStemStatus(`Ready - ${names.length} stems loaded via spectral multiband separation.`, true);
+        setStemStatus(`Ready - ${names.length} persisted Demucs WAV stems loaded.`, true);
       } catch (err) {
         console.error('Stem payload decode failed:', err);
         const message = (err && err.message) ? err.message.slice(0, 160) : String(err);
@@ -2601,7 +2582,7 @@
 
       if (dispatchBtn) {
         dispatchBtn.addEventListener('click', () => {
-          separateStems(stemState.sourcePath || 'tests/fixtures/media/audio/sample_match_audio.wav');
+          separateStems(stemState.sourcePath);
         });
       }
       if (playBtn) playBtn.addEventListener('click', playStemMix);

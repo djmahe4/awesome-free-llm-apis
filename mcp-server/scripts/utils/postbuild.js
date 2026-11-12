@@ -7,7 +7,7 @@ import fs, { mkdirSync, copyFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
-import { torchInstallPlan } from './optional-deps.js';
+import { torchInstallPlan, opencvInstallPlan } from './optional-deps.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '../..');
@@ -56,23 +56,42 @@ try {
   console.error('Warning: Python virtual environment setup failed. Details:', err.message);
 }
 
-// Step 1b (optional): PyTorch lets the model inspector read .pt checkpoints. It is a large download, so it is
-// skipped in CI and with SKIP_TORCH=1, and a failed install only warns.
-try {
-  const venvPython = process.platform === 'win32'
-    ? resolve(root, 'venv', 'Scripts', 'python.exe')
-    : resolve(root, 'venv', 'bin', 'python');
-  let torchPresent = false;
-  try { execSync(`"${venvPython}" -c "import torch"`, { stdio: 'ignore' }); torchPresent = true; } catch { /* not installed */ }
-  const plan = torchInstallPlan({ env: process.env, platform: process.platform, torchPresent });
-  if (plan.install) {
-    console.log('Installing optional PyTorch (' + plan.reason + '); set SKIP_TORCH=1 to skip...');
-    execSync(`"${venvPython}" -m pip ${plan.args.join(' ')}`, { stdio: 'inherit' });
-  } else {
-    console.log('Skipping optional PyTorch: ' + plan.reason + '.');
+// Step 1b (optional): Optional heavy Python deps (PyTorch for .pt inspection, headless OpenCV for parallax/OCR).
+const venvPython = process.platform === 'win32'
+  ? resolve(root, 'venv', 'Scripts', 'python.exe')
+  : resolve(root, 'venv', 'bin', 'python');
+
+const optionalDeps = [
+  {
+    label: 'PyTorch',
+    importName: 'torch',
+    skipEnv: 'SKIP_TORCH',
+    fallbackNote: '.pt checkpoints will not be readable',
+    getPlan: (present) => torchInstallPlan({ env: process.env, platform: process.platform, torchPresent: present }),
+  },
+  {
+    label: 'OpenCV',
+    importName: 'cv2',
+    skipEnv: 'SKIP_OPENCV',
+    fallbackNote: 'depth parallax & OCR will use pure-NumPy fallbacks',
+    getPlan: (present) => opencvInstallPlan({ env: process.env, opencvPresent: present }),
+  },
+];
+
+for (const dep of optionalDeps) {
+  try {
+    let present = false;
+    try { execSync(`"${venvPython}" -c "import ${dep.importName}"`, { stdio: 'ignore' }); present = true; } catch { /* not installed */ }
+    const plan = dep.getPlan(present);
+    if (plan.install) {
+      console.log(`Installing optional ${dep.label} (${plan.reason}); set ${dep.skipEnv}=1 to skip...`);
+      execSync(`"${venvPython}" -m pip ${plan.args.join(' ')}`, { stdio: 'inherit' });
+    } else {
+      console.log(`Skipping optional ${dep.label}: ${plan.reason}.`);
+    }
+  } catch (err) {
+    console.warn(`Warning: optional ${dep.label} install failed; ${dep.fallbackNote}. Details:`, err.message);
   }
-} catch (err) {
-  console.warn('Warning: optional PyTorch install failed; .pt checkpoints will not be readable. Details:', err.message);
 }
 
 for (const { from, to } of copies) {

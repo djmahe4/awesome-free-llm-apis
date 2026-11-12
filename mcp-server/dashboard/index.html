@@ -1021,11 +1021,11 @@
           <table class="qs-table">
             <thead><tr><th>Param</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td><code>action</code></td><td>enum: status | abort | list_capabilities | analyze_javascript | analyze_artifact | get_evidence | scan_github | inspect_model | infer_layer_roles | trace_layer_execution | reconstruct_training_samples | extract_model_layer | analyze_model_layer | quantize_layer | assemble_moe | run_reasoning_model | run_yolo_nn | program_weight_space</td><td>✓</td><td>Analysis action to execute</td></tr>
+              <tr><td><code>action</code></td><td>enum: status | abort | list_capabilities | analyze_javascript | analyze_artifact | get_evidence | scan_github | inspect_model | infer_layer_roles | trace_layer_execution | reconstruct_training_samples | extract_model_layer | analyze_model_layer | quantize_layer | assemble_moe | run_reasoning_model | run_yolo_nn | run_scene_augmentation | run_depth_parallax | animate_still | reverse_vlm_generate | separate_audio_stems | inspect_ocr_tokens | program_weight_space</td><td>✓</td><td>Analysis action to execute</td></tr>
               <tr><td><code>target</code></td><td>string</td><td>for analyze / get / scan_github / model actions</td><td>Target file path, model artifact (.gguf, .pt, .onnx), evidence ID (ev-*), or GitHub repo ("owner/repo")</td></tr>
               <tr><td><code>authorization</code></td><td>enum: ctf | lab | consent</td><td>for analyze / target list / scan_github / model actions</td><td>Mandatory security authorization framing</td></tr>
               <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session identifier for async polling and status retrieval</td></tr>
-              <tr><td><code>options</code></td><td>object</td><td></td><td>Analysis parameters (ref, limit, query, storageDir, workspaceRoot, etc.)</td></tr>
+              <tr><td><code>options</code></td><td>object</td><td></td><td>Analysis parameters; depth uses DEPTH_ANYTHING_MODEL_PATH locally (or explicit depthMode=heuristic); audio requires local DEMUCS_MODEL_PATH and explicitConsentAck=true</td></tr>
             </tbody>
           </table>
           <div class="qs-guide-body" style="padding: 8px 12px; font-size: 0.78rem;">
@@ -2325,17 +2325,20 @@
             <div id="ml-media-preset-demucs" class="ml-media-subpanel">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                 <span style="font-size:.78rem;font-weight:600;">Demucs 4-Stem Separation Workbench:</span>
-                <span style="font-size:.7rem;color:var(--text-muted);">STFT time-frequency masking &middot; spectral decomposition</span>
+                <span style="font-size:.7rem;color:var(--text-muted);">Local Demucs only &middot; no synthetic fallback</span>
               </div>
               <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
                 <button id="ml-stem-file-btn" class="btn btn-secondary btn-sm">📂 Load Audio File</button>
-                <button class="btn btn-secondary btn-sm ml-stem-preset-btn" data-audio="tests/fixtures/media/audio/sample_match_audio.wav">Sample Audio</button>
                 <input type="file" id="ml-stem-file-input" accept="audio/*" style="font-size:.72rem;color:var(--text-muted);display:none;">
                 <button id="ml-stem-dispatch-btn" class="btn btn-primary btn-sm">🔬 Separate Stems</button>
                 <button id="ml-stem-play-btn" class="btn btn-secondary btn-sm" disabled>▶ Play Mix</button>
                 <button id="ml-stem-stop-btn" class="btn btn-secondary btn-sm" disabled>■ Stop</button>
-                <span id="ml-stem-status" style="font-size:.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">Load or pick sample audio, then run separation.</span>
+                <span id="ml-stem-status" style="font-size:.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">Load audio, attest ownership or licence, then run local separation.</span>
               </div>
+              <label style="display:block;font-size:.7rem;color:var(--text-muted);margin:0 0 10px;">
+                <input type="checkbox" id="ml-stem-consent">
+                I own this audio or hold a licence permitting local stem separation.
+              </label>
               <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:12px;">
                 <div style="background:var(--bg-primary);padding:10px;border-radius:4px;" data-stem="vocals">
                   <div style="font-size:.72rem;color:var(--accent-purple);font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
@@ -2406,28 +2409,26 @@
 
             <!-- Depth Anything V2 3D Parallax Scratchpad -->
             <div id="ml-media-preset-depth" class="ml-media-subpanel" style="display:none;">
-              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:14px;align-items:center;">
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                <input type="file" id="ml-depth-file-input" accept="image/*" style="display:none;">
+                <button id="ml-depth-file-btn" class="btn btn-secondary btn-sm">Load image</button>
+                <button id="ml-depth-run-btn" class="btn btn-primary btn-sm" disabled>Render pseudo-3D</button>
+                <span id="ml-depth-status" style="font-size:.7rem;color:var(--text-muted);">Depth Anything V2 Small must be installed locally; no download occurs.</span>
+              </div>
+              <label style="display:block;font-size:.7rem;color:var(--text-muted);margin-bottom:10px;">
+                <input type="checkbox" id="ml-depth-heuristic-opt-in">
+                Explicitly opt into non-ML heuristic depth if local model is unavailable.
+              </label>
+              <label style="display:block;font-size:.72rem;color:var(--text-muted);max-width:320px;">
+                Camera parallax dolly: <strong id="ml-val-dolly" style="color:var(--accent-amber);">15 px</strong>
+                <input type="range" id="ml-depth-dolly" min="-30" max="30" value="15" style="width:100%;">
+              </label>
+              <div style="display:grid;grid-template-columns:minmax(180px, 1fr) minmax(180px, 1fr);gap:12px;align-items:start;margin-top:12px;">
                 <div>
-                  <div style="font-size:.78rem;font-weight:600;margin-bottom:6px;">Relative Depth Field Map:</div>
-                  <div style="display:flex;flex-direction:column;gap:8px;">
-                    <label style="font-size:.72rem;color:var(--text-muted);">
-                      Near Plane Disparity: <strong id="ml-val-near" style="color:var(--accent-cyan);">0.2m</strong>
-                      <input type="range" id="ml-depth-near" min="1" max="50" value="20" style="width:100%;">
-                    </label>
-                    <label style="font-size:.72rem;color:var(--text-muted);">
-                      Far Plane Cutoff: <strong id="ml-val-far" style="color:var(--accent-purple);">10.0m</strong>
-                      <input type="range" id="ml-depth-far" min="50" max="200" value="100" style="width:100%;">
-                    </label>
-                    <label style="font-size:.72rem;color:var(--text-muted);">
-                      Camera Parallax Dolly: <strong id="ml-val-dolly" style="color:var(--accent-amber);">15 mm</strong>
-                      <input type="range" id="ml-depth-dolly" min="-30" max="30" value="15" style="width:100%;">
-                    </label>
-                  </div>
+                  <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:4px;">Rendered image artifact preview</div>
+                  <canvas id="ml-depth-preview-canvas" width="512" height="320" style="width:100%;max-width:512px;background:#0a0f1d;border-radius:4px;border:1px solid var(--border-subtle);display:block;"></canvas>
                 </div>
-                <div style="text-align:center;">
-                  <canvas id="ml-depth-preview-canvas" width="200" height="120" style="background:#0a0f1d;border-radius:4px;border:1px solid var(--border-subtle);display:inline-block;"></canvas>
-                  <div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;">Ray-marched 2.5D disparity grid</div>
-                </div>
+                <div id="ml-depth-artifact" style="font-size:.68rem;color:var(--text-muted);overflow-wrap:anywhere;"></div>
               </div>
             </div>
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 // @ts-expect-error plain JavaScript module used by scripts/utils/postbuild.js
-import { torchInstallPlan } from '../scripts/utils/optional-deps.js';
+import { torchInstallPlan, opencvInstallPlan } from '../scripts/utils/optional-deps.js';
 
 // PyTorch lets the model inspector read .pt checkpoints. It is a large download, so it is optional: skipped in CI,
 // when asked, and when it is already installed; a failed install only warns.
@@ -46,5 +46,40 @@ describe('torchInstallPlan', () => {
     it('FORCE_TORCH installs even in CI', () => {
         const p = torchInstallPlan({ ...base, env: { CI: 'true', FORCE_TORCH: '1' } });
         expect(p.install).toBe(true);
+    });
+});
+
+describe('opencvInstallPlan', () => {
+    const cvBase = { env: {}, opencvPresent: false };
+
+    it('installs opencv-python-headless when absent and not skipped', () => {
+        const p = opencvInstallPlan(cvBase);
+        expect(p.install).toBe(true);
+        expect(p.args).toEqual(['install', 'opencv-python-headless']);
+    });
+    it('is skipped in CI unless FORCE_OPENCV is set', () => {
+        for (const CI of ['true', '1', 'yes']) {
+            const p = opencvInstallPlan({ ...cvBase, env: { CI } });
+            expect(p.install).toBe(false);
+            expect(p.reason).toMatch(/CI/);
+        }
+        const forced = opencvInstallPlan({ ...cvBase, env: { CI: 'true', FORCE_OPENCV: '1' } });
+        expect(forced.install).toBe(true);
+    });
+    it('is skipped when SKIP_OPENCV is set', () => {
+        for (const SKIP_OPENCV of ['1', 'true']) {
+            const p = opencvInstallPlan({ ...cvBase, env: { SKIP_OPENCV } });
+            expect(p.install).toBe(false);
+            expect(p.reason).toMatch(/SKIP_OPENCV/);
+        }
+    });
+    it('is skipped when already installed', () => {
+        const p = opencvInstallPlan({ ...cvBase, opencvPresent: true });
+        expect(p.install).toBe(false);
+        expect(p.reason).toMatch(/already/i);
+    });
+    it('treats empty or false env values as not set', () => {
+        expect(opencvInstallPlan({ ...cvBase, env: { CI: '', SKIP_OPENCV: '0' } }).install).toBe(true);
+        expect(opencvInstallPlan({ ...cvBase, env: { CI: 'false' } }).install).toBe(true);
     });
 });
