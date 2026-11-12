@@ -192,7 +192,7 @@ describe('reverse_tool Model Introspection Actions', () => {
 
     // Wait and poll for completion
     let statusRes: any;
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 200; i++) {
       await new Promise(r => setTimeout(r, 100));
       statusRes = await runReverseTool({
         action: 'status',

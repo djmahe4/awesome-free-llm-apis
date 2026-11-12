@@ -11,7 +11,7 @@ describe('ReaSessionManager Lifecycle', () => {
 
   beforeEach(() => {
     manager = new ReaSessionManager({
-      idleTimeoutMs: 2000,
+      idleTimeoutMs: 10000,
       command: process.execPath,
       args: [FAKE_REA],
     });

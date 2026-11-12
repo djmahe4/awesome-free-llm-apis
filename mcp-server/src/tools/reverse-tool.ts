@@ -64,11 +64,15 @@ function resolveEngineScriptPath(scriptName: string): string {
 let cachedPythonBin: string | null = null;
 let cachedOptionalDeps: { pil: boolean; cv2: boolean; torch: boolean } | null = null;
 
+const FIND_SPEC_PROBE =
+  'import importlib.util, json; print(json.dumps({"pil": importlib.util.find_spec("PIL") is not None, "cv2": importlib.util.find_spec("cv2") is not None, "torch": importlib.util.find_spec("torch") is not None}))';
+
 export function inspectPythonDeps(pythonBin?: string): { pil: boolean; cv2: boolean; torch: boolean } {
   if (cachedOptionalDeps && !pythonBin) return cachedOptionalDeps;
   const bin = pythonBin || resolvePythonPath();
+  if (cachedOptionalDeps && !pythonBin) return cachedOptionalDeps;
   try {
-    const probe = spawnSync(bin, ['-c', 'import sys; pil = False\ntry:\n import PIL; pil = True\nexcept:\n pass\ncv = False\ntry:\n import cv2; cv = True\nexcept:\n pass\ntc = False\ntry:\n import torch; tc = True\nexcept:\n pass\nimport json; print(json.dumps({"pil": pil, "cv2": cv, "torch": tc}))'], { timeout: 15000, encoding: 'utf8' });
+    const probe = spawnSync(bin, ['-c', FIND_SPEC_PROBE], { timeout: 15000, encoding: 'utf8', windowsHide: true });
     if (probe.status === 0 && probe.stdout) {
       const parsed = JSON.parse(probe.stdout.trim());
       const res = { pil: !!parsed.pil, cv2: !!parsed.cv2, torch: !!parsed.torch };
@@ -104,18 +108,34 @@ export function resolvePythonPath(): string {
     'python',
     'python3',
   ];
+  let firstWorking: string | null = null;
+  let firstWorkingDeps: { pil: boolean; cv2: boolean; torch: boolean } | null = null;
   for (const cand of candidates) {
     if (cand === 'python' || cand === 'python3' || fs.existsSync(cand)) {
       try {
-        const res = spawnSync(cand, ['-c', 'import torch, PIL; print(torch.__version__)'], { timeout: 30000, stdio: 'pipe' });
-        if (res.status === 0) {
-          cachedPythonBin = cand;
-          return cand;
+        const res = spawnSync(cand, ['-c', FIND_SPEC_PROBE], { timeout: 15000, encoding: 'utf8', windowsHide: true });
+        if (res.status === 0 && res.stdout) {
+          const parsed = JSON.parse(res.stdout.trim());
+          const deps = { pil: !!parsed.pil, cv2: !!parsed.cv2, torch: !!parsed.torch };
+          if (!firstWorking) {
+            firstWorking = cand;
+            firstWorkingDeps = deps;
+          }
+          if (deps.torch && deps.pil) {
+            cachedPythonBin = cand;
+            cachedOptionalDeps = deps;
+            return cand;
+          }
         }
       } catch {
         // continue
       }
     }
+  }
+  if (firstWorking) {
+    cachedPythonBin = firstWorking;
+    cachedOptionalDeps = firstWorkingDeps;
+    return firstWorking;
   }
   const found = candidates.find(c => c === 'python' || c === 'python3' || fs.existsSync(c));
   cachedPythonBin = found || 'python';
