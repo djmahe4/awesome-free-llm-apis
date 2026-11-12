@@ -382,7 +382,6 @@ def reverse_generate(args):
 
     return {
         "output_path": os.path.abspath(output_path),
-        "output_base64": "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii"),
         "tokens": [w for w, _ in raw_tokens],
         "token_attributions": attributions,
         "spatial_patches": spatial_patches,

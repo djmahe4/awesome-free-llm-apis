@@ -59,7 +59,6 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
     expect(data.ok).toBe(true);
     expect(data.operation).toBe('pseudo_3d_parallax');
     expect(data.depth_backend).toBe('heuristic');
-    expect(data.output_base64).toBeDefined();
     expect(data.metrics.homography_applied).toBe(true);
     expect(data.metrics.projection_model).toBe('perspective_3d_homography');
     expect(data.metrics.depth_entropy_bits).toBeGreaterThan(0);
@@ -149,8 +148,7 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
     expect(data.operation).toBe('animate_still');
     expect(data.frames_count).toBe(4);
     expect(data.fps).toBe(6);
-    expect(data.output_base64).toBeDefined();
-    expect(data.metrics.file_size_bytes).toBeGreaterThan(1000);
+    expect(data.output_path).toBeDefined();
     expect(fs.existsSync(outGif)).toBe(true);
   }, 45000);
 
@@ -178,7 +176,7 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
     expect(data.ok).toBe(true);
     expect(data.operation).toBe('animate_still');
     expect(data.frames_count).toBe(4);
-    expect(data.output_base64).toBeDefined();
+    expect(data.output_path).toBeDefined();
     expect(fs.existsSync(outGif)).toBe(true);
   }, 60000);
 

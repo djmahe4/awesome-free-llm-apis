@@ -54,7 +54,6 @@ describe('Depth-guided pseudo-3D engine', () => {
     expect(result.operation).toBe('pseudo_3d_parallax');
     expect(result.depth_backend).toBe('heuristic');
     expect(result.output_path).toBe(outImg);
-    expect(result.output_base64.length).toBeGreaterThan(50);
     expect(fs.statSync(outImg).size).toBeGreaterThan(100);
     expect(result.metrics.depth_entropy_bits).toBeGreaterThan(0);
     expect(result.metrics.mean_flow_pixels).toBeGreaterThan(0);

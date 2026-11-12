@@ -1700,7 +1700,15 @@
         if (depthStatus) depthStatus.textContent = String((data && data.error) || (result && result.error) || 'Depth render unavailable.').slice(0, 200);
         return;
       }
-      if (depthCanvas && data.output_base64) {
+      if (depthCanvas && data.output_path) {
+        const image = new Image();
+        image.onload = () => {
+          const ctx = depthCanvas.getContext('2d');
+          ctx.clearRect(0, 0, depthCanvas.width, depthCanvas.height);
+          ctx.drawImage(image, 0, 0, depthCanvas.width, depthCanvas.height);
+        };
+        image.src = '/api/media/preview?file=' + encodeURIComponent(data.output_path);
+      } else if (depthCanvas && data.output_base64) {
         const image = new Image();
         image.onload = () => {
           const ctx = depthCanvas.getContext('2d');
@@ -2152,8 +2160,13 @@
         }
         const data = json.data || json;
         vlmState.data = data;
-        vlmState.outputDataUrl = data.output_base64;
-        vlmImage.src = data.output_base64;
+        if (data.output_path) {
+          vlmState.outputDataUrl = '/api/media/preview?file=' + encodeURIComponent(data.output_path);
+          vlmImage.src = vlmState.outputDataUrl;
+        } else if (data.output_base64) {
+          vlmState.outputDataUrl = data.output_base64;
+          vlmImage.src = data.output_base64;
+        }
         vlmImage.onload = () => {
           vlmImage.style.display = 'block';
           vlmImageEmpty.style.display = 'none';

@@ -912,7 +912,6 @@ def run_depth_parallax(
         "depth_mode": depth_mode,
         "layers_count": int(depth_layers),
         "output_path": os.path.abspath(output_path),
-        "output_base64": base64.b64encode(buf.getvalue()).decode("utf-8"),
         "metrics": metrics,
     }
 
@@ -1077,7 +1076,6 @@ def run_animate_still(
         "fps": int(fps),
         "duration_sec": round(len(frame_list) / float(fps), 2),
         "output_path": os.path.abspath(output_path),
-        "output_base64": b64_str,
         "depth_backend": depth_info["backend"],
         "depth_mode": depth_mode,
         "render_type": "single-image pseudo-3D; hidden surfaces are not reconstructed",
