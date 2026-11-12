@@ -43,7 +43,47 @@ function resolveModelInspectorPath(): string {
   return found;
 }
 
+/** Media/engine sub-scripts that ship next to model_inspector.py (ML Studio engines). */
+function resolveEngineScriptPath(scriptName: string): string {
+  const candidates = [
+    path.resolve(__dirname, '../scripts', scriptName),
+    path.resolve(__dirname, '../../scripts', scriptName),
+    path.resolve(__dirname, '../../../scripts', scriptName),
+    path.resolve(process.cwd(), 'scripts', scriptName),
+    path.resolve(process.cwd(), 'mcp-server/scripts', scriptName),
+    path.resolve(process.cwd(), 'dist/scripts', scriptName),
+    path.resolve(process.cwd(), 'mcp-server/dist/scripts', scriptName),
+  ];
+  const found = candidates.find(c => fs.existsSync(c));
+  if (!found) {
+    throw new Error(`Engine script (${scriptName}) not found in candidates: ` + candidates.join(', '));
+  }
+  return found;
+}
+
 let cachedPythonBin: string | null = null;
+let cachedOptionalDeps: { pil: boolean; cv2: boolean; torch: boolean } | null = null;
+
+const FIND_SPEC_PROBE =
+  'import importlib.util, json; print(json.dumps({"pil": importlib.util.find_spec("PIL") is not None, "cv2": importlib.util.find_spec("cv2") is not None, "torch": importlib.util.find_spec("torch") is not None}))';
+
+export function inspectPythonDeps(pythonBin?: string): { pil: boolean; cv2: boolean; torch: boolean } {
+  if (cachedOptionalDeps && !pythonBin) return cachedOptionalDeps;
+  const bin = pythonBin || resolvePythonPath();
+  if (cachedOptionalDeps && !pythonBin) return cachedOptionalDeps;
+  try {
+    const probe = spawnSync(bin, ['-c', FIND_SPEC_PROBE], { timeout: 15000, encoding: 'utf8', windowsHide: true });
+    if (probe.status === 0 && probe.stdout) {
+      const parsed = JSON.parse(probe.stdout.trim());
+      const res = { pil: !!parsed.pil, cv2: !!parsed.cv2, torch: !!parsed.torch };
+      if (!pythonBin) cachedOptionalDeps = res;
+      return res;
+    }
+  } catch {
+    // ignore probe error
+  }
+  return { pil: false, cv2: false, torch: false };
+}
 
 export function resolvePythonPath(): string {
   if (process.env.PYTHON) {
@@ -68,18 +108,34 @@ export function resolvePythonPath(): string {
     'python',
     'python3',
   ];
+  let firstWorking: string | null = null;
+  let firstWorkingDeps: { pil: boolean; cv2: boolean; torch: boolean } | null = null;
   for (const cand of candidates) {
     if (cand === 'python' || cand === 'python3' || fs.existsSync(cand)) {
       try {
-        const res = spawnSync(cand, ['-c', 'import torch; print(torch.__version__)'], { timeout: 3000, stdio: 'pipe' });
-        if (res.status === 0) {
-          cachedPythonBin = cand;
-          return cand;
+        const res = spawnSync(cand, ['-c', FIND_SPEC_PROBE], { timeout: 15000, encoding: 'utf8', windowsHide: true });
+        if (res.status === 0 && res.stdout) {
+          const parsed = JSON.parse(res.stdout.trim());
+          const deps = { pil: !!parsed.pil, cv2: !!parsed.cv2, torch: !!parsed.torch };
+          if (!firstWorking) {
+            firstWorking = cand;
+            firstWorkingDeps = deps;
+          }
+          if (deps.torch && deps.pil) {
+            cachedPythonBin = cand;
+            cachedOptionalDeps = deps;
+            return cand;
+          }
         }
       } catch {
         // continue
       }
     }
+  }
+  if (firstWorking) {
+    cachedPythonBin = firstWorking;
+    cachedOptionalDeps = firstWorkingDeps;
+    return firstWorking;
   }
   const found = candidates.find(c => c === 'python' || c === 'python3' || fs.existsSync(c));
   cachedPythonBin = found || 'python';
@@ -121,6 +177,12 @@ export type ReverseToolAction =
   | 'run_reasoning_model'
   | 'run_yolo_nn'
   | 'run_torch_nn'
+  | 'run_scene_augmentation'
+  | 'run_depth_parallax'
+  | 'animate_still'
+  | 'reverse_vlm_generate'
+  | 'separate_audio_stems'
+  | 'inspect_ocr_tokens'
   | 'program_weight_space';
 
 export const isModelAction = (act: string): boolean => [
@@ -135,7 +197,13 @@ export const isModelAction = (act: string): boolean => [
   'run_reasoning_model',
   'run_yolo_nn',
   'run_torch_nn',
+  'run_scene_augmentation',
+  'run_depth_parallax',
+  'animate_still',
+  'reverse_vlm_generate',
   'program_weight_space',
+  'separate_audio_stems',
+  'inspect_ocr_tokens',
 ].includes(act as any);
 
 export interface ReverseToolInput {
@@ -686,21 +754,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
   }
 
-  const modelActions = [
-    'inspect_model',
-    'infer_layer_roles',
-    'trace_layer_execution',
-    'reconstruct_training_samples',
-    'extract_model_layer',
-    'analyze_model_layer',
-    'quantize_layer',
-    'assemble_moe',
-    'run_reasoning_model',
-    'run_yolo_nn',
-  'run_torch_nn',
-    'program_weight_space',
-  ];
-
   if (isModelAction(action)) {
     if (!authorization || !VALID_AUTH.includes(authorization as ReverseAuthorization)) {
       return {
@@ -727,12 +780,64 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       ...(options?.workspaceRoot ? [String(options.workspaceRoot)] : []),
     ];
 
-    if (!isSafeAllowedPath(target, allowedRoots)) {
+    const isOllamaTarget = typeof target === 'string' && /^ollama:[a-zA-Z0-9._:/-]+$/.test(target.trim()) && !target.includes('..');
+    if (!isOllamaTarget && !isSafeAllowedPath(target, allowedRoots)) {
       return {
         success: false,
         action,
         target,
         error: 'Path traversal disallowed in target.',
+      };
+    }
+
+    if (action === 'separate_audio_stems' && (authorization !== 'consent' || options?.explicitConsentAck !== true)) {
+      return {
+        success: false,
+        action,
+        target,
+        error: 'Audio stem separation requires authorization: "consent" and options.explicitConsentAck: true, confirming you own or are licensed to process this audio.',
+      };
+    }
+
+    if (action === 'run_depth_parallax' || action === 'animate_still' || action === 'run_scene_augmentation') {
+      const deps = (options as any)?._mockDeps || inspectPythonDeps();
+      if (!deps.pil) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'Optional Python dependency "Pillow" (PIL) is not installed in the configured Python environment. Please install it (e.g. "pip install Pillow") to use image transform tools.',
+        };
+      }
+      if (!deps.cv2) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'Optional Python dependency "opencv-python-headless" (cv2) is not installed in the configured Python environment. Please install it (e.g. "pip install opencv-python-headless") to use 3D boundary-aware warping and segmentation tools.',
+        };
+      }
+    }
+
+    let scriptPath: string;
+    try {
+      scriptPath = action === 'run_scene_augmentation'
+        ? resolveEngineScriptPath('scene_augmentation.py')
+        : (action === 'run_depth_parallax' || action === 'animate_still')
+          ? resolveEngineScriptPath('depth_parallax_engine.py')
+          : action === 'reverse_vlm_generate'
+            ? resolveEngineScriptPath('vlm_reverse_generator.py')
+          : action === 'separate_audio_stems'
+            ? resolveEngineScriptPath('audio_separator.py')
+          : action === 'inspect_ocr_tokens'
+            ? resolveEngineScriptPath('ocr_engine.py')
+            : resolveModelInspectorPath();
+    } catch (err: any) {
+      return {
+        success: false,
+        action,
+        target,
+        error: err.message || String(err),
       };
     }
 
@@ -758,18 +863,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       }
     }
 
-    let scriptPath: string;
-    try {
-      scriptPath = resolveModelInspectorPath();
-    } catch (err: any) {
-      return {
-        success: false,
-        action,
-        target,
-        error: err.message || String(err),
-      };
-    }
-
     const actionMap: Record<string, string> = {
       inspect_model: 'inspect',
       infer_layer_roles: 'infer_roles',
@@ -782,6 +875,12 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       run_reasoning_model: 'run_reasoning_model',
       run_yolo_nn: 'run_yolo_nn',
       run_torch_nn: 'run_torch_nn',
+      run_scene_augmentation: 'augment_scene',
+      run_depth_parallax: 'parallax',
+      animate_still: 'animate_still',
+      separate_audio_stems: 'separate_audio_stems',
+      reverse_vlm_generate: 'reverse_generate',
+      inspect_ocr_tokens: 'inspect_ocr_tokens',
       program_weight_space: 'program_weight_space',
     };
 
@@ -805,6 +904,15 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
         };
       }
       args.push('--output', path.resolve(outStr));
+    } else if (action === 'run_depth_parallax' || action === 'animate_still') {
+      const ext = action === 'animate_still' ? '.gif' : '.png';
+      const defaultOutDir = path.join(process.cwd(), '.mcp-uploads', 'depth-parallax');
+      const defaultOut = path.join(defaultOutDir, `${action}-${Date.now()}${ext}`);
+      args.push('--output', path.resolve(defaultOut));
+    } else if (action === 'reverse_vlm_generate') {
+      const defaultOutDir = path.join(process.cwd(), '.mcp-uploads', 'vlm-reverse');
+      const defaultOut = path.join(defaultOutDir, `vlm_reverse_${Date.now()}.png`);
+      args.push('--output', path.resolve(defaultOut));
     }
     if (options?.cacheDir) {
       const cacheStr = String(options.cacheDir);
@@ -851,6 +959,103 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     if (options?.task) {
       args.push('--task', String(options.task));
     }
+    if (options?.operation) {
+      args.push('--operation', String(options.operation));
+    }
+    if (options?.kernelSize !== undefined) {
+      args.push('--kernel-size', String(options.kernelSize));
+    }
+    if (options?.strides !== undefined) {
+      args.push('--strides', String(options.strides));
+    }
+    if (options?.intensity !== undefined) {
+      args.push('--intensity', String(options.intensity));
+    }
+    if (options?.aspect) {
+      args.push('--aspect', String(options.aspect));
+    }
+    if (options?.bins) {
+      args.push('--bins', String(options.bins));
+    }
+    if (options?.mode) {
+      args.push('--mode', String(options.mode));
+    }
+    if (options?.depthMode || options?.['depth-mode']) {
+      args.push('--depth-mode', String(options.depthMode || options['depth-mode']));
+    }
+    if (options?.resolution !== undefined) {
+      args.push('--resolution', String(options.resolution));
+    }
+    if (options?.stems) {
+      args.push('--stems', String(options.stems));
+    }
+    if (action === 'separate_audio_stems') {
+      args.push('--method', String(options?.method ?? 'htdemucs'));
+      const outputDir = options?.outputDir ?? options?.['output-dir'];
+      const outputDirPath = outputDir === undefined
+        ? path.join(process.cwd(), '.mcp-uploads', 'audio-stems')
+        : String(outputDir);
+      if (!isSafeAllowedPath(outputDirPath, allowedRoots)) {
+        return { success: false, action, target, error: 'Path traversal disallowed in options.outputDir.' };
+      }
+      args.push('--output-dir', path.resolve(outputDirPath));
+      const maxDuration = options?.maxDurationSeconds ?? options?.['max-duration-seconds'];
+      if (maxDuration !== undefined) args.push('--max-duration-seconds', String(maxDuration));
+    }
+    if (options?.buckets) {
+      args.push('--buckets', String(options.buckets));
+    }
+    if (options?.depthLayers !== undefined || options?.['depth-layers'] !== undefined) {
+      args.push('--depth-layers', String(options.depthLayers ?? options['depth-layers']));
+    }
+    if (options?.target) {
+      args.push('--target', String(options.target));
+    }
+    if (options?.maskType || options?.['mask-type']) {
+      args.push('--mask-type', String(options.maskType || options['mask-type']));
+    }
+    if (options?.yaw !== undefined) {
+      args.push('--yaw', String(options.yaw));
+    }
+    if (options?.pitch !== undefined) {
+      args.push('--pitch', String(options.pitch));
+    }
+    if (options?.roll !== undefined) {
+      args.push('--roll', String(options.roll));
+    }
+    if (options?.bbox) {
+      args.push('--bbox', Array.isArray(options.bbox) ? options.bbox.join(',') : String(options.bbox));
+    }
+    if (options?.dolly !== undefined) {
+      args.push('--dolly', String(options.dolly));
+    }
+    if (options?.pan !== undefined) {
+      args.push('--pan', String(options.pan));
+    }
+    if (options?.shiftY !== undefined || options?.['shift-y'] !== undefined) {
+      args.push('--shift-y', String(options.shiftY ?? options['shift-y']));
+    }
+    if (options?.frames !== undefined) {
+      args.push('--frames', String(options.frames));
+    }
+    if (options?.fps !== undefined) {
+      args.push('--fps', String(options.fps));
+    }
+    if (options?.trajectory) {
+      args.push('--trajectory', String(options.trajectory));
+    }
+    if (options?.azimuthAmp !== undefined || options?.['azimuth-amp'] !== undefined) {
+      args.push('--azimuth-amp', String(options.azimuthAmp ?? options['azimuth-amp']));
+    }
+    if (options?.elevationAmp !== undefined || options?.['elevation-amp'] !== undefined) {
+      args.push('--elevation-amp', String(options.elevationAmp ?? options['elevation-amp']));
+    }
+    if (options?.dollyAmp !== undefined || options?.['dolly-amp'] !== undefined) {
+      args.push('--dolly-amp', String(options.dollyAmp ?? options['dolly-amp']));
+    }
+    if (options?.panAmp !== undefined || options?.['pan-amp'] !== undefined) {
+      args.push('--pan-amp', String(options.panAmp ?? options['pan-amp']));
+    }
     const imagePath = options?.image ?? options?.image_path;
     if (imagePath) {
       const imgStr = String(imagePath);
@@ -892,7 +1097,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       try {
         const { stdout } = await execFileAsync(pythonBin, args, {
           maxBuffer: 10 * 1024 * 1024,
-          timeout: 120_000,
+          timeout: action === 'separate_audio_stems' ? 15 * 60_000 : 120_000,
           encoding: 'utf8',
           signal: runInfo?.controller?.signal,
         });
@@ -974,7 +1179,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "program_weight_space".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "run_scene_augmentation", "run_depth_parallax", "animate_still", "reverse_vlm_generate", "separate_audio_stems", "inspect_ocr_tokens", "program_weight_space".`,
   };
 }
 

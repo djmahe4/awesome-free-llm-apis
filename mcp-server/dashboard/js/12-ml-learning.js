@@ -18,6 +18,34 @@
     return fetch('/api/' + call.tool, { ...init, body: JSON.stringify(params) });
   }
 
+  async function reverseToolWithPolling(params, { onRunning, timeoutMs = 150_000 } = {}) {
+    const startedAt = Date.now();
+    const send = async requestParams => {
+      const response = await toolFetch({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'reverse_tool', params: requestParams })
+      });
+      let result;
+      try { result = await response.json(); }
+      catch { throw new Error('Reverse tool returned invalid JSON (' + response.status + ').'); }
+      if (!response.ok) throw new Error(String((result && result.error) || 'Reverse tool request failed (' + response.status + ').'));
+      return result;
+    };
+
+    let result = await send(params);
+    while (result && result.data && result.data.status === 'running') {
+      const sessionId = result.data.sessionId;
+      if (!sessionId) throw new Error('Reverse tool started background work without a sessionId.');
+      if (onRunning) onRunning(result.data);
+      const remaining = timeoutMs - (Date.now() - startedAt);
+      if (remaining <= 0) throw new Error('Reverse tool polling timed out. Background job may still be running.');
+      await new Promise(resolve => setTimeout(resolve, Math.min(1500, remaining)));
+      result = await send({ action: 'status', sessionId });
+    }
+    return result;
+  }
+
   // ─── Color Helpers & Snell Refraction ─────────────────────────────
   function wavelengthToRGB(wl) {
     let r = 0, g = 0, b = 0;
@@ -106,8 +134,6 @@
     },
     media: {
       preset: 'demucs',
-      depthNear: 20,
-      depthFar: 100,
       depthDolly: 15
     }
   };
@@ -1610,127 +1636,1013 @@
     });
   }
 
-  // ─── Future Media Transforms Scratchpad ─────────────────────────
+  // ─── Local media model workbenches ────────────────────────────────
   const mediaTabBtns = document.querySelectorAll('.ml-media-tab-btn');
   const mediaSubpanels = document.querySelectorAll('.ml-media-subpanel');
-  const mediaStatusBadge = document.getElementById('ml-media-status');
-  const mediaDispatchBtn = document.getElementById('ml-media-dispatch-btn');
-  const depthCanvas = document.getElementById('ml-depth-preview-canvas');
-
-  mediaTabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      mediaTabBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const preset = btn.dataset.preset;
-      window.MLStateBus.media.preset = preset;
-
-      mediaSubpanels.forEach(p => {
-        p.style.display = p.id === `ml-media-preset-${preset}` ? 'block' : 'none';
-      });
-
-      if (mediaStatusBadge) {
-        const labels = {
-          demucs: 'Preset: Demucs 4-Stem',
-          depth: 'Preset: Depth Anything V2 Parallax',
-          tts: 'Preset: Kokoro Neural Vocoder',
-          ocr: 'Preset: OCR Token Bounding'
-        };
-        mediaStatusBadge.textContent = labels[preset] || 'Preset: Custom';
-      }
-
-      if (preset === 'depth') renderDepthMap();
+  let depthImagePath = null;
+  mediaTabBtns.forEach(btn => btn.addEventListener('click', () => {
+    mediaTabBtns.forEach(item => item.classList.remove('active'));
+    btn.classList.add('active');
+    const preset = btn.dataset.preset;
+    window.MLStateBus.media.preset = preset;
+    mediaSubpanels.forEach(panel => {
+      panel.style.display = panel.id === `ml-media-preset-${preset}` ? 'block' : 'none';
     });
-  });
+    const badge = document.getElementById('ml-media-status');
+    if (badge) badge.textContent = preset === 'depth' ? 'Preset: local depth model' : 'Preset: ' + preset;
+  }));
 
-  ['vocals', 'drums', 'bass', 'other'].forEach(stem => {
-    const input = document.getElementById(`ml-stem-${stem}`);
-    const valElem = document.getElementById(`ml-stem-${stem}-val`);
-    if (input) {
-      input.addEventListener('input', (e) => {
-        const val = Number(e.target.value) / 100;
-        if (valElem) valElem.textContent = `${val.toFixed(2)} dB`;
-      });
-    }
-  });
-
-  function renderDepthMap() {
-    if (!depthCanvas) return;
-    const dctx = depthCanvas.getContext('2d');
-    const w = depthCanvas.width;
-    const h = depthCanvas.height;
-    dctx.clearRect(0, 0, w, h);
-
-    const dolly = (Number(document.getElementById('ml-depth-dolly')?.value || 15) / 30) * 20;
-
-    dctx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
-    dctx.lineWidth = 1;
-    for (let z = 10; z < h; z += 12) {
-      dctx.beginPath();
-      dctx.moveTo(w / 2 - (z * 1.5) + dolly, z);
-      dctx.lineTo(w / 2 + (z * 1.5) + dolly, z);
-      dctx.stroke();
-    }
-
-    dctx.fillStyle = '#8b5cf6';
-    dctx.fillRect(w / 2 - 25 + dolly * 1.5, h / 2 - 20, 50, 40);
-
-    dctx.fillStyle = '#06b6d4';
-    dctx.beginPath();
-    dctx.arc(w / 2 + 45 + dolly * 0.8, h / 2 + 10, 16, 0, Math.PI * 2);
-    dctx.fill();
-  }
-
-  ['ml-depth-near', 'ml-depth-far', 'ml-depth-dolly'].forEach(id => {
-    const inp = document.getElementById(id);
-    if (inp) {
-      inp.addEventListener('input', () => {
-        const near = document.getElementById('ml-depth-near')?.value;
-        const far = document.getElementById('ml-depth-far')?.value;
-        const dolly = document.getElementById('ml-depth-dolly')?.value;
-        const valNear = document.getElementById('ml-val-near');
-        const valFar = document.getElementById('ml-val-far');
-        const valDolly = document.getElementById('ml-val-dolly');
-        if (valNear) valNear.textContent = `${(near / 100).toFixed(1)}m`;
-        if (valFar) valFar.textContent = `${(far / 10).toFixed(1)}m`;
-        if (valDolly) valDolly.textContent = `${dolly} mm`;
-        renderDepthMap();
-      });
-    }
-  });
-
-  if (mediaDispatchBtn) {
-    mediaDispatchBtn.addEventListener('click', async () => {
-      const statusElem = document.getElementById('ml-media-call-status');
-      const preset = window.MLStateBus.media.preset;
-      mediaDispatchBtn.disabled = true;
-      mediaDispatchBtn.textContent = '🚀 Dispatching...';
-
+  const depthFileBtn = document.getElementById('ml-depth-file-btn');
+  const depthFileInput = document.getElementById('ml-depth-file-input');
+  const depthRunBtn = document.getElementById('ml-depth-run-btn');
+  const depthCanvas = document.getElementById('ml-depth-preview-canvas');
+  const depthStatus = document.getElementById('ml-depth-status');
+  const depthArtifact = document.getElementById('ml-depth-artifact');
+  const depthDolly = document.getElementById('ml-depth-dolly');
+  const depthDollyValue = document.getElementById('ml-val-dolly');
+  if (depthDolly && depthDollyValue) depthDolly.addEventListener('input', () => { depthDollyValue.textContent = depthDolly.value + ' px'; });
+  if (depthFileBtn && depthFileInput) {
+    depthFileBtn.addEventListener('click', () => depthFileInput.click());
+    depthFileInput.addEventListener('change', async () => {
+      const file = depthFileInput.files && depthFileInput.files[0];
+      if (!file) return;
+      depthFileBtn.disabled = true;
+      if (depthStatus) depthStatus.textContent = 'Uploading image to workspace...';
       try {
-        if (statusElem) statusElem.textContent = `Sending the ${preset} request to the server...`;
-        const mediaRes = await toolFetch({
+        const form = new FormData();
+        form.append('file', file);
+        form.append('workspace_root', '.');
+        const response = await fetch('/api/upload', { method: 'POST', body: form });
+        const uploaded = await response.json();
+        if (!response.ok || !uploaded || !uploaded.absPath) throw new Error((uploaded && uploaded.error) || 'Image upload failed.');
+        depthImagePath = uploaded.absPath;
+        if (depthRunBtn) depthRunBtn.disabled = false;
+        if (depthStatus) depthStatus.textContent = 'Image ready. Uses local weights or explicit heuristic opt-in.';
+      } catch (err) {
+        if (depthStatus) depthStatus.textContent = String(err && err.message || err).slice(0, 160);
+      } finally { depthFileBtn.disabled = false; }
+    });
+  }
+  if (depthRunBtn) depthRunBtn.addEventListener('click', async () => {
+    if (!depthImagePath) return;
+    depthRunBtn.disabled = true;
+    if (depthStatus) depthStatus.textContent = 'Estimating depth and rendering...';
+    try {
+      const result = await reverseToolWithPolling({
+        action: 'run_depth_parallax', target: depthImagePath, authorization: 'consent',
+        options: {
+          mode: 'continuous_parallax', dolly: Number(depthDolly && depthDolly.value || 15), depthLayers: 16,
+          depthMode: document.getElementById('ml-depth-heuristic-opt-in')?.checked ? 'heuristic' : 'model'
+        }
+      }, { onRunning: () => { if (depthStatus) depthStatus.textContent = 'Depth render running...'; } });
+      const data = result && result.data;
+      if (!result || result.success === false || !data || data.ok === false) {
+        if (depthStatus) depthStatus.textContent = String((data && data.error) || (result && result.error) || 'Depth render unavailable.').slice(0, 200);
+        return;
+      }
+      if (depthCanvas && data.output_path) {
+        const image = new Image();
+        image.onload = () => {
+          const ctx = depthCanvas.getContext('2d');
+          ctx.clearRect(0, 0, depthCanvas.width, depthCanvas.height);
+          ctx.drawImage(image, 0, 0, depthCanvas.width, depthCanvas.height);
+        };
+        image.src = '/api/media/preview?file=' + encodeURIComponent(data.output_path);
+      } else if (depthCanvas && data.output_base64) {
+        const image = new Image();
+        image.onload = () => {
+          const ctx = depthCanvas.getContext('2d');
+          ctx.clearRect(0, 0, depthCanvas.width, depthCanvas.height);
+          ctx.drawImage(image, 0, 0, depthCanvas.width, depthCanvas.height);
+        };
+        image.src = 'data:image/png;base64,' + data.output_base64;
+      }
+      if (depthArtifact) depthArtifact.textContent = 'Artifact: ' + String(data.output_path || 'not returned') + ' | depth: ' + String(data.depth_backend || 'unknown') + ' | ' + String(data.render_type || 'pseudo-3D');
+      if (depthStatus) depthStatus.textContent = 'Render saved. ' + String(data.depth_backend || '') + ' depth output.';
+    } catch (err) {
+      if (depthStatus) depthStatus.textContent = String(err && err.message || err).slice(0, 200);
+    } finally { depthRunBtn.disabled = !depthImagePath; }
+  });
+
+  // ─── Pooling Kernel Lab ──────────────────────────────────────────
+  const LAPLACIAN_KERNEL = [
+    [0, -1, 0],
+    [-1, 5, -1],
+    [0, -1, 0]
+  ];
+  const poolState = {
+    operation: 'max_pool',
+    kernelSize: 3,
+    stride: 2,
+    intensity: 0.5,
+    uploadedAbsPath: null,
+    uploadedRelPath: null,
+    resultAbsPath: null,
+    beforeImg: null,
+    afterImg: null
+  };
+  const poolPresets = Array.from(document.querySelectorAll('.ml-pool-preset-btn'));
+  const poolFileInput = document.getElementById('ml-pool-file-input');
+  const poolStatus = document.getElementById('ml-pool-status');
+  const poolKernel = document.getElementById('ml-pool-kernel');
+  const poolStride = document.getElementById('ml-pool-stride');
+  const poolIntensity = document.getElementById('ml-pool-intensity');
+  const poolKernelVal = document.getElementById('ml-pool-kernel-val');
+  const poolStrideVal = document.getElementById('ml-pool-stride-val');
+  const poolIntensityVal = document.getElementById('ml-pool-intensity-val');
+  const poolMatrix = document.getElementById('ml-pool-matrix');
+  const poolMatrixNote = document.getElementById('ml-pool-matrix-note');
+  const poolApplyBtn = document.getElementById('ml-pool-apply-btn');
+  const poolComparator = document.getElementById('ml-pool-comparator');
+  const poolDivider = document.getElementById('ml-pool-divider');
+  const poolBeforeCanvas = document.getElementById('ml-pool-before-canvas');
+  const poolAfterCanvas = document.getElementById('ml-pool-after-canvas');
+  const poolHint = document.getElementById('ml-pool-hint');
+  const poolMetrics = document.getElementById('ml-pool-metrics');
+
+  if (poolMatrix && poolApplyBtn) {
+    function gaussianWeights() {
+      const k = poolState.kernelSize;
+      const sigma = Math.max(poolState.intensity, 0.1) * k;
+      const half = (k - 1) / 2;
+      const weights = [];
+      let total = 0;
+      for (let y = 0; y < k; y++) {
+        weights.push([]);
+        for (let x = 0; x < k; x++) {
+          const dx = x - half;
+          const dy = y - half;
+          const w = Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
+          weights[y].push(w);
+          total += w;
+        }
+      }
+      for (let y = 0; y < k; y++) {
+        for (let x = 0; x < k; x++) {
+          weights[y][x] /= total;
+        }
+      }
+      return weights;
+    }
+
+    function renderPoolMatrix() {
+      let grid;
+      let note;
+      if (poolState.operation === 'laplacian_sharpen') {
+        grid = LAPLACIAN_KERNEL.map(row => row.map(v => String(v)));
+        note = 'Laplacian sharpen — fixed 3x3 (each kernel 1 and 5, negatives pull toward neigborhood)';
+      } else if (poolState.operation === 'gaussian_smooth') {
+        grid = gaussianWeights().map(row => row.map(w => (w * 100).toFixed(1) + '%'));
+        note = 'Gaussian weights — sigma ' + poolState.intensity.toFixed(2) + ', normalized to 100%';
+      } else {
+        const k = poolState.kernelSize;
+        grid = Array.from({ length: k }, () => Array.from({ length: k }, () => '1'));
+        note = poolState.operation + ', ' + k + 'x' + k + ' window, stride ' + poolState.stride;
+      }
+      poolMatrix.style.gridTemplateColumns = 'repeat(' + grid[0].length + ', auto)';
+      poolMatrix.innerHTML = '';
+      grid.forEach(row => {
+        row.forEach(val => {
+          const cell = document.createElement('div');
+          cell.textContent = val;
+          const num = parseFloat(val) || 0;
+          cell.style.cssText = 'padding:3px 7px;border-radius:3px;border:1px solid var(--border-subtle);background:' +
+            (num > 0 ? 'var(--bg-primary)' : 'var(--bg-secondary)') + ';font-size:.62rem;white-space:nowrap;';
+          if (val === '5') cell.style.color = 'var(--accent-cyan)';
+          else if (num < 0) cell.style.color = 'var(--accent-amber)';
+          else if (val === '1') cell.style.color = 'var(--accent-purple)';
+          poolMatrix.appendChild(cell);
+        });
+      });
+      poolMatrixNote.textContent = note;
+    }
+
+    function updatePoolSliderLabels() {
+      poolKernelVal.textContent = String(poolState.kernelSize);
+      poolStrideVal.textContent = String(poolState.stride);
+      poolIntensityVal.textContent = poolState.intensity.toFixed(2);
+    }
+
+    poolPresets.forEach(btn => {
+      btn.addEventListener('click', () => {
+        poolPresets.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        poolState.operation = btn.dataset.op;
+        renderPoolMatrix();
+      });
+    });
+    poolKernel.addEventListener('input', () => {
+      poolState.kernelSize = parseInt(poolKernel.value, 10);
+      updatePoolSliderLabels();
+      renderPoolMatrix();
+    });
+    poolStride.addEventListener('input', () => {
+      poolState.stride = parseInt(poolStride.value, 10);
+      updatePoolSliderLabels();
+      renderPoolMatrix();
+    });
+    poolIntensity.addEventListener('input', () => {
+      poolState.intensity = parseInt(poolIntensity.value, 10) / 100;
+      updatePoolSliderLabels();
+      renderPoolMatrix();
+    });
+    updatePoolSliderLabels();
+    renderPoolMatrix();
+
+    // Split-canvas comparator sweep (drag the divider to reveal after/before)
+    function setPoolSweep(pct) {
+      if (!poolComparator.getBoundingClientRect().width) return;
+      const clamped = Math.min(Math.max(pct, 0), 100);
+      poolDivider.style.left = clamped + '%';
+      poolAfterCanvas.style.clipPath = 'inset(0 ' + (100 - clamped) + '% 0 0)';
+    }
+    let poolSweeping = false;
+    poolDivider.addEventListener('pointerdown', ev => {
+      poolSweeping = true;
+      poolDivider.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    poolDivider.addEventListener('pointermove', ev => {
+      if (!poolSweeping) return;
+      const rect = poolComparator.getBoundingClientRect();
+      setPoolSweep(((ev.clientX - rect.left) / rect.width) * 100);
+    });
+    poolDivider.addEventListener('pointerup', () => { poolSweeping = false; });
+    poolDivider.addEventListener('pointercancel', () => { poolSweeping = false; });
+
+    function drawPoolImages() {
+      const before = poolState.beforeImg;
+      if (!before) return;
+      const maxW = 640;
+      const scale = Math.min(1, maxW / before.naturalWidth) || 1;
+      const w = Math.max(1, Math.round(before.naturalWidth * scale));
+      const h = Math.max(1, Math.round(before.naturalHeight * scale));
+      poolBeforeCanvas.width = w;
+      poolBeforeCanvas.height = h;
+      poolBeforeCanvas.getContext('2d').drawImage(before, 0, 0, w, h);
+      const after = poolState.afterImg;
+      if (after) {
+        poolAfterCanvas.width = w;
+        poolAfterCanvas.height = h;
+        poolAfterCanvas.getContext('2d').drawImage(after, 0, 0, w, h);
+      }
+      poolComparator.style.display = 'block';
+      poolHint.style.display = 'block';
+      setPoolSweep(after ? 50 : 100);
+    }
+
+    function fmtPoolNumber(label, value) {
+      if (typeof value !== 'number' || !isFinite(value)) return null;
+      return { label, text: label === 'elapsed ms' ? value.toFixed(1) : value.toFixed(3) };
+    }
+
+    function renderPoolMetrics(data) {
+      const deltas = (data && data.deltas) || {};
+      const chips = [
+        fmtPoolNumber('Δ max vs avg', deltas.max_vs_avg),
+        fmtPoolNumber('Δ min vs avg', deltas.min_vs_avg),
+        fmtPoolNumber('Δ center dev', deltas.avg_center_dev),
+        fmtPoolNumber('Δ smooth', deltas.smooth_delta),
+        fmtPoolNumber('Δ edge', deltas.edge_delta),
+        fmtPoolNumber('elapsed ms', data && data.elapsed_ms)
+      ].filter(Boolean);
+      if (!chips.length) return;
+      poolMetrics.style.display = 'grid';
+      poolMetrics.style.gridTemplateColumns = 'repeat(auto-fit,minmax(150px,1fr))';
+      poolMetrics.style.gap = '8px';
+      poolMetrics.innerHTML = '';
+      chips.forEach(chip => {
+        const box = document.createElement('div');
+        box.style.cssText = 'background:var(--bg-primary);padding:8px;border-radius:4px;border:1px solid var(--border-subtle);';
+        const lab = document.createElement('div');
+        lab.textContent = chip.label;
+        lab.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--text-muted);";
+        const val = document.createElement('div');
+        val.textContent = chip.text;
+        val.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:.82rem;color:var(--accent-cyan);";
+        box.appendChild(lab);
+        box.appendChild(val);
+        poolMetrics.appendChild(box);
+      });
+    }
+
+    // Upload flow — workspace_root '.' keeps uploads under .mcp-uploads/ inside
+    // the server cwd so both input and output PNGs are served by /api/media/preview.
+    poolFileInput.addEventListener('change', async () => {
+      const file = poolFileInput.files && poolFileInput.files[0];
+      if (!file) return;
+      poolState.resultAbsPath = null;
+      poolState.afterImg = null;
+      poolStatus.textContent = 'Uploading "' + file.name + '" to .mcp-uploads/...';
+      poolStatus.style.color = 'var(--text-muted)';
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('workspace_root', '.');
+        const res = await fetch('/api/upload', { method: 'POST', body: form });
+        const json = await res.json().catch(() => null);
+        if (!json || !json.absPath) throw new Error((json && json.error) || 'upload failed');
+        poolState.uploadedAbsPath = json.absPath;
+        poolState.uploadedRelPath = json.relativePath;
+        poolApplyBtn.disabled = false;
+        poolStatus.textContent = 'Ready: ' + json.relativePath;
+        poolStatus.style.color = 'var(--accent-green)';
+      } catch (err) {
+        poolStatus.textContent = 'Upload failed: ' + String((err && err.message) || err).slice(0, 160);
+        poolStatus.style.color = 'var(--accent-amber)';
+      }
+    });
+
+    // Run kernel — engine op passthrough; only the 5 supported ops are wired.
+    poolApplyBtn.addEventListener('click', async () => {
+      if (!poolState.uploadedAbsPath) return;
+      poolApplyBtn.disabled = true;
+      poolApplyBtn.textContent = '🌀 Running kernel...';
+      poolStatus.textContent = 'Running ' + poolState.operation + ' on the server...';
+      poolStatus.style.color = 'var(--text-muted)';
+      try {
+        const res = await toolFetch({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            tool: preset === 'depth' || preset === 'demucs' ? 'movie_tool' : 'reverse_tool',
+            tool: 'reverse_tool',
             params: {
-              action: preset === 'depth' ? 'parallax_warp' : (preset === 'demucs' ? 'stem_split' : 'status'),
-              options: { preset }
+              action: 'run_scene_augmentation',
+              target: poolState.uploadedAbsPath,
+              authorization: 'lab',
+              options: {
+                operation: poolState.operation,
+                kernelSize: poolState.kernelSize,
+                strides: poolState.stride,
+                intensity: poolState.intensity
+              }
             }
           })
-        }).catch(() => null);
-
-        let mediaJson = null;
-        try { mediaJson = mediaRes && mediaRes.ok ? await mediaRes.json() : null; } catch (e) { mediaJson = null; }
-        const mediaOk = !!mediaJson && mediaJson.success !== false;
-        if (statusElem) {
-          statusElem.textContent = mediaOk
-            ? 'Server accepted the ' + preset + ' request.'
-            : 'Not run: ' + String((mediaJson && mediaJson.error) || (mediaRes ? 'the server refused the request (it needs real media input)' : 'the server could not be reached')).slice(0, 160);
-          statusElem.style.color = mediaOk ? 'var(--accent-green)' : 'var(--accent-amber)';
+        });
+        const json = await res.json().catch(() => null);
+        if (!json || json.success !== true) {
+          throw new Error((json && json.error) || 'the server refused the request');
         }
+        const data = json.data || json;
+        poolState.resultAbsPath = data.output_path;
+        renderPoolMetrics(data);
+        poolStatus.textContent = 'Output written to ' + String(data.output_path || '').split(/[\\\/]/).pop() + ' — drag the divider to compare.';
+        poolStatus.style.color = 'var(--accent-green)';
+        const img = new Image();
+        img.onload = () => {
+          poolState.afterImg = img;
+          drawPoolImages();
+        };
+        img.src = '/api/media/preview?file=' + encodeURIComponent(data.output_path);
+      } catch (err) {
+        poolStatus.textContent = 'Kernel run failed: ' + String((err && err.message) || err).slice(0, 160);
+        poolStatus.style.color = 'var(--accent-amber)';
       } finally {
-        mediaDispatchBtn.disabled = false;
-        mediaDispatchBtn.textContent = '🚀 Dispatch Transform Job';
+        poolApplyBtn.disabled = false;
+        poolApplyBtn.textContent = '🌀 Run kernel on image';
+      }
+    });
+  }
+
+  // ─── VLM Reverse Image Synthesis & Attribution Studio ───────────
+  const vlmGenerateBtn = document.getElementById('ml-vlm-generate-btn');
+  if (vlmGenerateBtn) {
+    const vlmPrompt = document.getElementById('ml-vlm-prompt');
+    const vlmStatus = document.getElementById('ml-vlm-status');
+    const vlmImage = document.getElementById('ml-vlm-image');
+    const vlmImageEmpty = document.getElementById('ml-vlm-image-empty');
+    const vlmHeatmap = document.getElementById('ml-vlm-heatmap');
+    const vlmHeatmapEmpty = document.getElementById('ml-vlm-heatmap-empty');
+    const vlmHover = document.getElementById('ml-vlm-hover');
+    const vlmTokens = document.getElementById('ml-vlm-tokens');
+    const vlmMetrics = document.getElementById('ml-vlm-metrics');
+    const vlmSendBtn = document.getElementById('ml-vlm-send-btn');
+    const vlmResolution = document.getElementById('ml-vlm-resolution');
+    const vlmState = { mode: 'feature_attribution', data: null, outputDataUrl: null };
+    let vlmPatchMap = new Map();
+
+    document.querySelectorAll('.ml-vlm-preset-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (vlmPrompt) vlmPrompt.value = btn.dataset.prompt || '';
+        generateVlm();
+      });
+    });
+
+    document.querySelectorAll('.ml-vlm-mode-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.ml-vlm-mode-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        vlmState.mode = btn.dataset.mode || 'feature_attribution';
+        if (vlmState.data) generateVlm();
+      });
+    });
+
+    function drawVlmHeatmap(data) {
+      const grid = data && data.latent_energy_map;
+      const g = Array.isArray(grid) ? grid.length : 0;
+      if (!g) return;
+      const cell = 12;
+      const px = g * cell;
+      vlmHeatmap.width = px;
+      vlmHeatmap.height = px;
+      const ctx = vlmHeatmap.getContext('2d');
+      ctx.clearRect(0, 0, px, px);
+      for (let r = 0; r < g; r++) {
+        for (let c = 0; c < g; c++) {
+          const e = Math.max(0, Math.min(1, Number((grid[r] || [])[c]) || 0));
+          ctx.fillStyle = 'hsl(' + Math.round((1 - e) * 215) + ', 85%, ' + Math.round(64 - e * 40) + '%)';
+          ctx.fillRect(c * cell, r * cell, cell, cell);
+        }
+      }
+      vlmPatchMap = new Map();
+      ((data && data.spatial_patches) || []).forEach((p) => {
+        vlmPatchMap.set(p.row + ',' + p.col, p);
+      });
+    }
+
+    vlmHeatmap.addEventListener('mousemove', (ev) => {
+      if (!vlmState.data) return;
+      const rect = vlmHeatmap.getBoundingClientRect();
+      const g = (vlmState.data.latent_energy_map || []).length || 1;
+      const col = Math.min(g - 1, Math.max(0, Math.floor(((ev.clientX - rect.left) / rect.width) * g)));
+      const row = Math.min(g - 1, Math.max(0, Math.floor(((ev.clientY - rect.top) / rect.height) * g)));
+      const patch = vlmPatchMap.get(row + ',' + col);
+      vlmHover.style.display = 'block';
+      if (patch) {
+        vlmHover.innerHTML = '';
+        vlmHover.textContent = 'patch (' + row + ',' + col + ') — energy ' + Number(patch.energy).toFixed(3) + ' — dominant token: ' + (patch.dominant_token || 'none');
+      } else {
+        vlmHover.textContent = 'patch (' + row + ',' + col + ') — no dominant token (background energy)';
+      }
+    });
+    vlmHeatmap.addEventListener('mouseleave', () => { vlmHover.style.display = 'none'; });
+
+    function fmtVlmNumber(label, value) {
+      if (typeof value !== 'number' || !isFinite(value)) return null;
+      return { label, text: label === 'elapsed ms' ? value.toFixed(1) : value.toFixed(3) };
+    }
+
+    function renderVlmMetrics(data) {
+      const m = (data && data.metrics) || {};
+      const mChips = [
+        { label: 'mode', text: String(m.mode || vlmState.mode) },
+        { label: 'patch grid', text: m.patch_grid + '\u00d7' + m.patch_grid + ' (' + String(m.resolution || '?') + 'px)' },
+        fmtVlmNumber('attention entropy', m.attention_entropy),
+        fmtVlmNumber('peak saliency', m.peak_saliency),
+        { label: 'peak position', text: Array.isArray(m.peak_coords) ? '(' + m.peak_coords.join(',') + ')' : '—' },
+        { label: 'tokens decomposed', text: String(m.token_count != null ? m.token_count : ((data.tokens || []).length)) },
+        fmtVlmNumber('elapsed ms', m.elapsed_ms)
+      ].filter((c) => c && c.text);
+      vlmMetrics.style.display = 'grid';
+      vlmMetrics.style.gridTemplateColumns = 'repeat(auto-fit,minmax(140px,1fr))';
+      vlmMetrics.style.gap = '8px';
+      vlmMetrics.innerHTML = '';
+      mChips.forEach((chip) => {
+        const box = document.createElement('div');
+        box.style.cssText = 'background:var(--bg-primary);padding:8px;border-radius:4px;border:1px solid var(--border-subtle);';
+        const lab = document.createElement('div');
+        lab.textContent = chip.label;
+        lab.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--text-muted);";
+        const val = document.createElement('div');
+        val.textContent = chip.text;
+        val.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:.8rem;color:var(--accent-cyan);";
+        box.appendChild(lab);
+        box.appendChild(val);
+        vlmMetrics.appendChild(box);
+      });
+    }
+
+    function renderVlmTokens(data) {
+      const attribs = (data && data.token_attributions) || [];
+      vlmTokens.style.display = 'flex';
+      vlmTokens.innerHTML = '';
+      attribs.forEach((a) => {
+        const chip = document.createElement('span');
+        chip.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:.66rem;padding:4px 8px;border-radius:99px;background:var(--bg-primary);border:1px solid var(--border-subtle);color:var(--accent-cyan);";
+        chip.textContent = a.token + ' (' + (a.category || 'other') + ') · ' + (Number(a.weight) * 100).toFixed(1) + '%';
+        chip.title = 'centroid (' + (a.centroid || []).join(',') + '), energy share ' + (Number(a.energy_share) * 100).toFixed(1) + '%';
+        vlmTokens.appendChild(chip);
+      });
+    }
+
+    async function generateVlm() {
+      const prompt = (vlmPrompt && vlmPrompt.value || '').trim();
+      if (!prompt) {
+        vlmStatus.textContent = 'Enter a prompt (or tap a preset) first.';
+        vlmStatus.style.color = 'var(--accent-amber)';
+        return;
+      }
+      vlmGenerateBtn.disabled = true;
+      vlmGenerateBtn.textContent = '⏳ Synthesizing...';
+      vlmStatus.textContent = 'Decomposing prompt into token attention geometry...';
+      vlmStatus.style.color = 'var(--text-muted)';
+      try {
+        const res = await toolFetch({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tool: 'reverse_tool',
+            params: {
+              action: 'reverse_vlm_generate',
+              authorization: 'lab',
+              options: {
+                prompt: prompt,
+                mode: vlmState.mode,
+                resolution: Number(vlmResolution.value) || 128,
+                seed: 42
+              }
+            }
+          })
+        });
+        const json = await res.json().catch(() => null);
+        if (!json || json.success !== true) {
+          throw new Error((json && json.error) || 'the server refused the request');
+        }
+        const data = json.data || json;
+        vlmState.data = data;
+        if (data.output_path) {
+          vlmState.outputDataUrl = '/api/media/preview?file=' + encodeURIComponent(data.output_path);
+          vlmImage.src = vlmState.outputDataUrl;
+        } else if (data.output_base64) {
+          vlmState.outputDataUrl = data.output_base64;
+          vlmImage.src = data.output_base64;
+        }
+        vlmImage.onload = () => {
+          vlmImage.style.display = 'block';
+          vlmImageEmpty.style.display = 'none';
+        };
+        drawVlmHeatmap(data);
+        vlmHeatmap.style.display = 'block';
+        vlmHeatmapEmpty.style.display = 'none';
+        renderVlmTokens(data);
+        renderVlmMetrics(data);
+        vlmSendBtn.disabled = false;
+        const m = data.metrics || {};
+        vlmStatus.textContent = String(data.tokens || []).length + ' tokens projected onto a ' + (m.patch_grid || '?') + '\u00d7' + (m.patch_grid || '?') + ' latent grid — hover the heatmap.';
+        vlmStatus.style.color = 'var(--accent-green)';
+      } catch (err) {
+        vlmStatus.textContent = 'Synthesis failed: ' + String((err && err.message) || err).slice(0, 160);
+        vlmStatus.style.color = 'var(--accent-amber)';
+      } finally {
+        vlmGenerateBtn.disabled = false;
+        vlmGenerateBtn.textContent = '🖼 Synthesize image';
+      }
+    }
+    vlmGenerateBtn.addEventListener('click', generateVlm);
+
+    // Demucs 4-Stem Separation
+    const stemState = {
+      audioContext: null,
+      masterGain: null,
+      masterAnalyser: null,
+      sourcePath: null,
+      payload: null,
+      buffers: {},
+      gains: {},
+      analysers: {},
+      sources: {},
+      playing: false,
+      rafId: null
+    };
+    const stemColors = { vocals: '#c084fc', drums: '#38bdf8', bass: '#4ade80', other: '#fbbf24' };
+
+    function setStemStatus(message, ok) {
+      const status = document.getElementById('ml-stem-status');
+      if (!status) return;
+      status.textContent = String(message || '').slice(0, 160);
+      status.style.color = ok ? 'var(--accent-green)' : 'var(--accent-amber)';
+    }
+
+    function separateStems(sourcePath) {
+      if (!sourcePath) {
+        setStemStatus('No audio source selected.', false);
+        return;
+      }
+      const consent = document.getElementById('ml-stem-consent');
+      if (!consent || !consent.checked) {
+        setStemStatus('Confirm ownership or licence before local stem separation.', false);
+        return;
+      }
+      stemState.sourcePath = sourcePath;
+      setStemStatus('Dispatching local Demucs separation...', true);
+      reverseToolWithPolling({
+        action: 'separate_audio_stems', target: sourcePath, authorization: 'consent',
+        options: {
+          method: 'htdemucs', stems: ['vocals', 'drums', 'bass', 'other'],
+          explicitConsentAck: true, maxDurationSeconds: 600
+        }
+      }, {
+        timeoutMs: 15 * 60_000 + 30_000,
+        onRunning: progress => setStemStatus(progress.message || 'Local Demucs separation running...', true)
+      }).then(async result => {
+        const data = result && result.data;
+        if (result && result.success && data && data.status === 'ok') {
+          stemState.payload = data;
+          await loadStemPayload(data);
+        } else {
+          const message = (data && data.error) || (result && result.error) || 'Local Demucs backend unavailable.';
+          setStemStatus(String(message).slice(0, 160), false);
+          stopStemMix();
+        }
+      }).catch(err => {
+        setStemStatus((err && err.message) ? err.message.slice(0, 160) : String(err), false);
+        stopStemMix();
+      });
+    }
+
+    function ensureStemAudio() {
+      if (!stemState.audioContext) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        stemState.audioContext = new AudioCtx();
+      }
+      return stemState.audioContext;
+    }
+
+    async function decodeStemFile(filePath) {
+      const ctx = ensureStemAudio();
+      if (!filePath) throw new Error('No persisted WAV path returned for stem.');
+      const response = await fetch('/api/media/preview?file=' + encodeURIComponent(filePath));
+      if (!response.ok) throw new Error('Could not load persisted WAV stem (' + response.status + ').');
+      return await ctx.decodeAudioData(await response.arrayBuffer());
+    }
+
+    function renderStemNotes(names, perStem, payload) {
+      const container = document.getElementById('ml-stem-notes');
+      const body = document.getElementById('ml-stem-notes-body');
+      if (!container || !body) return;
+      const srcName = stemState.sourcePath ? stemState.sourcePath.split(String.fromCharCode(92)).pop().split('/').pop() : 'audio file';
+      body.textContent = 'Source: ' + srcName + ' | backend: ' + String(payload.backend || 'Demucs') + ' | stems: ' + names.join(', ') + '. ' + String(payload.learning_notes || 'Local separation completed.');
+      container.style.display = 'block';
+    }
+
+    function renderStemMetrics(names, perStem) {
+      names.forEach(name => {
+        const stem = (perStem && perStem[name]) || {};
+        const metricsEl = document.getElementById(`ml-stem-metrics-${name}`);
+        if (!metricsEl) return;
+        const rms = typeof stem.rms_power === 'number' ? stem.rms_power.toFixed(2) : 'n/a';
+        const centroid = typeof stem.spectral_centroid === 'number' ? `${stem.spectral_centroid.toFixed(0)} Hz` : 'n/a';
+        metricsEl.innerHTML = `
+          <div>Phase 1/3 - RMS: <strong>${rms}</strong></div>
+          <div>Phase 2/3 - Centroid: <strong>${centroid}</strong></div>
+          <div>Metrics use separated WAV; playback loads complete persisted stem.</div>`;
+      });
+    }
+
+    async function loadStemPayload(payload) {
+      setStemStatus('Decoding stems...', true);
+      try {
+        const names = ['vocals', 'drums', 'bass', 'other'];
+        const perStem = (payload && payload.stems) ? payload.stems : {};
+        if (names.some(name => !perStem[name] || !perStem[name].path)) throw new Error('Demucs did not return all four WAV stem files.');
+        const decoded = {};
+        for (const name of names) decoded[name] = await decodeStemFile(perStem[name].path);
+        stemState.buffers = decoded;
+        renderStemNotes(names, perStem, payload);
+        renderStemMetrics(names, perStem);
+        const playBtn = document.getElementById('ml-stem-play-btn');
+        const stopBtn = document.getElementById('ml-stem-stop-btn');
+        if (playBtn) playBtn.disabled = false;
+        if (stopBtn) stopBtn.disabled = false;
+        drawStemsFlat();
+        setStemStatus(`Ready - ${names.length} persisted Demucs WAV stems loaded.`, true);
+      } catch (err) {
+        console.error('Stem payload decode failed:', err);
+        const message = (err && err.message) ? err.message.slice(0, 160) : String(err);
+        setStemStatus(message, false);
+      }
+    }
+
+    function stemFaderValue(name) {
+      const input = document.getElementById(`ml-stem-${name}`);
+      if (!input) return 100;
+      const value = Number(input.value);
+      return Number.isFinite(value) ? value : 100;
+    }
+
+    function stemMuted(name) {
+      const btn = document.querySelector(`.ml-stem-mute-btn[data-stem="${name}"]`);
+      return !!(btn && btn.classList.contains('active'));
+    }
+
+    function stemSoloObscured(name) {
+      const anySolo = ['vocals', 'drums', 'bass', 'other'].some(other => {
+        if (other === name) return false;
+        const btn = document.querySelector(`.ml-stem-solo-btn[data-stem="${other}"]`);
+        return !!(btn && btn.classList.contains('active'));
+      });
+      if (!anySolo) return false;
+      const own = document.querySelector(`.ml-stem-solo-btn[data-stem="${name}"]`);
+      return !(own && own.classList.contains('active'));
+    }
+
+    function stemEffectiveGain(name) {
+      if (stemMuted(name) || stemSoloObscured(name)) return 0;
+      return stemFaderValue(name) / 100;
+    }
+
+    function updateStemButtonVisuals() {
+      ['vocals', 'drums', 'bass', 'other'].forEach(name => {
+        ['mute', 'solo'].forEach(kind => {
+          const btn = document.querySelector(`.ml-stem-${kind}-btn[data-stem="${name}"]`);
+          if (!btn) return;
+          if (btn.classList.contains('active')) {
+            btn.style.background = stemColors[name];
+            btn.style.color = '#0b0f1a';
+          } else {
+            btn.style.background = '';
+            btn.style.color = '';
+          }
+        });
+      });
+    }
+
+    function applyStemGains() {
+      ['vocals', 'drums', 'bass', 'other'].forEach(name => {
+        const gain = stemState.gains[name];
+        if (gain) gain.gain.value = stemEffectiveGain(name);
+      });
+      updateStemButtonVisuals();
+      if (!stemState.playing) drawStemsFlat();
+    }
+
+    function drawFlatLine(canvas, color) {
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, canvas.height / 2);
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.stroke();
+    }
+
+    function drawStemsFlat() {
+      ['vocals', 'drums', 'bass', 'other'].forEach(name => {
+        drawFlatLine(document.getElementById(`ml-stem-waveform-${name}`), stemColors[name]);
+      });
+      drawFlatLine(document.getElementById('ml-stem-master-canvas'), '#e2e8f0');
+    }
+
+    function stopOneSource(source) {
+      try {
+        source.stop();
+      } catch (err) {
+        return false;
+      }
+      return true;
+    }
+
+    function stopStemSources() {
+      Object.values(stemState.sources).forEach(source => stopOneSource(source));
+      stemState.sources = {};
+    }
+
+    function stopStemMix() {
+      stopStemSources();
+      stemState.playing = false;
+      if (stemState.rafId) {
+        cancelAnimationFrame(stemState.rafId);
+        stemState.rafId = null;
+      }
+      const hasBuffers = Object.keys(stemState.buffers).length > 0;
+      const playBtn = document.getElementById('ml-stem-play-btn');
+      const stopBtn = document.getElementById('ml-stem-stop-btn');
+      if (playBtn) playBtn.disabled = !hasBuffers;
+      if (stopBtn) stopBtn.disabled = true;
+      drawStemsFlat();
+    }
+
+    async function playStemMix() {
+      const names = ['vocals', 'drums', 'bass', 'other'];
+      if (Object.keys(stemState.buffers).length === 0) {
+        setStemStatus('Run the separation first - no stems to play.', false);
+        return;
+      }
+      stopStemSources();
+      const ctx = ensureStemAudio();
+      if (ctx.state === 'suspended') await ctx.resume();
+      names.forEach(name => {
+        const buffer = stemState.buffers[name];
+        if (!buffer) return;
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+        if (!stemState.gains[name]) {
+          stemState.gains[name] = ctx.createGain();
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 512;
+          stemState.analysers[name] = analyser;
+          stemState.gains[name].connect(stemState.analysers[name]);
+          stemState.analysers[name].connect(stemState.masterGain);
+        }
+        source.connect(stemState.gains[name]);
+        stemState.gains[name].gain.value = stemEffectiveGain(name);
+        source.start();
+        stemState.sources[name] = source;
+      });
+      stemState.playing = true;
+      const playBtn = document.getElementById('ml-stem-play-btn');
+      const stopBtn = document.getElementById('ml-stem-stop-btn');
+      if (playBtn) playBtn.disabled = true;
+      if (stopBtn) stopBtn.disabled = false;
+      setStemStatus('Playing stems. Use faders, mute and solo to compare layers.', true);
+      if (stemState.rafId) cancelAnimationFrame(stemState.rafId);
+      stemState.rafId = requestAnimationFrame(drawStemsLoop);
+    }
+
+    function drawStemsFrame() {
+      ['vocals', 'drums', 'bass', 'other'].forEach(name => {
+        const analyser = stemState.analysers[name];
+        const canvas = document.getElementById(`ml-stem-waveform-${name}`);
+        if (!analyser || !canvas) return;
+        const ctx = canvas.getContext('2d');
+        const data = new Uint8Array(analyser.fftSize);
+        analyser.getByteTimeDomainData(data);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = stemColors[name];
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        const step = canvas.width / data.length;
+        for (let i = 0; i < data.length; i++) {
+          const y = ((data[i] - 128) / 128) * (canvas.height / 2) + canvas.height / 2;
+          if (i === 0) ctx.moveTo(0, y);
+          else ctx.lineTo(i * step, y);
+        }
+        ctx.stroke();
+        const spectrumCanvas = document.getElementById(`ml-stem-spectrum-${name}`);
+        if (spectrumCanvas) {
+          const specCtx = spectrumCanvas.getContext('2d');
+          const freq = new Uint8Array(analyser.frequencyBinCount);
+          analyser.getByteFrequencyData(freq);
+          specCtx.clearRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
+          specCtx.fillStyle = stemColors[name];
+          const bars = 32;
+          const chunk = Math.max(1, Math.floor(freq.length / bars));
+          const barWidth = spectrumCanvas.width / bars;
+          for (let i = 0; i < bars; i++) {
+            let sum = 0;
+            for (let j = 0; j < chunk; j++) sum += freq[i * chunk + j] || 0;
+            const barHeight = (sum / chunk / 255) * spectrumCanvas.height;
+            specCtx.fillRect(i * barWidth + 1, spectrumCanvas.height - barHeight, barWidth - 2, barHeight);
+          }
+        }
+      });
+      const masterCanvas = document.getElementById('ml-stem-master-canvas');
+      if (masterCanvas && stemState.masterAnalyser) {
+        const ctx = masterCanvas.getContext('2d');
+        const data = new Uint8Array(stemState.masterAnalyser.fftSize);
+        stemState.masterAnalyser.getByteTimeDomainData(data);
+        ctx.clearRect(0, 0, masterCanvas.width, masterCanvas.height);
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        const step = masterCanvas.width / data.length;
+        for (let i = 0; i < data.length; i++) {
+          const y = ((data[i] - 128) / 128) * (masterCanvas.height / 2) + masterCanvas.height / 2;
+          if (i === 0) ctx.moveTo(0, y);
+          else ctx.lineTo(i * step, y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    function drawStemsLoop() {
+      if (!stemState.playing) return;
+      drawStemsFrame();
+      stemState.rafId = requestAnimationFrame(drawStemsLoop);
+    }
+
+    function ensureStemMasterChain() {
+      const ctx = ensureStemAudio();
+      if (stemState.masterGain) return ctx;
+      stemState.masterAnalyser = ctx.createAnalyser();
+      stemState.masterAnalyser.fftSize = 512;
+      stemState.masterGain = ctx.createGain();
+      stemState.masterGain.gain.value = 0.9;
+      stemState.masterGain.connect(stemState.masterAnalyser);
+      stemState.masterAnalyser.connect(ctx.destination);
+      return ctx;
+    }
+
+    function wireStemFader(name) {
+      const fader = document.getElementById(`ml-stem-${name}`);
+      const label = document.getElementById(`ml-stem-${name}-val`);
+      if (!fader || !label) return;
+      label.textContent = `${(stemFaderValue(name) / 100).toFixed(2)} gain`;
+      fader.addEventListener('input', () => {
+        label.textContent = `${(stemFaderValue(name) / 100).toFixed(2)} gain`;
+        applyStemGains();
+      });
+    }
+
+    function wireStemToggles(name) {
+      const muteBtn = document.querySelector(`.ml-stem-mute-btn[data-stem="${name}"]`);
+      if (muteBtn) {
+        muteBtn.addEventListener('click', () => {
+          muteBtn.classList.toggle('active');
+          applyStemGains();
+        });
+      }
+      const soloBtn = document.querySelector(`.ml-stem-solo-btn[data-stem="${name}"]`);
+      if (soloBtn) {
+        soloBtn.addEventListener('click', () => {
+          soloBtn.classList.toggle('active');
+          applyStemGains();
+        });
+      }
+    }
+
+    function wireStemWorkbench() {
+      const fileBtn = document.getElementById('ml-stem-file-btn');
+      const fileInput = document.getElementById('ml-stem-file-input');
+      const dispatchBtn = document.getElementById('ml-stem-dispatch-btn');
+      const playBtn = document.getElementById('ml-stem-play-btn');
+      const stopBtn = document.getElementById('ml-stem-stop-btn');
+
+      if (fileBtn && fileInput) {
+        fileBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async () => {
+          const file = fileInput.files && fileInput.files[0];
+          if (!file) return;
+          fileBtn.disabled = true;
+          setStemStatus('Uploading audio...', true);
+          try {
+            const form = new FormData();
+            form.append('file', file);
+            form.append('workspace_root', '.');
+            const response = await fetch('/api/upload', { method: 'POST', body: form });
+            const json = await response.json();
+            if (!json || !json.absPath) throw new Error('Upload did not return absPath.');
+            fileBtn.disabled = false;
+            const localName = json.absPath;
+            separateStems(localName);
+          } catch (err) {
+            fileBtn.disabled = false;
+            const message = (err && err.message) ? err.message.slice(0, 160) : String(err);
+            setStemStatus(message, false);
+          }
+        });
+      }
+
+      document.querySelectorAll('.ml-stem-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const audioPath = btn.getAttribute('data-audio');
+          if (audioPath) separateStems(audioPath);
+        });
+      });
+
+      if (dispatchBtn) {
+        dispatchBtn.addEventListener('click', () => {
+          separateStems(stemState.sourcePath);
+        });
+      }
+      if (playBtn) playBtn.addEventListener('click', playStemMix);
+      if (stopBtn) stopBtn.addEventListener('click', stopStemMix);
+
+      ['vocals', 'drums', 'bass', 'other'].forEach(name => {
+        wireStemFader(name);
+        wireStemToggles(name);
+      });
+      applyStemGains();
+      drawStemsFlat();
+    }
+
+
+    ensureStemMasterChain();
+    wireStemWorkbench();
+
+    // Send to Augmentation Lab — convert the data URL into a real file
+    // upload so the pooling kernel lab treats it like any uploaded PNG.
+    vlmSendBtn.addEventListener('click', async () => {
+      if (!vlmState.outputDataUrl) return;
+      vlmSendBtn.disabled = true;
+      vlmSendBtn.textContent = '📤 Uploading to lab...';
+      vlmStatus.textContent = 'Uploading synthesized image to .mcp-uploads/...';
+      vlmStatus.style.color = 'var(--text-muted)';
+      try {
+        const blob = await fetch(vlmState.outputDataUrl).then((r) => r.blob());
+        const pngFile = new File([blob], 'vlm-synthesized.png', { type: 'image/png' });
+        const form = new FormData();
+        form.append('file', pngFile);
+        form.append('workspace_root', '.');
+        const res = await fetch('/api/upload', { method: 'POST', body: form });
+        const json = await res.json().catch(() => null);
+        if (!json || !json.absPath) throw new Error((json && json.error) || 'upload failed');
+        poolState.uploadedAbsPath = json.absPath;
+        poolState.uploadedRelPath = json.relativePath;
+        poolStatus.textContent = 'Loaded synthesized image: ' + json.relativePath;
+        poolStatus.style.color = 'var(--accent-green)';
+        vlmStatus.textContent = 'Image piped into the Augmentation Lab — kernel running.';
+        vlmStatus.style.color = 'var(--accent-green)';
+        poolApplyBtn.click();
+      } catch (err) {
+        vlmStatus.textContent = 'Pipe to lab failed: ' + String((err && err.message) || err).slice(0, 160);
+        vlmStatus.style.color = 'var(--accent-amber)';
+      } finally {
+        vlmSendBtn.disabled = false;
+        vlmSendBtn.textContent = '📤 Send to Augmentation Lab';
       }
     });
   }
@@ -2005,6 +2917,230 @@
     renderBuild();
   }
   setupGuide();
+
+  // ─── OCR Decision Studio (Task 8) ─────────────────────────────
+  const ocrFileInput = document.getElementById('ml-ocr-file-input');
+  const ocrLoadBtn = document.getElementById('ml-ocr-load-btn');
+  const ocrSampleBtn = document.getElementById('ml-ocr-sample-btn');
+  const ocrInspectBtn = document.getElementById('ml-ocr-inspect-btn');
+  const ocrStatusEl = document.getElementById('ml-ocr-status');
+  const ocrViewport = document.getElementById('ml-ocr-viewport');
+  const ocrEmpty = document.getElementById('ml-ocr-empty');
+  const ocrStage = document.getElementById('ml-ocr-stage');
+  const ocrImg = document.getElementById('ml-ocr-img');
+  const ocrOverlay = document.getElementById('ml-ocr-overlay');
+  const ocrTokenList = document.getElementById('ml-ocr-token-list');
+  const ocrLegend = document.getElementById('ml-ocr-legend');
+  const ocrSummary = document.getElementById('ml-ocr-summary');
+  const ocrState = { filePath: null, data: null, tokens: [], blocks: [], activeToken: -1, previewImage: false };
+
+  function ocrSetStatus(msg, busy) {
+    ocrStatusEl.textContent = msg;
+    ocrStatusEl.style.color = busy ? 'var(--accent-cyan)' : 'var(--text-muted)';
+  }
+  function ocrConfColor(c) {
+    return c > 0.9 ? getComputedStyle(document.documentElement).getPropertyValue('--accent-green')
+      : c >= 0.7 ? getComputedStyle(document.documentElement).getPropertyValue('--accent-amber')
+      : getComputedStyle(document.documentElement).getPropertyValue('--accent-red');
+  }
+  function ocrHighlightToken(i) {
+    ocrState.activeToken = i;
+    ocrTokenList.querySelectorAll('[data-ocr-token]').forEach((row) => {
+      const idx = Number(row.getAttribute('data-ocr-token'));
+      row.style.background = (i >= 0 && idx === i) ? 'rgba(34,211,238,.18)' : 'transparent';
+    });
+    ocrDrawOverlay();
+  }
+
+  function ocrDrawOverlay() {
+    if (!ocrOverlay || !ocrState.tokens.length) return;
+    let scaleX = 1, scaleY = 1, offX = 0, offY = 0;
+    if (ocrState.previewImage && ocrImg.naturalWidth) {
+      ocrOverlay.width = ocrImg.naturalWidth;
+      ocrOverlay.height = ocrImg.naturalHeight;
+    } else {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      ocrState.tokens.forEach((t) => {
+        const [x, y, w, h] = t.bbox;
+        minX = Math.min(minX, x); minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+      });
+      if (!isFinite(minX)) return;
+      const spanX = Math.max(maxX - minX, 1), spanY = Math.max(maxY - minY, 1);
+      ocrOverlay.width = 720; ocrOverlay.height = Math.max(240, Math.round(240 * spanY / spanX));
+      offX = minX - spanX * 0.05; offY = minY - spanY * 0.05;
+      scaleX = ocrOverlay.width / (spanX * 1.1); scaleY = ocrOverlay.height / (spanY * 1.1);
+    }
+    const octx = ocrOverlay.getContext('2d');
+    octx.clearRect(0, 0, ocrOverlay.width, ocrOverlay.height);
+    octx.lineWidth = Math.max(1.5, ocrOverlay.width / 500);
+
+    ocrState.blocks.forEach((blk) => {
+      const [x, y, w, h] = blk.bbox;
+      octx.save();
+      octx.setLineDash([6, 4]);
+      octx.strokeStyle = 'rgba(34,211,238,.55)';
+      octx.strokeRect((x - offX) * scaleX, (y - offY) * scaleY, w * scaleX, h * scaleY);
+      octx.restore();
+    });
+
+    ocrState.tokens.forEach((tk, i) => {
+      const [x, y, w, h] = tk.bbox;
+      const color = ocrConfColor(tk.confidence);
+      const active = i === ocrState.activeToken;
+      octx.save();
+      octx.globalAlpha = active ? 0.28 : 0.12;
+      octx.fillStyle = color;
+      octx.fillRect((x - offX) * scaleX, (y - offY) * scaleY, w * scaleX, h * scaleY);
+      octx.globalAlpha = 1;
+      octx.strokeStyle = color;
+      octx.lineWidth = active ? octx.lineWidth * 2 : octx.lineWidth;
+      octx.strokeRect((x - offX) * scaleX, (y - offY) * scaleY, w * scaleX, h * scaleY);
+      octx.fillStyle = color;
+      octx.font = Math.max(9, octx.lineWidth * 5) + 'px monospace';
+      octx.fillText(String(i), (x - offX) * scaleX, Math.max(9, (y - offY) * scaleY - 2));
+      octx.restore();
+    });
+  }
+  ocrOverlay.addEventListener('mousemove', (ev) => {
+    if (!ocrState.tokens.length || (ocrState.previewImage && !ocrImg.naturalWidth)) return;
+    const rect = ocrOverlay.getBoundingClientRect();
+    let showX = ev.offsetX, showY = ev.offsetY;
+    const canvasX = ev.offsetX * (ocrOverlay.width / rect.width);
+    const canvasY = ev.offsetY * (ocrOverlay.height / rect.height);
+    let hit = -1;
+    if (ocrState.previewImage) { showX = canvasX; showY = canvasY; }
+    ocrState.tokens.forEach((tk, i) => {
+      const [x, y, w, h] = tk.bbox;
+      let mx = canvasX, my = canvasY;
+      if (!ocrState.previewImage) {
+        let minX = Infinity, minY = Infinity;
+        ocrState.tokens.forEach((o) => { minX = Math.min(minX, o.bbox[0]); minY = Math.min(minY, o.bbox[1]); });
+        const xs = ocrState.tokens.map((o) => o.bbox[0] + o.bbox[2]), ys = ocrState.tokens.map((o) => o.bbox[1] + o.bbox[3]);
+        mx = minX - (Math.max(...xs) - minX) * 0.05 + canvasX / (ocrOverlay.width / ((Math.max(...xs) - minX) * 1.1));
+        my = minY - (Math.max(...ys) - minY) * 0.05 + canvasY / (ocrOverlay.height / ((Math.max(...ys) - minY) * 1.1));
+      }
+      if (mx >= x && mx <= x + w && my >= y && my <= y + h) hit = i;
+    });
+    if (hit !== ocrState.activeToken) ocrHighlightToken(hit);
+  });
+  ocrOverlay.addEventListener('mouseleave', () => ocrHighlightToken(-1));
+
+  function ocrRenderTokenList() {
+    ocrTokenList.innerHTML = '';
+    if (!ocrState.tokens.length) {
+      ocrTokenList.textContent = 'No structured tokens returned.';
+      return;
+    }
+    ocrState.tokens.forEach((tk, i) => {
+      const row = document.createElement('div');
+      row.setAttribute('data-ocr-token', String(i));
+      row.style.cssText = 'padding:4px 6px;border-radius:4px;cursor:pointer;border-bottom:1px solid var(--border-subtle);';
+      row.innerHTML = '<div style="display:flex;justify-content:space-between;gap:6px;align-items:center;">' +
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;' +
+        'color:' + ocrConfColor(tk.confidence) + ';">"' + (tk.text || '').replace(/[<>&]/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[ch])) + '"</span>' +
+        '<span style="color:var(--text-muted);font-size:.6rem;">#' + i + '</span></div>' +
+        '<div style="background:var(--bg-secondary);border-radius:3px;height:4px;margin:2px 0;">' +
+        '<div style="width:' + Math.min(100, Math.round((tk.confidence || 0) * 100)) + '%;background:' + ocrConfColor(tk.confidence) + ';height:4px;border-radius:3px;"></div></div>' +
+        '<div style="color:var(--text-muted);font-size:.58rem;">conf ' + (tk.confidence || 0).toFixed(2) + ' · [' + tk.bbox.map((v) => Math.round(v)).join(', ') + '] · ' + (tk.source || '') +
+        (tk.ocr_psm ? ' · psm ' + tk.ocr_psm : '') + '</div>';
+      row.addEventListener('mouseenter', () => ocrHighlightToken(i));
+      row.addEventListener('mouseleave', () => ocrHighlightToken(-1));
+      ocrTokenList.appendChild(row);
+    });
+  }
+
+  function ocrRunInspection(target) {
+    ocrInspectBtn.disabled = true;
+    ocrSetStatus('Inspecting via /api/reverse_tool → inspect_ocr_tokens...(' + target + ')', true);
+    toolFetch({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tool: 'reverse_tool',
+        params: { action: 'inspect_ocr_tokens', authorization: 'lab', target: target }
+      })
+    }).then(async (res) => {
+      const json = await res.json().catch(() => null);
+      const data = json && json.data;
+      if (!json || json.success === false || !data) {
+        throw new Error(((json && json.error) || ('HTTP ' + res.status + ' — server refused the call')));
+      }
+      ocrState.data = data;
+      ocrState.tokens = Array.isArray(data.tokens) ? data.tokens : [];
+      ocrState.blocks = Array.isArray(data.layout_blocks) ? data.layout_blocks : [];
+      ocrRenderTokenList();
+      ocrDrawOverlay();
+      ocrOverlay.style.display = 'block';
+      ocrLegend.style.display = 'flex';
+      ocrSummary.style.display = 'block';
+      const notes = Array.isArray(data.learning_notes)
+        ? data.learning_notes
+        : String(data.learning_notes || '').split('\n').map((n) => n.trim()).filter(Boolean);
+      ocrSummary.textContent = data.tokens.length + ' tokens · ' + ocrState.blocks.length + ' layout blocks · ' +
+        notes.join(' · ');
+      ocrSetStatus('Done: ' + ocrState.tokens.length + ' tokens found.', false);
+      ocrInspectBtn.disabled = false;
+    }).catch((err) => {
+      const message = (err && err.message) ? err.message.slice(0, 160) : String(err);
+      ocrSetStatus('Failed: ' + message, false);
+      ocrInspectBtn.disabled = false;
+    });
+  }
+
+  if (ocrLoadBtn && ocrFileInput) {
+    ocrLoadBtn.addEventListener('click', () => ocrFileInput.click());
+    ocrFileInput.addEventListener('change', async () => {
+      const file = ocrFileInput.files && ocrFileInput.files[0];
+      if (!file) return;
+      ocrLoadBtn.disabled = true;
+      ocrSetStatus('Uploading "' + file.name + '" to .mcp-uploads/...', true);
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('workspace_root', '.');
+        const response = await fetch('/api/upload', { method: 'POST', body: form });
+        const json = await response.json();
+        if (!json || !json.absPath) throw new Error('Upload did not return absPath.');
+        ocrState.filePath = json.absPath;
+        ocrState.previewImage = /^image\//.test(file.type || '');
+        if (ocrState.previewImage) {
+          ocrImg.src = URL.createObjectURL(file);
+          ocrImg.style.display = 'block';
+          ocrEmpty.style.display = 'none';
+          ocrStage.style.display = 'inline-block';
+        } else {
+          ocrImg.removeAttribute('src');
+          ocrImg.style.display = 'none';
+          ocrStage.style.display = 'none';
+          ocrEmpty.style.display = 'block';
+        }
+        ocrLoadBtn.disabled = false;
+        ocrInspectBtn.disabled = false;
+        ocrSetStatus('Ready: ' + file.name + '. Click "Run Token Inspection" to extract bboxes.', false);
+      } catch (err) {
+        ocrLoadBtn.disabled = false;
+        ocrSetStatus('Upload failed: ' + ((err && err.message) || String(err)).slice(0, 140), false);
+      }
+    });
+  }
+  if (ocrSampleBtn) {
+    ocrSampleBtn.addEventListener('click', () => {
+      ocrState.filePath = 'tests/fixtures/media/frames/frame_0050.jpg';
+      ocrState.previewImage = false;
+      ocrImg.removeAttribute('src');
+      ocrImg.style.display = 'none';
+      ocrStage.style.display = 'none';
+      ocrEmpty.style.display = 'block';
+      ocrInspectBtn.disabled = false;
+      ocrSetStatus('Fixture loaded (frame_0050.jpg). Run Token Inspection — overlay normalizes to bbox extents.', false);
+    });
+  }
+  if (ocrInspectBtn) {
+    ocrInspectBtn.addEventListener('click', () => {
+      ocrRunInspection(ocrState.filePath || 'tests/fixtures/media/frames/frame_0050.jpg');
+    });
+  }
 
   // ─── Initial Boot ────────────────────────────────────────────────
   recalculateMatrix();

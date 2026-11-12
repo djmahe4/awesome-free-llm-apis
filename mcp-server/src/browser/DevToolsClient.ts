@@ -168,7 +168,7 @@ export class StdioDevToolsClient implements DevToolsClient {
         const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
         const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
 
-        const args = ['-y', 'chrome-devtools-mcp', '--chrome-arg=--no-sandbox', '--allow-unrestricted-paths', '--no-page-id-routing'];
+        const args = ['-y', 'chrome-devtools-mcp', '--headless=false', '--chrome-arg=--no-sandbox', '--allow-unrestricted-paths', '--no-page-id-routing'];
         const executablePath = await resolveChromeExecutable();
         if (executablePath) {
             args.push(`--executable-path=${executablePath}`);

@@ -571,56 +571,64 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
 
     // Hoist model resolution — avoid N×listLocalModels HTTP calls (one per file)
     let resolvedModel: string | null = null;
-    if (!dryRun) {
+    const isAstOnlyRun = !!input.astEditOps && input.astEditOps.length > 0;
+    if (!dryRun && !isAstOnlyRun) {
       try {
         const { listLocalModels, rankCandidateModels } = await import('../../providers/ollama-local.js');
         const models = await listLocalModels();
-        // A caller-pinned model wins over llmfit and the router (it may exceed the VRAM budget on purpose).
-        if (input.model) {
-          resolvedModel = models.find(m => m === input.model || m.startsWith(`${input.model}:`)) ?? null;
-          if (!resolvedModel) {
-            result.diagnostics.push({ filePath: '', message: `model '${input.model}' is not installed locally (have: ${models.join(', ')}); using the automatic choice instead.`, severity: 'warning', source: 'llm-patch' });
-          }
-        }
-
-        // Check llmfit hardware recommendations to find the optimal coding model
-        if (!resolvedModel) try {
-          const { recommendModels } = await import('../../services/llmfit.js');
-          // The first probe can take ~9 s (it starts a subprocess) and its result is cached afterwards, so a slow
-          // one must not hold up the edit: past the limit the router below chooses, and the probe warms the cache.
-          const probeMs = Number(process.env.CODING_AGENTS_LLMFIT_MS) || 3000;
-          const fitResult = await Promise.race([
-            recommendModels({ useCase: 'coding', limit: 5, workspaceRoot }),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('llmfit probe is slow')), probeMs).unref()),
-          ]);
-          const recommendedOllamaNames = (fitResult.models || [])
-            .map(m => m.ollamaName)
-            .filter(Boolean) as string[];
-
-          for (const rec of recommendedOllamaNames) {
-            const match = models.find(m => m === rec || m.startsWith(`${rec}:`));
-            if (match) {
-              resolvedModel = match;
-              break;
+        if (models.length > 0) {
+          // A caller-pinned model wins over llmfit and the router (it may exceed the VRAM budget on purpose).
+          if (input.model) {
+            resolvedModel = models.find(m => m === input.model || m.startsWith(`${input.model}:`)) ?? null;
+            if (!resolvedModel) {
+              result.diagnostics.push({ filePath: '', message: `model '${input.model}' is not installed locally (have: ${models.join(', ')}); using the automatic choice instead.`, severity: 'warning', source: 'llm-patch' });
             }
           }
-        } catch {
-          // Fall back gracefully to heuristic candidate ranking
-        }
 
-        if (!resolvedModel) {
-          // Capability- and budget-aware choice among installed models (real /api/show
-          // capabilities and llmfit memory); falls back to name heuristics if discovery fails.
-          let ranked: string[];
-          try {
-            const { listModelProfiles, rankProfiles } = await import('../../services/model-router.js');
-            const profiles = (await listModelProfiles()).filter(p => models.includes(p.name));
-            ranked = rankProfiles(profiles, 'code').filter(r => r.fitsBudget).map(r => r.name);
-            if (ranked.length === 0) ranked = rankCandidateModels(models);
-          } catch {
-            ranked = rankCandidateModels(models);
+          // Single installed model requires no hardware/router ranking.
+          if (!resolvedModel && models.length === 1) {
+            resolvedModel = models[0];
           }
-          resolvedModel = ranked[0] ?? null;
+
+          // Check llmfit hardware recommendations to find the optimal coding model
+          if (!resolvedModel) try {
+            const { recommendModels } = await import('../../services/llmfit.js');
+            // The first probe can take ~9 s (it starts a subprocess) and its result is cached afterwards, so a slow
+            // one must not hold up the edit: past the limit the router below chooses, and the probe warms the cache.
+            const probeMs = Number(process.env.CODING_AGENTS_LLMFIT_MS) || 3000;
+            const fitResult = await Promise.race([
+              recommendModels({ useCase: 'coding', limit: 5, workspaceRoot, timeoutMs: probeMs }),
+              new Promise<never>((_, reject) => setTimeout(() => reject(new Error('llmfit probe is slow')), probeMs).unref()),
+            ]);
+            const recommendedOllamaNames = (fitResult.models || [])
+              .map(m => m.ollamaName)
+              .filter(Boolean) as string[];
+
+            for (const rec of recommendedOllamaNames) {
+              const match = models.find(m => m === rec || m.startsWith(`${rec}:`));
+              if (match) {
+                resolvedModel = match;
+                break;
+              }
+            }
+          } catch {
+            // Fall back gracefully to heuristic candidate ranking
+          }
+
+          if (!resolvedModel) {
+            // Capability- and budget-aware choice among installed models (real /api/show
+            // capabilities and llmfit memory); falls back to name heuristics if discovery fails.
+            let ranked: string[];
+            try {
+              const { listModelProfiles, rankProfiles } = await import('../../services/model-router.js');
+              const profiles = (await listModelProfiles()).filter(p => models.includes(p.name));
+              ranked = rankProfiles(profiles, 'code').filter(r => r.fitsBudget).map(r => r.name);
+              if (ranked.length === 0) ranked = rankCandidateModels(models);
+            } catch {
+              ranked = rankCandidateModels(models);
+            }
+            resolvedModel = ranked[0] ?? null;
+          }
         }
       } catch {
         console.warn('[coding-agents] Ollama unreachable — only a cloud fallback (allowCloudFallback) can edit now');

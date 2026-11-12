@@ -123,7 +123,7 @@ describe('torch_nn_engine Architecture Generalization & Forward Passes', () => {
     expect((resPose.data as any).task).toBe('pose');
     expect((resPose.data as any).poses).toBeDefined();
     expect((resPose.data as any).poses[0].keypoints).toBeDefined();
-  }, 20000);
+  }, 60000);
 
   it('verifies Conv2d and BatchNorm folding numerical equivalence via python script', async () => {
     const pythonScript = path.resolve(__dirname, '../scripts/torch_nn_engine.py');

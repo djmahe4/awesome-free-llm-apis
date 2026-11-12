@@ -161,9 +161,10 @@ export interface RouterDeps {
   now?: () => number;
 }
 
-const profileCache: { byName: Map<string, ModelProfile>; at: number } = { byName: new Map(), at: 0 };
+const profileCache: { byName: Map<string, ModelProfile>; at: number; negativeAt: number } = { byName: new Map(), at: 0, negativeAt: 0 };
 const CACHE_TTL_MS = 5 * 60_000;
-export function resetModelRouterCache(): void { profileCache.byName.clear(); profileCache.at = 0; }
+const NEGATIVE_TTL_MS = 10_000;
+export function resetModelRouterCache(): void { profileCache.byName.clear(); profileCache.at = 0; profileCache.negativeAt = 0; }
 
 async function timed<T>(p: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([p, new Promise<null>(r => setTimeout(() => r(null), ms))]);
@@ -175,17 +176,32 @@ async function timed<T>(p: Promise<T>, ms: number): Promise<T | null> {
  */
 export async function listModelProfiles(deps: RouterDeps = {}): Promise<ModelProfile[]> {
   const now = deps.now ?? Date.now;
-  if (profileCache.byName.size > 0 && now() - profileCache.at < CACHE_TTL_MS && !deps.fetchImpl) {
-    return [...profileCache.byName.values()];
+  if (!deps.fetchImpl) {
+    if (profileCache.byName.size > 0 && now() - profileCache.at < CACHE_TTL_MS) {
+      return [...profileCache.byName.values()];
+    }
+    if (profileCache.negativeAt > 0 && now() - profileCache.negativeAt < NEGATIVE_TTL_MS) {
+      throw new Error('Ollama /api/tags failed (cached unreachable)');
+    }
   }
   const base = (deps.baseUrl || process.env.OLLAMA_LOCAL_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
   const doFetch = deps.fetchImpl ?? (async (url: string, init?: any) => {
     const { default: nodeFetch } = await import('node-fetch');
-    return nodeFetch(url, init) as any;
+    return nodeFetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(500) }) as any;
   });
 
-  const tagsRes = await doFetch(`${base}/api/tags`);
-  if (!tagsRes.ok) throw new Error(`Ollama /api/tags failed`);
+  let tagsRes: any;
+  try {
+    tagsRes = await doFetch(`${base}/api/tags`);
+  } catch (err) {
+    if (!deps.fetchImpl) profileCache.negativeAt = now();
+    throw err;
+  }
+  if (!tagsRes.ok) {
+    if (!deps.fetchImpl) profileCache.negativeAt = now();
+    throw new Error(`Ollama /api/tags failed`);
+  }
+  if (!deps.fetchImpl) profileCache.negativeAt = 0;
   const tags: Array<{ name: string; size?: number; details?: any }> = (await tagsRes.json()).models ?? [];
 
   const llmfit = deps.llmfitInfo ?? ((n: string) => getModelInfo(n, { memoryBudgetGb: vramBudgetGb(), fast: true }));

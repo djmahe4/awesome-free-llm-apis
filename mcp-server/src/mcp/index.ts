@@ -965,6 +965,12 @@ export async function createMCPServer(): Promise<Server> {
           '  - assemble_moe: Mixture-of-Experts composite routing and SwiGLU forward execution.',
           '  - run_reasoning_model: Autoregressive reasoning runtime with RoPE and thinking trace generation.',
           '  - run_yolo_nn: Pure-NumPy YOLOv8 neural network forward pass and detection decoding.',
+          '  - run_scene_augmentation: Apply supported 2D image operations.',
+          '  - run_depth_parallax: Estimate local depth and render labelled pseudo-3D parallax.',
+          '  - animate_still: Render a bounded pseudo-3D animation from one image.',
+          '  - reverse_vlm_generate: Generate an image from reverse VLM feature projections.',
+          '  - separate_audio_stems: Separate consented audio with configured local Demucs weights.',
+          '  - inspect_ocr_tokens: Inspect OCR tokens and spatial layout.',
           '  - program_weight_space: Spectral SVD analysis, attractor ablation, and loop suppression in weight space.',
         ].join('\n'),
         inputSchema: {
@@ -990,6 +996,12 @@ export async function createMCPServer(): Promise<Server> {
                 'assemble_moe',
                 'run_reasoning_model',
                 'run_yolo_nn',
+                'run_scene_augmentation',
+                'run_depth_parallax',
+                'animate_still',
+                'reverse_vlm_generate',
+                'separate_audio_stems',
+                'inspect_ocr_tokens',
                 'program_weight_space'
               ],
               description: 'Reverse engineering action to perform'

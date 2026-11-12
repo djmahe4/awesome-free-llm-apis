@@ -1,8 +1,59 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import type { Middleware, NextFunction, PipelineContext } from '../middleware.js';
 import { TaskType } from '../middleware.js';
 import { SearchProviderRegistry } from '../../search/registry.js';
 import type { UnifiedSearchResult } from '../../search/types.js';
 import { logToolCall } from '../../utils/ChatLogger.js';
+import { getMcpDir } from '../../utils/mcp-home.js';
+
+export interface SearchLogEntry {
+  id: string;
+  userId: string;
+  query: string;
+  provider: string;
+  sessionId: string;
+  resultCount: number;
+  results: Array<{ title: string; url: string; snippet: string }>;
+  timestamp: number;
+}
+
+const MAX_LOCAL_SEARCH_LOGS = 100;
+const localSearchLogs: SearchLogEntry[] = [];
+
+function getLocalSearchLogsPath(): string {
+  return path.join(getMcpDir(), 'search-logs.json');
+}
+
+async function appendLocalSearchLog(entry: SearchLogEntry): Promise<void> {
+  localSearchLogs.unshift(entry);
+  if (localSearchLogs.length > MAX_LOCAL_SEARCH_LOGS) {
+    localSearchLogs.length = MAX_LOCAL_SEARCH_LOGS;
+  }
+  try {
+    const filePath = getLocalSearchLogsPath();
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    let existing: SearchLogEntry[] = [];
+    try {
+      const raw = await fs.readFile(filePath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) existing = parsed;
+    } catch { /* fresh file */ }
+    const merged = [entry, ...existing.filter(e => e.id !== entry.id)].slice(0, MAX_LOCAL_SEARCH_LOGS);
+    await fs.writeFile(filePath, JSON.stringify(merged, null, 2), 'utf-8');
+  } catch { /* best-effort */ }
+}
+
+export async function getLocalSearchLogs(limit = 50): Promise<SearchLogEntry[]> {
+  try {
+    const raw = await fs.readFile(getLocalSearchLogsPath(), 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.slice(0, limit);
+    }
+  } catch { /* fall back to in-memory buffer */ }
+  return localSearchLogs.slice(0, limit);
+}
 
 /**
  * Routes search requests (context.request.google_search or TaskType.SemanticSearch)
@@ -88,6 +139,19 @@ export class SearchRouterMiddleware implements Middleware {
   private logSearch(context: PipelineContext, query: string, provider: string, results: UnifiedSearchResult[], latencyMs: number): void {
     const sessionId = context.sessionId || context.request.sessionId || 'search-adhoc';
     const fullResults = results.map(r => ({ title: r.title, url: r.url, snippet: r.snippet }));
+    const timestamp = Date.now();
+    const entry: SearchLogEntry = {
+      id: `local-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+      userId: 'anonymous',
+      query,
+      provider,
+      sessionId,
+      resultCount: results.length,
+      results: fullResults,
+      timestamp,
+    };
+
+    appendLocalSearchLog(entry).catch(() => {});
 
     logToolCall(sessionId, 'search_tool:search', { query, provider }, {
       provider,

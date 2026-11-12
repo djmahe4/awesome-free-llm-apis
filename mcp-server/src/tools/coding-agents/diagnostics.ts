@@ -21,11 +21,18 @@ function timeoutNotice(filePath: string, tool: string, seconds: number): Diagnos
   return { filePath, message: `${tool} timed out after ${seconds}s; this file was not checked`, severity: 'warning', source: 'subprocess' };
 }
 
+let cachedPythonCmd: string | null | undefined = undefined;
+
 export function getPythonCmd(): string | null {
-  for (const cmd of ['python', 'python3']) {
+  if (cachedPythonCmd !== undefined) return cachedPythonCmd;
+  const candidates = process.env.PYTHON ? [process.env.PYTHON, 'python', 'python3'] : ['python', 'python3'];
+  for (const cmd of candidates) {
     try {
-      const res = spawnSync(cmd, ['--version'], { encoding: 'utf-8', timeout: 3000, windowsHide: true });
-      if (res.status === 0) return cmd;
+      const res = spawnSync(cmd, ['--version'], { encoding: 'utf-8', timeout: 10_000, windowsHide: true });
+      if (res.status === 0) {
+        cachedPythonCmd = cmd;
+        return cmd;
+      }
     } catch { /* try next */ }
   }
   return null;
