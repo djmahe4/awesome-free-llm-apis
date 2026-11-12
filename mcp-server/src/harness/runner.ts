@@ -8,6 +8,7 @@ import { serializeTasksMarkdown, parseTasksMarkdown, type TaskItem } from '../to
 import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
 import { buildHandoff, validateHandoff, type Handoff } from './handoff.js';
 import { createReasoningStrategy, type LessonNode, type StepFailure } from './reasoning.js';
+import { validateThoughtDeviation, enforceDeviationPolicy, type LayaValidationResult } from './laya-bridge.js';
 import { MonitorRegistry } from './monitor.js';
 import { appendSessionMemory, buildSessionMemoryPromptBlock, parseTurnMemory, recentSessionMemory } from './session-memory.js';
 import type { HarnessDeclaration, HarnessRun } from './types.js';
@@ -747,6 +748,31 @@ export async function hasRepeatedSuccess(store: HarnessStore, callId: string, ar
   );
 }
 
+export async function checkThoughtDeviation(
+  store: HarnessStore,
+  run: HarnessRun,
+  role: string,
+  goal: string,
+  proposed: string,
+  callId: string,
+): Promise<boolean> {
+  try {
+    const events = await store.readTrace();
+    const trace = events.slice(-3).map(e => ({ text: `${e.type}: ${JSON.stringify(e.data ?? {}).slice(0, 200)}` }));
+    const result: LayaValidationResult = await validateThoughtDeviation({ goal, trace, proposed });
+    const policy = enforceDeviationPolicy(result);
+    await store.appendTrace({
+      runId: run.runId,
+      role,
+      type: 'deviation',
+      data: { callId, policy, alignment: result.alignment, drift_prob: result.drift_prob, unsafe_prob: result.unsafe_prob, latency_ms: result.latency_ms },
+    }).catch(() => {});
+    return policy === 'halt';
+  } catch {
+    return false;
+  }
+}
+
 /** Last successfully validated handoff in this run's trace, if any — used to rebuild a resumed step's input from persisted state, not from memory. */
 async function lastHandoff(store: HarnessStore): Promise<Handoff | undefined> {
   const events = await store.readTrace();
@@ -962,6 +988,14 @@ async function runSteps(
         run.error = `Repeat detected: step '${callId}' already completed with identical arguments (needs_user)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
         await endTaskAttempt(store, originalGoal, stepId, 'failed', `repeat detected: ${run.error}`);
+        return { content: lastContent, lastRole, finalHandoff: handoff };
+      }
+
+      if (await checkThoughtDeviation(store, run, role, originalGoal, stepGoal, callId)) {
+        run.status = 'failed';
+        run.error = `Deviation guard: proposed step '${callId}' drifted from the goal (laya drift > 0.5)`;
+        await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
+        await endTaskAttempt(store, originalGoal, stepId, 'failed', run.error);
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
 
