@@ -26,6 +26,7 @@ import base64
 import io
 import json
 import math
+import os
 import sys
 import time
 import zlib
@@ -366,7 +367,21 @@ def reverse_generate(args):
     peak_row, peak_col = divmod(peak_pos, G)
     elapsed_ms = round4((time.time() - _START) * 1000.0)
 
+    output_path = getattr(args, "output", None)
+    if not output_path:
+        out_dir = os.path.join(os.getcwd(), ".mcp-uploads", "vlm-reverse")
+        os.makedirs(out_dir, exist_ok=True)
+        output_path = os.path.join(out_dir, f"vlm_reverse_{int(time.time() * 1000)}.png")
+    else:
+        out_parent = os.path.dirname(os.path.abspath(output_path))
+        if out_parent:
+            os.makedirs(out_parent, exist_ok=True)
+
+    with open(output_path, "wb") as f:
+        f.write(png_bytes)
+
     return {
+        "output_path": os.path.abspath(output_path),
         "output_base64": "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii"),
         "tokens": [w for w, _ in raw_tokens],
         "token_attributions": attributions,
@@ -402,6 +417,7 @@ def main():
     parser.add_argument("--mode", default="feature_attribution", choices=MODES)
     parser.add_argument("--resolution", default=256, type=int)
     parser.add_argument("--seed", default=None, type=int)
+    parser.add_argument("--output", default=None, help="persisted destination PNG path")
     args = parser.parse_args()
     result = reverse_generate(args)
     json.dump(result, sys.stdout, separators=(",", ":"))

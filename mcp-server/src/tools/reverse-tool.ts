@@ -888,6 +888,10 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       const defaultOutDir = path.join(process.cwd(), '.mcp-uploads', 'depth-parallax');
       const defaultOut = path.join(defaultOutDir, `${action}-${Date.now()}${ext}`);
       args.push('--output', path.resolve(defaultOut));
+    } else if (action === 'reverse_vlm_generate') {
+      const defaultOutDir = path.join(process.cwd(), '.mcp-uploads', 'vlm-reverse');
+      const defaultOut = path.join(defaultOutDir, `vlm_reverse_${Date.now()}.png`);
+      args.push('--output', path.resolve(defaultOut));
     }
     if (options?.cacheDir) {
       const cacheStr = String(options.cacheDir);

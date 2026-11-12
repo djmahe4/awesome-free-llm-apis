@@ -17,6 +17,9 @@ describe('VLM Reverse Image Synthesis & Attribution Engine', () => {
 
     expect(res.success).toBe(true);
     const data = res.data as any;
+    expect(data.output_path).toBeDefined();
+    expect(typeof data.output_path).toBe('string');
+    expect(data.output_path.endsWith('.png')).toBe(true);
     expect(data.output_base64).toMatch(/^data:image\/png;base64,/);
     expect(data.tokens).toContain('soccer');
     expect(data.token_attributions).toBeDefined();
