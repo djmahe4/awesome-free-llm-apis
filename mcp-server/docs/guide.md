@@ -529,3 +529,27 @@ Every tool in the server adheres to the Model Context Protocol (MCP) JSON-RPC 2.
 | **`load_skill_prompt`** | `load`, `search` | Dynamic keyword discovery and prompt assembly from bundled Hermes skills or local `.agents/` catalog. | `type`, `name`, `keywords`, `workspaceDir` |
 | **`validate_provider`** | `validate` | Health check, API key verification, and latency measurement for individual LLM providers. | `provider` (`gemini`, `groq`, `openrouter`, `ollama`, `cohere`, etc.) |
 | **`get_token_stats`** | `read` | Real-time RPM/RPD token quotas, quota resets, and durable lifetime request telemetry across all providers. | *(No parameters required)* |
+
+---
+
+## 15. Agent Intent Cross-Reference (Multi-Agent Harness)
+
+The Phase 9 harness features (collapsible context injection, laya deviation validation, thought dataset pipeline, quantum oracle — see `skill/references/agent_harness.md`) were designed against a cross-agent survey of how leading coding agents store reasoning and inject context. Condensed reference table:
+
+| Agent | Context injection mechanism | Reasoning / thought storage | Collapse / compaction |
+|---|---|---|---|
+| **Cline** | `ContextManager.ts` aggregates system prompt, env details, tool schemas, and history each turn; `.clinerules` / `AGENTS.md` keyword scanning. | Git-like checkpoint per tool call; Memory Bank markdowns (`activeContext.md`, `progress.md`); first 200 lines / 25 KB of `MEMORY.md` as routing index. | Visual context progress bar; prune redundant file-reads to summary notices at ~70–80% threshold. |
+| **Claude Code** | 4-layer hierarchy: org-level → `~/.claude/CLAUDE.md` → project `CLAUDE.md` / `AGENTS.md` → `.claude/rules/` (file-pattern scoped); directory-walking auto-discovery. | Auto-memory at `~/.claude/projects/<repo>/memory/`; `MEMORY.md` index injected, deeper files pulled on demand; background consolidation sweeps. | Index design bounds startup injection; older notes loaded only when referenced. |
+| **Codex (OpenAI)** | Static assets front-loaded for prompt cache hits; dynamic state at tail; error-driven context remediation re-injects compiler output. | Thread → Turn → Item primitives; encrypted latent `CompactionPart`; reasoning tokens allocated before tool calls; `low/medium/high/xhigh` effort levels. | `/responses/compact` endpoint with encrypted opaque payload (not lossy text). |
+| **OpenCode (SST)** | `AGENTS.md` walked up directory tree + `opencode.jsonc`; session-start memory plugins inject semantic profiles. | Drizzle ORM + bun:sqlite message trees; 3-tier memory (working / project rules / episodic); LRU-decay guard for error traces. | Auto-compact at 95%; last 15 k tokens raw + semantic summary prefix. |
+| **OMP / Oh-My-Pi** | Auto-inherits `.claude`, `.cursor`, `.windsurf`, `.cline` rule dirs; stream-filtering regex interceptors inject mid-stream corrections; admission-time tool-output pruning. | 5 pluggable memory backends (`off`, `local`, `hindsight`, `mnemopi`, `sharpshooter`); `memory://root/*` URI protocol; `retain`/`recall`/`reflect` tools. | Local backend injects a "Memory Guidance" block at session start; hindsight enables cross-session sharing. |
+| **OpenHands** | `<EXTRA_INFO>` skill-trigger blocks; path/file-rule progressive disclosure. | Dual-tier `~/.openhands/memory/` + workspace memory; curated `MEMORY.md` index; raw scratchpads read on demand. | Background Dreamer cycles stage memories as provisional notes with explicit promotion. |
+| **Zed** | `@`-mention dynamic injection; fallback chain `.rules` → `.cursorrules` → `.clinerules` → `AGENTS.md` → `CLAUDE.md`. | Thread-isolated contexts; `threads.db` SQLite storage; MCP `context_servers` for external memory. | `/compact` + auto-compact at ~90%; older messages condensed to a summary block. |
+| **Antigravity (AGY)** | Workspace rules (`.agents/rules/`); dynamic `/add-dir` skill injection; pre/post tool-call hook lifecycle. | DAG planning (foldable nodes), wiki ADR, Eisenhower matrix, vector store; `evidence.ts` provenance. | Collapsible DAG: completed branches summarized; active nodes retain full diffs (`foldModule()`). |
+| **This repo (harness)** | `ContextInjectionHook` middleware on `ToolGateway.invoke` with `triggers[]`, `foldByDefault`, `tasksPrefill`, `fromTasksFile()`. | `ThoughtBundle` rows with provenance (`source: 'rea' \| 'reasoning' \| 'external'`), trace `deviation` events, `ThoughtDatasetWriter` JSONL with MoE expert labels. | `data-folded` `<details>` panels in the dashboard; laya `enforceDeviationPolicy` gates drift > 0.5; quantum oracle scores multi-thought decisions (`entangled_verification`). |
+
+### Feature-to-survey mapping
+- **Collapsible context injection** ← keyword-triggered injection (Cline, Claude Code, OMP, Zed, OpenHands) + fold-at-tool-call granularity (Antigravity, OMP).
+- **Laya deviation validation** ← advisor watcher (OMP) + reasoning effort gating (Codex).
+- **Thought dataset pipeline** ← novel (no surveyed agent exports thoughts as training data).
+- **Quantum oracle** ← novel (circuit-based accuracy scoring).
