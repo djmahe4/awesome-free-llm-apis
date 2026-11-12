@@ -27,3 +27,29 @@ describe('ThoughtDatasetWriter', () => {
     expect(row.thought_text).toBe('load binary header');
   });
 });
+
+describe('ThoughtDatasetWriter.readRecent', () => {
+  it('filters rows by runId prefix, keeps the last K, and tolerates corrupt lines', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thought-replay-'));
+    tempDirs.push(dir);
+    const writer = new ThoughtDatasetWriter({ outputDir: dir });
+    const row = { alignment: 'aligned' as const, drift_prob: 0, goal: 'g' };
+    await writer.append({ thought: { id: 'run-a:step1', text: 'first thought', source: 'rea', timestamp: 1 }, tool: 'browser_tool', action: 'navigate', ...row });
+    await writer.append({ thought: { id: 'run-b:step1', text: 'other run', source: 'rea', timestamp: 2 }, tool: 'browser_tool', action: 'navigate', ...row });
+    await writer.append({ thought: { id: 'run-a:step2', text: 'second thought', source: 'rea', timestamp: 3 }, tool: 'websearch', action: 'search', ...row });
+    await writer.append({ thought: { id: 'run-a:step3', text: 'third thought', source: 'rea', timestamp: 4 }, tool: 'manage_memory', action: 'search', ...row });
+    await writer.append({ thought: { id: 'run-a:step4', text: 'fourth thought', source: 'rea', timestamp: 5 }, tool: 'browser_tool', action: 'click', ...row });
+    fs.appendFileSync(path.join(dir, 'thoughts.jsonl'), '{corrupt json\n', 'utf8');
+
+    const rows = ThoughtDatasetWriter.readRecent(dir, 'run-a', 3);
+    expect(rows).toHaveLength(3);
+    expect(rows.map(r => r.thoughtId)).toEqual(['run-a:step2', 'run-a:step3', 'run-a:step4']);
+    expect(rows[0]).toMatchObject({ thoughtText: 'second thought', tool: 'websearch', action: 'search' });
+  });
+
+  it('returns [] when the dataset file does not exist', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thought-empty-'));
+    tempDirs.push(dir);
+    expect(ThoughtDatasetWriter.readRecent(dir, 'run-a', 3)).toEqual([]);
+  });
+});

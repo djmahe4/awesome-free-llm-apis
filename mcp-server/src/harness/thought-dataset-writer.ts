@@ -26,6 +26,13 @@ export interface DatasetRow {
   circuit_confidence?: number | null;
 }
 
+export interface ReplayThoughtRow {
+  thoughtId: string;
+  thoughtText: string;
+  tool: string;
+  action?: string;
+}
+
 export class ThoughtDatasetWriter {
   private filePath: string;
 
@@ -62,5 +69,30 @@ export class ThoughtDatasetWriter {
 
   static expertLabel(tool: string): string {
     return TOOL_TO_EXPERT[tool] ?? 'general';
+  }
+
+  static readRecent(outputDir: string, runId: string, limit: number): ReplayThoughtRow[] {
+    try {
+      const raw = fs.readFileSync(path.join(outputDir, 'thoughts.jsonl'), 'utf8');
+      const rows: any[] = [];
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          rows.push(JSON.parse(line));
+        } catch {
+        }
+      }
+      return rows
+        .filter(r => typeof r.thought_id === 'string' && r.thought_id.startsWith(`${runId}:`))
+        .slice(-limit)
+        .map(r => ({
+          thoughtId: r.thought_id,
+          thoughtText: String(r.thought_text ?? ''),
+          tool: String(r.tool ?? 'unknown'),
+          action: r.action,
+        }));
+    } catch {
+      return [];
+    }
   }
 }
