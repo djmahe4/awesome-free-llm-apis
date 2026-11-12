@@ -1025,7 +1025,7 @@
               <tr><td><code>target</code></td><td>string</td><td>for analyze / get / scan_github / model actions</td><td>Target file path, model artifact (.gguf, .pt, .onnx), evidence ID (ev-*), or GitHub repo ("owner/repo")</td></tr>
               <tr><td><code>authorization</code></td><td>enum: ctf | lab | consent</td><td>for analyze / target list / scan_github / model actions</td><td>Mandatory security authorization framing</td></tr>
               <tr><td><code>sessionId</code></td><td>string</td><td></td><td>Session identifier for async polling and status retrieval</td></tr>
-              <tr><td><code>options</code></td><td>object</td><td></td><td>Analysis parameters; depth uses DEPTH_ANYTHING_MODEL_PATH locally (or explicit depthMode=heuristic); audio requires local DEMUCS_MODEL_PATH and explicitConsentAck=true</td></tr>
+              <tr><td><code>options</code></td><td>object</td><td></td><td>Analysis parameters (ref, limit, query, storageDir, workspaceRoot, etc.)</td></tr>
             </tbody>
           </table>
           <div class="qs-guide-body" style="padding: 8px 12px; font-size: 0.78rem;">
@@ -2314,7 +2314,7 @@
           <!-- Preset Switcher -->
           <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
             <button class="btn btn-secondary btn-sm ml-media-tab-btn active" data-preset="demucs">🎵 Audio Stems (Demucs 4-Stem)</button>
-            <button class="btn btn-secondary btn-sm ml-media-tab-btn" data-preset="depth">📐 3D Parallax Warp (Depth Anything V2)</button>
+            <button class="btn btn-secondary btn-sm ml-media-tab-btn" data-preset="depth">📐 Pseudo-3D Parallax (Depth Anything V2)</button>
             <button class="btn btn-secondary btn-sm ml-media-tab-btn" data-preset="tts">🗣 TTS Synth (Kokoro Vocoder)</button>
             <button class="btn btn-secondary btn-sm ml-media-tab-btn" data-preset="ocr">🔍 OCR &amp; Token Bounding Decisions</button>
           </div>
