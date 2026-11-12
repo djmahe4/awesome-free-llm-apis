@@ -27,6 +27,8 @@ import io
 import json
 import math
 import os
+import shutil
+import subprocess
 import sys
 import time
 import zlib
@@ -42,6 +44,108 @@ try:
 except ImportError:
     sys.stderr.write("Error: Pillow is required for vlm_reverse_generator.py\n")
     sys.exit(1)
+
+try:
+    from model_inspector import resolve_model_path, inspect_gguf
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from model_inspector import resolve_model_path, inspect_gguf
+    except ImportError:
+        resolve_model_path = None
+        inspect_gguf = None
+
+VL_OLLAMA_PATTERNS = (
+    "qwen3-vl", "qwen2.5vl", "qwen2-vl", "qwen-vl",
+    "llava", "minicpm-v", "moondream", "llama3.2-vision", "pixtral", "bakllava",
+)
+
+
+def _ollama_models_dir():
+    return os.environ.get("OLLAMA_MODELS") or os.path.expanduser("~/.ollama/models")
+
+
+def _find_llmfit_bin():
+    scripts_dir = os.path.dirname(sys.executable)
+    for name in ("llmfit.exe", "llmfit"):
+        cand = os.path.join(scripts_dir, name)
+        if os.path.isfile(cand):
+            return cand
+    return shutil.which("llmfit")
+
+
+def _llmfit_vl_candidates(limit=10):
+    """Query llmfit for hardware-fitted multimodal/vision Ollama model names."""
+    llmfit_bin = _find_llmfit_bin()
+    if not llmfit_bin:
+        return []
+    for use_case in ("multimodal", "vision"):
+        try:
+            proc = subprocess.run(
+                [llmfit_bin, "recommend", "--json", "--use-case", use_case, "--limit", str(limit)],
+                capture_output=True, text=True, timeout=3,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                data = json.loads(proc.stdout)
+                names = [m.get("ollama_name") for m in data.get("models", []) if m.get("ollama_name")]
+                if names:
+                    return names
+        except Exception:
+            continue
+    return []
+
+
+def discover_ollama_vl_model():
+    """Find an installed VL model in Ollama's local manifest directory, guided by llmfit."""
+    manifests_dir = os.path.join(_ollama_models_dir(), "manifests")
+    if not os.path.isdir(manifests_dir):
+        return None
+    if resolve_model_path is not None:
+        for ollama_name in _llmfit_vl_candidates():
+            ref = ollama_name if ollama_name.startswith("ollama:") else f"ollama:{ollama_name}"
+            try:
+                resolve_model_path(ref)
+                return ref
+            except Exception:
+                continue
+    for root, _dirs, files in os.walk(manifests_dir):
+        rel = os.path.relpath(root, manifests_dir).replace("\\", "/").lower()
+        if any(pat in rel for pat in VL_OLLAMA_PATTERNS) and files:
+            model_part = rel.split("/library/")[-1] if "/library/" in rel else rel
+            return f"ollama:{model_part}:{files[0]}"
+    return None
+
+
+def load_vl_manifest_info(file_arg):
+    """Resolve an Ollama VL manifest (or auto-discover one) without hf CLI."""
+    ref = file_arg.strip() if isinstance(file_arg, str) and file_arg.strip() else None
+    if ref == "ollama:auto":
+        ref = discover_ollama_vl_model()
+    if not ref:
+        return None
+    if ref.startswith("ollama:") and resolve_model_path is not None:
+        try:
+            blob_path = resolve_model_path(ref)
+            info = {"source": "ollama_manifest", "ref": ref, "blob_path": blob_path}
+            if inspect_gguf is not None:
+                gguf = inspect_gguf(blob_path)
+                info["architecture"] = gguf.get("architecture")
+                info["tensor_count"] = gguf.get("tensorCount")
+            return info
+        except Exception as exc:
+            return {"source": "ollama_manifest", "ref": ref, "error": str(exc)}
+    if os.path.isfile(ref) and inspect_gguf is not None:
+        try:
+            gguf = inspect_gguf(ref)
+            return {
+                "source": "local_gguf",
+                "ref": ref,
+                "architecture": gguf.get("architecture"),
+                "tensor_count": gguf.get("tensorCount"),
+            }
+        except Exception:
+            pass
+    return None
 
 MODES = (
     "feature_attribution",
@@ -302,6 +406,7 @@ def reverse_generate(args):
     mode = args.mode
     resolution = max(64, min(int(args.resolution), 512))
     seed = args.seed
+    model_info = load_vl_manifest_info(getattr(args, "file", None))
 
     raw_tokens = tokenize(prompt)
     meta = []
@@ -381,6 +486,8 @@ def reverse_generate(args):
 
     return {
         "output_path": os.path.abspath(output_path),
+        "model_source": model_info.get("source") if model_info else "synthetic_lexicon",
+        **({"ollama_model": model_info} if model_info else {}),
         "tokens": [w for w, _ in raw_tokens],
         "token_attributions": attributions,
         "spatial_patches": spatial_patches,

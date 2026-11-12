@@ -780,7 +780,8 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       ...(options?.workspaceRoot ? [String(options.workspaceRoot)] : []),
     ];
 
-    if (!isSafeAllowedPath(target, allowedRoots)) {
+    const isOllamaTarget = typeof target === 'string' && /^ollama:[a-zA-Z0-9._:/-]+$/.test(target.trim()) && !target.includes('..');
+    if (!isOllamaTarget && !isSafeAllowedPath(target, allowedRoots)) {
       return {
         success: false,
         action,

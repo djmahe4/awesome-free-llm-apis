@@ -398,8 +398,22 @@ export function createExpressApp(): express.Express {
       // Recent search queries/results logged by SearchRouterMiddleware (v1.0.9).
       app.get('/api/search-logs', async (req, res) => {
         try {
-          const logs = await getRecentSearchLogs();
-          res.json(logs);
+          const { getLocalSearchLogs } = await import('./pipeline/middlewares/SearchRouterMiddleware.js');
+          const [remoteLogs, localLogs] = await Promise.all([
+            getRecentSearchLogs().catch(() => []),
+            getLocalSearchLogs(50).catch(() => []),
+          ]);
+          const seen = new Set<string>();
+          const merged = [...localLogs, ...remoteLogs]
+            .filter(item => {
+              const key = `${item.provider}:${item.query}:${Math.floor(item.timestamp / 1000)}`;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            })
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 50);
+          res.json(merged);
         } catch (err) {
           res.status(500).json({ error: String(err) });
         }
