@@ -1696,7 +1696,7 @@
         }
       }, { onRunning: () => { if (depthStatus) depthStatus.textContent = 'Depth render running...'; } });
       const data = result && result.data;
-      if (!response.ok || !result || result.success === false || !data || data.ok === false) {
+      if (!result || result.success === false || !data || data.ok === false) {
         if (depthStatus) depthStatus.textContent = String((data && data.error) || (result && result.error) || 'Depth render unavailable.').slice(0, 200);
         return;
       }

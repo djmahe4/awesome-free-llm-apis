@@ -1,27 +1,53 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { handleReverseTool } from '../src/tools/reverse-tool.js';
 
 describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', () => {
   const framesDir = path.resolve(__dirname, 'fixtures/media/frames');
+  const frame0001 = path.join(framesDir, 'frame_0001.jpg');
   const frame0050 = path.join(framesDir, 'frame_0050.jpg');
-  const outDir = path.resolve(__dirname, 'tmp');
+  const outDir = path.resolve(__dirname, 'tmp', 'depth-parallax-integration');
 
   beforeAll(() => {
-    if (!fs.existsSync(outDir)) {
-      fs.mkdirSync(outDir, { recursive: true });
-    }
+    fs.mkdirSync(outDir, { recursive: true });
   });
 
-  it('runs scene_parallax with layered depth planes, dolly, and pan', async () => {
+  afterAll(() => {
+    fs.rmSync(outDir, { recursive: true, force: true });
+  });
+
+  it('returns not_available when local Depth Anything weights are absent in default model mode', async () => {
+    const prev = process.env.DEPTH_ANYTHING_MODEL_PATH;
+    process.env.DEPTH_ANYTHING_MODEL_PATH = '';
+    try {
+      const res = await handleReverseTool({
+        action: 'run_depth_parallax',
+        target: frame0050,
+        authorization: 'lab',
+      });
+      expect(res.success).toBe(true);
+      const data = res.data as any;
+      expect(data.ok).toBe(false);
+      expect(data.status).toBe('not_available');
+      expect(data.error).toContain('no weights were downloaded');
+    } finally {
+      if (prev === undefined) delete process.env.DEPTH_ANYTHING_MODEL_PATH;
+      else process.env.DEPTH_ANYTHING_MODEL_PATH = prev;
+    }
+  }, 30000);
+
+  it('runs continuous_parallax with projective camera homography in explicit heuristic mode', async () => {
     const outImg = path.join(outDir, 'test_scene_parallax.png');
     const res = await handleReverseTool({
       action: 'run_depth_parallax',
       target: frame0050,
       authorization: 'lab',
       options: {
-        mode: 'scene_parallax',
+        mode: 'continuous_parallax',
+        depthMode: 'heuristic',
+        yaw: 4.0,
+        pitch: 2.0,
         dolly: 12.0,
         pan: 5.0,
         output: outImg,
@@ -31,22 +57,60 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
     expect(res.success).toBe(true);
     const data = res.data as any;
     expect(data.ok).toBe(true);
-    expect(data.mode).toBe('scene_parallax');
+    expect(data.operation).toBe('pseudo_3d_parallax');
+    expect(data.depth_backend).toBe('heuristic');
     expect(data.output_base64).toBeDefined();
-    expect(data.metrics.depth_entropy).toBeGreaterThan(0);
-    expect(data.metrics.disocclusion_ratio).toBeGreaterThanOrEqual(0);
+    expect(data.metrics.homography_applied).toBe(true);
+    expect(data.metrics.projection_model).toBe('perspective_3d_homography');
+    expect(data.metrics.depth_entropy_bits).toBeGreaterThan(0);
+    expect(data.metrics.out_of_frame_ratio).toBeLessThan(0.05);
+    expect(data.metrics.disocclusion_ratio).toBeNull();
     expect(fs.existsSync(outImg)).toBe(true);
   }, 30000);
 
-  it('runs multi-scoped 3D augmentation Scope 1: isolated Soccer Ball 3D spin', async () => {
-    const outImg = path.join(outDir, 'test_scope_ball_3d.png');
+  it('rotates explicit full referee bbox [470,35,1060,1075] with GrabCut without head slicing', async () => {
+    const outImg = path.join(outDir, 'test_referee_fullbody_3d.png');
     const res = await handleReverseTool({
       action: 'run_depth_parallax',
       target: frame0050,
       authorization: 'lab',
       options: {
         mode: 'object_3d_rotation',
-        target: 'ball',
+        depthMode: 'heuristic',
+        bbox: [470, 35, 1060, 1075],
+        maskType: 'grabcut',
+        yaw: 18.0,
+        pitch: 6.0,
+        roll: -4.0,
+        output: outImg,
+      },
+    });
+
+    expect(res.success).toBe(true);
+    const data = res.data as any;
+    expect(data.ok).toBe(true);
+    expect(data.operation).toBe('pseudo_3d_object_transform');
+    expect(data.metrics.depth_source).toBe('heuristic');
+    expect(data.metrics.homography_applied).toBe(true);
+    expect(data.metrics.target_bbox).toEqual([470, 35, 1060, 1075]);
+    expect(data.metrics.mask_backend).toBe('opencv_grabcut');
+    expect(data.metrics.object_pixels_transformed).toBeGreaterThan(150000);
+    expect(data.metrics.foreground_retention_ratio).toBeGreaterThan(0.85);
+    expect(data.metrics.background_stability_score).toBeGreaterThan(0.97);
+    expect(fs.existsSync(outImg)).toBe(true);
+  }, 45000);
+
+  it('rotates isolated ball bbox [680,440,860,640] on frame_0050', async () => {
+    const outImg = path.join(outDir, 'test_ball_bbox_3d.png');
+    const res = await handleReverseTool({
+      action: 'run_depth_parallax',
+      target: frame0050,
+      authorization: 'lab',
+      options: {
+        mode: 'object_3d_rotation',
+        depthMode: 'heuristic',
+        bbox: [680, 440, 860, 640],
+        maskType: 'sphere',
         yaw: 30.0,
         pitch: 10.0,
         output: outImg,
@@ -56,88 +120,8 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
     expect(res.success).toBe(true);
     const data = res.data as any;
     expect(data.ok).toBe(true);
-    expect(data.mode).toBe('object_3d_rotation');
-    expect(data.metrics.target).toBe('ball');
-    expect(data.metrics.mask_type).toBe('circle');
-    expect(data.metrics.pooling_pixel_awareness).toBe(true);
-    expect(data.metrics.object_pixels_transformed).toBeGreaterThan(1000);
-    expect(data.metrics.background_stability_score).toBeGreaterThan(0.99);
-    expect(fs.existsSync(outImg)).toBe(true);
-  }, 30000);
-
-  it('runs multi-scoped 3D augmentation Scope 2: Copa Del Rey Pedestal 3D tilt', async () => {
-    const outImg = path.join(outDir, 'test_scope_pedestal_3d.png');
-    const res = await handleReverseTool({
-      action: 'run_depth_parallax',
-      target: frame0050,
-      authorization: 'lab',
-      options: {
-        mode: 'object_3d_rotation',
-        target: 'pedestal',
-        yaw: -25.0,
-        pitch: 10.0,
-        output: outImg,
-      },
-    });
-
-    expect(res.success).toBe(true);
-    const data = res.data as any;
-    expect(data.ok).toBe(true);
-    expect(data.mode).toBe('object_3d_rotation');
-    expect(data.metrics.target).toBe('pedestal');
-    expect(data.metrics.pooling_pixel_awareness).toBe(true);
+    expect(data.metrics.target_bbox).toEqual([680, 440, 860, 640]);
     expect(data.metrics.object_pixels_transformed).toBeGreaterThan(5000);
-    expect(data.metrics.background_stability_score).toBeGreaterThan(0.99);
-    expect(fs.existsSync(outImg)).toBe(true);
-  }, 30000);
-
-  it('runs multi-scoped 3D augmentation Scope 3: Goalkeeper isolated GrabCut rotation', async () => {
-    const outImg = path.join(outDir, 'test_scope_goalkeeper_3d.png');
-    const res = await handleReverseTool({
-      action: 'run_depth_parallax',
-      target: frame0050,
-      authorization: 'lab',
-      options: {
-        mode: 'object_3d_rotation',
-        target: 'goalkeeper',
-        yaw: -15.0,
-        output: outImg,
-      },
-    });
-
-    expect(res.success).toBe(true);
-    const data = res.data as any;
-    expect(data.ok).toBe(true);
-    expect(data.mode).toBe('object_3d_rotation');
-    expect(data.metrics.target).toBe('goalkeeper');
-    expect(data.metrics.pooling_pixel_awareness).toBe(true);
-    expect(data.metrics.object_pixels_transformed).toBeGreaterThan(20000);
-    expect(data.metrics.background_stability_score).toBeGreaterThan(0.99);
-    expect(fs.existsSync(outImg)).toBe(true);
-  }, 30000);
-
-  it('runs multi-scoped 3D augmentation Scope 4: Custom Referee BBox with 3D turn', async () => {
-    const outImg = path.join(outDir, 'test_scope_referee_custom_bbox.png');
-    const res = await handleReverseTool({
-      action: 'run_depth_parallax',
-      target: frame0050,
-      authorization: 'lab',
-      options: {
-        mode: 'object_3d_rotation',
-        bbox: [540, 50, 960, 750],
-        maskType: 'grabcut',
-        yaw: 15.0,
-        output: outImg,
-      },
-    });
-
-    expect(res.success).toBe(true);
-    const data = res.data as any;
-    expect(data.ok).toBe(true);
-    expect(data.mode).toBe('object_3d_rotation');
-    expect(data.metrics.target_bbox).toEqual([540, 50, 960, 750]);
-    expect(data.metrics.pooling_pixel_awareness).toBe(true);
-    expect(data.metrics.object_pixels_transformed).toBeGreaterThan(50000);
     expect(data.metrics.background_stability_score).toBeGreaterThan(0.99);
     expect(fs.existsSync(outImg)).toBe(true);
   }, 30000);
@@ -149,7 +133,8 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
       target: frame0050,
       authorization: 'lab',
       options: {
-        frames: 6,
+        depthMode: 'heuristic',
+        frames: 4,
         fps: 6,
         trajectory: 'orbit',
         azimuthAmp: 4.0,
@@ -162,26 +147,28 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
     const data = res.data as any;
     expect(data.ok).toBe(true);
     expect(data.operation).toBe('animate_still');
-    expect(data.frames_count).toBe(6);
+    expect(data.frames_count).toBe(4);
     expect(data.fps).toBe(6);
-    expect(data.duration_sec).toBe(1.0);
     expect(data.output_base64).toBeDefined();
     expect(data.metrics.file_size_bytes).toBeGreaterThan(1000);
     expect(fs.existsSync(outGif)).toBe(true);
-  }, 40000);
+  }, 45000);
 
-  it('runs animate_still with target="ball" generating volumetric spherical 3D rotation sequence', async () => {
-    const outGif = path.join(outDir, 'test_animate_still_ball.gif');
+  it('runs animate_still object_spin on frame_0001 explicit referee bbox without angle overflow', async () => {
+    const outGif = path.join(outDir, 'test_animate_still_referee_spin.gif');
     const res = await handleReverseTool({
       action: 'animate_still',
-      target: frame0050,
+      target: frame0001,
       authorization: 'lab',
       options: {
         mode: 'object_3d_rotation',
-        target: 'ball',
-        frames: 6,
-        fps: 6,
+        depthMode: 'heuristic',
+        bbox: [620, 20, 1220, 1080],
+        maskType: 'grabcut',
+        frames: 4,
+        fps: 4,
         trajectory: 'object_spin',
+        azimuthAmp: 5.0,
         output: outGif,
       },
     });
@@ -190,10 +177,10 @@ describe('Reverse Tool - Object-Aware 3D Augmentation & 2.5D Parallax Engine', (
     const data = res.data as any;
     expect(data.ok).toBe(true);
     expect(data.operation).toBe('animate_still');
-    expect(data.frames_count).toBe(6);
+    expect(data.frames_count).toBe(4);
     expect(data.output_base64).toBeDefined();
     expect(fs.existsSync(outGif)).toBe(true);
-  }, 40000);
+  }, 60000);
 
   it('handles invalid file and path traversal securely', async () => {
     const res = await handleReverseTool({

@@ -716,21 +716,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
   }
 
-  const modelActions = [
-    'inspect_model',
-    'infer_layer_roles',
-    'trace_layer_execution',
-    'reconstruct_training_samples',
-    'extract_model_layer',
-    'analyze_model_layer',
-    'quantize_layer',
-    'assemble_moe',
-    'run_reasoning_model',
-    'run_yolo_nn',
-  'run_torch_nn',
-    'program_weight_space',
-  ];
-
   if (isModelAction(action)) {
     if (!authorization || !VALID_AUTH.includes(authorization as ReverseAuthorization)) {
       return {
@@ -860,6 +845,11 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
         };
       }
       args.push('--output', path.resolve(outStr));
+    } else if (action === 'run_depth_parallax' || action === 'animate_still') {
+      const ext = action === 'animate_still' ? '.gif' : '.png';
+      const defaultOutDir = path.join(process.cwd(), '.mcp-uploads', 'depth-parallax');
+      const defaultOut = path.join(defaultOutDir, `${action}-${Date.now()}${ext}`);
+      args.push('--output', path.resolve(defaultOut));
     }
     if (options?.cacheDir) {
       const cacheStr = String(options.cacheDir);
@@ -951,9 +941,6 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     }
     if (options?.buckets) {
       args.push('--buckets', String(options.buckets));
-    }
-    if (options?.mode) {
-      args.push('--mode', String(options.mode));
     }
     if (options?.depthLayers !== undefined || options?.['depth-layers'] !== undefined) {
       args.push('--depth-layers', String(options.depthLayers ?? options['depth-layers']));

@@ -158,6 +158,37 @@ def _not_available(message: str) -> dict[str, Any]:
     }
 
 
+def _load_demucs_checkpoint(model_path: str):
+    """Load a local Demucs model from .safetensors or PyTorch checkpoint without remote downloads."""
+    import torch
+    from demucs.states import load_model
+
+    if model_path.lower().endswith(".safetensors"):
+        from demucs.hf import load_safetensors_model
+        return load_safetensors_model(model_path)
+
+    try:
+        checkpoint = torch.load(model_path, map_location="cpu", weights_only=True)
+        return load_model(checkpoint)
+    except Exception as exc:
+        # Official Demucs .th packages store klass/Fraction metadata rejected by PyTorch >=2.6 weights_only=True.
+        if "Weights only load failed" not in str(exc) and "Unsupported global" not in str(exc):
+            raise
+        from fractions import Fraction
+        import demucs.htdemucs
+        import demucs.hdemucs
+        import demucs.demucs
+        safe_types = [
+            Fraction,
+            demucs.htdemucs.HTDemucs,
+            demucs.hdemucs.HDemucs,
+            demucs.demucs.Demucs,
+        ]
+        with torch.serialization.safe_globals(safe_types):
+            checkpoint = torch.load(model_path, map_location="cpu", weights_only=True)
+        return load_model(checkpoint)
+
+
 def separate_audio(
     path: str,
     requested_stems: str,
@@ -174,7 +205,7 @@ def separate_audio(
     try:
         import torch
         from demucs.apply import apply_model
-        from demucs.states import load_model
+        from demucs.states import load_model  # noqa: F401
     except Exception as exc:
         return _not_available("Demucs is not installed or usable locally: " + str(exc))
 
@@ -183,8 +214,7 @@ def separate_audio(
     remove_prepared = False
     writers: dict[str, wave.Wave_write] = {}
     try:
-        checkpoint = torch.load(model_path, map_location='cpu', weights_only=True)
-        model = load_model(checkpoint)
+        model = _load_demucs_checkpoint(model_path)
         if not all(hasattr(model, name) for name in ("sources", "samplerate", "audio_channels")):
             raise RuntimeError("The configured checkpoint is not a compatible Demucs model")
         if set(model.sources) != set(STEM_NAMES):
