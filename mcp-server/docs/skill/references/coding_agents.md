@@ -55,9 +55,17 @@ interface CodingAgentsInput {
   // off by default (costs model calls): the model proposes extra assumptions to check, and in enforce mode corrects a refuted goal once
   "hypothesisModel": false,
   // off by default: validate subagent delegation and checks (subagentValidation?: boolean)
-  "subagentValidation": false
+  "subagentValidation": false,
+  // optional: explicit thought-source files to watch instead of auto-detection. Each list holds
+  // absolute or workspace-relative paths for that agent's store (claude: session .jsonl files,
+  // opencode: .db files, codex: rollout files, antigravity: transcript.jsonl files). When
+  // thoughtSources is absent the reader auto-detects Claude jsonl sessions, the OpenCode db,
+  // Codex rollouts and Antigravity brain transcripts for the workspace.
+  "thoughtSources": { "codex": ["C:/sessions/rollout-2026-11-13.jsonl"] }
 }
 ```
+
+**Thought injection on resume:** between resumes you (or laya) can leave messages in `.free-llm-mcp/laya-messages.json` and answers to the agent's questions in `tasks.md`. On the next `resume` the pipeline drains queued messages into a `## Agent's assumptions` section in `tasks.md` (the tasks.md blackboard stays the single source of truth), folds answered questions (`Q1: ...` / `A1: ...`) into the goal, and pauses again when pending questions remain so you can answer them in the file first.
 
 **Assumption check (hypotheses):** before editing, coding_agents lists what the goal and plan assume and checks each against the workspace, with no model involved: every target file should exist, and every code name the goal mentions in backticks or as `name()` should be defined in some file (unless the goal says to add or create it). The result is in `result.hypotheses` and `hypotheses.md` next to `tasks.md` (claim, probe, status, evidence). With `hypothesisGate: "enforce"` a refuted assumption returns `status:"paused"` and a `Blocked before editing` summary instead of an edit; correct the goal or plan and call again. Probe kinds available to the checker: `file:`, `defined:`, `symbol:`, `arity:`, `grep:`, `cite:`, and the command probes `cmd:<exit code>@<command>` (the command exits with that code) and `test:<command>` (the command passes). Command probes run only for rows you wrote yourself, only with `hypothesisExec: true` in the settings file, and only for the commands `verifyCommand` allows (no shell syntax); otherwise the row stays `open` and nothing runs. Wiki claims and model proposals never run commands.
 Use it for known pre-failing, flaky or environment-dependent tests, so they don't keep every check red and send the repair loop chasing them.

@@ -153,7 +153,7 @@ export interface RepairAttempt {
 export interface CodingAgentsResult {
   sessionId: string;
   goal: string;
-  pipelineStage: 'enumerate' | 'locate' | 'anchor' | 'edit' | 'verify' | 'completed';
+  pipelineStage: 'enumerate' | 'locate' | 'anchor' | 'edit' | 'verify' | 'completed' | 'paused';
   relevantFiles: string[];
   anchors: SnapshotAnchor[];
   patchPlan: LineAnchoredPatch[];

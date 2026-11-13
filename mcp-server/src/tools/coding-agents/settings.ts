@@ -24,6 +24,30 @@ export interface CodingAgentsSettings {
   /** Asks the model for extra assumptions to check, and for one corrected goal when enforce finds a refuted one. Off by default (costs model calls). */
   hypothesisModel: boolean;
   subagentValidation: boolean;
+  /** Explicit thought sources to watch; undefined = auto-detect Claude jsonl, OpenCode db, Codex rollouts and Antigravity transcripts for the workspace. */
+  thoughtSources?: { claude?: string[]; opencode?: string[]; codex?: string[]; antigravity?: string[] };
+}
+
+function parseStringList(value: unknown): string[] | undefined {
+  return Array.isArray(value)
+    ? value.filter((s: unknown): s is string => typeof s === 'string' && s.trim() !== '')
+    : undefined;
+}
+
+export function parseThoughtSources(value: unknown): CodingAgentsSettings['thoughtSources'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const v = value as Record<string, unknown>;
+  const claude = parseStringList(v['claude']);
+  const opencode = parseStringList(v['opencode']);
+  const codex = parseStringList(v['codex']);
+  const antigravity = parseStringList(v['antigravity']);
+  if (!claude && !opencode && !codex && !antigravity) return undefined;
+  return {
+    ...(claude ? { claude } : {}),
+    ...(opencode ? { opencode } : {}),
+    ...(codex ? { codex } : {}),
+    ...(antigravity ? { antigravity } : {}),
+  };
 }
 
 export function loadCodingAgentsSettings(workspaceRoot: string): CodingAgentsSettings {
@@ -37,6 +61,7 @@ export function loadCodingAgentsSettings(workspaceRoot: string): CodingAgentsSet
       hypothesisExec: raw?.hypothesisExec === true,
       hypothesisModel: raw?.hypothesisModel === true,
       subagentValidation: raw?.subagentValidation === true,
+      thoughtSources: parseThoughtSources(raw?.thoughtSources),
     };
   } catch {
     return { skipFailingTests: [], allowCloudFallback: false, hypothesisGate: 'warn', hypothesisExec: false, hypothesisModel: false, subagentValidation: false };

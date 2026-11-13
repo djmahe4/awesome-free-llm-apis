@@ -14,6 +14,7 @@ import { logToolCall } from '../../utils/ChatLogger.js';
 import { RunRegistry, RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
 import { globalCasStore } from '../../memory/ContentAddressableCheckpoint.js';
 import { assertPatchPathAllowed } from '../../harness/write-guard.js';
+import { appendAgentAssumptions, buildResumeFeedback, drainMessages, readAgentQuestions, removeConsumedQuestions } from '../../harness/laya-injector.js';
 import {
   type SnapshotAnchor,
   type LineAnchoredPatch,
@@ -372,6 +373,30 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           activeGoal = nextPendingTask.context
             ? `${nextPendingTask.task}\n\n[Planner context]\n${nextPendingTask.context}`
             : nextPendingTask.task;
+        }
+
+        const questions = readAgentQuestions(tasksContent);
+        if (questions.answered.length > 0) {
+          const answeredText = questions.answered.map(qa => `Q: ${qa.question} — A: ${qa.answer}`).join('\n');
+          activeGoal = withFeedback(activeGoal, `[Answered agent questions]\n${answeredText}`);
+          removeConsumedQuestions(tasksFilePath);
+          const cleaned = await fs.readFile(tasksFilePath, 'utf-8');
+          loadedTasks = parseTasksMarkdown(cleaned);
+        }
+        if (questions.pending.length > 0) {
+          result.pipelineStage = 'paused';
+          result.isPaused = true;
+          result.status = 'paused';
+          result.tasksFile = 'tasks.md';
+          result.patchSummary = `The agent asked question(s) in tasks.md under "${'## Agent\'s questions'}". Fill in your answers (A1:, A2: ...) and save the file, then call with action="resume" again.`;
+          return finalizeResult();
+        }
+        const drained = drainMessages(workspaceRoot);
+        if (drained.length > 0) {
+          appendAgentAssumptions(tasksFilePath, drained.map(m => m.text));
+          activeGoal = withFeedback(activeGoal, buildResumeFeedback(workspaceRoot, drained));
+          const updated = await fs.readFile(tasksFilePath, 'utf-8');
+          loadedTasks = parseTasksMarkdown(updated);
         }
       }
     }
