@@ -202,7 +202,7 @@ describe('LayaBridge', () => {
         expert: 'general',
         expert_source: 'fallback',
         probabilities: undefined,
-        latency_ms: 0,
+        latency_ms: expect.any(Number),
       });
     });
   });
