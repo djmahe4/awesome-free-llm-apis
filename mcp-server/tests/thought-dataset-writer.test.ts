@@ -26,6 +26,44 @@ describe('ThoughtDatasetWriter', () => {
     expect(row.expert_label).toBe('reverse');
     expect(row.thought_text).toBe('load binary header');
   });
+
+  it('writes DAG linkage fields and expert_source when provided', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thought-link-'));
+    tempDirs.push(dir);
+    const writer = new ThoughtDatasetWriter({ outputDir: dir });
+    await writer.append({
+      thought: { id: 'sess:thought:3', text: 'chain thought', source: 'rea', timestamp: 5 },
+      tool: 'Read', action: '{"file_path":"x.ts"}', goal: 'g',
+      alignment: 'aligned', drift_prob: 0, expert_label: 'coding', expert_source: 'laya',
+      parent_thought_id: 'sess:tool_result:2', root_thought_id: 'sess:root:1',
+      depth: 4, tool_call_id: 'tc-1', result_ok: true,
+    });
+    const row = JSON.parse(fs.readFileSync(path.join(dir, 'thoughts.jsonl'), 'utf8').trim());
+    expect(row.parent_thought_id).toBe('sess:tool_result:2');
+    expect(row.root_thought_id).toBe('sess:root:1');
+    expect(row.depth).toBe(4);
+    expect(row.tool_call_id).toBe('tc-1');
+    expect(row.result_ok).toBe(true);
+    expect(row.expert_source).toBe('laya');
+  });
+
+  it('defaults linkage fields to null and expert_source to fallback when omitted', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thought-default-'));
+    tempDirs.push(dir);
+    const writer = new ThoughtDatasetWriter({ outputDir: dir });
+    await writer.append({
+      thought: { id: 't1', text: 'plain', source: 'rea', timestamp: 0 },
+      tool: 'none', action: '', goal: 'g',
+      alignment: 'aligned', drift_prob: 0, expert_label: 'general',
+    });
+    const row = JSON.parse(fs.readFileSync(path.join(dir, 'thoughts.jsonl'), 'utf8').trim());
+    expect(row.parent_thought_id).toBeNull();
+    expect(row.root_thought_id).toBeNull();
+    expect(row.depth).toBeNull();
+    expect(row.tool_call_id).toBeNull();
+    expect(row.result_ok).toBeNull();
+    expect(row.expert_source).toBe('fallback');
+  });
 });
 
 describe('ThoughtDatasetWriter.readRecent', () => {

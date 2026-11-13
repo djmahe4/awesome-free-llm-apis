@@ -5,6 +5,17 @@ export const LAYA_MODEL = 'laya:421m-typed-decisions-bf16';
 
 export type AlignmentResult = 'aligned' | 'tangential' | 'drift' | 'not_available';
 
+export const LAYA_EXPERT_SET = ['reverse', 'cyber', 'browser', 'media', 'coding', 'memory', 'quantum', 'general'] as const;
+
+export type LayaExpert = (typeof LAYA_EXPERT_SET)[number];
+
+export interface LayaExpertResult {
+  expert: LayaExpert;
+  expert_source: 'laya' | 'fallback';
+  probabilities?: Record<string, number>;
+  latency_ms: number;
+}
+
 export interface LayaValidationResult {
   alignment: AlignmentResult;
   drift_prob: number;
@@ -83,6 +94,61 @@ export async function validateThoughtDeviation(
   } catch (err) {
     console.warn('[laya-bridge] validateThoughtDeviation request failed, falling back to NOT_AVAILABLE:', (err as Error)?.message ?? err);
     return NOT_AVAILABLE;
+  }
+}
+
+export async function assignExpert(
+  input: { thought: string; goal: string; tool: string },
+  deps?: LayaBridgeDeps,
+): Promise<LayaExpertResult> {
+  const t0 = Date.now();
+  const fallback = (latency: number): LayaExpertResult => ({
+    expert: 'general',
+    expert_source: 'fallback',
+    latency_ms: latency,
+  });
+  try {
+    const model = await resolveModel(deps);
+    const state = JSON.stringify({ goal: input.goal, tool: input.tool, thought: input.thought.slice(0, 600) });
+    const body = {
+      model,
+      state,
+      questions: {
+        expert: {
+          type: 'choice',
+          instructions: 'Which expert domain does this reasoning belong to?',
+          criteria: Object.fromEntries(LAYA_EXPERT_SET.map(e => [e, e])),
+        },
+      },
+    };
+    const doFetch = deps?.fetchImpl ?? fetch;
+    const res = await doFetch(`${resolveBaseUrl(deps)}/v1/systemone`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return fallback(Date.now() - t0);
+    const json: any = await res.json();
+    const a = json?.answers?.expert;
+    const choice = a?.choice;
+    if (typeof choice !== 'string' || !LAYA_EXPERT_SET.includes(choice as LayaExpert)) {
+      return fallback(Date.now() - t0);
+    }
+    const probabilities: Record<string, number> = {};
+    const rawProbs = a.probabilities ?? {};
+    for (const key of Object.keys(rawProbs)) {
+      const v = Number(rawProbs[key]);
+      if (Number.isFinite(v)) probabilities[key] = v;
+    }
+    return {
+      expert: choice as LayaExpert,
+      expert_source: 'laya',
+      probabilities: Object.keys(probabilities).length ? probabilities : undefined,
+      latency_ms: Date.now() - t0,
+    };
+  } catch {
+    return fallback(Date.now() - t0);
   }
 }
 

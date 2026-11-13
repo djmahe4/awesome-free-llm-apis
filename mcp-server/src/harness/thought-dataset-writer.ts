@@ -24,6 +24,12 @@ export interface DatasetRow {
   drift_prob: number;
   expert_label?: string;
   circuit_confidence?: number | null;
+  parent_thought_id?: string | null;
+  root_thought_id?: string | null;
+  depth?: number;
+  tool_call_id?: string | null;
+  result_ok?: boolean | null;
+  expert_source?: 'laya' | 'fallback';
 }
 
 export interface ReplayThoughtRow {
@@ -63,6 +69,12 @@ export class ThoughtDatasetWriter {
       drift_prob: row.drift_prob,
       expert_label: row.expert_label ?? ThoughtDatasetWriter.expertLabel(row.tool),
       circuit_confidence: row.circuit_confidence ?? null,
+      parent_thought_id: row.parent_thought_id ?? null,
+      root_thought_id: row.root_thought_id ?? null,
+      depth: row.depth ?? null,
+      tool_call_id: row.tool_call_id ?? null,
+      result_ok: row.result_ok ?? null,
+      expert_source: row.expert_source ?? 'fallback',
     };
     await fs.promises.appendFile(this.filePath, JSON.stringify(jsonlRow) + '\n', 'utf8');
   }
