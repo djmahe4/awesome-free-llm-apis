@@ -1,4 +1,4 @@
-import { caTrace } from '../tools/coding-agents/trace.js';
+import { caTrace, caTraceDir, caTraceDump } from '../tools/coding-agents/trace.js';
 import fetch from 'node-fetch';
 import { getModelInfo } from '../services/llmfit.js';
 
@@ -179,26 +179,29 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
 
   const numCtx = options?.numCtx || await resolveNumCtx(model, messages, options?.maxTokens);
 
+  const requestBody = JSON.stringify({
+    model,
+    messages,
+    stream: false,
+    // 0 unloads the model right after the reply, so a staged pipeline (vision model, then code
+    // model) never has both resident in VRAM at once.
+    ...(options?.keepAlive !== undefined ? { keep_alive: options.keepAlive } : {}),
+    // false switches a thinking model's hidden reasoning off; other models ignore it.
+    ...(options?.think !== undefined ? { think: options.think } : {}),
+    options: {
+      temperature: options?.temperature,
+      num_predict: options?.maxTokens,
+      num_ctx: numCtx,
+    },
+  });
+  const traceId = `ollama-${Date.now()}-${model}`;
+  caTraceDump(`${traceId}-request`, requestBody);
   let response;
   try {
     response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages,
-        stream: false,
-        // 0 unloads the model right after the reply, so a staged pipeline (vision model, then code
-        // model) never has both resident in VRAM at once.
-        ...(options?.keepAlive !== undefined ? { keep_alive: options.keepAlive } : {}),
-        // false switches a thinking model's hidden reasoning off; other models ignore it.
-        ...(options?.think !== undefined ? { think: options.think } : {}),
-        options: {
-          temperature: options?.temperature,
-          num_predict: options?.maxTokens,
-          num_ctx: numCtx,
-        },
-      }),
+      body: requestBody,
       signal: controller.signal as any,
     });
   } catch (err: any) {
@@ -226,6 +229,7 @@ export async function chatLocal(model: string, messages: OllamaLocalMessage[], o
     prompt_eval_duration?: number;
     eval_duration?: number;
   };
+  if (caTraceDir()) caTraceDump(`${traceId}-response`, JSON.stringify({ num_ctx: numCtx, ...data }, null, 2));
   const ns = (v?: number) => ((v ?? 0) / 1e9).toFixed(1);
   caTrace('ollama', `model=${model} ctx=${numCtx} total=${ns(data.total_duration)}s load=${ns(data.load_duration)}s prompt=${data.prompt_eval_count ?? 0}tok/${ns(data.prompt_eval_duration)}s gen=${data.eval_count ?? 0}tok/${ns(data.eval_duration)}s`);
   const promptTokens = data.prompt_eval_count ?? 0;

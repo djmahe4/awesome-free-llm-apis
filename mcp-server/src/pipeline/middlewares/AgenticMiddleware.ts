@@ -17,7 +17,8 @@ import { logChatTurn } from '../../utils/ChatLogger.js';
 import {
     PROJECTS_DIR,
     STATE_FILE,
-    KNOWLEDGE_FILE
+    KNOWLEDGE_FILE,
+    COMMS_QUEUE_MAX,
 } from './constants.js';
 import { ContextGatherer } from './context-gatherer.js';
 import { classifyIntent, disambiguateConfusedIntent } from './intent-classifier.js';
@@ -301,7 +302,8 @@ export function detectHallucination(content: string, lastResponse?: string): Hal
     if (phantomCitations.some(p => p.test(content))) {
         return { status: 'FAIL', reason: 'phantom citation pattern matched' };
     }
-    if (inventedState.some(p => p.test(content))) {
+    const URL_PATTERN = /https?:\/\/[^\s]+/i;
+    if (inventedState.some(p => p.test(content) && !URL_PATTERN.test(content))) {
         return { status: 'FAIL', reason: 'invented state pattern matched' };
     }
 
@@ -473,7 +475,7 @@ function addToQueues(
         const entry = JSON.stringify({ ts: new Date().toISOString(), type, ...cleanData });
         commsQueue.push(entry);
 
-        if (commsQueue.length > 10) {
+        if (commsQueue.length > COMMS_QUEUE_MAX) {
             commsQueue.shift();
         }
 

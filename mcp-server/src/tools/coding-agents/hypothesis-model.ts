@@ -23,6 +23,7 @@ const PROBE_HELP = [
   '  defined:<name>                   the name is defined in some source file',
   '  symbol:<name>@<path>             the name is defined in that file',
   '  arity:<name>@<path>=<count>      the function takes that many parameters',
+  '  module:<specifier>@<path>        the import specifier resolves from that file (a real node: built-in, an installed package, or an existing relative file)',
   '  grep:<regex>@<path>              the pattern matches a line of that file (must be specific)',
 ].join('\n');
 

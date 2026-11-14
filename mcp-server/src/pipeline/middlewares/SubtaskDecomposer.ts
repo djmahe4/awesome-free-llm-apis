@@ -78,15 +78,21 @@ export class SubtaskDecomposer {
                 path.join(process.cwd(), '.free-llm-mcp', 'projects', sessionId, STATE_FILE),
                 path.join(getMcpDir(), 'projects', sanitizeSessionId(sessionId), STATE_FILE),
             ];
+            const parsedCandidates: Array<{ state: QueueState; mtime: number }> = [];
             for (const sp of candidatePaths) {
                 try {
+                    const stat = await fs.stat(sp);
                     const data = await fs.readFile(sp, 'utf-8');
-                    state = JSON.parse(data);
-                    if (state) {
-                        queues.set(sessionId, state);
-                        break;
+                    const parsed = JSON.parse(data);
+                    if (parsed && typeof parsed === 'object') {
+                        parsedCandidates.push({ state: parsed, mtime: stat.mtimeMs });
                     }
                 } catch {}
+            }
+            if (parsedCandidates.length > 0) {
+                parsedCandidates.sort((a, b) => b.mtime - a.mtime);
+                state = parsedCandidates[0].state;
+                queues.set(sessionId, state);
             }
         }
         if (!state) {

@@ -186,13 +186,12 @@ export function buildLinearThoughtDag(
 
 export function expandThoughtDag(dag: ThoughtDag, query: string, maxChars = 16000): string {
   if (!dag.nodes.length || maxChars <= 0) return '';
-  const rawTerms = Array.from(new Set(query.toLowerCase().match(/[\p{L}\p{N}_./\\-]{3,}/gu) ?? []));
-  const terms = rawTerms.filter(t => !rawTerms.some(other => other !== t && other.includes(t)));
+  const terms = new Set((query.toLowerCase().match(/[\p{L}\p{N}_./\\-]{3,}/gu) ?? []));
   const selected = new Set<string>();
   const ranked = dag.nodes.map((node, index) => ({
     node,
     index,
-    score: terms.reduce((score, term) => score + Number(node.text.toLowerCase().includes(term)), 0),
+    score: Array.from(terms).reduce((score, term) => score + Number(node.text.toLowerCase().includes(term)), 0),
   })).sort((a, b) => b.score - a.score || b.index - a.index);
   for (const entry of ranked) {
     if (entry.score === 0 && selected.size > 0) break;

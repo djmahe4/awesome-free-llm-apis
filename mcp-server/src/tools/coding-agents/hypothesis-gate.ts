@@ -42,6 +42,8 @@ const NOT_NAMES = new Set(['true', 'false', 'null', 'undefined', 'this', 'self',
 
 const COMMON_EXTERNAL_OR_STDLIB_SYMBOLS = new Set([
 
+  'fzstd',
+
   // Python builtins, stdlib & typing
 
   'bytesio', 'stringio', 'path', 'purepath', 'exception', 'valueerror', 'typeerror', 'keyerror',
@@ -122,6 +124,29 @@ export function resolveGateMode(workspaceRoot: string): GateMode {
 
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const SQLITE_SCHEMA_NAMES = new Set(['threads', 'folder_paths', 'data_type', 'updated_at']);
+const ENVIRONMENT_NAMES = new Set(['localappdata', 'zed_threads_db', 'zed_data_dir']);
+
+function isSchemaOrEnvironmentName(goal: string, name: string): boolean {
+  const lowerName = name.toLowerCase();
+  const matches = goal.matchAll(new RegExp(`(?<![\\w$])${esc(name)}(?![\\w$])`, 'gi'));
+  for (const match of matches) {
+    const index = match.index ?? 0;
+    const before = goal.slice(0, index);
+    const after = goal.slice(index + match[0].length);
+    const boundary = Math.max(before.lastIndexOf('.'), before.lastIndexOf(';'), before.lastIndexOf('\n'));
+    const nextBoundary = [after.indexOf('.'), after.indexOf(';'), after.indexOf('\n')].filter(value => value >= 0);
+    const clauseEnd = nextBoundary.length ? Math.min(...nextBoundary) : after.length;
+    const context = `${before.slice(Math.max(boundary + 1, index - 80))} ${after.slice(0, Math.min(clauseEnd, 80))}`;
+    if (SQLITE_SCHEMA_NAMES.has(lowerName) && /\b(?:sqlite|database|db|table|column|schema|field)\b/i.test(context)) return true;
+    if (ENVIRONMENT_NAMES.has(lowerName) && (
+      (name === name.toUpperCase() && /[A-Z]/.test(name))
+      || /\b(?:environment variable|env var|setting|configuration)\b/i.test(context)
+    )) return true;
+  }
+  return false;
+}
 
 
 
@@ -227,12 +252,21 @@ export function deriveHypotheses(input: DeriveInput): Hypothesis[] {
 
     const lower = name.toLowerCase();
 
-    if (!/^[A-Za-z_$][\w$]*$/.test(name) || name.length < 3 || NOT_NAMES.has(lower) || COMMON_EXTERNAL_OR_STDLIB_SYMBOLS.has(lower)) continue;
+    if (!/^[A-Za-z_$][\w$]*$/.test(name) || name.length < 3 || NOT_NAMES.has(lower) || COMMON_EXTERNAL_OR_STDLIB_SYMBOLS.has(lower) || isSchemaOrEnvironmentName(input.goal, name)) continue;
 
     if (asksToCreate(input.goal, name) || asksToImport(input.goal, name)) continue;
 
     add(`\`${name}\`, which the goal refers to, is defined in the workspace`, `defined:${name}`);
 
+  }
+
+  // A module the goal tells the editor to use must resolve (a misspelled `node:` built-in). Checked with the same
+  // resolver as the post-edit import guard, before any edit is made on top of it.
+  const moduleHost = input.targetFiles?.[0] ?? targets[0];
+  if (moduleHost) {
+    const specs = new Set<string>();
+    for (const m of input.goal.matchAll(/\bnode:[a-z][\w/]*/g)) specs.add(m[0]);
+    for (const spec of specs) add(`the goal uses the module \`${spec}\`, which resolves from ${moduleHost}`, `module:${spec}@${moduleHost}`);
   }
 
 

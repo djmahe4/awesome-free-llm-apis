@@ -74,31 +74,18 @@ function parseFolderPaths(value: string | null | undefined): string[] {
 
 export function listZedSessions(
   db: NonNullable<ReturnType<typeof openZedDb>>,
-  workspaceRoot?: string,
+  workspaceRoot: string,
 ): ZedSession[] {
-  let rows: Array<Record<string, unknown>>;
-  if (workspaceRoot) {
-    const escapeSqlLike = (str: string) => str.replace(/([%_])/g, '\\$1');
-    const needle = escapeSqlLike(workspaceRoot.toLowerCase().replace(/\\/g, '/'));
-    rows = db.prepare(`
-      SELECT id, summary, updated_at, folder_paths
-      FROM threads
-      WHERE LOWER(REPLACE(REPLACE(COALESCE(folder_paths, ''), char(92), '/'), '//', '/')) LIKE ? ESCAPE '\\'
-      ORDER BY updated_at DESC
-      LIMIT 500
-    `).all(`%${needle}%`) as Array<Record<string, unknown>>;
-  } else {
-    rows = db.prepare(
-      'SELECT id, summary, updated_at, folder_paths FROM threads ORDER BY updated_at DESC LIMIT 500',
-    ).all() as Array<Record<string, unknown>>;
-  }
-  const workspace = workspaceRoot ? normalizePath(workspaceRoot) : undefined;
+  const rows = db.prepare(
+    'SELECT id, summary, updated_at, folder_paths FROM threads ORDER BY updated_at DESC LIMIT 500',
+  ).all() as Array<Record<string, unknown>>;
+  const workspace = normalizePath(workspaceRoot);
   return rows.map(row => ({
     id: String(row.id ?? ''),
     title: typeof row.summary === 'string' ? row.summary : undefined,
     updatedAt: typeof row.updated_at === 'string' ? row.updated_at : undefined,
     folderPaths: parseFolderPaths(typeof row.folder_paths === 'string' ? row.folder_paths : undefined),
-  })).filter(session => !workspace || session.folderPaths.some(folder => {
+  })).filter(session => session.folderPaths.some(folder => {
     const normalized = normalizePath(folder);
     return normalized === workspace || normalized.startsWith(`${workspace}/`);
   }));
@@ -188,7 +175,6 @@ export function buildZedThoughtDag(sessionId: string, title: string, data: Recor
     const message = entry[role];
     if (!message || typeof message !== 'object') continue;
     const record = message as Record<string, unknown>;
-    let currentThoughtNodeId: string | null = null;
     for (const block of Array.isArray(record.content) ? record.content : []) {
       if (!block || typeof block !== 'object') continue;
       const item = block as Record<string, unknown>;
@@ -200,14 +186,12 @@ export function buildZedThoughtDag(sessionId: string, title: string, data: Recor
         node.toolCallId = typeof call.id === 'string' ? call.id : undefined;
         node.input = typeof call.raw_input === 'string' ? call.raw_input : stringifyContext(call.input);
         if (node.toolCallId) toolCalls.set(node.toolCallId, node.id);
-        currentThoughtNodeId = node.id;
         continue;
       }
       const blockText = messageText({ content: [block] }, role);
       if (!blockText.length) continue;
       const text = `${role === 'User' ? 'User' : 'Assistant'}:\n${blockText.join('\n\n')}`;
-      const thoughtNode = add(nodes.length === 0 ? 'root' : 'thought', text, typeof entry.timestamp === 'string' ? entry.timestamp : undefined);
-      currentThoughtNodeId = thoughtNode.id;
+      add(nodes.length === 0 ? 'root' : 'thought', text, typeof entry.timestamp === 'string' ? entry.timestamp : undefined);
       if (!goal && role === 'User') goal = blockText.join('\n\n');
     }
     const results = record.tool_results;
@@ -220,9 +204,8 @@ export function buildZedThoughtDag(sessionId: string, title: string, data: Recor
             : stringifyContext(part)).join('\n')
           : stringifyContext(result.output ?? result.content ?? rawResult);
         if (!output.trim()) continue;
-        const targetCallId = typeof result.tool_use_id === 'string' ? result.tool_use_id : callId;
-        const parentId = toolCalls.get(targetCallId) ?? toolCalls.get(callId) ?? currentThoughtNodeId;
-        add('tool_result', output, typeof entry.timestamp === 'string' ? entry.timestamp : undefined, parentId).toolCallId = targetCallId;
+        const parentId = toolCalls.get(callId) ?? (nodes.length ? nodes[nodes.length - 1].id : null);
+        add('tool_result', output, typeof entry.timestamp === 'string' ? entry.timestamp : undefined, parentId).toolCallId = callId;
       }
     }
   }

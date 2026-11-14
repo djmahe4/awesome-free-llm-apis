@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { LAYA_MODEL } from './laya-bridge.js';
+import { withFileLock, withFileLockSync } from '../utils/file-lock.js';
 
 export const ASSUMPTIONS_HEADING = "## Agent's assumptions";
 export const QUESTIONS_HEADING = "## Agent's questions";
@@ -121,43 +122,35 @@ export function queueMessage(workspaceRoot: string, entry: QueuedInjection): voi
   const file = queuePath(workspaceRoot);
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
-  let entries: QueuedInjection[] = [];
-  if (fs.existsSync(file)) {
+  withFileLockSync(file, () => {
+    let entries: QueuedInjection[] = [];
     try {
       entries = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (!Array.isArray(entries)) entries = [];
-    } catch (err) {
-      console.warn(`[laya-injector] queueMessage failed to parse ${file}:`, (err as Error)?.message ?? err);
-      entries = [];
-    }
-  }
-  entries.push(entry);
-  fs.writeFileSync(file, JSON.stringify(entries, null, 2), 'utf8');
+    } catch { }
+    entries.push(entry);
+    fs.writeFileSync(file, JSON.stringify(entries, null, 2), 'utf8');
+  });
 }
 
 export function peekMessages(workspaceRoot: string): QueuedInjection[] {
-  const file = queuePath(workspaceRoot);
-  if (!fs.existsSync(file)) return [];
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const parsed = JSON.parse(fs.readFileSync(queuePath(workspaceRoot), 'utf8'));
     return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
-    console.warn(`[laya-injector] peekMessages failed to read ${file}:`, (err as Error)?.message ?? err);
+  } catch {
     return [];
   }
 }
 
 export function drainMessages(workspaceRoot: string): QueuedInjection[] {
   const file = queuePath(workspaceRoot);
-  const entries = peekMessages(workspaceRoot);
-  if (entries.length) {
-    try {
-      fs.rmSync(file, { force: true });
-    } catch (err) {
-      console.warn(`[laya-injector] drainMessages failed to delete ${file}:`, (err as Error)?.message ?? err);
+  return withFileLockSync(file, () => {
+    const entries = peekMessages(workspaceRoot);
+    if (entries.length) {
+      try { fs.rmSync(file, { force: true }); } catch { }
     }
-  }
-  return entries;
+    return entries;
+  });
 }
 
 function extractSection(content: string, heading: string): string | null {
@@ -179,15 +172,8 @@ export function appendAgentAssumptions(tasksPath: string, items: string[]): void
   if (headingIdx === -1) {
     if (existing && !existing.endsWith('\n')) lines.push('');
     lines.push(ASSUMPTIONS_HEADING);
-    for (const item of items) lines.push(`- ${item}`);
-  } else {
-    let endIdx = lines.length;
-    for (let i = headingIdx + 1; i < lines.length; i++) {
-      if (/^##?\s+/.test(lines[i])) { endIdx = i; break; }
-    }
-    const bullets = items.map(item => `- ${item}`);
-    lines.splice(endIdx, 0, ...bullets);
   }
+  for (const item of items) lines.push(`- ${item}`);
   fs.writeFileSync(tasksPath, lines.join('\n') + '\n', 'utf8');
 }
 
@@ -225,8 +211,6 @@ export function readAgentQuestions(content: string): AgentQuestions {
 export function removeConsumedQuestions(tasksPath: string): void {
   if (!fs.existsSync(tasksPath)) return;
   const content = fs.readFileSync(tasksPath, 'utf8');
-  const { answered, pending } = readAgentQuestions(content);
-  if (!answered.length) return;
   const lines = content.split(/\r?\n/);
   const headingIdx = lines.findIndex(l => l.trim() === QUESTIONS_HEADING);
   if (headingIdx === -1) return;
@@ -234,18 +218,7 @@ export function removeConsumedQuestions(tasksPath: string): void {
   for (let i = headingIdx + 1; i < lines.length; i++) {
     if (/^##?\s+/.test(lines[i])) { endIdx = i; break; }
   }
-
-  if (pending.length === 0) {
-    fs.writeFileSync(tasksPath, [...lines.slice(0, headingIdx), ...lines.slice(endIdx)].join('\n'), 'utf8');
-  } else {
-    const newSection = [
-      lines[headingIdx],
-      '',
-      ...pending.map((q, idx) => `Q${idx + 1}: ${q}`),
-      ''
-    ];
-    fs.writeFileSync(tasksPath, [...lines.slice(0, headingIdx), ...newSection, ...lines.slice(endIdx)].join('\n'), 'utf8');
-  }
+  fs.writeFileSync(tasksPath, [...lines.slice(0, headingIdx), ...lines.slice(endIdx)].join('\n'), 'utf8');
 }
 
 export function recordAgentQuestions(tasksPath: string, questions: string[]): void {
@@ -256,21 +229,8 @@ export function recordAgentQuestions(tasksPath: string, questions: string[]): vo
   if (headingIdx === -1) {
     if (existing && !existing.endsWith('\n')) lines.push('');
     lines.push(QUESTIONS_HEADING);
-    questions.forEach((q, i) => lines.push(`Q${i + 1}: ${q}`));
-  } else {
-    let endIdx = lines.length;
-    let maxQNum = 0;
-    for (let i = headingIdx + 1; i < lines.length; i++) {
-      if (/^##?\s+/.test(lines[i])) { endIdx = i; break; }
-      const m = lines[i].trim().match(/^Q(\d+)\s*:/i);
-      if (m) {
-        const num = parseInt(m[1], 10);
-        if (num > maxQNum) maxQNum = num;
-      }
-    }
-    const newLines = questions.map((q, i) => `Q${maxQNum + i + 1}: ${q}`);
-    lines.splice(endIdx, 0, ...newLines);
   }
+  questions.forEach((q, i) => lines.push(`Q${i + 1}: ${q}`));
   fs.writeFileSync(tasksPath, lines.join('\n') + '\n', 'utf8');
 }
 

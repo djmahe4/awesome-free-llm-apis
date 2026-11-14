@@ -74,23 +74,21 @@ export interface CodingAgentsInput {
   goal: string;
   workspaceRoot?: string;
   targetFiles?: string[];
-  /** @internal Optional exact terms that narrow live log/JSON context for a debugging task. */
+  /** Optional exact terms that narrow live log/JSON context for a debugging task. */
   contextKeywords?: string[];
   /**
-   * @internal
    * Extra directories the editor should know the DATA SHAPE of (for example another application's data folder). Opt-in by
    * being named here; scanned read-only and locally with the workspace scanner, structure only (tables, columns, merged JSON
    * shapes, never values), and never included in a cloud prompt. At most 3.
    */
   contextDirs?: string[];
   /**
-   * @internal
    * Opt-in: an installed local model (for example a larger one than the editor) that reads the tests and writes a short
    * contract per export, which the coding model then edits against. Used when a module is rebuilt one export at a time.
    * Off when unset, so a standalone coding model is what is measured by default. Local only; skipped if not installed.
    */
   contractModel?: string;
-  /** @internal Read-only request for additional tasks.md DAG context around the active task. */
+  /** Read-only request for additional tasks.md DAG context around the active task. */
   contextWindow?: { radius?: number; taskIds?: string[] };
   dryRun?: boolean;
   topKFiles?: number;
