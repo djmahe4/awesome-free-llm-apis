@@ -244,7 +244,7 @@ export class ReaProxy {
         this.request('initialize', {
           protocolVersion: '2024-11-05',
           capabilities: {},
-          clientInfo: { name: 'awesome-free-llm-apis', version: '1.1.2' },
+          clientInfo: { name: 'awesome-free-llm-apis', version: '1.1.3' },
         }, hsTimeout),
         new Promise<any>((_, reject) => {
           earlyErrorReject = reject;

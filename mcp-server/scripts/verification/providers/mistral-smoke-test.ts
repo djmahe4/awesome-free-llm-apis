@@ -77,7 +77,7 @@ async function runMistralSmokeTest() {
         failedModels.forEach(m => console.log(`  - ${m.id} (${m.name}): ${m.error}`));
     }
 
-    const removedIds = CHANGED_MODELS.mistral.removed;
+    const removedIds = CHANGED_MODELS.mistral?.removed ?? [];
     console.error(`\n--- [removed-model] Checking ${removedIds.length} models removed from data.json ---\n`);
     const removedResults: { id: string; status: string; error?: string }[] = [];
     for (const id of removedIds) {

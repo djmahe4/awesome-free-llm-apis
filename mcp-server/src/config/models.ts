@@ -21,7 +21,6 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
 
     // S-Tier Generalists
     'gemma-4-31b-it': { capability: 0.95, contextWindow: 300000, isVision: true, isReasoning: true },
-    'google/gemma-4-31b-it': { capability: 0.95, contextWindow: 300000, isVision: true, isReasoning: true },
     'google/gemma-4-31B-it': { capability: 0.95, contextWindow: 300000, isVision: true },
     'google/gemma-4-31b-it:free': { capability: 0.95, contextWindow: 300000, isVision: true },
     'gemma-4-26b-a4b-it': { capability: 0.94, contextWindow: 150000, isVision: true },
@@ -145,6 +144,8 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'minimax-m3': { capability: 0.90, contextWindow: 128000 },
 
     // NVIDIA NIM active & free models
+    'minimaxai/minimax-m3.1-flash': { capability: 0.93, contextWindow: 128000, isReasoning: true },
+    'nvidia/nemotron-3.5-bolt-e4b': { capability: 0.94, contextWindow: 128000, isCoder: true, isReasoning: true },
     'nvidia/nemotron-3.5-lightning-30b-a3b': { capability: 0.92, contextWindow: 128000, isCoder: true, isReasoning: true },
     'nvidia/nemotron-3.5-lightning:free': { capability: 0.92, contextWindow: 128000, isCoder: true, isReasoning: true },
     'nvidia/nemotron-3.5-super-vl-120b-a12b': { capability: 0.93, contextWindow: 128000, isVision: true, isReasoning: true },
@@ -162,7 +163,6 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'nvidia/nemotron-mini-4b-instruct:free': { capability: 0.65, contextWindow: 32000 },
     'meta/llama-3.2-11b-vision-instruct': { capability: 0.80, contextWindow: 128000, isVision: true },
     'meta/llama-3.2-90b-vision-instruct': { capability: 0.86, contextWindow: 128000, isVision: true },
-    'minimaxai/minimax-m3': { capability: 0.90, contextWindow: 128000, isVision: true },
     'google/diffusiongemma-26b-a4b-it': { capability: 0.88, contextWindow: 128000, isReasoning: true },
     'moonshotai/kimi-k3': { capability: 0.92, contextWindow: 128000, isReasoning: true },
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free': { capability: 0.90, contextWindow: 256000, isVision: true, isReasoning: true },
