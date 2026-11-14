@@ -209,6 +209,7 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'aion-labs/aion-rp-llama-3.1-8b': { capability: 0.78, contextWindow: 32768, isRoleplaying: true },
 
     // Pollinations / Multimodal Media Models (Keyframes, Audio, Video)
+    'black-forest-labs/flux-3-image-klein': { capability: 0.95, contextWindow: 32000, isImageGeneration: true },
     'black-forest-labs/flux.1-schnell': { capability: 0.90, contextWindow: 32000, isImageGeneration: true },
     'tongyi-mai/z-image-turbo': { capability: 0.88, contextWindow: 32000, isImageGeneration: true },
     'lykon/dreamshaper-8-lcm': { capability: 0.85, contextWindow: 32000, isImageGeneration: true },

@@ -30,5 +30,6 @@ export class NvidiaProvider extends BaseProvider {
     { id: 'meta/llama-3.2-90b-vision-instruct', name: 'Llama 3.2 90B Vision' },
     { id: 'moonshotai/kimi-k3', name: 'Kimi K3' },
     { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B' },
+    { id: 'black-forest-labs/flux-3-image-klein', name: 'FLUX.3 Image Klein (GenAI T2I)' },
   ];
 }
