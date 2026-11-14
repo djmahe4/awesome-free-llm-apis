@@ -3,6 +3,8 @@ import {
   LAYA_MODEL,
   validateThoughtDeviation,
   enforceDeviationPolicy,
+  assignExpert,
+  LAYA_EXPERT_SET,
   type LayaValidationResult,
   type LayaBridgeDeps,
 } from '../src/harness/laya-bridge.js';
@@ -126,6 +128,82 @@ describe('LayaBridge', () => {
       expect(enforceDeviationPolicy(r({ unsafe_prob: 0.5 }))).toBe('require_review');
       expect(enforceDeviationPolicy(r({ alignment: 'tangential', drift_prob: 0.3 }))).toBe('replan');
       expect(enforceDeviationPolicy(r({}))).toBe('proceed');
+    });
+  });
+
+  describe('assignExpert', () => {
+    const expertResponse = {
+      model: LAYA_MODEL,
+      answers: {
+        expert: {
+          type: 'choice',
+          choice: 'reverse',
+          probabilities: { reverse: 0.7, general: 0.2, coding: 0.1 },
+          confidence: 0.7,
+        },
+      },
+      usage: { input_tokens: 64, output_tokens: 0 },
+    };
+
+    it('posts a choice question to /v1/systemone and returns the laya expert', async () => {
+      const { impl, calls } = mockFetch(expertResponse, true);
+      const result = await assignExpert(
+        { goal: 'analyze elf binary', thought: 'inspect the section headers', tool: 'reverse_tool' },
+        { fetchImpl: impl, baseUrl: 'http://127.0.0.1:11434/', profiles: [layaProfile] },
+      );
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toBe('http://127.0.0.1:11434/v1/systemone');
+      const body = JSON.parse(calls[0].init.body);
+      expect(body.model).toBe(LAYA_MODEL);
+      expect(body.questions.expert.type).toBe('choice');
+      const state = JSON.parse(body.state);
+      expect(state.goal).toBe('analyze elf binary');
+      expect(state.thought).toBe('inspect the section headers');
+      expect(state.tool).toBe('reverse_tool');
+      expect(result).toMatchObject({
+        expert: 'reverse',
+        expert_source: 'laya',
+        probabilities: { reverse: 0.7 },
+        latency_ms: expect.any(Number),
+      });
+      expect(result.probabilities && Object.keys(result.probabilities).every(k => (LAYA_EXPERT_SET as readonly string[]).includes(k))).toBe(true);
+    });
+
+    it('truncates long thought text in the request state', async () => {
+      const { impl, calls } = mockFetch(expertResponse, true);
+      await assignExpert(
+        { goal: 'g', thought: 'y'.repeat(800), tool: 'none' },
+        { fetchImpl: impl, baseUrl: 'http://127.0.0.1:11434', profiles: [layaProfile] },
+      );
+      const state = JSON.parse(calls[0].init.body).state;
+      expect(JSON.parse(state).thought).toHaveLength(600);
+    });
+
+    it('falls back to general/fallback when the answer is not a known expert', async () => {
+      const bad = { model: LAYA_MODEL, answers: { expert: { type: 'choice', choice: 'wizard' } } };
+      const { impl, calls } = mockFetch(bad, true);
+      const result = await assignExpert(
+        { goal: 'g', thought: 't', tool: 'browser_tool' },
+        { fetchImpl: impl, baseUrl: 'http://127.0.0.1:11434', profiles: [layaProfile] },
+      );
+      expect(result).toMatchObject({ expert: 'general', expert_source: 'fallback' });
+      expect(calls).toHaveLength(1);
+    });
+
+    it('falls back to general/fallback when the fetch fails', async () => {
+      const fail = (async () => {
+        throw new Error('ECONNREFUSED');
+      }) as unknown as LayaBridgeDeps['fetchImpl'];
+      const result = await assignExpert(
+        { goal: 'g', thought: 't', tool: 'none' },
+        { fetchImpl: fail, baseUrl: 'http://127.0.0.1:9' },
+      );
+      expect(result).toEqual({
+        expert: 'general',
+        expert_source: 'fallback',
+        probabilities: undefined,
+        latency_ms: expect.any(Number),
+      });
     });
   });
 });

@@ -14,17 +14,20 @@ import { ThoughtDatasetWriter, type DatasetRow } from './thought-dataset-writer.
 import type { ThoughtBundle } from './context-injection-hook.js';
 import { MonitorRegistry } from './monitor.js';
 import { appendSessionMemory, buildSessionMemoryPromptBlock, parseTurnMemory, recentSessionMemory } from './session-memory.js';
-import type { HarnessDeclaration, HarnessRun } from './types.js';
+import type { HarnessDeclaration, HarnessRun, TraceEvent } from './types.js';
 
 const contextManager = new ContextManager();
 
 let thoughtDatasetWriter: ThoughtDatasetWriter | undefined;
+function datasetDir(): string {
+  const override = process.env.THOUGHT_DATASET_DIR;
+  const home = process.env.FREE_LLM_MCP_HOME;
+  const base = home ? home : process.cwd();
+  return override ?? path.join(base, '.free-llm-mcp', 'thought-dataset');
+}
 function datasetWriter(): ThoughtDatasetWriter {
   if (!thoughtDatasetWriter) {
-    const override = process.env.THOUGHT_DATASET_DIR;
-    const home = process.env.FREE_LLM_MCP_HOME;
-    const base = home ? home : process.cwd();
-    thoughtDatasetWriter = new ThoughtDatasetWriter({ outputDir: override ?? path.join(base, '.free-llm-mcp', 'thought-dataset') });
+    thoughtDatasetWriter = new ThoughtDatasetWriter({ outputDir: datasetDir() });
   }
   return thoughtDatasetWriter;
 }
@@ -772,14 +775,15 @@ export async function checkThoughtDeviation(
 ): Promise<LayaValidationResult> {
   try {
     const events = await store.readTrace();
-    const trace = events.slice(-3).map(e => ({ text: `${e.type}: ${JSON.stringify(e.data ?? {}).slice(0, 200)}` }));
+    const truncated = events.some(e => e.type === 'trace_truncated');
+    const { trace, trailSource } = buildDeviationTrace(events, truncated, run.runId);
     const result: LayaValidationResult = await validateThoughtDeviation({ goal, trace, proposed });
     const policy = enforceDeviationPolicy(result);
     await store.appendTrace({
       runId: run.runId,
       role,
       type: 'deviation',
-      data: { callId, policy, alignment: result.alignment, drift_prob: result.drift_prob, unsafe_prob: result.unsafe_prob, latency_ms: result.latency_ms },
+      data: { callId, policy, alignment: result.alignment, drift_prob: result.drift_prob, unsafe_prob: result.unsafe_prob, latency_ms: result.latency_ms, trail_source: trailSource },
     }).catch(() => {});
     return result;
   } catch (err) {
@@ -792,6 +796,33 @@ export async function checkThoughtDeviation(
     }).catch(() => {});
     throw err;
   }
+}
+
+const DEVIATION_TRAIL_LIMIT = 3;
+
+/**
+ * The trace tail is the primary trail source, but once the store has
+ * truncated (trace.jsonl stops growing past MAX_TRACE_FILE_BYTES, so the
+ * tail is frozen pre-truncation state), we replay the last K ThoughtBundles
+ * this run wrote to the thought dataset instead — the dataset has its own
+ * 10MB cap with rotation, so it keeps flowing long after the trace froze.
+ * Falls back to the (stale) trace tail when the dataset has no rows for
+ * this run yet.
+ */
+function buildDeviationTrace(events: TraceEvent[], truncated: boolean, runId: string): { trace: { text: string }[]; trailSource: 'trace' | 'dataset_replay' } {
+  if (truncated) {
+    const replay = ThoughtDatasetWriter.readRecent(datasetDir(), runId, DEVIATION_TRAIL_LIMIT);
+    if (replay.length > 0) {
+      return {
+        trace: replay.map(r => ({ text: `thought(${r.tool}): ${r.thoughtText.slice(0, 200)}` })),
+        trailSource: 'dataset_replay',
+      };
+    }
+  }
+  return {
+    trace: events.slice(-DEVIATION_TRAIL_LIMIT).map(e => ({ text: `${e.type}: ${JSON.stringify(e.data ?? {}).slice(0, 200)}` })),
+    trailSource: 'trace',
+  };
 }
 
 /** Last successfully validated handoff in this run's trace, if any — used to rebuild a resumed step's input from persisted state, not from memory. */
