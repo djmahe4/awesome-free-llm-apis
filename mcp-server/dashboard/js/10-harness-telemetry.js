@@ -201,6 +201,55 @@ function renderHarnessHandoffs(trace) {
   }).join('');
 }
 
+function renderHarnessTraceLine(time, type, payload) {
+  return `<div style="padding:3px 6px;border-bottom:1px solid rgba(255,255,255,0.06);font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--text-muted);">[${esc(time)}] [${esc(type)}] ${esc(JSON.stringify(payload))}</div>`;
+}
+
+function renderHarnessThoughtDeviations(deviations) {
+  if (!deviations.length) {
+    return '<li style="padding:2px 0;color:var(--text-muted);">no thought-validation records for this call</li>';
+  }
+  return deviations.map(d => {
+    const dp = d.data !== undefined ? d.data : (d.payload || {});
+    const drift = typeof dp.drift_prob === 'number' ? dp.drift_prob.toFixed(2) : '—';
+    const unsafe = typeof dp.unsafe_prob === 'number' ? dp.unsafe_prob.toFixed(2) : '—';
+    const lat = typeof dp.latency_ms === 'number' ? `${dp.latency_ms}ms` : '—';
+    return `<li style="padding:2px 0;">alignment: <span style="color:var(--accent-cyan);">${esc(String(dp.alignment ?? '—'))}</span> · drift: ${drift} · unsafe: ${unsafe} · policy: ${esc(String(dp.policy ?? '—'))} · ${esc(lat)}</li>`;
+  }).join('');
+}
+
+function renderHarnessTrace(trace) {
+  const deviationsByCall = new Map();
+  for (const t of trace) {
+    const payload = t.data !== undefined ? t.data : (t.payload || {});
+    if (t.type === 'tool_call' && payload.callId !== undefined) {
+      deviationsByCall.set(String(payload.callId), []);
+    }
+  }
+  for (const t of trace) {
+    if (t.type !== 'deviation') continue;
+    const payload = t.data !== undefined ? t.data : (t.payload || {});
+    const key = String(payload.callId);
+    if (deviationsByCall.has(key)) deviationsByCall.get(key).push(t);
+  }
+  return trace.map(t => {
+    const time = new Date(t.ts || t.timestamp || Date.now()).toLocaleTimeString();
+    const payload = t.data !== undefined ? t.data : (t.payload || {});
+    if (t.type === 'tool_call' && payload.callId !== undefined) {
+      const deviations = deviationsByCall.get(String(payload.callId));
+      return `<div style="padding:3px 6px;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--text-secondary);">[${esc(time)}] [${esc(t.type)}] ${esc(JSON.stringify(payload))}</div>
+        <details data-folded="true" style="margin:2px 0 0 14px;">
+          <summary style="cursor:pointer;user-select:none;font-size:.68rem;color:var(--accent-cyan);">Thoughts (${deviations.length})</summary>
+          <ul style="margin:2px 0 4px;padding-left:16px;font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--text-muted);">${renderHarnessThoughtDeviations(deviations)}</ul>
+        </details>
+      </div>`;
+    }
+    if (t.type === 'deviation' && deviationsByCall.has(String(payload.callId))) return '';
+    return renderHarnessTraceLine(time, t.type, payload);
+  }).join('');
+}
+
 async function inspectHarnessRun(runId) {
   currentHarnessRunId = runId;
   const ws = (harnessWorkspaceInput?.value || '').trim();
@@ -216,11 +265,7 @@ async function inspectHarnessRun(runId) {
       if (!data.trace || data.trace.length === 0) {
         harnessTraceView.textContent = 'No trace events recorded.';
       } else {
-        harnessTraceView.textContent = data.trace.map(t => {
-          const time = new Date(t.ts || t.timestamp || Date.now()).toLocaleTimeString();
-          const payload = t.data !== undefined ? t.data : t.payload;
-          return `[${time}] [${t.type}] ${JSON.stringify(payload)}`;
-        }).join('\n');
+        harnessTraceView.innerHTML = renderHarnessTrace(data.trace);
       }
     }
     renderHarnessHandoffs(data.trace);
@@ -254,6 +299,14 @@ window.inspectHarnessRun = inspectHarnessRun;
 
 if (harnessRefreshBtn) {
   harnessRefreshBtn.addEventListener('click', fetchHarnessTelemetry);
+}
+
+if (harnessTraceView) {
+  harnessTraceView.addEventListener('toggle', (e) => {
+    if (e.target instanceof HTMLDetailsElement) {
+      e.target.setAttribute('data-folded', e.target.open ? 'false' : 'true');
+    }
+  }, true);
 }
 
 if (harnessDetailClose) {

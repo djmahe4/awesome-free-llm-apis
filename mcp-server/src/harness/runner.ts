@@ -1,4 +1,5 @@
 import { RunRegistry } from '../pipeline/middlewares/RunRegistry.js';
+import path from 'node:path';
 import { ContextManager } from '../utils/ContextManager.js';
 import { HarnessStore } from './store.js';
 import { loadHarnessDeclaration, selectRole } from './declaration.js';
@@ -8,11 +9,25 @@ import { serializeTasksMarkdown, parseTasksMarkdown, type TaskItem } from '../to
 import { CYBER_TERMS_REGEX } from '../utils/TaskClassifier.js';
 import { buildHandoff, validateHandoff, type Handoff } from './handoff.js';
 import { createReasoningStrategy, type LessonNode, type StepFailure } from './reasoning.js';
+import { validateThoughtDeviation, enforceDeviationPolicy, type LayaValidationResult } from './laya-bridge.js';
+import { ThoughtDatasetWriter, type DatasetRow } from './thought-dataset-writer.js';
+import type { ThoughtBundle } from './context-injection-hook.js';
 import { MonitorRegistry } from './monitor.js';
 import { appendSessionMemory, buildSessionMemoryPromptBlock, parseTurnMemory, recentSessionMemory } from './session-memory.js';
 import type { HarnessDeclaration, HarnessRun } from './types.js';
 
 const contextManager = new ContextManager();
+
+let thoughtDatasetWriter: ThoughtDatasetWriter | undefined;
+function datasetWriter(): ThoughtDatasetWriter {
+  if (!thoughtDatasetWriter) {
+    const override = process.env.THOUGHT_DATASET_DIR;
+    const home = process.env.FREE_LLM_MCP_HOME;
+    const base = home ? home : process.cwd();
+    thoughtDatasetWriter = new ThoughtDatasetWriter({ outputDir: override ?? path.join(base, '.free-llm-mcp', 'thought-dataset') });
+  }
+  return thoughtDatasetWriter;
+}
 
 /**
  * Reuses coding_agents' own tasks.md blackboard (see store.ts's
@@ -747,6 +762,38 @@ export async function hasRepeatedSuccess(store: HarnessStore, callId: string, ar
   );
 }
 
+export async function checkThoughtDeviation(
+  store: HarnessStore,
+  run: HarnessRun,
+  role: string,
+  goal: string,
+  proposed: string,
+  callId: string,
+): Promise<LayaValidationResult> {
+  try {
+    const events = await store.readTrace();
+    const trace = events.slice(-3).map(e => ({ text: `${e.type}: ${JSON.stringify(e.data ?? {}).slice(0, 200)}` }));
+    const result: LayaValidationResult = await validateThoughtDeviation({ goal, trace, proposed });
+    const policy = enforceDeviationPolicy(result);
+    await store.appendTrace({
+      runId: run.runId,
+      role,
+      type: 'deviation',
+      data: { callId, policy, alignment: result.alignment, drift_prob: result.drift_prob, unsafe_prob: result.unsafe_prob, latency_ms: result.latency_ms },
+    }).catch(() => {});
+    return result;
+  } catch (err) {
+    console.error(`[harness] checkThoughtDeviation failed for run=${run.runId} role=${role} callId=${callId}:`, err);
+    await store.appendTrace({
+      runId: run.runId,
+      role,
+      type: 'error',
+      data: { errorType: 'deviation_error', callId, error: (err as Error)?.message ?? String(err) },
+    }).catch(() => {});
+    throw err;
+  }
+}
+
 /** Last successfully validated handoff in this run's trace, if any — used to rebuild a resumed step's input from persisted state, not from memory. */
 async function lastHandoff(store: HarnessStore): Promise<Handoff | undefined> {
   const events = await store.readTrace();
@@ -965,6 +1012,24 @@ async function runSteps(
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
 
+      let deviationResult: LayaValidationResult;
+      try {
+        deviationResult = await checkThoughtDeviation(store, run, role, originalGoal, stepGoal, callId);
+      } catch (err) {
+        run.status = 'failed';
+        run.error = `Deviation validation failure: step '${callId}' could not be verified (${(err as Error)?.message ?? err})`;
+        await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
+        await endTaskAttempt(store, originalGoal, stepId, 'failed', run.error);
+        return { content: lastContent, lastRole, finalHandoff: handoff };
+      }
+      if (enforceDeviationPolicy(deviationResult) === 'halt') {
+        run.status = 'failed';
+        run.error = `Deviation guard: proposed step '${callId}' drifted from the goal (laya drift > 0.5)`;
+        await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
+        await endTaskAttempt(store, originalGoal, stepId, 'failed', run.error);
+        return { content: lastContent, lastRole, finalHandoff: handoff };
+      }
+
       await beginTaskAttempt(store, originalGoal, stepId, `step ${callId}: attempting via ${dispatch.toolName}`);
       goalTokens = contextManager.countStringTokens(stepGoal);
       const estimate = goalTokens + 2000;
@@ -1032,6 +1097,26 @@ async function runSteps(
           await appendSessionMemory(store.runDirPath, { runId: run.runId, role, ...parsedTurn }).catch(() => {});
         }
       }
+
+      const thought: ThoughtBundle = {
+        id: `${run.runId}:${callId}`,
+        text: stepGoal.slice(0, 2000),
+        source: 'rea',
+        timestamp: Date.now(),
+        tool: dispatch.toolName,
+        action: callId,
+        goal: originalGoal,
+      };
+      const row: DatasetRow = {
+        thought,
+        tool: dispatch.toolName,
+        action: callId,
+        goal: originalGoal,
+        alignment: deviationResult?.alignment ?? 'not_available',
+        drift_prob: deviationResult?.drift_prob ?? 0,
+        expert_label: ThoughtDatasetWriter.expertLabel(dispatch.toolName),
+      };
+      await datasetWriter().append(row).catch(() => {});
     }
 
     await endTaskAttempt(store, originalGoal, stepId, taskOutcomeFor(run.status), `step ${callId}: ${run.status}${run.error ? ` (${run.error})` : ''}`);

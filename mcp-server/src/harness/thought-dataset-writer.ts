@@ -1,0 +1,66 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import type { ThoughtBundle } from './context-injection-hook.js';
+import type { AlignmentResult } from './laya-bridge.js';
+
+const TOOL_TO_EXPERT: Record<string, string> = {
+  reverse_tool: 'reverse',
+  cyber_tool: 'cyber',
+  browser_tool: 'browser',
+  movie_tool: 'media',
+  coding_agents: 'coding',
+  manage_memory: 'memory',
+  quantum_tool: 'quantum',
+  use_free_llm: 'general',
+};
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+export interface DatasetRow {
+  thought: ThoughtBundle;
+  tool: string;
+  action?: string;
+  goal: string;
+  alignment: AlignmentResult;
+  drift_prob: number;
+  expert_label?: string;
+  circuit_confidence?: number | null;
+}
+
+export class ThoughtDatasetWriter {
+  private filePath: string;
+
+  constructor(opts: { outputDir: string; filename?: string }) {
+    fs.mkdirSync(opts.outputDir, { recursive: true });
+    this.filePath = path.join(opts.outputDir, opts.filename ?? 'thoughts.jsonl');
+  }
+
+  async append(row: DatasetRow): Promise<void> {
+    try {
+      const stat = await fs.promises.stat(this.filePath);
+      if (stat.size > MAX_FILE_BYTES) {
+        await fs.promises.rename(this.filePath, this.filePath + `.${Date.now()}.bak`);
+      }
+    } catch {
+      // File does not exist yet or cannot be stated; proceed to append
+    }
+
+    const jsonlRow = {
+      thought_id: row.thought.id,
+      thought_text: row.thought.text,
+      thought_source: row.thought.source,
+      timestamp: row.thought.timestamp,
+      tool: row.tool,
+      action: row.action,
+      goal: row.goal,
+      alignment: row.alignment,
+      drift_prob: row.drift_prob,
+      expert_label: row.expert_label ?? ThoughtDatasetWriter.expertLabel(row.tool),
+      circuit_confidence: row.circuit_confidence ?? null,
+    };
+    await fs.promises.appendFile(this.filePath, JSON.stringify(jsonlRow) + '\n', 'utf8');
+  }
+
+  static expertLabel(tool: string): string {
+    return TOOL_TO_EXPERT[tool] ?? 'general';
+  }
+}

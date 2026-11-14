@@ -168,3 +168,76 @@ The declaration-level `cyberTools: [name, …]` list is the fail-closed gate for
 
 - A bridge not named in `cyberTools` → `needs_approval` (absent list = no bridge dispatches through the harness at all).
 - The role must *also* allowlist `cyber_tool`/`run_action` through its normal `tools` rules — both gates must pass.
+
+## Collapsible Context Injection Hooks (`ContextInjectionHook`)
+Roles can receive pre-folded "thought bundles" instead of raw context blobs. Bundles are created from `tasks.md` blackboard entries and injected as structured data through the tool gateway (`src/harness/context-injection-hook.ts`).
+
+### ThoughtBundle
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Unique bundle id |
+| `text` | string | The thought / context text |
+| `source` | `'rea' \| 'reasoning' \| 'external'` | Origin of the bundle |
+| `timestamp` | number | Creation epoch ms |
+| `tool`, `action`, `goal` | string (optional) | Tool/action/goal association |
+
+### InjectionContext
+```json
+{ "folded": true, "summary": "…", "thoughts": [ThoughtBundle, …] }
+```
+When `folded: true`, the full bundle list is withheld from the role frame; only `summary` (if present) is injected.
+
+### Hook options
+- `foldByDefault?: boolean` — collapse bundles by default (default `true`).
+- `triggers?: string[]` — role keywords that activate bundle injection.
+- `tasksPrefill?: boolean` — pre-load bundles from the run's `tasks.md` before the role starts.
+
+### fromTasksFile
+`fromTasksFile(tasksMdPath, options)` synchronously reads a `tasks.md` file and builds `ThoughtBundle[]` from its task entries. Missing or unreadable paths are tolerated (empty bundle list, never throws).
+
+### Wiring
+Bundles flow through `ToolGateway.invoke` — no new endpoint; the existing `/api/harness/runs/:runId` trace carries the folded marker.
+
+## Laya Deviation Validation (`laya-bridge.ts`)
+Each proposed step may be validated against a laya-style reasoning mirror before execution.
+
+### checkThoughtDeviation
+- Inputs: the role's last-3 trace rows (thought bundles) → POST `/v1/systemone`.
+- Timeout: hard `AbortSignal.timeout(5000)` (5 s).
+- Request criteria: alignment scoring plus `unsafe: { type: 'noul' }` (noull self-reference guard).
+- When the laya service is unreachable, the sentinel response `NOT_AVAILABLE` is returned — never a fabricated score.
+
+### enforceDeviationPolicy
+| Result | Policy | Harness behavior |
+|---|---|---|
+| `NOT_AVAILABLE` | proceed | Lay service down — continue without validation |
+| `drift > 0.5` | halt | Run halts with `Deviation guard: proposed step '<callId>' drifted from the goal (laya drift > 0.5)` |
+| `unsafe > 0.4` | require_review | Human approval gate |
+| tangential alignment | replan | Step is rescheduled through planning |
+| otherwise | proceed | Normal execution |
+
+Every evaluation emits a structured trace event:
+```json
+{ "type": "deviation", "data": { "callId": "…", "policy": "…", "alignment": 0.0, "drift_prob": 0.0, "unsafe_prob": 0.0, "latency_ms": 0 } }
+```
+Bridge failures are swallowed (they never break a run). In the dashboard, `deviation` events render as **Thoughts (N)** panels folded under their matching `tool_call` row.
+
+## Thought Dataset Pipeline (`thought-dataset-writer.ts`)
+Every validated thought is appended to a JSONL dataset for offline MoE expert training.
+
+- **Location**: `process.env.THOUGHT_DATASET_DIR ?? <home>/.free-llm-mcp/thought-dataset/thoughts.jsonl`.
+- **Row schema**:
+```json
+{ "thought_id": "<runId>:<callId>", "thought": "…", "tool": "…", "action": "…", "goal": "…", "alignment": 0.0, "drift_prob": 0.0, "expert_label": "…" }
+```
+- **Expert mapping**: `TOOL_TO_EXPERT` routes each tool/action pair to an expert shard id.
+- **Rotation**: when the file exceeds 10 MB it is rotated to `thoughts.jsonl.<epoch-ms>.bak` and a fresh file starts.
+- **Post-processor**: `scripts/thought_to_moe_dataset.py` splits the JSONL into `expert_<label>.jsonl` shards; embeddings use `all-MiniLM-L6-v2`, falling back to a deterministic md5-derived 16-dim mock vector when the model is unavailable.
+
+## Quantum Oracle (`quantumOracleScore`)
+Optional laya-bridge enhancement for multi-thought decisions:
+
+- Circuit: `entangled_verification` preset on the quantum tool, `numBranches = min(thoughts.length, 8)`.
+- Query: the first 3 thought texts joined as the reasoning question.
+- Score: mean branch confidence across the verification circuit.
+- Null-safe: on any bridge/model failure the score is `null` and the run proceeds — the oracle is opt-in (default off) and advisory only.

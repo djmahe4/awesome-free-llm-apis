@@ -11,7 +11,7 @@ import { getModelInfo, type LlmFitModelInfo } from './llmfit.js';
  * and the on-disk size otherwise.
  */
 
-export type Need = 'code' | 'vision' | 'embedding' | 'general';
+export type Need = 'code' | 'vision' | 'embedding' | 'general' | 'decision';
 
 export interface ModelProfile {
   name: string;
@@ -49,6 +49,7 @@ export function vramBudgetGb(): number {
 const CODE_NAME_RE = /coder|codellama|devstral|starcoder|deepseek-coder|granite-code|codestral|codegemma|\bcode\b/i;
 const VISION_NAME_RE = /vision|llava|\bvl\b|[-:.]vl[-:.]|qwen\d*(?:\.\d+)?vl|minicpm-v|moondream|bakllava|gemma3|pixtral|llama3\.2-vision/i;
 const EMBED_NAME_RE = /embed|bge|e5-|gte-|minilm|arctic-embed|snowflake|mxbai|nomic/i;
+const DECISION_NAME_RE = /\blaya\b/i;
 
 function parseParamsB(text?: string): number | undefined {
   const m = (text || '').match(/([\d.]+)\s*([BMK])/i);
@@ -71,6 +72,7 @@ export function buildProfile(
     capabilitySource = 'name';
     capabilities = [];
     if (EMBED_NAME_RE.test(name)) capabilities.push('embedding');
+    else if (DECISION_NAME_RE.test(name)) capabilities.push('decision');
     else capabilities.push('completion');
     if (VISION_NAME_RE.test(name)) capabilities.push('vision');
   }
@@ -116,6 +118,10 @@ export function scoreModel(p: ModelProfile, need: Need, budgetGb = vramBudgetGb(
     if (p.capabilities.includes('insert')) { score += 10; reasons.push('fill-in-the-middle'); }
     if (p.capabilities.includes('tools')) { score += 5; reasons.push('tool calling'); }
     if (isVisionModel(p)) { score -= 30; reasons.push('vision model (weaker for plain code)'); }
+  } else if (need === 'decision') {
+    if (p.capabilities.includes('decision') || DECISION_NAME_RE.test(p.name)) { score += 100; reasons.push('decision capability'); }
+    else { score -= 100; reasons.push('no decision capability'); }
+    if (isVisionModel(p)) { score -= 30; reasons.push('vision model (weaker for decisions)'); }
   } else {
     // general: prefer a plain text model; vision models are fine but not preferred
     if (isVisionModel(p)) { score -= 15; reasons.push('vision model'); }
