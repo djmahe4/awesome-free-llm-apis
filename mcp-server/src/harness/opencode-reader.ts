@@ -33,16 +33,25 @@ export function openOpencodeDb(dbPath: string): SqliteDb | null {
 }
 
 export function listOpencodeSessions(db: NonNullable<ReturnType<typeof openOpencodeDb>>, directoryFilter?: string): OpencodeSession[] {
-  const rows = db.prepare('SELECT id, directory, title, time_updated FROM session ORDER BY time_updated DESC LIMIT 200').all() as Array<Record<string, unknown>>;
-  const sessions = rows.map(r => ({
+  let rows: Array<Record<string, unknown>>;
+  if (directoryFilter) {
+    const needle = directoryFilter.toLowerCase().replace(/\\/g, '/');
+    rows = db.prepare(`
+      SELECT id, directory, title, time_updated
+      FROM session
+      WHERE LOWER(REPLACE(COALESCE(directory, ''), '\\', '/')) LIKE ?
+      ORDER BY time_updated DESC
+      LIMIT 200
+    `).all(`%${needle}%`) as Array<Record<string, unknown>>;
+  } else {
+    rows = db.prepare('SELECT id, directory, title, time_updated FROM session ORDER BY time_updated DESC LIMIT 200').all() as Array<Record<string, unknown>>;
+  }
+  return rows.map(r => ({
     id: String(r.id ?? ''),
     directory: r.directory != null ? String(r.directory) : undefined,
     title: r.title != null ? String(r.title) : undefined,
     timeUpdated: r.time_updated != null ? String(r.time_updated) : undefined,
   }));
-  if (!directoryFilter) return sessions;
-  const needle = directoryFilter.toLowerCase().replace(/\\/g, '/');
-  return sessions.filter(s => (s.directory ?? '').toLowerCase().replace(/\\/g, '/').includes(needle));
 }
 
 export function readOpencodeThoughts(

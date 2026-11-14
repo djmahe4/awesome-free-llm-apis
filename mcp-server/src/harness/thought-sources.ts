@@ -77,6 +77,8 @@ export function listOpencodeSessionSources(homeDir: string, workspaceRoot: strin
     }));
   } catch {
     return [];
+  } finally {
+    try { db.close(); } catch {}
   }
 }
 

@@ -161,7 +161,7 @@ describe('tasks.md ledger', () => {
     expect(readAgentQuestions('no questions section here')).toEqual({ answered: [], pending: [] });
   });
 
-  it('removeConsumedQuestions strips the questions section', () => {
+  it('removeConsumedQuestions strips the questions section when all are answered', () => {
     const tasksPath = path.join(mktemp('laya-tasks3-'), 'tasks.md');
     fs.writeFileSync(tasksPath, `## Task\n\nwork\n\n${QUESTIONS_HEADING}\n\nQ1: which?\nA1: that one\n`, 'utf8');
     removeConsumedQuestions(tasksPath);
@@ -170,6 +170,39 @@ describe('tasks.md ledger', () => {
     expect(content).not.toContain('Q1:');
     expect(content).toContain('## Task');
     expect(readAgentQuestions(content)).toEqual({ answered: [], pending: [] });
+  });
+
+  it('removeConsumedQuestions preserves pending questions when partially answered', () => {
+    const tasksPath = path.join(mktemp('laya-tasks4-'), 'tasks.md');
+    fs.writeFileSync(tasksPath, `## Task\n\nwork\n\n${QUESTIONS_HEADING}\n\nQ1: answered?\nA1: yes\nQ2: still pending?\n\n## Next\n`, 'utf8');
+    removeConsumedQuestions(tasksPath);
+    const content = fs.readFileSync(tasksPath, 'utf8');
+    expect(content).toContain(QUESTIONS_HEADING);
+    expect(content).toContain('Q1: still pending?');
+    expect(content).not.toContain('answered?');
+    expect(content).toContain('## Next');
+    const { answered, pending } = readAgentQuestions(content);
+    expect(answered).toEqual([]);
+    expect(pending).toEqual(['still pending?']);
+  });
+
+  it('appendAgentAssumptions and recordAgentQuestions insert inside existing sections before next heading', () => {
+    const tasksPath = path.join(mktemp('laya-tasks5-'), 'tasks.md');
+    fs.writeFileSync(tasksPath, `## Task\n\nwork\n\n${ASSUMPTIONS_HEADING}\n- initial assumption\n\n${QUESTIONS_HEADING}\nQ1: first question?\n\n## Next Steps\n- finish\n`, 'utf8');
+    appendAgentAssumptions(tasksPath, ['second assumption']);
+    recordAgentQuestions(tasksPath, ['second question?']);
+    const content = fs.readFileSync(tasksPath, 'utf8');
+    const lines = content.split('\n');
+    const assumptionsIdx = lines.indexOf(ASSUMPTIONS_HEADING);
+    const questionsIdx = lines.indexOf(QUESTIONS_HEADING);
+    const nextStepsIdx = lines.indexOf('## Next Steps');
+    const secondAssumptionIdx = lines.indexOf('- second assumption');
+    const secondQuestionIdx = lines.indexOf('Q2: second question?');
+
+    expect(secondAssumptionIdx).toBeGreaterThan(assumptionsIdx);
+    expect(secondAssumptionIdx).toBeLessThan(questionsIdx);
+    expect(secondQuestionIdx).toBeGreaterThan(questionsIdx);
+    expect(secondQuestionIdx).toBeLessThan(nextStepsIdx);
   });
 });
 

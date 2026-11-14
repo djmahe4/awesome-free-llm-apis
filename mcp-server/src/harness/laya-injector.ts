@@ -179,8 +179,15 @@ export function appendAgentAssumptions(tasksPath: string, items: string[]): void
   if (headingIdx === -1) {
     if (existing && !existing.endsWith('\n')) lines.push('');
     lines.push(ASSUMPTIONS_HEADING);
+    for (const item of items) lines.push(`- ${item}`);
+  } else {
+    let endIdx = lines.length;
+    for (let i = headingIdx + 1; i < lines.length; i++) {
+      if (/^##?\s+/.test(lines[i])) { endIdx = i; break; }
+    }
+    const bullets = items.map(item => `- ${item}`);
+    lines.splice(endIdx, 0, ...bullets);
   }
-  for (const item of items) lines.push(`- ${item}`);
   fs.writeFileSync(tasksPath, lines.join('\n') + '\n', 'utf8');
 }
 
@@ -218,6 +225,8 @@ export function readAgentQuestions(content: string): AgentQuestions {
 export function removeConsumedQuestions(tasksPath: string): void {
   if (!fs.existsSync(tasksPath)) return;
   const content = fs.readFileSync(tasksPath, 'utf8');
+  const { answered, pending } = readAgentQuestions(content);
+  if (!answered.length) return;
   const lines = content.split(/\r?\n/);
   const headingIdx = lines.findIndex(l => l.trim() === QUESTIONS_HEADING);
   if (headingIdx === -1) return;
@@ -225,7 +234,18 @@ export function removeConsumedQuestions(tasksPath: string): void {
   for (let i = headingIdx + 1; i < lines.length; i++) {
     if (/^##?\s+/.test(lines[i])) { endIdx = i; break; }
   }
-  fs.writeFileSync(tasksPath, [...lines.slice(0, headingIdx), ...lines.slice(endIdx)].join('\n'), 'utf8');
+
+  if (pending.length === 0) {
+    fs.writeFileSync(tasksPath, [...lines.slice(0, headingIdx), ...lines.slice(endIdx)].join('\n'), 'utf8');
+  } else {
+    const newSection = [
+      lines[headingIdx],
+      '',
+      ...pending.map((q, idx) => `Q${idx + 1}: ${q}`),
+      ''
+    ];
+    fs.writeFileSync(tasksPath, [...lines.slice(0, headingIdx), ...newSection, ...lines.slice(endIdx)].join('\n'), 'utf8');
+  }
 }
 
 export function recordAgentQuestions(tasksPath: string, questions: string[]): void {
@@ -236,8 +256,21 @@ export function recordAgentQuestions(tasksPath: string, questions: string[]): vo
   if (headingIdx === -1) {
     if (existing && !existing.endsWith('\n')) lines.push('');
     lines.push(QUESTIONS_HEADING);
+    questions.forEach((q, i) => lines.push(`Q${i + 1}: ${q}`));
+  } else {
+    let endIdx = lines.length;
+    let maxQNum = 0;
+    for (let i = headingIdx + 1; i < lines.length; i++) {
+      if (/^##?\s+/.test(lines[i])) { endIdx = i; break; }
+      const m = lines[i].trim().match(/^Q(\d+)\s*:/i);
+      if (m) {
+        const num = parseInt(m[1], 10);
+        if (num > maxQNum) maxQNum = num;
+      }
+    }
+    const newLines = questions.map((q, i) => `Q${maxQNum + i + 1}: ${q}`);
+    lines.splice(endIdx, 0, ...newLines);
   }
-  questions.forEach((q, i) => lines.push(`Q${i + 1}: ${q}`));
   fs.writeFileSync(tasksPath, lines.join('\n') + '\n', 'utf8');
 }
 

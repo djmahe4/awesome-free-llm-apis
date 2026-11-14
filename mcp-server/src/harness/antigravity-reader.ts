@@ -54,8 +54,12 @@ function parseTranscriptLine(line: string): ParsedLine | null {
 }
 
 function firstUserInputText(transcriptPath: string): string | undefined {
+  let fd: number | null = null;
   try {
-    const raw = fs.readFileSync(transcriptPath, 'utf8');
+    const buffer = Buffer.alloc(64 * 1024);
+    fd = fs.openSync(transcriptPath, 'r');
+    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    const raw = buffer.toString('utf8', 0, bytesRead);
     for (const line of raw.split(/\r?\n/)) {
       const parsed = parseTranscriptLine(line);
       if (!parsed || parsed.type !== 'USER_INPUT' || !parsed.content) continue;
@@ -63,17 +67,29 @@ function firstUserInputText(transcriptPath: string): string | undefined {
     }
   } catch {
     return undefined;
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+    }
   }
   return undefined;
 }
 
 function mentionsWorkspace(transcriptPath: string, workspaceRoot: string): boolean {
+  let fd: number | null = null;
   try {
-    const head = fs.readFileSync(transcriptPath, 'utf8').slice(0, 16 * 1024);
+    const buffer = Buffer.alloc(16 * 1024);
+    fd = fs.openSync(transcriptPath, 'r');
+    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    const head = buffer.toString('utf8', 0, bytesRead);
     const collapse = (value: string) => normalizePath(value).replace(/\/+/g, '/');
     return collapse(head).includes(collapse(workspaceRoot));
   } catch {
     return false;
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+    }
   }
 }
 

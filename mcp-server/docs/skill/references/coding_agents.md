@@ -56,12 +56,11 @@ interface CodingAgentsInput {
   "hypothesisModel": false,
   // off by default: validate subagent delegation and checks (subagentValidation?: boolean)
   "subagentValidation": false,
-  // optional: explicit thought-source files to watch instead of auto-detection. Each list holds
-  // absolute or workspace-relative paths for that agent's store (claude: session .jsonl files,
-  // opencode: .db files, codex: rollout files, antigravity: transcript.jsonl files). When
-  // thoughtSources is absent the reader auto-detects Claude jsonl sessions, the OpenCode db,
+  // optional: explicit thought sources to watch instead of auto-detection. claude holds
+  // session .jsonl file paths; opencode, codex, and antigravity hold session/conversation IDs.
+  // When thoughtSources is absent the reader auto-detects Claude jsonl sessions, the OpenCode db,
   // Codex rollouts and Antigravity brain transcripts for the workspace.
-  "thoughtSources": { "codex": ["C:/sessions/rollout-2026-11-13.jsonl"] }
+  "thoughtSources": { "claude": ["C:/sessions/session-1.jsonl"], "codex": ["session-uuid-1"] }
 }
 ```
 
