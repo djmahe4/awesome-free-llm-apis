@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 
 export function generateUnifiedDiff(
   relPath: string,
@@ -131,9 +132,43 @@ function computeWindowedSnippet(
 /** Assert path is inside workspaceRoot to prevent path traversal on writes. */
 export function assertSafe(fullPath: string, workspaceRoot: string): void {
   const normalized = path.resolve(fullPath);
-  const root = path.resolve(workspaceRoot);
-  if (!normalized.startsWith(root + path.sep) && normalized !== root) {
-    throw new Error(`[security] Path traversal blocked: ${normalized} is outside ${root}`);
+  const lexicalRoot = path.resolve(workspaceRoot);
+  const isWithin = (root: string, candidate: string): boolean => {
+    const relative = path.relative(root, candidate);
+    return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+  };
+  if (!isWithin(lexicalRoot, normalized)) {
+    throw new Error(`[security] Path traversal blocked: ${normalized} is outside ${lexicalRoot}`);
+  }
+
+  let existing = normalized;
+  while (true) {
+    try {
+      fs.lstatSync(existing);
+      break;
+    } catch {
+      const parent = path.dirname(existing);
+      if (parent === existing) throw new Error(`[security] Cannot resolve target path: ${normalized}`);
+      existing = parent;
+    }
+  }
+  let realRoot: string;
+  let realExisting: string;
+  try {
+    realRoot = fs.realpathSync(lexicalRoot);
+    realExisting = fs.realpathSync(existing);
+  } catch {
+    throw new Error(`[security] Cannot resolve workspace path: ${normalized}`);
+  }
+  if (!isWithin(realRoot, realExisting)) {
+    throw new Error(`[security] Symlink escape blocked: ${normalized} resolves outside ${realRoot}`);
+  }
+  try {
+    const target = fs.realpathSync(normalized);
+    if (!isWithin(realRoot, target)) {
+      throw new Error(`[security] Symlink escape blocked: ${normalized} resolves outside ${realRoot}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 }
-

@@ -24,8 +24,8 @@ export interface CodingAgentsSettings {
   /** Asks the model for extra assumptions to check, and for one corrected goal when enforce finds a refuted one. Off by default (costs model calls). */
   hypothesisModel: boolean;
   subagentValidation: boolean;
-  /** Explicit thought sources to watch; undefined = auto-detect Claude jsonl, OpenCode db, Codex rollouts and Antigravity transcripts for the workspace. */
-  thoughtSources?: { claude?: string[]; opencode?: string[]; codex?: string[]; antigravity?: string[] };
+  /** Explicit thought-source session IDs to watch; undefined = auto-detect workspace-matched sessions. */
+  thoughtSources?: { claude?: string[]; opencode?: string[]; codex?: string[]; antigravity?: string[]; zed?: string[] };
 }
 
 function parseStringList(value: unknown): string[] | undefined {
@@ -41,12 +41,14 @@ export function parseThoughtSources(value: unknown): CodingAgentsSettings['thoug
   const opencode = parseStringList(v['opencode']);
   const codex = parseStringList(v['codex']);
   const antigravity = parseStringList(v['antigravity']);
-  if (!claude && !opencode && !codex && !antigravity) return undefined;
+  const zed = parseStringList(v['zed']);
+  if (!claude && !opencode && !codex && !antigravity && !zed) return undefined;
   return {
     ...(claude ? { claude } : {}),
     ...(opencode ? { opencode } : {}),
     ...(codex ? { codex } : {}),
     ...(antigravity ? { antigravity } : {}),
+    ...(zed ? { zed } : {}),
   };
 }
 

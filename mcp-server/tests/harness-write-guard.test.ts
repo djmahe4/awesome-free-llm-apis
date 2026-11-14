@@ -39,8 +39,14 @@ describe('isProtectedWritePath', () => {
 
   it('allows ordinary workspace files and ignores paths outside the workspace', () => {
     expect(isProtectedWritePath(WS, 'src/index.ts')).toBe(false);
-    expect(isProtectedWritePath(WS, 'tasks.md')).toBe(false);
+    expect(isProtectedWritePath(WS, 'docs/tasks.md')).toBe(false);
+    expect(isProtectedWritePath(WS, 'notes.md')).toBe(false);
     expect(isProtectedWritePath(WS, '../elsewhere/harness/appsec.yaml')).toBe(false);
+  });
+
+  it('protects the root tasks.md blackboard: it holds the human thought-context approval an agent patch must not flip', () => {
+    expect(isProtectedWritePath(WS, 'tasks.md')).toBe(true);
+    expect(isProtectedWritePath(WS, 'TASKS.md')).toBe(true);
   });
 
   it('normalizes backslash separators', () => {

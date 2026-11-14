@@ -5,6 +5,7 @@ const LEGACY_DECL_DIR = 'harness';
 const LEGACY_DECL_EXT = /\.ya?ml$/i;
 const BRIDGES_FILE = '.free-llm-mcp/bridges.json';
 const CODING_AGENTS_SETTINGS_FILE = '.free-llm-mcp/coding-agents.json';
+const TASKS_BLACKBOARD_FILE = 'tasks.md';
 
 function relativeToWorkspace(workspaceRoot: string, filePath: string): string | null {
   const root = path.resolve(workspaceRoot);
@@ -20,6 +21,8 @@ export function isProtectedWritePath(workspaceRoot: string, filePath: string): b
   if (relLower === BRIDGES_FILE) return true;
   // coding_agents settings (skipFailingTests): an agent able to edit it could skip its own failing test.
   if (relLower === CODING_AGENTS_SETTINGS_FILE) return true;
+  // Human-controlled thought-context approval must not be changed by an agent patch.
+  if (relLower === TASKS_BLACKBOARD_FILE) return true;
   if (relLower.startsWith(`${UNIFORM_DECL_DIR}/`)) return true;
   if (
     (relLower.startsWith(`${LEGACY_DECL_DIR}/`) || relLower === LEGACY_DECL_DIR) &&

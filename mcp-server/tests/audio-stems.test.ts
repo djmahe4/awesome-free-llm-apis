@@ -11,6 +11,14 @@ const originalPythonPath = process.env.PYTHONPATH;
 const originalDemucsModelPath = process.env.DEMUCS_MODEL_PATH;
 const originalDemucsTestCallLog = process.env.DEMUCS_TEST_CALL_LOG;
 const pythonBin = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+const hasTorch = !process.env.CI && (() => {
+  try {
+    execFileSync(pythonBin, ['-c', 'import torch'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 let audioFixtureDir = '';
 let audioSample = '';
 let tempDir: string | undefined;
@@ -117,7 +125,7 @@ def apply_model(model, mixture, **kwargs):
     expect(data.error).toContain('no weights were downloaded');
   });
 
-  it('reports not_available when the Demucs backend cannot be imported', async () => {
+  it.skipIf(!hasTorch)('reports not_available when the Demucs backend cannot be imported', async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'audio-demucs-unavailable-'));
     const packageDir = path.join(tempDir, 'demucs');
     fs.mkdirSync(packageDir);
@@ -142,7 +150,7 @@ def apply_model(model, mixture, **kwargs):
     expect(data.error).toContain('mock backend unavailable');
   });
 
-  it('honors output directory and caps long input duration', () => {
+  it.skipIf(!hasTorch)('honors output directory and caps long input duration', () => {
     const modelPath = makeDemucsMock();
     execFileSync(pythonBin, ['-c', `import torch; torch.save({'model': 'local-htdemucs'}, r'''${modelPath}''')`]);
     process.env.DEMUCS_MODEL_PATH = modelPath;
@@ -173,7 +181,7 @@ def apply_model(model, mixture, **kwargs):
     }
   });
 
-  it('returns actual mocked Demucs stem audio and metrics', async () => {
+  it.skipIf(!hasTorch)('returns actual mocked Demucs stem audio and metrics', async () => {
     const modelPath = makeDemucsMock();
     execFileSync(pythonBin, ['-c', `import torch; torch.save({'model': 'local-htdemucs'}, r'''${modelPath}''')`]);
     process.env.DEMUCS_MODEL_PATH = modelPath;
