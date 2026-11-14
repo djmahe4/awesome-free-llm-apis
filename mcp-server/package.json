@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "@gradio/client": "^2.7.0",
-    "@huggingface/transformers": "^4.3.1",
+    "@huggingface/transformers": "^4.3.2",
     "@modelcontextprotocol/sdk": "^1.24.3",
     "@noble/post-quantum": "^0.7.1",
     "@types/multer": "^2.3.0",
