@@ -215,16 +215,16 @@ export interface DirScanArgs {
   map_dbs?: boolean;
 }
 
-export function scanWorkspace(args: DirScanArgs): DirScanResult {
+export function scanWorkspace(args: DirScanArgs): Promise<DirScanResult> {
   const { workspace_root, max_depth, files_per_folder, skip_dirs, budget_ms, map_dbs } = args;
   const scanner = new WorkspaceDirScanner(workspace_root);
-  return scanner.scanDir({
+  return Promise.resolve(scanner.scanDir({
     maxDepth: max_depth,
     filesPerFolder: files_per_folder,
     skipDirs: skip_dirs,
     budgetMs: budget_ms,
     mapDbs: map_dbs,
-  });
+  }));
 }
 
 function isSqliteFile(filePath: string): boolean {
