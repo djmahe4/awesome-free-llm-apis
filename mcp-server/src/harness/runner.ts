@@ -1416,9 +1416,15 @@ export async function deployHarness(input: DeployInput): Promise<HarnessRun> {
       await finishStepsAndEnvelope(store, run, decl, roles, 0, input.goal, input.workspaceRoot, registryKey, () => runInfo.controller.signal.aborted, undefined, recall?.context, recall);
       await finalizeRun(store, run, registryKey);
     } catch (err: any) {
-      run.status = 'failed';
-      run.error = err?.message || String(err);
-      await store.appendTrace({ runId: run.runId, role: 'top_level', type: 'error', data: { message: run.error } }).catch(() => {});
+      const isTransient = /rate limit|circuit breaker|429|exhausted all fallback|no available providers/i.test(err?.message || String(err));
+      if (isTransient) {
+        run.status = 'paused_budget';
+        run.error = `Transient provider exhaustion: ${err?.message || String(err)}. Parked in paused_budget for resume.`;
+      } else {
+        run.status = 'failed';
+        run.error = err?.message || String(err);
+      }
+      await store.appendTrace({ runId: run.runId, role: 'top_level', type: isTransient ? 'budget' : 'error', data: { message: run.error } }).catch(() => {});
       await finalizeRun(store, run, registryKey);
     }
   })().catch(() => {});
