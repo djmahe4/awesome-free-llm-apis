@@ -3,11 +3,57 @@
 
 const fs = require('fs');
 const path = require('path');
+const SETUP = require('./provider-setup');
 
 const ROOT = path.join(__dirname, '..');
 const data = JSON.parse(fs.readFileSync(path.join(ROOT, 'data.json'), 'utf8'));
 
-const OKAPI_URL = 'https://okapi.bot/go/awesome-free-llm-apis';
+const SPONSORS_PAGE = 'https://opencollective.com/awesome-free-llm-apis';
+// GitHub traffic stats only cover 14 days: refresh this figure once a month.
+const MONTHLY_VIEWS = '250,000+';
+
+const SPONSORS = [
+	{name: 'Okapi', url: 'https://okapi.bot/go/awesome-free-llm-apis', tier: 'sponsor', tagline: 'Free API watcher. No more breaking changes.', logoLight: 'media/okapi-logo-light.svg', logoDark: 'media/okapi-logo-dark.svg'},
+];
+
+const LOGO_WIDTH = {gold: 280, sponsor: 140};
+
+function sponsorLogo({name, url, logoLight, logoDark}, width) {
+	return `\t<a href="${url}">
+\t\t<picture>
+\t\t\t<source media="(prefers-color-scheme: dark)" srcset="${logoDark}">
+\t\t\t<img src="${logoLight}" width="${width}" alt="${name}">
+\t\t</picture>
+\t</a>`;
+}
+
+function sponsorBlock(sponsor, width) {
+	const tagline = sponsor.tagline ? `\n\t<br>\n\t<sub>${sponsor.tagline}</sub>` : '';
+	return `<p align="center">\n${sponsorLogo(sponsor, width)}${tagline}\n</p>`;
+}
+
+function sponsorsSection() {
+	const gold = SPONSORS.filter(s => s.tier === 'gold');
+	const sponsors = SPONSORS.filter(s => s.tier === 'sponsor');
+	const goldBlocks = gold.map(s => sponsorBlock(s, LOGO_WIDTH.gold));
+	if (gold.length === 0) {
+		goldBlocks.push(sponsorBlock({
+			name: 'Your logo here',
+			url: SPONSORS_PAGE,
+			logoLight: 'media/sponsor-slot-light.svg',
+			logoDark: 'media/sponsor-slot-dark.svg',
+		}, LOGO_WIDTH.gold));
+	}
+
+	const sections = [`<h3 align="center">Gold sponsors</h3>\n\n${goldBlocks.join('\n\n')}`];
+	if (sponsors.length > 0) {
+		sections.push(`<h3 align="center">Sponsors</h3>\n\n${sponsors.map(s => sponsorBlock(s, LOGO_WIDTH.sponsor)).join('\n\n')}`);
+	}
+
+	sections.push(`<p align="center"><sub>${MONTHLY_VIEWS} views a month from developers · <a href="${SPONSORS_PAGE}">Become a sponsor</a></sub></p>`);
+
+	return sections.join('\n\n');
+}
 
 const HEADER = `<h1 align="center">
 \t<a href="https://github.com/mnfst/awesome-free-llm-apis">
@@ -23,24 +69,13 @@ const HEADER = `<h1 align="center">
 
 <p align="center">LLM APIs with permanent free tiers for text inference.</p>
 
-<p align="center"><sub>All endpoints are OpenAI SDK-compatible unless noted. Each link points to the provider's API key page.</sub></p>
+<p align="center"><sub>Most providers offer an OpenAI-compatible endpoint. Native and compatible base URLs can differ. Each link points to the provider's API key page.</sub></p>
 
 <p align="center"><sub>All of those free LLM APIs are available at <a href="https://manifest.build">manifest.build</a> - make reliable agents.</sub></p>
 
 <hr>
 
-<h3 align="center">Sponsors</h3>
-
-<p align="center">
-\t<a href="${OKAPI_URL}">
-\t\t<picture>
-\t\t\t<source media="(prefers-color-scheme: dark)" srcset="media/okapi-logo-dark.svg">
-\t\t\t<img src="media/okapi-logo-light.svg" width="180" alt="Okapi">
-\t\t</picture>
-\t</a>
-\t<br>
-\t<sub>Free API watcher. No more breaking changes.</sub>
-</p>
+${sponsorsSection()}
 
 <hr>`;
 
@@ -75,7 +110,13 @@ function buildProviderSection(provider) {
 		desc,
 	];
 	if (provider.baseUrl != null) {
-		parts.push('', `Base URL: \`${provider.baseUrl}\``);
+		const setup = SETUP[provider.name.toLowerCase()];
+		const compatible = setup && setup.openaiBaseUrl;
+		if (compatible && compatible.replace(/\/$/, '') !== provider.baseUrl.replace(/\/$/, '')) {
+			parts.push('', `Native API base URL: \`${provider.baseUrl}\``, '', `OpenAI-compatible base URL: \`${compatible}\``);
+		} else {
+			parts.push('', `Base URL: \`${provider.baseUrl}\``);
+		}
 	}
 	parts.push('', buildTable(provider.models));
 	return parts.join('\n');

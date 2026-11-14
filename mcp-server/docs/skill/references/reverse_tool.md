@@ -1,4 +1,4 @@
-# `reverse_tool` [v1.1.2]
+# `reverse_tool` [v1.1.3]
 
 **Purpose:** Reverse engineering analysis engine, remote GitHub asset recognizer, and static artifact forensics inspector. Supports static JavaScript/TypeScript AST extraction, binary/archive artifact forensics, evidence tracking with cryptographic SHA-256 validation, remote GitHub repo recon (releases, AST symbols, call flows, wiki generation), and bridge proxying to local/external reverse engineering agent engines (REA).
 

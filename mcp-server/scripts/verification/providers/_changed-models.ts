@@ -5,7 +5,7 @@
  * smoke-test scripts to verify newly added models and confirm whether removed
  * models are truly dead.
  * Gemini is excluded per user instruction.
- * Cerebras and GitHub Models are fully deprecated.
+ * Cerebras, GitHub Models, and Mistral AI are fully deprecated.
  */
 
 export interface ChangedModels {
@@ -16,6 +16,7 @@ export interface ChangedModels {
 export const CHANGED_MODELS: Record<string, ChangedModels> = {
   // cerebras entry removed as of v1.1.0 — provider fully deprecated (free tier replaced by mandatory payment method)
   // github-models entry removed as of v1.0.9 — provider fully deprecated (see src/providers/github-models.ts)
+  // mistral entry removed as of v1.1.3 — provider fully deprecated (free tier removed upstream in PR #232 / #234)
   cohere: {
     added: [],
     removed: [],
@@ -40,22 +41,23 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
     added: [
       'tencent/hy3:free',
       'nvidia/nemotron-3.5-lightning:free',
-      'liquid/lfm-2.5-2.6b:free',
       'cohere/north-mini-code:free',
-      'poolside/laguna-s-2.1:free',
-      'poolside/laguna-xs-2.1:free',
       'nvidia/nemotron-3-ultra-550b-a55b:free',
       'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
       'kilo-auto/free',
       'inclusionai/ling-3.1-flash',
       'apodex/apodex-1.1-mini:free',
       'dots-studio/dots-3-note-preview:free',
-      'recursive/flint-v1.0:free',
-      'xingchen-agi/xing4.0-29b-a4b:free',
       'nvidia/nemotron-3.5-super-vl:free',
-      'reflection/beam-free',
     ],
     removed: [
+      'poolside/laguna-s-2.1:free',
+      'poolside/laguna-xs-2.1:free',
+      'liquid/lfm-2.5-2.6b:free',
+      'recursive/flint-v1.0:free',
+      'xingchen-agi/xing4.0-29b-a4b:free',
+      'reflection/beam-free',
+      'nvidia/nemotron-3.5-content-safety:free',
       'nvidia/nemotron-3-super-120b-a12b:free',
       'inclusionai/ling-3.0-flash:free',
       'inclusionai/ling-3.0-flash-sante:free',
@@ -64,19 +66,19 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
     ],
   },
   mistral: {
-    added: [
-      'mistral-medium-3-5',
-      'ministral-8b-2512',
-      'ministral-3b-2512',
-      'ministral-14b-2512',
-    ],
-    removed: [
-      'mistral-medium-2604',
-    ],
+    added: [],
+    removed: [],
   },
   nvidia: {
-    added: [],
+    added: [
+      'moonshotai/kimi-k3_1-pro',
+      'mistralai/mistral-large-4-1t-a52b',
+      'nvidia/nemotron-3.5-bolt-e4b',
+      'minimaxai/minimax-m3.1-flash',
+      'black-forest-labs/flux-3-image-klein',
+    ],
     removed: [
+      'google/gemma-4-31b-it',
       'nvidia/nemotron-3-nano-30b-a3b',
       'meta/llama-3.3-70b-instruct',
       'mistralai/mistral-nemotron',
@@ -97,16 +99,20 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
       'inclusionai/ling-3.0-flash-sante:free',
       'qwen/qwen3.8-27b:free',
       'dots-studio/dots-3-note-preview:free',
-      'liquid/lfm-2.5-2.6b:free',
       'nvidia/nemotron-3.5-lightning:free',
-      'thinkingmachines/inkling:free',
       'nvidia/nemotron-3-ultra-550b-a55b:free',
       'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
-      'recursive/flint-v1.0:free',
-      'xingchen-agi/xing4.0-29b-a4b:free',
       'nvidia/nemotron-3.5-super-vl:free',
     ],
     removed: [
+      'poolside/laguna-s-2.1:free',
+      'poolside/laguna-xs-2.1:free',
+      'liquid/lfm-2.5-2.6b:free',
+      'recursive/flint-v1.0:free',
+      'xingchen-agi/xing4.0-29b-a4b:free',
+      'thinkingmachines/inkling:free',
+      'thinkingmachines/inkling-small:free',
+      'nvidia/nemotron-3.5-content-safety:free',
       'nvidia/nemotron-3-super-120b-a12b:free',
       'openai/gpt-oss-20b:free',
       'inclusionai/ling-3.0-flash:free',
@@ -119,11 +125,11 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
     added: [
       'gpt-oss:20b',
       'mistral-Nemo-Instruct-2407',
-      'minimax-m2.7',
-      'nemotron-3-nano:30b',
       'codestral-latest',
     ],
     removed: [
+      'minimax-m2.7',
+      'nemotron-3-nano:30b',
       'DeepSeek-V4-Flash-0731',
       'deepseek-r1-0528',
       'deepseek-v3-0324',
@@ -180,9 +186,10 @@ export const CHANGED_MODELS: Record<string, ChangedModels> = {
       'Qwen3.5-9B',
       'Qwen2.5-VL-72B-Instruct',
       'Mistral-Small-3.2-24B-Instruct-2506',
+    ],
+    removed: [
       'Mistral-Nemo-Instruct-2407',
     ],
-    removed: [],
   },
   zhipu: {
     added: [],

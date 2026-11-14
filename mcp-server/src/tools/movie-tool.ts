@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 import { spawn, spawnSync } from 'node:child_process';
 import fetch from 'node-fetch';
 import { TimelineManifestStore } from './media/timeline-manifest.js';
-import { buildKeyframeUrl, generateMotionClip, type MotionEngine } from './media/video-router.js';
+import { buildKeyframeUrl, requestNvidiaGenAiImage, generateMotionClip, type MotionEngine } from './media/video-router.js';
 import { buildMusicPrompt, generateBgm } from './media/music-router.js';
 import { formatLyricsPrompt } from './media/lyrics-router.js';
 import { buildSeoPrompt } from './media/seo-router.js';
@@ -190,6 +190,20 @@ export async function runMovieTool(input: MovieToolInput): Promise<MovieToolOutp
               success: true,
               data: { type: 'motion_path', engine, path: dest, bytes, duration_s: Math.round((input.duration_ms || 5000) / 1000) }
             };
+          }
+          if (input.model && (input.model.includes('flux-3-image-klein') || input.model.startsWith('black-forest-labs/flux-3'))) {
+            const genResult = await requestNvidiaGenAiImage({
+              prompt: input.prompt,
+              model: input.model,
+              width: input.metadata?.width || 1024,
+              height: input.metadata?.height || 1024,
+              apiKey: input.apiKey || process.env.NVIDIA_API_KEY
+            });
+            if (genResult.base64) {
+              const imagePath = path.join(projectDir, `nvidia_flux3_${Date.now()}.jpg`);
+              await fsp.writeFile(imagePath, Buffer.from(genResult.base64, 'base64'));
+              return { success: true, data: { type: 'keyframe_image', path: imagePath, model: input.model } };
+            }
           }
           const url = buildKeyframeUrl({
             prompt: input.prompt,

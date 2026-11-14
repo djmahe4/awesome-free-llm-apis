@@ -31,7 +31,7 @@ Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-
 | Fast Chat | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | `cloudflare` | 100% success, ~1300ms ⚡ |
 | Coding | `qwen/qwen3-coder-480b-a35b:free` | `openrouter` | 480B coder, FREE |
 | Deep Reasoning | `deepseek-ai/DeepSeek-R1` | `openrouter` | Chain-of-thought |
-| High-Tier Reasoning | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia` | Planning/subtask planner |
+| High-Tier Reasoning | `nvidia/nemotron-3.5-bolt-e4b` | `nvidia` | Planning/subtask planner |
 | Bulk Tasks | `Qwen/Qwen2.5-72B-Instruct` | `siliconflow` | 1,000 RPM — best for bulk |
 
 ---
@@ -276,7 +276,7 @@ Multi-agent declarative harness execution and coordination engine.
 
 ---
 
-### `reverse_tool` [v1.1.2]
+### `reverse_tool` [v1.1.3]
 Reverse engineering analysis engine and static artifact forensics inspector.
 - **Authorization Framing**: Enforces `'ctf'` | `'lab'` | `'consent'` on all deep analysis actions (`analyze_javascript`, `analyze_artifact`, `get_evidence`, `scan_github`).
 - **GitHub Recon & Asset Forensics**: Discovers release binaries/ASARs/models, indexes tree descriptors, extracts AST symbols/call flows on demand, and generates architectural wiki documentation (`scan_github`).
@@ -401,7 +401,7 @@ If the `@mcp:free-llm-apis` server or `mcp-server/` folder is not found in the i
 > --- 5. REASONING / PLANNING PROVIDERS ---
 > (Critical for agentic subtask decomposition, ordered by active model count)
 >
-> nvidia       (14 models)
+> nvidia       (12 models)
 > pollinations (9 models)
 > openrouter   (9 models)
 > kilocode     (8 models)
