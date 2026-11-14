@@ -1,4 +1,5 @@
 import type { CodingAgentsInput, CodingAgentsResult } from './types.js';
+import { caTrace } from './trace.js';
 
 type Rollback = (checkpointId: string, newFiles: string[]) => Promise<string[]>;
 
@@ -21,13 +22,19 @@ export async function runSteps(
   steps: string[],
   runStep: (step: CodingAgentsInput) => Promise<CodingAgentsResult>,
   rollback?: Rollback,
+  /** Called before each step with its text; returns the goal to run instead, or null to skip a step that is already satisfied. */
+  prepare?: (step: string, last: boolean) => Promise<string | null>,
 ): Promise<CodingAgentsResult> {
   let firstCheckpoint: string | undefined;
   const attempts: NonNullable<CodingAgentsResult['repair']>['attempts'] = [];
   let result!: CodingAgentsResult;
   for (let i = 0; i < steps.length; i++) {
       const last = i === steps.length - 1;
-      result = await runStep({ ...input, goal: steps[i], verifyCommand: last ? input.verifyCommand : undefined });
+      const goal = prepare ? await prepare(steps[i], last) : steps[i];
+      if (goal === null) { caTrace(`goal step ${i + 1}/${steps.length} skipped`, 'already satisfied'); continue; }
+      caTrace(`goal step ${i + 1}/${steps.length}`, steps[i].slice(-160).replace(/\s+/g, ' '));
+      // Earlier steps do not run the check, but the editor still reads its tests as the specification.
+      result = await runStep({ ...input, goal, verifyCommand: last ? input.verifyCommand : undefined, ...(last || !input.verifyCommand ? {} : { specCommand: input.verifyCommand }) });
       firstCheckpoint ??= result.checkpointId;
       attempts.push(...(result.repair?.attempts ?? []));
       const finished = !result.error && result.applied && (!result.repair || result.repair.outcome === 'converged' || result.repair.outcome === 'unverified');

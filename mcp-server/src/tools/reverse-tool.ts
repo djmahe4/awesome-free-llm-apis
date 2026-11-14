@@ -94,7 +94,9 @@ export function resolvePythonPath(): string {
   }
   const isWin = process.platform === 'win32';
   const pyRel = isWin ? path.join('Scripts', 'python.exe') : path.join('bin', 'python');
+  const pyLoc = process.env.pythonLocation || process.env.Python_ROOT_DIR || process.env.Python3_ROOT_DIR;
   const candidates = [
+    ...(pyLoc ? [isWin ? path.join(pyLoc, 'python.exe') : path.join(pyLoc, 'bin', 'python')] : []),
     path.resolve(process.cwd(), 'venv', pyRel),
     path.resolve(process.cwd(), '.venv', pyRel),
     path.resolve(process.cwd(), 'mcp-server/venv', pyRel),

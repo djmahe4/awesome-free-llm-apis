@@ -64,6 +64,7 @@ jobs:
           cache-dependency-path: mcp-server/package-lock.json
 
       - name: Set up Python
+        id: setup-python
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
@@ -82,6 +83,8 @@ jobs:
 
       - name: Run tests
         run: npm test
+        env:
+          PYTHON: ${{ steps.setup-python.outputs.python-path }}
 
       - name: Grounding evaluation (planted hallucinations)
         run: npm run eval:grounding

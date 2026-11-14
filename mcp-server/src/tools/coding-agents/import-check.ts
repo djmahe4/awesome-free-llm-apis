@@ -91,6 +91,37 @@ async function pyModuleExists(root: string, fromDir: string, spec: string): Prom
   return { ok, local: true, dir: path.dirname(target), last: parts[parts.length - 1] };
 }
 
+const FIND_SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.venv', 'venv', '.free-llm-mcp', '.mcp-uploads', 'checkpoints']);
+
+/**
+ * The relative import path (from `fromDir`) of the workspace file whose name, without extension, is `base`; the closest one
+ * when several match, undefined when none does. Bounded: at most 4000 entries and 1.5 s.
+ */
+export async function findByBasename(root: string, base: string, fromDir: string, ext: string): Promise<string | undefined> {
+  const deadline = Date.now() + 1500;
+  const matches: string[] = [];
+  let seen = 0;
+  const stack = [root];
+  while (stack.length > 0 && seen < 4000 && Date.now() < deadline) {
+    const dir = stack.pop()!;
+    let entries: import('node:fs').Dirent[];
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      seen++;
+      if (e.isDirectory()) { if (!FIND_SKIP.has(e.name)) stack.push(path.join(dir, e.name)); continue; }
+      if (!e.isFile() || e.name.endsWith('.d.ts')) continue;
+      if (e.name.replace(/\.(m|c)?[jt]sx?$/, '') === base && /\.(m|c)?[jt]sx?$/.test(e.name)) matches.push(path.join(dir, e.name));
+    }
+  }
+  if (matches.length === 0) return undefined;
+  const rel = (file: string) => {
+    const noExt = file.replace(/\.(m|c)?[jt]sx?$/, '');
+    const r = path.relative(fromDir, noExt).replace(/\\/g, '/');
+    return `${r.startsWith('.') ? r : `./${r}`}${ext}`;
+  };
+  return matches.map(rel).sort((a, b) => a.split('/').length - b.split('/').length || a.length - b.length)[0];
+}
+
 export async function newImportProblems(relPath: string, before: string, after: string, workspaceRoot: string): Promise<string[]> {
   const root = path.resolve(workspaceRoot);
   const abs = path.resolve(root, relPath);
@@ -106,12 +137,22 @@ export async function newImportProblems(relPath: string, before: string, after: 
           const near = await closestSibling(path.resolve(fromDir, path.dirname(spec)), wantedBase, f => f.replace(/\.(d\.)?(m|c)?[jt]sx?$/, ''));
           const ext = (spec.match(/\.(m|c)?[jt]sx?$/) ?? [''])[0];
           const dir = path.posix.dirname(spec.replace(/\\/g, '/'));
-          const suggestion = near ? `${dir === '.' ? '.' : dir}/${near}${ext}` : '';
-          problems.push(`${relPath}: import '${spec}' does not exist${near ? `; did you mean '${suggestion}'?` : ''}`);
+          // A file with exactly this name elsewhere in the workspace beats a fuzzy sibling: the common slip is the right
+          // file reached by the wrong path (`../thought-dag.js` from the folder that already holds it).
+          const exact = await findByBasename(root, wantedBase, fromDir, ext || '.js');
+          const suggestion = exact ?? (near ? `${dir === '.' ? '.' : dir}/${near}${ext}` : '');
+          problems.push(`${relPath}: import '${spec}' does not exist${suggestion ? `; did you mean '${suggestion}'?` : ''}`);
         }
       } else {
         const bare = spec.replace(/^node:/, '');
-        if (spec.startsWith('node:') || BUILTINS.has(bare) || BUILTINS.has(bare.split('/')[0])) continue;
+        // A `node:` prefix is not a pass: a model rewrote a correct `node:sqlite` to `node:sqlite3` and the repair loop
+        // then kept it. Prefix-only builtins (node:sqlite, node:test) are listed WITH the prefix in builtinModules.
+        if (spec.startsWith('node:')) {
+          if (BUILTINS.has(spec) || BUILTINS.has(bare) || BUILTINS.has(bare.split('/')[0])) continue;
+          problems.push(`${relPath}: '${spec}' is not a Node.js built-in module`);
+          continue;
+        }
+        if (BUILTINS.has(bare) || BUILTINS.has(bare.split('/')[0])) continue;
         if (!(await jsPackageInstalled(fromDir, root, spec))) problems.push(`${relPath}: package '${spec.split('/')[0].startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]}' is not installed in this workspace`);
       }
     }
