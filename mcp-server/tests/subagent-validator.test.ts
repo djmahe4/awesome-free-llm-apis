@@ -23,9 +23,10 @@ describe('subagent-validator', () => {
         choices: [{ message: { content: JSON.stringify(mockPayload) } }],
       }));
 
-      const validator = makeSubagentValidator(ws, sid, llm);
+      const validator = makeSubagentValidator(ws, sid, llm, undefined, '[tasks.md blackboard] prior assumption refuted');
       const result = await validator(sampleContext);
 
+      expect((llm.mock.calls[0][0] as any).messages[1].content).toContain('prior assumption refuted');
       expect(result).toEqual(mockPayload);
       expect(result).toHaveLength(2);
       expect(result[0]).toHaveProperty('claim', 'token verification file exists');

@@ -62,7 +62,7 @@ export function parseValidatorClaims(text: string): Array<{ claim: string; probe
   }
 }
 
-export function makeSubagentValidator(workspaceRoot: string, sessionId: string, llm?: Llm, scopedFiles?: string[]): Proposer {
+export function makeSubagentValidator(workspaceRoot: string, sessionId: string, llm?: Llm, scopedFiles?: string[], validationContext = ''): Proposer {
   return async ({ goal, files, derived }) => {
     try {
       const call = llm ?? (await defaultLlm());
@@ -71,11 +71,12 @@ export function makeSubagentValidator(workspaceRoot: string, sessionId: string, 
         'If more context is needed across caller or test files, generate probes targeting those specific files or symbols.',
         'List up to 6 skeptical assumptions or potential failure modes this goal depends on that can be verified against the source files, each with an exact probe.',
         'Return ONLY a JSON array: [{ "claim": "<adversarial challenge/assumption>", "probe": "<probe>" }]. No prose, no code fence.',
-        'Do not repeat these checks that already exist:',
-        derived.map(h => `- ${h.probe}`).join('\n') || '(none)',
+        'Do not repeat checks that already exist. Re-check any prior refuted hypothesis against the live evidence and propose a corrected, verifiable assumption when warranted.',
+        derived.map(h => `- ${h.status.toUpperCase()}: ${h.claim} [${h.probe}]${h.evidence ? ` — ${h.evidence}` : ''}`).join('\n') || '(none)',
         PROBE_HELP,
         `## Goal\n${goal}`,
         `## Files in the workspace\n${(scopedFiles && scopedFiles.length > 0 ? scopedFiles : files).slice(0, 60).join('\n') || '(none listed)'}`,
+        ...(validationContext ? [`## Human blackboard and live context\n${validationContext}`] : []),
       ].join('\n\n');
 
       const res = await call({

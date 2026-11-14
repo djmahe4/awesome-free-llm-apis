@@ -1,5 +1,6 @@
 import { loadCodingAgentsSettings, isSkippedTest } from './settings.js';
 import { spawn, spawnSync } from 'node:child_process';
+import { withApiTrap } from './api-trap.js';
 
 /**
  * Behavioural gate for coding_agents: a caller-supplied check (normally a test run) that must still
@@ -148,7 +149,8 @@ export async function runVerifyCommand(
       detached: process.platform !== 'win32',
       // No colour: NO_COLOR is the cross-tool convention, PY_COLORS covers pytest. FORCE_COLOR is removed
       // rather than set to 0, because pytest treats it being set at all as "force colour".
-      env: { ...withoutKey(process.env, 'FORCE_COLOR'), CI: '1', NO_COLOR: '1', PY_COLORS: '0' },
+      // withApiTrap: a call to a member a built-in does not have fails with the members it does have (see api-trap.ts).
+      env: withApiTrap({ ...withoutKey(process.env, 'FORCE_COLOR'), CI: '1', NO_COLOR: '1', PY_COLORS: '0' }),
     });
     const append = (d: Buffer) => {
       const text = d.toString();

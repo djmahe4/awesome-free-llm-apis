@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { createReadStream } from 'node:fs';
+import { isSameOrNestedWorkspacePath } from './workspace-path.js';
 
 export interface CodexSession {
   id: string;
@@ -123,7 +124,7 @@ export function listCodexSessions(homeDir: string, directoryFilter?: string): Co
     const id = meta.id;
     const cwd = meta.cwd;
     if (!id) continue;
-    if (needle && (!cwd || !normalizeCodexPath(cwd).includes(needle))) continue;
+    if (needle && (!cwd || !isSameOrNestedWorkspacePath(cwd, directoryFilter!))) continue;
     let mtime = 0;
     try { mtime = fs.statSync(fullPath).mtimeMs; } catch { }
     const idx = titles.get(id);

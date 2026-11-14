@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 
 /**
  * A per-project record of how runs failed (#149). Keys come from facts, not model wording. A later run on the same
@@ -64,4 +65,52 @@ export async function remediationsFor(root: string, files: string[], now = Date.
   const fresh = (await loadMistakes(root)).filter(m => files.includes(m.file) && now - m.lastSeen < MAX_AGE_MS);
   fresh.sort((a, b) => b.count - a.count);
   return [...new Set(fresh.map(m => m.remediation))].slice(0, MAX_LINES);
+}
+
+/**
+ * The failing fact behind a run that did not converge: the first runtime error or assertion line of the check's output
+ * plus the line of the test that raised it. `kind` says THAT a run failed; this says WHAT failed ("messages is not
+ * iterable" when called as `buildThing('s1', 'x', { messages: [...] })`), which is what a retry can act on.
+ */
+export function failureFact(outputTail: string | undefined, root: string): string | undefined {
+  if (!outputTail) return undefined;
+  const lines = outputTail.split(/\r?\n/);
+  const msg = lines.map(l => l.trim()).find(l => /\b(?:TypeError|ReferenceError|RangeError|SyntaxError|AssertionError)\b/.test(l));
+  if (!msg) return undefined;
+  const clean = (s: string) => s.replace(/\s+/g, ' ').slice(0, 200);
+  const frame = lines.map(l => l.match(/([\w./\\:-]*(?:tests?|__tests__)[\\/][\w./\\-]+\.(?:[cm]?[jt]sx?)):(\d+)(?::\d+)?/)).find(Boolean);
+  if (frame) {
+    try {
+      const abs = path.resolve(root, frame[1].replace(/^.*?(?=(?:tests?|__tests__)[\\/])/, ''));
+      const src = readFileSync(abs, 'utf8').split(/\r?\n/)[Number(frame[2]) - 1];
+      if (src?.trim()) return clean(`${msg} — raised at ${path.relative(root, abs).replace(/\\/g, '/')}:${frame[2]}: ${src.trim()}`);
+    } catch { /* the message alone still helps */ }
+  }
+  return clean(msg);
+}
+
+const MAX_FACTS = 2;
+const factStorePath = (root: string) => path.join(root, '.free-llm-mcp', 'failure-facts.json');
+
+interface FailureFact { file: string; fact: string; lastSeen: number }
+
+async function loadFacts(root: string): Promise<FailureFact[]> {
+  try { const p = JSON.parse(await fs.readFile(factStorePath(root), 'utf-8')); return Array.isArray(p) ? p : []; } catch { return []; }
+}
+
+/** Remembers one failing fact for each of these files (the newest replaces an identical older one). */
+export async function recordFailureFact(root: string, files: string[], fact: string, now = Date.now()): Promise<void> {
+  const store = (await loadFacts(root)).filter(f => !(files.includes(f.file) && f.fact === fact));
+  for (const file of files) store.push({ file, fact, lastSeen: now });
+  await fs.mkdir(path.dirname(factStorePath(root)), { recursive: true });
+  await fs.writeFile(factStorePath(root), JSON.stringify(store.slice(-50), null, 2), 'utf-8');
+}
+
+/** The newest facts for these files from the last thirty days, phrased for the next attempt's feedback. */
+export async function failureFactsFor(root: string, files: string[], now = Date.now()): Promise<string[]> {
+  return (await loadFacts(root))
+    .filter(f => files.includes(f.file) && now - f.lastSeen < MAX_AGE_MS)
+    .sort((a, b) => b.lastSeen - a.lastSeen)
+    .slice(0, MAX_FACTS)
+    .map(f => `A previous run on ${f.file} failed with: ${f.fact}`);
 }

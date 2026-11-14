@@ -28,12 +28,18 @@ describe('buildSyntaxBrief lists parse errors, not unresolved imports', () => {
         for (const m of ["',' expected", 'Declaration or statement expected', "'}' expected", 'Expression expected']) expect(brief).toContain(m);
         expect(brief.indexOf("',' expected")).toBeLessThan(brief.indexOf("'}' expected"));
     });
-    it('says nothing when the only errors are unresolved names and modules', () => {
-        expect(buildSyntaxBrief([
+    it('lists unresolved names and modules when they are the only errors, but never the ambient node-types advice', () => {
+        // An empty brief made the repair loop read "no problem" and stop with nothing applied, so with no parse error
+        // the resolution errors are the brief.
+        const brief = buildSyntaxBrief([
             err("Cannot find name 'node:fs/promises'.", 1),
             err("Cannot find module './types.js' or its corresponding type declarations.", 3),
             err("Cannot find name 'require'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node`.", 5),
-        ])).toBe('');
+        ]);
+        expect(brief).toContain("src/a.ts:1 Cannot find name 'node:fs/promises'");
+        expect(brief).toContain("Cannot find module './types.js'");
+        expect(brief).not.toMatch(/install type definitions/);
+        expect(buildSyntaxBrief([err("Cannot find name 'process'. Do you need to install type definitions for node?", 2)])).not.toBe('');
     });
     it('still ignores warnings', () => {
         expect(buildSyntaxBrief([{ filePath: 'a.ts', line: 1, message: 'Unterminated string literal.', severity: 'warning' }])).toBe('');

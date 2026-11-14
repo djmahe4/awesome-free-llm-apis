@@ -34,18 +34,13 @@ def main():
 
     shards: dict[str, list] = defaultdict(list)
     with open(args.input, encoding='utf-8') as f:
-        for line_num, line in enumerate(f, start=1):
+        for line in f:
             line = line.strip()
             if not line:
                 continue
-            try:
-                row = json.loads(line)
-            except Exception as e:
-                print(f"Skipping malformed JSON at line {line_num}: {e}")
-                continue
-            row['embedding'] = embed_text(row.get('thought_text', ''), embed_model)
-            expert = row.get('expert_label', 'general')
-            shards[expert].append(row)
+            row = json.loads(line)
+            row['embedding'] = embed_text(row['thought_text'], embed_model)
+            shards[row['expert_label']].append(row)
 
     for label, rows in shards.items():
         shard_path = out / f'expert_{label}.jsonl'

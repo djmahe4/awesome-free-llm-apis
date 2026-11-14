@@ -143,6 +143,12 @@ describe('plan action and run gate through CodingAgentsHandler', () => {
         expect(r.hypotheses.map((h: any) => [h.probe, h.status])).toEqual([['defined:getUser', 'confirmed'], ['defined:fetchUser', 'refuted']]);
         const md = await fs.readFile(path.join(pws, 'hypotheses.md'), 'utf-8');
         expect(md).toMatch(/\| h2 \|.*fetchUser.*\| refuted \|/);
+        const tasks = await fs.readFile(path.join(pws, 'tasks.md'), 'utf-8');
+        expect(tasks).toContain('Context permissions');
+        expect(tasks).toContain('Hypothesis validation');
+        expect(tasks).toMatch(/REFUTED.*fetchUser/);
+        expect(r.content).toContain('Hypothesis Validation');
+        expect(r.content).toContain('fetchUser');
         expect(r.diagnostics.some((d: any) => d.source === 'hypothesis' && d.severity === 'warning')).toBe(true);
         expect(r.patchSummary).toMatch(/assumption/i);
     });
@@ -182,5 +188,18 @@ describe('words between code spans are not names', () => {
     });
     it('real names in spans are still taken', () => {
         expect(probes('make `getUser` cache and `Cart` smaller')).toEqual(['defined:getUser', 'defined:Cart']);
+    });
+    it('does not treat package, environment, or SQLite schema names as workspace declarations', () => {
+        expect(probes('Use package `fzstd` with `ZED_THREADS_DB`, table `threads` and `folder_paths`.'))
+            .toEqual([]);
+    });
+    it('does not globally suppress a code symbol named threads', () => {
+        expect(probes('Use `threads` to process worker jobs.')).toEqual(['defined:threads']);
+        expect(probes('Use `threads` table for persistence.')).toEqual([]);
+    });
+    it('only ignores environment names when used as environment configuration', () => {
+        expect(probes('Use `zed_data_dir` helper to locate the workspace.')).toEqual(['defined:zed_data_dir']);
+        expect(probes('Read environment variable `zed_data_dir` before startup.')).toEqual([]);
+        expect(probes('Read `zed_data_dir` environment variable before startup.')).toEqual([]);
     });
 });

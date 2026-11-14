@@ -33,6 +33,11 @@ import {
   serializeTasksMarkdown,
   parseTasksMarkdown,
   extractGoalFromTasksMarkdown,
+  hasAgentThoughtContextApproval,
+  withAgentThoughtContextApproval,
+  withHypothesisSummary,
+  validationTasksBlackboard,
+  codingTaskSucceeded,
 } from './tasks.js';
 import { isNoopPatch } from './patch-gen.js';
 import { resolveGateMode, runHypothesisGate, writeHypothesesFile, HYPOTHESES_FILE } from './hypothesis-gate.js';
@@ -42,9 +47,13 @@ import { makeSubagentValidator } from './subagent-validator.js';
 import { globalEpisodicCache } from './episodic-probe-cache.js';
 const _symbolGraphCache = new SymbolGraphCache();
 import { loadCodingAgentsSettings } from './settings.js';
+import { FileStructureDag } from '../../harness/file-outline.js';
+import { buildCodingAgentWorkspaceContext } from '../../harness/coding-agent-context.js';
+import { readAgentThoughtDags, expandAgentThoughtContext } from '../../harness/agent-thought-context.js';
 import {
   discoverWiringTargets,
   scanCodeFiles,
+  scanCodingAgentContextFiles,
   withMarkdown,
   stableWorkspaceSessionId,
   aliasServesCall,
@@ -327,7 +336,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     if (input.action === 'plan' || input.pauseOnTaskPlan) {
       const planCandidateFiles = await scanCodeFiles(workspaceRoot, 100);
       const tasks = await decomposeGoalIntelligently(input.goal, workspaceRoot, planCandidateFiles, sessionId);
-      await fs.writeFile(tasksFilePath, serializeTasksMarkdown(input.goal, tasks), 'utf-8');
+      let tasksMarkdown = withAgentThoughtContextApproval(serializeTasksMarkdown(input.goal, tasks));
+      if (result.hypotheses) tasksMarkdown = withHypothesisSummary(tasksMarkdown, result.hypotheses);
+      await fs.writeFile(tasksFilePath, tasksMarkdown, 'utf-8');
       result.pipelineStage = 'completed';
       result.tasksPlan = tasks;
       result.tasksFile = 'tasks.md';
@@ -339,6 +350,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       const planGate = await runHypothesisGate({ mode: resolveGateMode(workspaceRoot), goal: input.goal, files: planCandidateFiles, targetFiles: input.targetFiles, tasks, workspaceRoot });
       if (planGate.hypotheses.length > 0) {
         await writeHypothesesFile(workspaceRoot, input.goal, planGate.hypotheses).catch(() => {});
+        const tasksMarkdown = await fs.readFile(tasksFilePath, 'utf-8');
+        await fs.writeFile(tasksFilePath, withHypothesisSummary(tasksMarkdown, planGate.hypotheses), 'utf-8');
         result.hypotheses = planGate.hypotheses;
         result.hypothesesFile = 'hypotheses.md';
         if (planGate.refuted.length > 0) {
@@ -352,6 +365,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     }
 
     let activeGoal = withFeedback(input.goal, input.feedback);
+    let thoughtContextApproved = false;
     let loadedTasks: TaskItem[] | undefined;
     let nextPendingTask: TaskItem | undefined;
     let planGoal = input.goal;
@@ -361,6 +375,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     if (input.action === 'resume') {
       if (await fs.pathExists(tasksFilePath)) {
         const tasksContent = await fs.readFile(tasksFilePath, 'utf-8');
+        thoughtContextApproved = hasAgentThoughtContextApproval(tasksContent);
         loadedTasks = parseTasksMarkdown(tasksContent);
         planGoal = extractGoalFromTasksMarkdown(tasksContent) || input.goal;
         nextPendingTask = loadedTasks.find(t => t.status === 'pending');
@@ -410,6 +425,12 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
 
     // ── Step 1: Enumerate ────────────────────────────────────────────────────
     const codeFiles: string[] = await scanCodeFiles(workspaceRoot, 100);
+    const contextFiles = await scanCodingAgentContextFiles(
+      workspaceRoot,
+      effectiveTargetFiles ?? [],
+      `${activeGoal}\n${input.verifyCommand ?? ''}`,
+    );
+    const validationFiles = Array.from(new Set([...contextFiles, ...codeFiles]));
 
     // Feedback-based scope selection: prioritize target files, files mentioned in goal/feedback,
     // and 1-hop neighborhood rather than an arbitrary slice of codeFiles.
@@ -417,6 +438,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     const goalTerms = (activeGoal || '').toLowerCase().match(/\b[\w.-]+\.(?:ts|js|py|go|rs)\b/g) || [];
     const prioritizedFiles = Array.from(new Set([
       ...(effectiveTargetFiles || []),
+      ...contextFiles,
       ...codeFiles.filter(f => goalTerms.some(t => f.toLowerCase().includes(t)) || feedbackTerms.some(t => f.toLowerCase().includes(t))),
       ...codeFiles
     ])).slice(0, 30);
@@ -452,10 +474,30 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       const shouldRunValidator = settings.subagentValidation || (settings.hypothesisGate !== 'off' && isLargeChangeZone);
       // Pass scoped 1-hop neighborhood to subagent validator
       const scopedValidatorFiles = prioritizedFiles.filter(f =>
-        (effectiveTargetFiles && effectiveTargetFiles.includes(f)) || directCallers.has(f)
+        (effectiveTargetFiles && effectiveTargetFiles.includes(f)) || contextFiles.includes(f) || directCallers.has(f)
       );
+      let validationContext = '';
+      if (shouldRunValidator && settings.hypothesisGate !== 'off') {
+        const tasksMarkdown = input.action === 'resume' && await fs.pathExists(tasksFilePath)
+          ? await fs.readFile(tasksFilePath, 'utf-8')
+          : undefined;
+        const blackboard = validationTasksBlackboard(input.action, tasksMarkdown, loadedTasks);
+        const liveContext = buildCodingAgentWorkspaceContext({
+          workspaceRoot,
+          query: `${activeGoal} ${effectiveTargetFiles?.join(' ') ?? ''}`,
+          targetFile: effectiveTargetFiles?.[0],
+          debugKeywords: input.contextKeywords,
+          maxChars: 5000,
+        });
+        let thoughtContext = '';
+        if (thoughtContextApproved) {
+          const dags = await readAgentThoughtDags({ workspaceRoot, config: settings.thoughtSources, maxSources: 20 });
+          thoughtContext = expandAgentThoughtContext(dags, activeGoal, 2500);
+        }
+        validationContext = [blackboard && `[tasks.md blackboard]\n${blackboard}`, liveContext, thoughtContext && `[approved agent thoughts]\n${thoughtContext}`].filter(Boolean).join('\n\n');
+      }
       const subPropose = shouldRunValidator
-        ? makeSubagentValidator(workspaceRoot, sessionId, undefined, scopedValidatorFiles.length > 0 ? scopedValidatorFiles : prioritizedFiles)
+        ? makeSubagentValidator(workspaceRoot, sessionId, undefined, scopedValidatorFiles.length > 0 ? scopedValidatorFiles : prioritizedFiles, validationContext)
         : undefined;
 
       const composedPropose = (primaryPropose || subPropose)
@@ -477,7 +519,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         : undefined;
 
       const gate = await runHypothesisGate({
-        mode: resolveGateMode(workspaceRoot), goal: activeGoal, files: codeFiles,
+        mode: resolveGateMode(workspaceRoot), goal: activeGoal, files: validationFiles,
         targetFiles: effectiveTargetFiles, tasks: nextPendingTask ? [nextPendingTask] : undefined, workspaceRoot,
         ...(composedPropose ? { propose: composedPropose, revise: modelReviser(workspaceRoot, sessionId) } : {}),
       });
@@ -495,6 +537,10 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         await writeHypothesesFile(workspaceRoot, activeGoal, gate.hypotheses).catch(() => {});
         result.hypotheses = gate.hypotheses;
         result.hypothesesFile = 'hypotheses.md';
+        if (await fs.pathExists(tasksFilePath)) {
+          const tasksMarkdown = await fs.readFile(tasksFilePath, 'utf-8');
+          await fs.writeFile(tasksFilePath, withHypothesisSummary(tasksMarkdown, gate.hypotheses), 'utf-8');
+        }
       } else if (gate.hypotheses.length > 0) {
         result.hypotheses = gate.hypotheses;
       }
@@ -555,7 +601,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
           log: [],
         };
       });
-      await fs.writeFile(tasksFilePath, serializeTasksMarkdown(input.goal, tasks), 'utf-8');
+      let tasksMarkdown = withAgentThoughtContextApproval(serializeTasksMarkdown(input.goal, tasks));
+      if (result.hypotheses) tasksMarkdown = withHypothesisSummary(tasksMarkdown, result.hypotheses);
+      await fs.writeFile(tasksFilePath, tasksMarkdown, 'utf-8');
       result.pipelineStage = 'completed';
       result.tasksPlan = tasks;
       result.tasksFile = 'tasks.md';
@@ -672,6 +720,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     // Multi-file runs: every file's prompt sees the others' API surface, edited ones in their new form.
     // relatedFiles: part of the change, not edited in this call (a narrowed repair); shown in their current form.
     const changeFiles = [...new Set([...result.relevantFiles, ...(input.relatedFiles ?? [])])];
+    const structureDag = new FileStructureDag();
     const runContents = new Map<string, string>();
     const editedInRun = new Set<string>(input.relatedFiles ?? []);
     if (changeFiles.length > 1) {
@@ -713,8 +762,8 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         candidatePatchedContent = cachedPatch.fullPatchedContent;
       } else if (!dryRun && (!input.astEditOps || input.astEditOps.length === 0)) {
         const generated = await generateFilePatch({
-          input: { ...input, _symbolGraph: symbolGraph } as any, result, relPath, fullPath, workspaceRoot, sessionId, run, resolvedModel, originalContent, activeGoal,
-          loadedTasks, nextPendingTask, changeFiles, runContents, editedInRun,
+          input: { ...input, _symbolGraph: symbolGraph } as any, result, relPath, fullPath, workspaceRoot, sessionId, run, resolvedModel, originalContent, activeGoal, objective: planGoal,
+          loadedTasks, nextPendingTask, changeFiles, runContents, editedInRun, thoughtContextApproved, structureDag,
         });
         candidatePatchedContent = generated.patchedContent;
         candidateFailed = generated.failed;
@@ -805,6 +854,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         runContents.set(relPath, patchedContent);
         editedInRun.add(relPath);
       }
+      structureDag.updateFile(relPath, patchedContent);
       result.astRewritesCount = (result.astRewritesCount || 0) + rewrites;
       if (run) {
         run.completedCount++;
@@ -873,7 +923,17 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         result.message = `Not applied: ${assessment.reasons.join('; ')}. Review the diff. To proceed, apply without verifyCommand, run \`${input.verifyCommand}\` yourself, and send its exit code and output back as verifyReport.`;
       }
     }
-    if (!dryRun && input.resolve?.action === 'apply' && patches.length > 0 && !verifyWithheld && !reviewBlocked) {
+    // A generation that produced nothing for a new or empty file leaves a blank patch. Writing it used to throw,
+    // and the repair loop treats a thrown error as final, so the reason the model's reply was unusable never reached it.
+    // Not applied instead: the failure diagnostic becomes the retry brief.
+    const blankPatchFiles = !dryRun ? patches.filter(p => !p.fullPatchedContent?.trim()).map(p => p.filePath) : [];
+    for (const f of blankPatchFiles) {
+      if (!result.diagnostics.some(d => d.filePath === f && d.severity === 'error')) {
+        result.diagnostics.push({ filePath: f, message: 'The model produced no usable content for this file, so nothing was written.', severity: 'error', source: 'llm-patch' });
+      }
+    }
+    const blankPatch = blankPatchFiles.length > 0;
+    if (!dryRun && input.resolve?.action === 'apply' && patches.length > 0 && !verifyWithheld && !reviewBlocked && !blankPatch) {
       for (const patch of patches) {
         assertPatchPathAllowed(workspaceRoot, patch.filePath);
       }
@@ -928,6 +988,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
         for (const { tmpPath, fullPath } of tempWrites) {
           await fs.rename(tmpPath, fullPath);
         }
+        for (const patch of patches) structureDag.updateFile(patch.filePath, patch.fullPatchedContent);
       } catch (writeErr: any) {
         // Rollback any temporary files on error
         for (const { tmpPath } of tempWrites) {
@@ -978,7 +1039,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
     }
     result.pipelineStage = 'completed';
     // applied = true only when patches were actually written to disk
-    result.applied = !dryRun && input.resolve?.action === 'apply' && !verifyWithheld && !reviewBlocked;
+    result.applied = !dryRun && input.resolve?.action === 'apply' && !verifyWithheld && !reviewBlocked && !blankPatch;
     if (result.applied && noopFiles === patches.length && (result.symbolLoss?.length || 0) > 0) {
       result.applied = false;
       result.message = `${result.message ? result.message + ' ' : ''}Refused to apply changes: unmentioned symbols were lost (${result.symbolLoss!.join(', ')}).`;
@@ -1080,7 +1141,7 @@ ${after.outputTail}`,
           result.applied = false;
           result.restoredFiles = [...files, ...deletedNewFiles];
           // Hand the compiler messages to a retry (the loop would otherwise see only a silent rollback).
-          const syntaxBrief = buildSyntaxBrief(diagnosticsList as any);
+          const syntaxBrief = buildSyntaxBrief(diagnosticsList);
           if (syntaxBrief) result.rollbackBrief = syntaxBrief;
           result.patchSummary = `Automatically rolled back ${restoredCount} file(s)${deletedNewFiles.length ? ` and removed ${deletedNewFiles.length} newly-created file(s)` : ''}: the applied patch introduced ${diagnosticsList.filter(d => d.severity === 'error').length} compiler error(s), which usually means the LLM's output doesn't actually belong to the target file. Checkpoint: ${result.checkpointId}. Re-run with a more explicit goal, astEditOps, or action:"resume".`;
         } catch (rollbackErr: any) {
@@ -1098,8 +1159,13 @@ ${after.outputTail}`,
     // actually happened this resume (not just flip a checkbox) — a failed
     // attempt stays 'pending' so the next resume retries the SAME task, with
     // this attempt's outcome visible in its log rather than silently lost.
-    if (loadedTasks && nextPendingTask) {
-      const succeeded = !taskHadFailure && !result.error;
+    if (loadedTasks && nextPendingTask && !dryRun) {
+      const succeeded = !taskHadFailure && codingTaskSucceeded({
+        applied: !!result.applied,
+        error: result.error,
+        diagnostics: result.diagnostics,
+        patches: result.patchPlan,
+      });
       nextPendingTask.status = succeeded ? 'completed' : 'pending';
       const outcomeParts = [
         `resume#${taskResumeCount}`,
@@ -1113,7 +1179,9 @@ ${after.outputTail}`,
       }
       (nextPendingTask.log ??= []).push(`${new Date().toISOString()} ${outcomeParts.join(' ')}`);
 
-      await fs.writeFile(tasksFilePath, serializeTasksMarkdown(planGoal, loadedTasks), 'utf-8');
+      let tasksMarkdown = withAgentThoughtContextApproval(serializeTasksMarkdown(planGoal, loadedTasks), thoughtContextApproved);
+      if (result.hypotheses) tasksMarkdown = withHypothesisSummary(tasksMarkdown, result.hypotheses);
+      await fs.writeFile(tasksFilePath, tasksMarkdown, 'utf-8');
       result.tasksPlan = loadedTasks;
       result.tasksFile = 'tasks.md';
       const remaining = loadedTasks.filter(t => t.status === 'pending');

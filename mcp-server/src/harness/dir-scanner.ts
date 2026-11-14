@@ -17,7 +17,7 @@ export function classifyColumn(name: string): PiiClass {
 const NON_NAME_WORDS = new Set([
   'the', 'this', 'that', 'and', 'but', 'for', 'you', 'your', 'with', 'from', 'have', 'has', 'had',
   'are', 'was', 'were', 'been', 'will', 'would', 'can', 'could', 'should', 'may', 'might', 'must',
-  'not', 'all', 'any', 'new', 'use', 'used', 'using', 'node', 'test', 'file', 'files',
+  'not', 'all', 'any', 'new', 'use', 'used', 'using', 'node', 'zed', 'test', 'file', 'files',
   'code', 'line', 'lines', 'error', 'errors', 'llm', 'api', 'mcp', 'http', 'https', 'read',
   'write', 'made', 'set', 'get', 'let', 'its', 'his', 'her', 'one', 'two', 'run', 'end', 'sum',
   'md', 'ts', 'js', 'json', 'sql', 'db', 'sqlite', 'claude', 'codex', 'gemini', 'openai',
@@ -177,9 +177,7 @@ export class WorkspaceDirScanner {
         try {
           const stat = fs.statSync(path.join(dir, entry.name));
           files.push({ name: entry.name, size: stat.size, mtimeMs: stat.mtimeMs });
-        } catch (err) {
-          // Inaccessible or deleted during scan
-        }
+        } catch { }
       }
 
       const folder: ScannedFolder = { path: dir, depth, files, subdirs: subdirs.length };
@@ -215,16 +213,16 @@ export interface DirScanArgs {
   map_dbs?: boolean;
 }
 
-export function scanWorkspace(args: DirScanArgs): Promise<DirScanResult> {
+export async function scanWorkspace(args: DirScanArgs): Promise<DirScanResult> {
   const { workspace_root, max_depth, files_per_folder, skip_dirs, budget_ms, map_dbs } = args;
   const scanner = new WorkspaceDirScanner(workspace_root);
-  return Promise.resolve(scanner.scanDir({
+  return scanner.scanDir({
     maxDepth: max_depth,
     filesPerFolder: files_per_folder,
     skipDirs: skip_dirs,
     budgetMs: budget_ms,
     mapDbs: map_dbs,
-  }));
+  });
 }
 
 function isSqliteFile(filePath: string): boolean {
@@ -262,16 +260,14 @@ function mapSqliteSchema(dbPath: string): ScannedDb | null {
           rowCount: countRow.c,
           columns: cols.map(c => ({ name: c.name, type: c.type, pii: classifyColumn(c.name) })),
         });
-      } catch (err) {
-        // Table may be virtual or unreadable
-      }
+      } catch { }
     }
     return { path: dbPath, format: 'sqlite', tables: mapped };
   } catch {
     return null;
   } finally {
     if (db !== null) {
-      try { db.close(); } catch (err) { /* ignore close error */ }
+      try { db.close(); } catch { }
     }
   }
 }

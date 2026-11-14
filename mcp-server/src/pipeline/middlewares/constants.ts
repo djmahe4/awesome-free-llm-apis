@@ -67,3 +67,6 @@ export const MAX_FILES_SCANNED = 5000;
 // result + resume handle instead of continuing to block. Many MCP clients (code editors)
 // kill a tool call at ~30s; default leaves headroom for serialization + the final persist.
 export const SUBTASK_BUDGET_MS = Number(process.env.MCP_SUBTASK_BUDGET_MS ?? 20_000);
+
+// Maximum communication queue entries preserved before sliding window eviction
+export const COMMS_QUEUE_MAX = Number(process.env.COMMS_QUEUE_MAX ?? 50);

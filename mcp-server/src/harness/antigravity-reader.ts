@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { containsWorkspacePath } from './workspace-path.js';
 
 export interface AntigravitySession {
   id: string;
@@ -16,9 +17,6 @@ export interface AntigravityThought {
   text: string;
 }
 
-function normalizePath(p: string): string {
-  return p.toLowerCase().replace(/\\/g, '/');
-}
 
 export function antigravityBrainRoot(homeDir = os.homedir()): string {
   const override = process.env['ANTIGRAVITY_DATA_DIR'];
@@ -54,55 +52,25 @@ function parseTranscriptLine(line: string): ParsedLine | null {
 }
 
 function firstUserInputText(transcriptPath: string): string | undefined {
-  let fd: number | null = null;
   try {
-    fd = fs.openSync(transcriptPath, 'r');
-    const bufSize = 64 * 1024;
-    const buffer = Buffer.alloc(bufSize);
-    let bytesRead = 0;
-    let remainder = '';
-    while ((bytesRead = fs.readSync(fd, buffer, 0, bufSize, null)) > 0) {
-      const chunk = remainder + buffer.toString('utf8', 0, bytesRead);
-      const lines = chunk.split(/\r?\n/);
-      remainder = lines.pop() ?? '';
-      for (const line of lines) {
-        const parsed = parseTranscriptLine(line);
-        if (parsed && parsed.type === 'USER_INPUT' && parsed.content) {
-          return stripUserRequestTag(parsed.content);
-        }
-      }
-    }
-    if (remainder) {
-      const parsed = parseTranscriptLine(remainder);
-      if (parsed && parsed.type === 'USER_INPUT' && parsed.content) {
-        return stripUserRequestTag(parsed.content);
-      }
+    const raw = fs.readFileSync(transcriptPath, 'utf8');
+    for (const line of raw.split(/\r?\n/)) {
+      const parsed = parseTranscriptLine(line);
+      if (!parsed || parsed.type !== 'USER_INPUT' || !parsed.content) continue;
+      return stripUserRequestTag(parsed.content);
     }
   } catch {
     return undefined;
-  } finally {
-    if (fd !== null) {
-      try { fs.closeSync(fd); } catch {}
-    }
   }
   return undefined;
 }
 
 function mentionsWorkspace(transcriptPath: string, workspaceRoot: string): boolean {
-  let fd: number | null = null;
   try {
-    const buffer = Buffer.alloc(16 * 1024);
-    fd = fs.openSync(transcriptPath, 'r');
-    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
-    const head = buffer.toString('utf8', 0, bytesRead);
-    const collapse = (value: string) => normalizePath(value).replace(/\/+/g, '/');
-    return collapse(head).includes(collapse(workspaceRoot));
+    const head = fs.readFileSync(transcriptPath, 'utf8').slice(0, 16 * 1024);
+    return containsWorkspacePath(head, workspaceRoot);
   } catch {
     return false;
-  } finally {
-    if (fd !== null) {
-      try { fs.closeSync(fd); } catch {}
-    }
   }
 }
 

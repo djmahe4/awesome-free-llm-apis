@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { detectThoughtSources, listClaudeJsonlSources, listOpencodeSessionSources, listCodexSessionSources, listAntigravitySessionSources } from '../src/harness/thought-sources.js';
+import { containsWorkspacePath, isSameOrNestedWorkspacePath } from '../src/harness/workspace-path.js';
 import { openOpencodeDb, readOpencodeThoughts, opencodeDbPath } from '../src/harness/opencode-reader.js';
 import { readCodexThoughts } from '../src/harness/codex-reader.js';
 import { listAntigravitySessions, readAntigravityThoughts } from '../src/harness/antigravity-reader.js';
@@ -273,5 +274,22 @@ describe('detectThoughtSources', () => {
     });
     expect(sources.map(s => s.label)).toEqual(['claude:a', 'opencode:ses_zz']);
     expect(sources[0].claudeJsonl).toBe('C:\\a.jsonl');
+  });
+});
+
+describe('workspace-path boundaries', () => {
+  it('containsWorkspacePath avoids false positive substrings when prefix characters match', () => {
+    expect(containsWorkspacePath('/prefix/otherapp/file.ts', '/app')).toBe(false);
+    expect(containsWorkspacePath('navigate to /app/file.ts now', '/app')).toBe(true);
+    expect(containsWorkspacePath('in "/app" dir', '/app')).toBe(true);
+    expect(containsWorkspacePath('C:\\work\\otherproj\\file.ts', 'C:\\proj')).toBe(false);
+    expect(containsWorkspacePath('C:\\proj\\src\\index.ts', 'C:\\proj')).toBe(true);
+  });
+
+  it('isSameOrNestedWorkspacePath handles root and nested paths securely', () => {
+    expect(isSameOrNestedWorkspacePath('/app', '/app')).toBe(true);
+    expect(isSameOrNestedWorkspacePath('/app/sub/dir', '/app')).toBe(true);
+    expect(isSameOrNestedWorkspacePath('/app2', '/app')).toBe(false);
+    expect(isSameOrNestedWorkspacePath('', '/app')).toBe(false);
   });
 });

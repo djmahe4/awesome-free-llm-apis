@@ -129,7 +129,12 @@ export function withFileLockSync<T>(filePath: string, fn: () => T, timeoutMs = 5
                 if (Date.now() - start > timeoutMs) {
                     throw new Error(`Timeout waiting for sync lock on file: ${filePath}`);
                 }
-                Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+                try {
+                    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+                } catch {
+                    const until = Date.now() + 25;
+                    while (Date.now() < until) { /* spin-wait fallback */ }
+                }
             } else {
                 throw err;
             }

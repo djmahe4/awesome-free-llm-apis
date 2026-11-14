@@ -11,6 +11,7 @@ vi.mock('../src/pipeline/middlewares/context-gatherer.js', () => ({ ContextGathe
 vi.mock('../src/utils/ChatLogger.js', () => ({ logToolCall: vi.fn().mockResolvedValue(undefined) }));
 
 import { listLocalModels, chatLocal } from '../src/providers/ollama-local.js';
+import { ContextGatherer } from '../src/pipeline/middlewares/context-gatherer.js';
 import { localLlmPatch } from '../src/tools/local-llm-patch.js';
 import { removeDir } from './helpers/temp-dir.js';
 
@@ -70,6 +71,20 @@ describe('local_llm_patch robustness', () => {
     const opts = (chatLocal as any).mock.calls[0][2];
     expect(opts.temperature).toBe(0);
     expect(opts.maxTokens).toBeGreaterThan(0);
+  });
+
+  it('skips generic retrieval when the coding agent already supplied curated context', async () => {
+    (ContextGatherer.gatherContext as any).mockClear();
+    (chatLocal as any).mockResolvedValue(reply(SR));
+    const r = await localLlmPatch({
+      filePath: file,
+      instruction: '[Live workspace context] Use the existing add function contract.',
+      workspace_root: dir,
+      outputFormat: 'search-replace',
+      skipContextGathering: true,
+    } as any);
+    expect(r.success).toBe(true);
+    expect(ContextGatherer.gatherContext).not.toHaveBeenCalled();
   });
 
   it('a truncated prompt fails loudly instead of returning a patch built on a cut-off file', async () => {

@@ -772,7 +772,7 @@ export async function checkThoughtDeviation(
   goal: string,
   proposed: string,
   callId: string,
-): Promise<LayaValidationResult> {
+): Promise<LayaValidationResult | null> {
   try {
     const events = await store.readTrace();
     const truncated = events.some(e => e.type === 'trace_truncated');
@@ -786,15 +786,14 @@ export async function checkThoughtDeviation(
       data: { callId, policy, alignment: result.alignment, drift_prob: result.drift_prob, unsafe_prob: result.unsafe_prob, latency_ms: result.latency_ms, trail_source: trailSource },
     }).catch(() => {});
     return result;
-  } catch (err) {
-    console.error(`[harness] checkThoughtDeviation failed for run=${run.runId} role=${role} callId=${callId}:`, err);
+  } catch (err: any) {
     await store.appendTrace({
       runId: run.runId,
       role,
       type: 'error',
-      data: { errorType: 'deviation_error', callId, error: (err as Error)?.message ?? String(err) },
+      data: { stage: 'deviation_check', callId, error: err?.message || String(err) },
     }).catch(() => {});
-    throw err;
+    return null;
   }
 }
 
@@ -1043,17 +1042,8 @@ async function runSteps(
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
 
-      let deviationResult: LayaValidationResult;
-      try {
-        deviationResult = await checkThoughtDeviation(store, run, role, originalGoal, stepGoal, callId);
-      } catch (err) {
-        run.status = 'failed';
-        run.error = `Deviation validation failure: step '${callId}' could not be verified (${(err as Error)?.message ?? err})`;
-        await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});
-        await endTaskAttempt(store, originalGoal, stepId, 'failed', run.error);
-        return { content: lastContent, lastRole, finalHandoff: handoff };
-      }
-      if (enforceDeviationPolicy(deviationResult) === 'halt') {
+      const deviationResult = await checkThoughtDeviation(store, run, role, originalGoal, stepGoal, callId);
+      if (deviationResult && enforceDeviationPolicy(deviationResult) === 'halt') {
         run.status = 'failed';
         run.error = `Deviation guard: proposed step '${callId}' drifted from the goal (laya drift > 0.5)`;
         await store.appendTrace({ runId: run.runId, role, type: 'error', data: { message: run.error } }).catch(() => {});

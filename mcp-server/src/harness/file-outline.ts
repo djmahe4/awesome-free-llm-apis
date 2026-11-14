@@ -123,14 +123,12 @@ export class FileStructureDag {
     });
     this.fileRoots.set(relativePath, fileId);
     const nodeBySymbol = new Map<string, FileStructureNode>();
+    const seenIds = new Map<string, number>();
     for (const symbol of outline.outline) {
       const baseId = `${relativePath}#${symbol.line}:${symbol.name}`;
-      let id = baseId;
-      if (this.nodesById.has(id)) {
-        let count = 2;
-        while (this.nodesById.has(`${baseId}#${count}`)) count++;
-        id = `${baseId}#${count}`;
-      }
+      const count = seenIds.get(baseId) ?? 0;
+      seenIds.set(baseId, count + 1);
+      const id = count === 0 ? baseId : `${baseId}#${count}`;
       const parent = symbol.parentId ? nodeBySymbol.get(symbol.parentId) : undefined;
       const node: FileStructureNode = {
         id,
@@ -144,7 +142,6 @@ export class FileStructureDag {
         depth: (parent?.depth ?? 0) + 1,
       };
       this.nodesById.set(id, node);
-      nodeBySymbol.set(baseId, node);
       nodeBySymbol.set(id, node);
     }
     this.outlines.set(relativePath, outline);

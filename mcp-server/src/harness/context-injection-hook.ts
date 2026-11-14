@@ -94,7 +94,9 @@ export class ContextInjectionHook {
 
   async after(ctx: HookCallResultContext, result: unknown): Promise<ThoughtBundle | null> {
     this.counter += 1;
-    const text = `Tool ${ctx.tool}.${ctx.action} (${ctx.goal ?? ''}) completed: ${stringifyResult(result)}`;
+    const durationStr = ctx.durationMs != null ? ` +${ctx.durationMs}ms` : '';
+    const errorStr = ctx.error ? ` [ERROR: ${ctx.error}]` : '';
+    const text = `Tool ${ctx.tool}.${ctx.action} (${ctx.goal ?? ''})${durationStr}${errorStr}: ${stringifyResult(result)}`;
     if (!/\S/.test(text)) return null;
     return {
       id: `rea-${ctx.tool}-${ctx.action}-${this.counter}-${Date.now()}`,
@@ -108,7 +110,10 @@ export class ContextInjectionHook {
   }
 }
 
-type HookCallResultContext = HookCallContext;
+export interface HookCallResultContext extends HookCallContext {
+  durationMs?: number;
+  error?: string;
+}
 
 function stringifyResult(result: unknown): string {
   if (result == null) return 'no result';

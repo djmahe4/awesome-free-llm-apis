@@ -319,6 +319,35 @@ export function inconsistentCalls(rawSrc: string): Array<{ name: string; counts:
 const KEY_LINE_RE =/\b(FAIL(ED)?|ERROR|AssertionError|Assertion failed|Traceback|panic:|expected|received|actual|TypeError|ReferenceError|SyntaxError|✗|×|not ok)\b|^\s*[✗×]|^\s*E\s{2,}/i;
 const FRAME_RE = /[\w./\\-]+\.[a-z]{1,4}:\d+(:\d+)?/i;
 const BRIEF_CAP = 2000;
+/**
+ * Restates "+ key: A" / "- key: B" pairs from a diff body as one sentence per property. A small model that saw the diff still
+ * applied a casing fix ('Agent' -> 'agent') where the test wanted a different word ('assistant'); naming the difference
+ * (casing only vs a different value) tells it which edit is needed.
+ */
+export function diffValueHints(diffs: string[], max = 4): string[] {
+  const hints: string[] = [];
+  const seen = new Set<string>();
+  for (const block of diffs) {
+    const rows = block.split('\n');
+    for (let i = 0; i < rows.length - 1 && hints.length < max; i++) {
+      const got = rows[i].match(/^\s*\+\s+([\w$"']+):\s*(.+?),?\s*$/);
+      const want = rows[i + 1].match(/^\s*-\s+([\w$"']+):\s*(.+?),?\s*$/);
+      if (!got || !want || got[1] !== want[1]) continue;
+      const key = got[1].replace(/["']/g, '');
+      const sig = `${key}|${got[2]}|${want[2]}`;
+      if (seen.has(sig)) continue;
+      seen.add(sig);
+      const strip = (v: string) => v.replace(/^['"`]|['"`]$/g, '');
+      const caseOnly = strip(got[2]).toLowerCase() === strip(want[2]).toLowerCase();
+      hints.push(caseOnly
+        ? `\`${key}\`: your code gives ${got[2]}, the test expects ${want[2]}. They differ only in letter case.`
+        : `\`${key}\`: your code gives ${got[2]}, the test expects ${want[2]}. These are different values, not a casing difference: add an explicit mapping from ${got[2]} to ${want[2]} (a lookup table or a condition) instead of transforming the text.`);
+    }
+  }
+  return hints;
+}
+
+const OPAQUE_VALUE_RE = /^\s*(?:actual|expected):\s*\[(?:Array|Object|Function)\],?\s*$/;
 
 /** Quoted strings and ip/number-like tokens in failing case names: the inputs the tests use. */
 function caseInputs(cases: string[]): string[] {
@@ -357,8 +386,21 @@ export function buildRepairBrief(i: RepairBriefInput): string {
   const key: string[] = [];
   const frames: string[] = [];
   for (const l of lines) {
-    if (KEY_LINE_RE.test(l)) key.push(l.trim());
+    // node:test prints `actual: [Array]` for any array or object: it names the keyword but carries no value.
+    if (KEY_LINE_RE.test(l) && !OPAQUE_VALUE_RE.test(l)) key.push(l.trim());
     if (FRAME_RE.test(l) && patchedBase.some(b => norm(l).includes(b))) frames.push(l.trim());
+  }
+  // The "+ actual - expected" body is what shows WHICH value is wrong ("+ role: 'User'" / "- role: 'user'"), and none
+  // of its lines contain a keyword, so the key-line filter used to drop it: the model was told only that two arrays differ.
+  const diffs: string[] = [];
+  for (let k = 0; k < lines.length && diffs.length < 3; k++) {
+    if (!/^\s*\+\s*actual\s*-\s*expected\s*$/i.test(lines[k])) continue;
+    const block: string[] = [];
+    for (let m = k + 1; m < lines.length && block.length < 24; m++) {
+      if (/^\s*(at |generatedMessage\b|code:|test at )/.test(lines[m])) break;
+      block.push(lines[m]);
+    }
+    if (block.length) diffs.push(block.join('\n'));
   }
   const dedupe = (a: string[]) => [...new Set(a)];
   const parts: string[] = [PERSONA, `Check: ${i.command} (${i.timedOut ? 'timed out' : `exit ${i.exitCode}`})`];
@@ -401,6 +443,9 @@ export function buildRepairBrief(i: RepairBriefInput): string {
   }
   if (cases.length > 3) parts.push('Several cases fail: rewrite the whole function from the requirements instead of patching single lines.');
   if (i.timedOut) parts.push('The check timed out: the edit probably introduced a hang or an infinite loop.');
+  if (diffs.length) parts.push('What differs ("+" is the value your code produced, "-" is the value the test expects):\n' + diffs.join('\n---\n'));
+  const valueHints = diffValueHints(diffs);
+  if (valueHints.length) parts.push(valueHints.join('\n'));
   if (key.length) parts.push('Failures:\n' + dedupe(key).slice(0, 12).join('\n'));
   if (frames.length) parts.push('Frames in your edit:\n' + dedupe(frames).slice(0, 6).join('\n'));
   if (!key.length && !frames.length && lines.length) parts.push('Output:\n' + collapseSimilarLines(lines, { head: 4, tail: 8 }).join('\n'));
@@ -451,15 +496,23 @@ export async function readVerifyTestContext(command: string, workspaceRoot: stri
  */
 export function buildSyntaxBrief(diagnostics: Array<{ filePath: string; line?: number; message: string; severity?: string }>): string {
   const all = diagnostics.filter(d => d.severity === 'error');
-  const errors = all.filter(d => !/Cannot find (?:name|module)\b|or its corresponding type declarations|install type definitions/i.test(d.message));
-  if (errors.length === 0) return '';
-  const shown = errors.slice(0, 10).map(d => `${d.filePath}${d.line ? `:${d.line}` : ''} ${d.message.split('\n')[0].slice(0, 200)}`);
-  const more = errors.length > shown.length ? `\n(+${errors.length - shown.length} more)` : '';
+  // Ambient "install type definitions for node" advice is never about the edit.
+  const substantive = all.filter(d => !/install type definitions for node|add 'node' to the types field/i.test(d.message));
+  // The isolated per-file check has no node_modules and no sibling files, so every import looks unresolved (#114). While a
+  // real parse or type error exists, those resolution lines are left out and counted, so they cannot lead the brief. With
+  // ONLY resolution errors the brief still lists them: an empty brief made the repair loop think it had converged.
+  const resolution = (d: { message: string }) => /Cannot find (?:name|module)\b|or its corresponding type declarations/i.test(d.message);
+  const real = substantive.filter(d => !resolution(d));
+  const effective = real.length > 0 ? real : (substantive.length > 0 ? substantive : all);
+  if (effective.length === 0) return '';
+  const shown = effective.slice(0, 10).map(d => `${d.filePath}${d.line ? `:${d.line}` : ''} ${d.message.split('\n')[0].slice(0, 200)}`);
+  const more = effective.length > shown.length ? `\n(+${effective.length - shown.length} more)` : '';
+  const leftOut = substantive.length - effective.length;
   return [
-    'Your last edit was rolled back: the file does not parse (syntax errors).',
+    'Your last edit was rolled back: the file does not parse or has compiler/type errors.',
     `Errors:\n${shown.join('\n')}${more}`,
     'Rules: return a corrected edit that is valid code. Do not run commands or tests; the user runs them.',
-    all.length > errors.length ? `${all.length - errors.length} unresolved import or module resolution error(s) from the isolated check were left out; they are not caused by your edit.` : '',
+    leftOut > 0 ? `${leftOut} unresolved import or module resolution error(s) from the isolated check were left out; they are not caused by your edit.` : '',
   ].filter(Boolean).join('\n');
 }
 

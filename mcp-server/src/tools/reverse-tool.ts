@@ -85,16 +85,23 @@ export function inspectPythonDeps(pythonBin?: string): { pil: boolean; cv2: bool
   return { pil: false, cv2: false, torch: false };
 }
 
+export function resetPythonCache(): void {
+  cachedPythonBin = null;
+  cachedOptionalDeps = null;
+}
+
 export function resolvePythonPath(): string {
   if (process.env.PYTHON) {
     return process.env.PYTHON;
   }
-  if (cachedPythonBin) {
+  if (cachedPythonBin && (cachedPythonBin === 'python' || cachedPythonBin === 'python3' || fs.existsSync(cachedPythonBin))) {
     return cachedPythonBin;
   }
   const isWin = process.platform === 'win32';
   const pyRel = isWin ? path.join('Scripts', 'python.exe') : path.join('bin', 'python');
+  const pyLoc = process.env.pythonLocation || process.env.Python_ROOT_DIR || process.env.Python3_ROOT_DIR;
   const candidates = [
+    ...(pyLoc ? [isWin ? path.join(pyLoc, 'python.exe') : path.join(pyLoc, 'bin', 'python')] : []),
     path.resolve(process.cwd(), 'venv', pyRel),
     path.resolve(process.cwd(), '.venv', pyRel),
     path.resolve(process.cwd(), 'mcp-server/venv', pyRel),

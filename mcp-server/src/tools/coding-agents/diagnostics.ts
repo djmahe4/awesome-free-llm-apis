@@ -169,7 +169,9 @@ export async function runTsMorphCheck(
       },
     });
 
-    const srcFile = project.createSourceFile(filePath, fullContent, { overwrite: true });
+    const isJs = /\.[cm]?js$/i.test(filePath);
+    const virtualPath = isJs ? filePath.replace(/\.[cm]?js$/i, '.ts') : filePath;
+    const srcFile = project.createSourceFile(virtualPath, fullContent, { overwrite: true });
 
     // Context7: sourceFile.getPreEmitDiagnostics() — syntactic + semantic, global, options
     const diagnostics = srcFile.getPreEmitDiagnostics();
@@ -208,7 +210,9 @@ export async function extractTsMorphSymbols(
   try {
     const { Project, SyntaxKind } = await import('ts-morph');
     const project = new Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true });
-    const srcFile = project.createSourceFile(filePath, fullContent, { overwrite: true });
+    const isJs = /\.[cm]?js$/i.test(filePath);
+    const virtualPath = isJs ? filePath.replace(/\.[cm]?js$/i, '.ts') : filePath;
+    const srcFile = project.createSourceFile(virtualPath, fullContent, { overwrite: true });
 
     const symbols: string[] = [];
     // Context7: forEachDescendant for visitor pattern across all descendants

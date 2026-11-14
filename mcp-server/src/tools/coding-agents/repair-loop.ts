@@ -6,8 +6,9 @@ import { resetVerifyCache } from './verify-cache.js';
 import { loadCodingAgentsSettings } from './settings.js';
 import { alreadyAdded } from './work-order.js';
 import { runSteps, splitSteps } from './goal-steps.js';
+import { deriveExportSteps, exportStepPreparer } from './export-steps.js';
 import { FILE_LEVEL_ENTRY } from './verify-command.js';
-import { classifyMistake, recordMistake, remediationsFor } from './mistakes.js';
+import { classifyMistake, recordMistake, remediationsFor, failureFact, recordFailureFact, failureFactsFor } from './mistakes.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { checkWorkOrder, noChangeBrief, unfinishedBrief, type WorkOrderCheck } from './work-order-decision.js';
@@ -85,11 +86,21 @@ function attemptOutcome(r: CodingAgentsResult): string {
 function briefOf(r: CodingAgentsResult, input: CodingAgentsInput): string | undefined {
   // An edit that does not parse is rolled back before any check can run; its compiler messages are the feedback.
   if (r.rollbackBrief && !r.applied) return r.rollbackBrief;
+  // Only when an apply was asked for (a proposal is not "failed" for being unapplied) and only for errors that are real:
+  // the isolated per-file check reports every import as unresolved (semantic codes >= 2000), which is not about the edit.
+  const realErrors = (r.diagnostics ?? []).filter(d => d.severity === 'error' && !(d.source === 'ast-syntactic' && typeof d.code === 'number' && d.code >= 2000));
+  if (!r.applied && input.resolve?.action === 'apply' && realErrors.length > 0) {
+    const errs = realErrors;
+    return `Your edit could not be applied due to compiler errors:\n${errs.map(e => `${e.filePath}${e.line ? `:${e.line}` : ''} ${e.message}`).join('\n')}`;
+  }
   // With a verifyCommand the check is the judge (the reviewer does not even run: in live runs a 7B
   // reviewer repeatedly insisted spec-correct code was wrong).
   if (input.verifyCommand) {
-    if ((r.verification?.status !== 'regressed' && r.verification?.status !== 'not_green') || !r.verification.repairBrief) return undefined;
-    return r.verification.repairBrief;
+    if (r.verification?.repairBrief) return r.verification.repairBrief;
+    if ((r.verification?.status === 'regressed' || r.verification?.status === 'not_green') && r.verification.outputTail) {
+      return `Verification command "${input.verifyCommand}" failed:\n${r.verification.outputTail.slice(0, 2000)}`;
+    }
+    return undefined;
   }
   if (input.review !== false && r.review?.verdict === 'blocked' && r.review.brief) return r.review.brief;
   return undefined;
@@ -104,9 +115,10 @@ export async function runWithRepairLoop(
   restoreFiles?: RestoreFiles,
   workOrder: typeof checkWorkOrder = checkWorkOrder,
 ): Promise<CodingAgentsResult> {
-  const steps = input.edits ? [] : splitSteps(input.goal);
+  const explicitSteps = input.edits ? [] : splitSteps(input.goal);
+  const steps = explicitSteps.length > 0 || input.edits ? explicitSteps : await deriveExportSteps(input);
   if (steps.length > 0) {
-    return runSteps(input, steps, step => runWithRepairLoop(step, sessionId, run, runner, rollback, restoreFiles, workOrder), rollback);
+    return runSteps(input, steps, step => runWithRepairLoop(step, sessionId, run, runner, rollback, restoreFiles, workOrder), rollback, explicitSteps.length > 0 ? undefined : exportStepPreparer(input));
   }
   // Deterministic AST edits cannot be "re-generated", so there is nothing to repair by retrying.
   const retriable = !(input.astEditOps && input.astEditOps.length > 0);
@@ -154,7 +166,7 @@ export async function runWithRepairLoop(
     }
   }
   // A known mistake on these files opens the first attempt's brief (#149).
-  const known = input.workspaceRoot && input.targetFiles?.length ? await remediationsFor(input.workspaceRoot, input.targetFiles).catch(() => []) : [];
+  const known = input.workspaceRoot && input.targetFiles?.length ? [...await remediationsFor(input.workspaceRoot, input.targetFiles).catch(() => []), ...await failureFactsFor(input.workspaceRoot, input.targetFiles).catch(() => [])] : [];
   if (known.length > 0) current = { ...current, feedback: [...known, ...(current.feedback ? [current.feedback] : [])].join('\n') };
   for (let n = 1; ; n++) {
     if (run?.controller.signal.aborted && n === 1) {
@@ -320,8 +332,14 @@ export async function runWithRepairLoop(
     }
     // A patch-in-place retry edits only the files the failure points at: re-editing files that already pass
     // broke them in traced multi-file runs. A rewrite starts from the original tree, so it keeps all files.
+    // Escalate the task DAG context window radius on retries so stalled agents see broader sibling context.
+    const escalatedRadius = Math.min(2 + (n - samples), 4);
     current = {
       ...input, feedback: nextBrief, temperature: RETRY_TEMPERATURE(n - samples + 2),
+      contextWindow: {
+        ...input.contextWindow,
+        radius: Math.max(input.contextWindow?.radius ?? 1, escalatedRadius),
+      },
       ...(rewrite ? { rewrite: true } : narrowTo(result.verification?.failedCases ?? [], nextBrief)),
     };
   }
@@ -348,6 +366,10 @@ export async function runWithRepairLoop(
 
   const mistake = classifyMistake({ outcome, symbolLoss: result.symbolLoss });
   if (mistake && input.workspaceRoot && input.targetFiles?.length) await recordMistake(input.workspaceRoot, mistake, input.targetFiles).catch(() => undefined);
+  if (mistake && input.workspaceRoot && input.targetFiles?.length) {
+    const fact = failureFact(result.verification?.outputTail, input.workspaceRoot);
+    if (fact) await recordFailureFact(input.workspaceRoot, input.targetFiles, fact).catch(() => undefined);
+  }
 
   // Only attach the record when the loop mattered (a check or a review took part).
   if (input.verifyCommand || result.review || attempts.length > 1) {
