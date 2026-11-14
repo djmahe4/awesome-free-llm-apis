@@ -26,7 +26,8 @@ type SqliteDb = InstanceType<typeof DatabaseSync>;
 export function openOpencodeDb(dbPath: string): SqliteDb | null {
   try {
     return new DatabaseSync(dbPath, { readOnly: true });
-  } catch {
+  } catch (err) {
+    console.warn(`[opencode-reader] Failed to open SQLite DB at ${dbPath}:`, (err as Error)?.message ?? err);
     return null;
   }
 }

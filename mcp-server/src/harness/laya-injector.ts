@@ -122,27 +122,40 @@ export function queueMessage(workspaceRoot: string, entry: QueuedInjection): voi
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
   let entries: QueuedInjection[] = [];
-  try {
-    entries = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (!Array.isArray(entries)) entries = [];
-  } catch { }
+  if (fs.existsSync(file)) {
+    try {
+      entries = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (!Array.isArray(entries)) entries = [];
+    } catch (err) {
+      console.warn(`[laya-injector] queueMessage failed to parse ${file}:`, (err as Error)?.message ?? err);
+      entries = [];
+    }
+  }
   entries.push(entry);
   fs.writeFileSync(file, JSON.stringify(entries, null, 2), 'utf8');
 }
 
 export function peekMessages(workspaceRoot: string): QueuedInjection[] {
+  const file = queuePath(workspaceRoot);
+  if (!fs.existsSync(file)) return [];
   try {
-    const parsed = JSON.parse(fs.readFileSync(queuePath(workspaceRoot), 'utf8'));
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
     return Array.isArray(parsed) ? parsed : [];
-  } catch {
+  } catch (err) {
+    console.warn(`[laya-injector] peekMessages failed to read ${file}:`, (err as Error)?.message ?? err);
     return [];
   }
 }
 
 export function drainMessages(workspaceRoot: string): QueuedInjection[] {
+  const file = queuePath(workspaceRoot);
   const entries = peekMessages(workspaceRoot);
   if (entries.length) {
-    try { fs.rmSync(queuePath(workspaceRoot), { force: true }); } catch { }
+    try {
+      fs.rmSync(file, { force: true });
+    } catch (err) {
+      console.warn(`[laya-injector] drainMessages failed to delete ${file}:`, (err as Error)?.message ?? err);
+    }
   }
   return entries;
 }
