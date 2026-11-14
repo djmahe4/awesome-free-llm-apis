@@ -15,6 +15,7 @@ export interface LineAnchoredPatch {
   originalSnippet: string;   // preview (first 10 lines)
   replacementSnippet: string; // preview (first 10 lines)
   fullPatchedContent: string; // full content used for diagnostics & writes
+  unchanged?: boolean;       // the edit left the existing file exactly as it was
   unifiedDiff: string;
   symbols?: string[];
   /** True if this file didn't exist before this run — used by the post-apply
@@ -73,6 +74,22 @@ export interface CodingAgentsInput {
   goal: string;
   workspaceRoot?: string;
   targetFiles?: string[];
+  /** Optional exact terms that narrow live log/JSON context for a debugging task. */
+  contextKeywords?: string[];
+  /**
+   * Extra directories the editor should know the DATA SHAPE of (for example another application's data folder). Opt-in by
+   * being named here; scanned read-only and locally with the workspace scanner, structure only (tables, columns, merged JSON
+   * shapes, never values), and never included in a cloud prompt. At most 3.
+   */
+  contextDirs?: string[];
+  /**
+   * Opt-in: an installed local model (for example a larger one than the editor) that reads the tests and writes a short
+   * contract per export, which the coding model then edits against. Used when a module is rebuilt one export at a time.
+   * Off when unset, so a standalone coding model is what is measured by default. Local only; skipped if not installed.
+   */
+  contractModel?: string;
+  /** Read-only request for additional tasks.md DAG context around the active task. */
+  contextWindow?: { radius?: number; taskIds?: string[] };
   dryRun?: boolean;
   topKFiles?: number;
   /**
@@ -92,6 +109,8 @@ export interface CodingAgentsInput {
    * syntax; see tools/coding-agents/verify-command.ts.
    */
   verifyCommand?: string;
+  /** @internal set by runSteps on steps that must not run the check yet: its tests are still shown to the editor as the specification. */
+  specCommand?: string;
   /**
    * Output of a check the USER ran themselves (used when an edit was withheld because it touches tests,
    * scripts or hooks). A failure comes back as a debugger brief; nothing on disk changes.
@@ -111,6 +130,8 @@ export interface CodingAgentsInput {
   relatedFiles?: string[];
   /** Let a failed local edit fall back to free cloud models, which sends the file and goal to a third-party provider (default false; also settable in .free-llm-mcp/coding-agents.json). */
   allowCloudFallback?: boolean;
+  /** @internal Set by the repair loop when it escalates: skip the local model and go straight to the cloud one (needs allowCloudFallback). */
+  preferCloud?: boolean;
   /** Installed local model to use (e.g. a bigger one for a cross-file change). Overrides the automatic choice and the VRAM budget. */
   model?: string;
   /** Reasoning for thinking models: off (default), auto, on. See local_llm_patch. */
@@ -119,10 +140,18 @@ export interface CodingAgentsInput {
   maxDurationMs?: number;
   /** Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry). */
   maxRepairAttempts?: number;
+  /** Exact changes as data: applied by script, with no model call. */
+  edits?: import('./anchored-edit.js').AnchoredEdit[];
+  /** Report a green check as unverified when it was already green before the edit. */
+  requireRed?: boolean;
+  /** The caller supplied post-condition probes, so a check that was already green still counts. */
+  hasPostConditions?: boolean;
   /** Independent review of the proposed diff before apply (default on; false disables it). */
   review?: boolean;
   action?: 'plan' | 'execute' | 'resume' | 'status' | 'abort';
   pauseOnTaskPlan?: boolean;
+  /** Pause before implicit multi-file edits so each file-scoped task can be reviewed and resumed independently. */
+  pauseBeforeMultiFile?: boolean;
 }
 
 export interface RepairAttempt {
@@ -135,24 +164,27 @@ export interface RepairAttempt {
   failing?: number;
   /** The attempt regenerated the file instead of patching it. */
   rewrite?: boolean;
+  /** Why the edit lacked the text the goal supplied, as decided by the work-order check. */
+  triage?: string;
 }
 
 export interface CodingAgentsResult {
   sessionId: string;
   goal: string;
-  pipelineStage: 'enumerate' | 'locate' | 'anchor' | 'edit' | 'verify' | 'completed';
+  pipelineStage: 'enumerate' | 'locate' | 'anchor' | 'edit' | 'verify' | 'completed' | 'paused';
   relevantFiles: string[];
   anchors: SnapshotAnchor[];
   patchPlan: LineAnchoredPatch[];
   patchSummary: string;
   diagnostics: DiagnosticResult[];
   applied: boolean;
-  status?: 'applied' | 'rollback' | 'dry_run' | 'paused' | 'running' | 'undo_file' | 'file_history';
+  status?: 'applied' | 'rollback' | 'dry_run' | 'proposed' | 'paused' | 'running' | 'undo_file' | 'file_history';
   message?: string;
   checkpointId?: string;
   restoredFiles?: string[];
   /** Set when an apply was rolled back because the edit did not parse: the compiler messages as feedback for a retry. */
   rollbackBrief?: string;
+  symbolLoss?: string[];
   /** Independent reviewer's verdict on the proposed diff. */
   review?: {
     verdict: 'ok' | 'concerns' | 'blocked' | 'skipped';
@@ -162,7 +194,7 @@ export interface CodingAgentsResult {
   };
   /** How the automatic repair loop ended (present when a check or review took part). */
   repair?: {
-    outcome: 'converged' | 'not_converged' | 'stuck' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
+    outcome: 'converged' | 'unverified' | 'not_converged' | 'stuck' | 'cycling' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
     attemptCount: number;
     attempts: RepairAttempt[];
   };
@@ -211,6 +243,8 @@ export interface CodingAgentsResult {
   usedFallbackModel?: boolean;
   wiringFiles?: string[];
   wiringContext?: string[];
+  partialApply?: boolean;
+  durationMs?: number;
 }
 
 export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
@@ -223,9 +257,13 @@ export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
     ? '⏳ Running in Background'
     : result.status === 'paused'
     ? '⏸️ Workflow Paused (tasks.md)'
-    : (result.applied ? '✅ Changes Applied to Disk' : (result.patchPlan?.length ? '🔍 Proposed Plan (Dry Run)' : '⚡ Execution Completed'));
+    : result.status === 'proposed'
+    ? '📝 Proposed Plan (Pending Apply)'
+    : (result.applied ? (result.partialApply ? '⚠️ Partial Changes Applied to Disk' : '✅ Changes Applied to Disk') : (result.patchPlan?.length ? '🔍 Proposed Plan (Dry Run)' : '⚡ Execution Completed'));
   lines.push(`### 🤖 Coding Agent: ${statusLabel}\n`);
-  lines.push(`- **Goal:** ${result.goal}`);
+  if (result.goal && result.goal !== 'undefined') {
+    lines.push(`- **Goal:** ${result.goal}`);
+  }
   lines.push(`- **Pipeline Stage:** \`${result.pipelineStage || 'completed'}\``);
   if (result.checkpointId) {
     lines.push(`- **CAS Checkpoint:** \`${result.checkpointId}\``);
@@ -244,6 +282,13 @@ export function formatCodingAgentsMarkdown(result: CodingAgentsResult): string {
   }
   if (result.astRewritesCount) {
     lines.push(`- **AST Structural Rewrites:** ${result.astRewritesCount}`);
+  }
+  if (result.hypotheses?.length) {
+    lines.push(`\n#### 🧪 Hypothesis Validation (${result.hypotheses.length})`);
+    for (const hypothesis of result.hypotheses) {
+      const evidence = hypothesis.evidence ? ` — ${hypothesis.evidence}` : '';
+      lines.push(`- **${hypothesis.status.toUpperCase()}** ${hypothesis.claim} — \`${hypothesis.probe}\`${evidence}`);
+    }
   }
   if (result.tasksPlan?.length) {
     const doneCount = result.tasksPlan.filter(t => t.status === 'completed').length;

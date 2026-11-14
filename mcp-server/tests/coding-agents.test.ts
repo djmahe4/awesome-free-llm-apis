@@ -555,7 +555,8 @@ describe('CodingAgentsHandler — DAG tasks.md, docs filtering & AST validation'
       goal: '- Step 1: Update PORT\n- Step 2: Add HOST',
       workspaceRoot: ws,
       action: 'resume',
-      dryRun: true,
+      dryRun: false,
+      resolve: { action: 'apply' },
       targetFiles: ['src/config.ts'],
       astEditOps: [
         { pat: 'PORT = 3000', out: 'PORT = 8080' },

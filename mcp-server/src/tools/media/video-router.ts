@@ -2,6 +2,7 @@ import fetch from 'node-fetch';
 
 export type KeyframeModel =
   | 'flux'
+  | 'black-forest-labs/flux-3-image-klein'
   | 'black-forest-labs/flux.1-schnell'
   | 'black-forest-labs/FLUX.1-schnell'
   | 'black-forest-labs/FLUX.1-dev'
@@ -43,9 +44,54 @@ export interface KeyframeInput {
 }
 
 export interface KeyframeResult {
-  imageUrl: string;
+  imageUrl?: string;
+  base64?: string;
   headers?: Record<string, string>;
   status: number;
+}
+
+/**
+ * Generates an image via NVIDIA NIM GenAI endpoint (e.g. black-forest-labs/flux-3-image-klein).
+ */
+export async function requestNvidiaGenAiImage(input: KeyframeInput): Promise<KeyframeResult> {
+  const apiKey = input.apiKey || process.env.NVIDIA_API_KEY;
+  if (!apiKey) {
+    throw new Error('NVIDIA_API_KEY is required to generate images with NVIDIA GenAI models.');
+  }
+
+  const model = input.model || 'black-forest-labs/flux-3-image-klein';
+  const url = `https://ai.api.nvidia.com/v1/genai/${model}`;
+
+  const payload = {
+    prompt: input.prompt,
+    width: input.width || 1024,
+    height: input.height || 1024,
+    seed: input.seed !== undefined ? input.seed : 0,
+    steps: 25
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`NVIDIA GenAI error HTTP ${response.status}: ${errorText.slice(0, 300)}`);
+  }
+
+  const data: any = await response.json();
+  const base64 = data?.artifacts?.[0]?.base64 || data?.image || '';
+  return {
+    base64,
+    status: response.status,
+    headers: Object.fromEntries(response.headers.entries())
+  };
 }
 
 /**

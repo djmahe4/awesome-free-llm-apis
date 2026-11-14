@@ -29,6 +29,7 @@ export type Probe =
   | { kind: 'arity'; name: string; path: string; expected: number }
   | { kind: 'grep'; pattern: string; path: string }
   | { kind: 'cite'; path: string; from: number; to: number; hash: string }
+  | { kind: 'module'; spec: string; path: string }
   | { kind: 'cmd'; expected: number; command: string }
   | { kind: 'test'; command: string };
 
@@ -72,6 +73,13 @@ export function parseProbe(text: string): Probe | null {
   if (kind === 'cite') {
     const m = rest.match(/^(.+):L(\d+)-L(\d+)#([0-9a-f]{4,64})$/);
     return m ? { kind: 'cite', path: m[1], from: Number(m[2]), to: Number(m[3]), hash: m[4] } : null;
+  }
+
+  if (kind === 'module') {
+    // module:<specifier>@<file that would import it>; the specifier may itself contain '@' (a scoped package)
+    const at = rest.lastIndexOf('@');
+    const spec = rest.slice(0, at).trim(), p = rest.slice(at + 1).trim();
+    return at > 0 && spec && p && !/\s/.test(spec) ? { kind: 'module', spec, path: p } : null;
   }
 
   if (kind === 'cmd') {
@@ -222,7 +230,7 @@ export interface ProbeContext {
 
 export async function runProbe(probeText: string, workspaceRoot: string, ctx: ProbeContext = {}): Promise<ProbeResult> {
   const probe = parseProbe(probeText);
-  if (!probe) return { status: 'refuted', evidence: `unrecognised probe "${clip(String(probeText))}" (use file:, defined:, symbol:, arity:, grep: or cite:)` };
+  if (!probe) return { status: 'refuted', evidence: `unrecognised probe "${clip(String(probeText))}" (use file:, defined:, symbol:, arity:, module:, grep: or cite:)` };
 
   if (probe.kind === 'cmd' || probe.kind === 'test') {
     if (!ctx.allowExec) return { status: 'open', evidence: 'command probes are switched off here (hypothesisExec in .free-llm-mcp/coding-agents.json), so the command was not run' };
@@ -239,6 +247,16 @@ export async function runProbe(probeText: string, workspaceRoot: string, ctx: Pr
     return run.exitCode === 0
       ? { status: 'confirmed', evidence: `${clip(probe.command)} passed` }
       : { status: 'refuted', evidence: `${clip(probe.command)} failed (exit ${run.exitCode})${tail ? ': ' + tail : ''}` };
+  }
+
+  if (probe.kind === 'module') {
+    // The same resolution the post-edit import guard uses, so the gate and the guard cannot disagree: a `node:` name must
+    // be a real built-in, a bare name an installed package, a relative path an existing file.
+    const { newImportProblems } = await import('./import-check.js');
+    const problems = await newImportProblems(probe.path, '', `require(${JSON.stringify(probe.spec)})`, workspaceRoot).catch(() => []);
+    return problems.length === 0
+      ? { status: 'confirmed', evidence: `'${probe.spec}' resolves from ${probe.path}` }
+      : { status: 'refuted', evidence: clip(problems[0].replace(/^[^:]*:s*/, '')) };
   }
 
   if (probe.kind === 'file') {

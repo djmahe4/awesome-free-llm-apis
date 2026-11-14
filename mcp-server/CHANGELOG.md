@@ -1,5 +1,47 @@
 # Changelog
 
+## v1.1.3 – Reverse Engineering Engine, Multi-Modal Learning Workbench, Real-Time Agent Harness & Full Verification Pipeline (November 2026)
+
+### 🚀 Highlights
+
+- **`reverse_tool`: Comprehensive Reverse Engineering Engine & Forensic Inspector** (`src/reverse/`, `src/tools/reverse-tool.ts`, `docs/skill/references/reverse_tool.md`):
+  - **ReaProxy Handshake & Execution**: Protocol handshake (`initialize`, `notifications/initialized`), schema pinning, timeouts, process tree teardown, and sanitization for local/external reverse engineering agent engines (REA).
+  - **Static JS/TS AST & Artifact Analysis**: Sliding-window AST analyzer extracting routes, sinks, and API secrets (`analyze_javascript`); artifact inspector detecting formats (ELF, PE, WASM, ASAR, GGUF, ONNX, PyTorch), Shannon entropy, 1-byte/wide-character strings, and Trojan Source markers (`analyze_artifact`).
+  - **GitHub Recon & Symbol Graph**: Remote repo scanner extracting release binaries/ASARs/models, tree descriptors, AST symbol graphs, and architectural wiki docs (`scan_github`).
+  - **Cryptographic Evidence Contract**: Deterministic SHA-256 evidence ledger with bounded LRU caching, ID sanitizer, and static-vs-dynamic execution discrepancy recording (`get_evidence`).
+  - **Model Weight Space & Architecture Inspection**: GGUF, ONNX, and PyTorch inspectors extracting tensor topologies, quantization metadata, and layer activation profiles.
+
+- **Multi-Modal Learning Studio & Vision Reverse Engineering** (`scripts/`, `dashboard/js/12-ml-learning.js`, `dashboard/partials/13b-ml-learning.html`):
+  - **Volumetric 3D Parallax & Camera Animation**: Boundary-aware depth surface regression, multi-frame camera trajectory generator (`animate_still`), and object-isolated 3D rotation with Telea inpainting (`depth_parallax_engine.py`).
+  - **VLM Reverse Image Synthesis**: Visual question answering, feature decomposition, and image synthesis via local/remote VLMs (`vlm_reverse_generator.py`).
+  - **Audio Stem Separation Workbench**: Deep-learning stem extraction (vocals, drums, bass, other) with waveform preview scheduler (`audio_separator.py`).
+  - **OCR Token & Spatial Layout Studio**: Word-level bounding box visualization, layout block detection, and confidence annotations (`ocr_engine.py`).
+  - **Weight-Space Programming & MoE Reconstruction**: Layer-wise weight clustering, expert routing analysis, and YOLO/MoE weight-space model reconstruction (`weight_space_programmer.py`, `moe_engine.py`, `yolo_nn_engine.py`).
+
+- **Grounded `agent_harness` & Thought Dataset Pipeline** (`src/harness/`, `docs/skill/references/agent_harness.md`):
+  - **Lossless Thought DAG & Dataset Assembly**: Structured DAG representation of agent thought streams, deviation validation bridge (`laya-bridge.ts`, `laya-injector.ts`), and MoE training dataset extraction (`thought-dataset-writer.ts`).
+  - **External Context Readers**: Direct streaming thought extractors for Antigravity, Codex, OpenCode, and Zed sessions (`antigravity-reader.ts`, `codex-reader.ts`, `opencode-reader.ts`, `zed-reader.ts`).
+  - **Collapsible Context Injection & Write Guards**: Step-by-step hook-based context injection into model prompts and strict workspace write boundary protection (`write-guard.ts`, `context-injection-hook.ts`).
+
+- **`coding_agents` Grounding & Verification Tools** (`src/tools/coding-agents/`):
+  - **Subagent-Driven Hypothesis Validation**: Scoped feedback loop with hypothesis gate enforcing pre-edit verification (`hypothesis-gate.ts`, `subagent-validator.ts`).
+  - **Trace & Cache Hardening**: Episodic probe cache with LRU eviction, per-file symbol graph cache with content-hash invalidation, and grounded work order decision loops.
+  - **Verification Suite & Diagnostics**: Disallowed unresolvable bare built-in modules (`sqlite`, `test`, `sea`) in import checks; recognized Node 22 native `node:sqlite` and `node:test` specifiers.
+
+### 🔒 Security and Reliability
+
+- **Strict Path Confinement**: Hardened directory traversal guards across reverse tool, file outlines, scanner, and harness workspace paths.
+- **PR #174 Review Hardening**: Bounded audio stem separation timeout with real-time polling progress heartbeat; tightened Ollama model target validation against malformed specifiers; preserved backward compatibility for `pauseBeforeMultiFile` (batch execution by default); broadened `diffValueHints` parsing across multiple test framework output formats (`-/+`, `+/-`, `Expected:`/`Received:`); safeguarded global `Module._load` hooking in `api-trap` preload; improved repair loop fallback tracking readability; and expanded `verify-cache` size limit to 128 entries to support deep repair iterations.
+- **Atomic Concurrency & Lock Resilience**: Cross-platform file locking (`src/utils/file-lock.ts`) and safe concurrency primitives preventing race conditions during parallel agent executions; in-process promise deduplication in `WorkspaceIndexer` preventing redundant concurrent index runs; hardened stale lock reaping when lock age exceeds 30s; and gated expensive whole-tree workspace scans behind `scanWorkspace: true` in `cyber_tool` to prevent 90s test timeouts.
+- **CI & Sandbox Optimization**: Streamlined CI workflows to trigger specifically on PR merges; untracked transient test fixtures.
+
+### 🌐 Providers & Models
+
+- **Upstream Sync & Model Catalog Audit**: Merged upstream changes through `data/sync-2026-11-12` and PRs #232, #234, #235, #237, #238, #239, #240.
+- **Provider Refinements**: Verified active availability of NVIDIA NIM models (`mistralai/mistral-large-4-1t-a52b`, `nvidia/nemotron-3.5-bolt-e4b`, `minimaxai/minimax-m3.1-flash`); pruned retired/gone endpoints while maintaining accessible active models.
+
+---
+
 ## v1.1.2 – Grounded coding_agents, Hardened Browser/Harness/Cyber/Skills, Per-Action Dashboard Inputs, JSON Context Reduction & Provider Updates (October 2026)
 
 ### 🚀 Highlights
@@ -192,34 +234,3 @@ Follow-ups to this release:
 - **Firebase identity-churn fix**: `exchangeRefreshToken()` had no retry logic and silently minted a brand-new anonymous account on any transient network failure during token refresh. It now retries with backoff (matching the pattern already used by `getUserStats()`/`getLeaderboard()`), logs the real HTTP rejection reason, and warns explicitly when falling through to a new account despite having saved credentials.
 - **`docs/` reference refactor**: `references/usages.md` split into one `.md` file per tool (`references/use_free_llm.md`, `references/browser_tool.md`, `references/cyber_tool.md`, `references/quantum_tool.md`, `references/local_llm_patch.md`, etc.), linked individually from `SKILL.md` so the skill doc stays focused on agentic workflow guidance rather than a growing test matrix.
 - `empero-ai/Qwythos-9B-Claude-Mythos-5-1M` confirmed present in the HuggingFace provider list and reachable via `TextRouterMiddleware` routing (verify-only, no code change needed).
-
----
-
-## v1.0.8 – Dynamic Intelligent Browser Scraper, Cyber Tool Registry, File-Lock Concurrency & Flat Schema Exports (July 2026)
-
-### 🚀 Highlights
-
-- **100% Dynamic Browser Scraper (`browser_tool`)**:
-  - Implemented domain-agnostic `DynamicNodeAnalyzer` to discover interactive ARIA buttons and category tabs with zero hardcoded class strings.
-  - Added quantified scroll depth observation (`0%` to `100%` bottom fold) and state monitoring.
-  - Created `ScrapingSessionCheckpointManager` allowing users to pause, inspect frontend findings, select depth options, and resume sessions across process restarts.
-  - Created `ScriptPersistenceManager` to save generated JS extraction functions to `data/scrapes/scripts/` for 0-token LLM context cost on subsequent runs.
-  - Implemented `UniversalTabularSchemaFlattener` to dynamically flatten deeply nested JSON graphs into flat CSV rows (`startX`, `startY`, `endX`, `endY`, `outcome`).
-
-- **`browser_tool` now owns a real browser session end to end.** The scaffolding above wasn't actually reachable: `scrapeAndProcessWithCheckpoint` was always invoked with `devtoolsEvalResponse: null` and no `mcpClient` from both `src/mcp/index.ts` and `POST /api/browser_tool`, so the tool silently exported zero records while reporting `success: true`. `src/browser/BrowserSessionPool.ts` now spawns and reuses a `chrome-devtools-mcp` session per `sessionId`, with LRU eviction, an idle reaper, and a cached-failure path so a broken engine returns a structured error instead of throwing or retrying a slow `npx` spawn on every call.
-- **New action surface** (`src/browser/actionSchemas.ts`, `src/browser/dispatch.ts`): `navigate, snapshot, click, scroll, wait, evaluate, network, api_replay, extract, deep_scrape, screenshot, checkpoint, session`. One zod registry now generates both the MCP `inputSchema` and the runtime validation, closing the drift where `domainContext`/`filenameBase`/`deepScrapeLimit`/etc existed on `BrowserScrapeInput` but were never reachable over MCP. `action: 'scrape'` and `action: 'list_checkpoints'` remain supported as back-compat aliases.
-- **Network body capture + private-API replay**: an injected fetch/XHR interceptor (`src/browser/interceptor.ts`) captures response bodies chrome-devtools-mcp's own `list_network_requests` doesn't expose, and `EndpointRanker`/`EndpointTemplater` (`src/browser/EndpointRanker.ts`, `EndpointTemplater.ts`) score discovered endpoints and mine id values from observed traffic/DOM instead of requiring them to be hardcoded.
-- **Strict mode by default**: `interpretExtractedDataWithLLM` in `src/tools/browser-action.ts` no longer synthesizes plausible-looking `{id, title, link}` records when the LLM's output fails to parse — it now retries once with a corrective prompt, then reports `status: 'failed'` with a structured error. `success: true` with zero records is no longer possible without an explicit evidenced-empty-page warning.
-- **Cloudflare/CAPTCHA block detection + Firebase logging**: `src/browser/BlockDetector.ts` scans snapshot text for known Cloudflare-interstitial and CAPTCHA markers on every `snapshot()` call. When a scrape action (`extract`, `api_replay`, `click`) fails on a page that's actually a challenge wall, the result now says so explicitly (`BLOCKED_BY_CLOUDFLARE` / `BLOCKED_BY_CAPTCHA`) instead of reporting a generic empty result, and the obstruction is fire-and-forget logged to a new `scraping_failures` Firestore collection via `logScrapingFailure` (`src/utils/firebase.ts`) — separate from the general `errors` collection so these are filterable on the dashboard.
-
-- **Isolated Cyber Security Tool Registry (`cyber_tool`)**:
-  - Created process-safe `CyberToolsRegistry` storing security binary mappings in userprofile path `~/.free-llm-mcp/cyber-tools-registry.json`.
-  - Enforced atomic file-locking (`.lock`) synchronization to prevent multi-agent race conditions during concurrent tool registration.
-  - Isolated security tool command flags and WAF/IPS troubleshooting logs within the dedicated `global-cyber-tools` wiki namespace.
-
-- **Granular Step Logging & Web Dashboard Integration**:
-  - Integrated Phase 3 `ChatLogger.logToolCall` across every step of `browser_tool` (`explore_surface_area`, `discover_nodes`, `click_node`, `save_checkpoint`, `load_checkpoint`, `list_checkpoints`, `scrape_and_process`) and `cyber_tool` (`list_tools`, `get_tool`, `register_tool`, `wiki_lookup`).
-  - Added `browser_tool` and `cyber_tool` to `src/server.ts` express endpoints (`POST /api/browser_tool`, `POST /api/cyber_tool`), interactive Tool Playground dropdowns, and Quick Start accordions on the Web Dashboard.
-
-- **Unit & Integration Testing Hardening**:
-  - Achieved 100% green test status across 16/16 unit test suites (`npx vitest run`).

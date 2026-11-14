@@ -16,9 +16,12 @@ const TOOLS = [
     id: 'vision_tool', label: 'vision_tool', icon: '👁',
     tag: 'Vision / VLM',
     fields: [
-      { id: 'image_path', label: 'Image Path', type: 'text', placeholder: 'file:///C:/path/to/screenshot.png' },
-      { id: 'prompt',     label: 'Analysis Prompt', type: 'textarea', placeholder: 'Describe the UI layout' },
-      { id: 'model',      label: 'Model Override', type: 'model-picker' },
+      { id: 'image_path', label: 'Image Path', type: 'text', placeholder: 'file:///C:/path/to/screenshot.png', showFor: ['', 'run', 'continue'] },
+      { id: 'prompt',     label: 'Analysis Prompt', type: 'textarea', placeholder: 'Describe the UI layout', showFor: ['', 'run', 'continue'] },
+      { id: 'model',      label: 'Model Override', type: 'model-picker', showFor: ['', 'run', 'continue'] },
+      { id: 'action',     label: 'Task Action', type: 'select', options: ['', 'run', 'status', 'continue', 'abort'] },
+      { id: 'taskId',     label: 'Vision Task ID', type: 'text', placeholder: 'Use returned taskId for status/continue/abort', showFor: ['status', 'continue', 'abort'] },
+      { id: 'sessionId',  label: 'Task ID Alias', type: 'text', placeholder: 'Optional taskId alias', showFor: ['status', 'continue', 'abort'] },
     ]
   },
   {
@@ -168,10 +171,18 @@ const TOOLS = [
       { id: 'sessionId', label: 'Session ID (optional)', type: 'text', placeholder: 'coding-session-1' },
       { id: 'action', label: 'Action', type: 'select', options: ['', 'plan', 'execute', 'resume', 'status', 'abort'] },
       { id: 'pauseOnTaskPlan', label: 'Pause On Task Plan', type: 'toggle', showFor: ['', 'execute'] },
+      { id: 'pauseBeforeMultiFile', label: 'Pause Before Multi-File Edits', type: 'toggle', default: true, showFor: ['', 'execute'] },
       { id: 'verifyCommand', label: 'Verify Command (rolls back on regression)', type: 'text', placeholder: 'npx vitest run tests/a.test.ts', showFor: ['', 'execute', 'resume'] },
+      { id: 'edits', label: 'Exact Edits JSON (applied by script, no model)', type: 'textarea', placeholder: '[{"file":"src/a.ts","anchor":"const a = 1;","position":"after","lines":["const b = 2;"]}]', showFor: ['', 'execute', 'resume'] },
+      { id: 'requireRed', label: 'Require Red (an already-green check is unverified)', type: 'toggle', showFor: ['', 'execute', 'resume'] },
+      { id: 'hasPostConditions', label: 'Has Post-Conditions (own probes check the result)', type: 'toggle', showFor: ['', 'execute', 'resume'] },
       { id: 'feedback', label: 'Feedback / Repair Brief (retry)', type: 'textarea', placeholder: 'paste result.verification.repairBrief from the previous attempt', showFor: ['', 'execute', 'resume'] },
       { id: 'verifyReport', label: 'Verify Report JSON (your own test run)', type: 'textarea', placeholder: '{"exitCode":1,"output":"..."}', showFor: ['', 'execute', 'resume'] },
       { id: 'targetFiles', label: 'Target Files (comma-separated)', type: 'text', placeholder: 'src/foo.ts, src/bar.ts', showFor: ['', 'plan', 'execute', 'resume'] },
+      { id: 'contextKeywords', label: 'Debug Context Keywords (comma-separated)', type: 'text', placeholder: 'timeout, connection refused', showFor: ['', 'plan', 'execute', 'resume'] },
+      { id: 'contextDirs', label: 'Context Dirs (comma-separated, read-only data-shape scan, local only)', type: 'text', placeholder: 'C:\\Users\\me\\AppData\\Local\\Zed\\threads', showFor: ['', 'execute', 'resume'] },
+      { id: 'contractModel', label: 'Contract Model (optional local model that writes per-export contracts from the tests)', type: 'text', placeholder: 'qwen3:8b', showFor: ['', 'execute', 'resume'] },
+      { id: 'contextWindow', label: 'Context Window JSON (optional DAG radius/tasks)', type: 'textarea', placeholder: '{"radius":2}', showFor: ['', 'execute', 'resume'] },
       { id: 'verifyLspDiagnostics', label: 'Verify LSP Diagnostics', type: 'toggle', default: true, showFor: ['', 'execute'] },
       { id: 'astEditOps', label: 'AST Edit Ops JSON (optional)', type: 'textarea', placeholder: '[{"pat":"old($$A)","out":"new($$A)"}]', showFor: ['', 'execute', 'resume'] },
       { id: 'resolve', label: 'Resolve JSON (optional)', type: 'textarea', placeholder: '{"action":"apply"}', showFor: ['', 'execute', 'resume'] },
@@ -222,6 +233,18 @@ const TOOLS = [
       { id: 'label', label: 'Artifact Label', type: 'text', placeholder: 'Opening Cut', showFor: ['add_artifact'] },
       { id: 'artifact_path', label: 'File Path / URL', type: 'text', placeholder: 'projects/default/video.mp4', showFor: ['add_artifact', 'generate_assets'] },
       { id: 'artifactId', label: 'Artifact ID (for approve/reroll/effects)', type: 'text', placeholder: 'art_123', showFor: ['reroll_artifact', 'approve_artifact', 'apply_effect', 'undo_effect', 'update_artifact_bounds'] }
+    ]
+  }
+  ,
+  {
+    id: 'reverse_tool', label: 'reverse_tool', icon: '🔍',
+    tag: 'Reverse Engineering Analyzer',
+    fields: [
+      { id: 'action', label: 'Action', type: 'select', options: ['status', 'abort', 'list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer', 'quantize_layer', 'assemble_moe', 'run_reasoning_model', 'run_yolo_nn', 'run_scene_augmentation', 'run_depth_parallax', 'animate_still', 'reverse_vlm_generate', 'separate_audio_stems', 'inspect_ocr_tokens', 'program_weight_space'] },
+      { id: 'target', label: 'Target File / Evidence ID', type: 'text', placeholder: 'path/to/file, image/audio path, owner/repo, or ev-123', showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer', 'quantize_layer', 'assemble_moe', 'run_reasoning_model', 'run_yolo_nn', 'run_scene_augmentation', 'run_depth_parallax', 'animate_still', 'reverse_vlm_generate', 'separate_audio_stems', 'inspect_ocr_tokens', 'program_weight_space'] },
+      { id: 'authorization', label: 'Authorization Framing', type: 'select', options: ['', 'ctf', 'lab', 'consent'], showFor: ['list_capabilities', 'analyze_javascript', 'analyze_artifact', 'get_evidence', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer', 'quantize_layer', 'assemble_moe', 'run_reasoning_model', 'run_yolo_nn', 'run_scene_augmentation', 'run_depth_parallax', 'animate_still', 'reverse_vlm_generate', 'separate_audio_stems', 'inspect_ocr_tokens', 'program_weight_space'] },
+      { id: 'sessionId', label: 'Session ID (Async)', type: 'text', placeholder: 'sess-123', showFor: ['status', 'abort', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer', 'quantize_layer', 'assemble_moe', 'run_reasoning_model', 'run_yolo_nn', 'run_scene_augmentation', 'run_depth_parallax', 'animate_still', 'reverse_vlm_generate', 'separate_audio_stems', 'inspect_ocr_tokens', 'program_weight_space'] },
+      { id: 'options', label: 'Analysis Options (JSON)', type: 'textarea', placeholder: '{"depthMode":"model","depthLayers":16,"method":"htdemucs","explicitConsentAck":true}', showFor: ['analyze_javascript', 'analyze_artifact', 'scan_github', 'inspect_model', 'infer_layer_roles', 'trace_layer_execution', 'reconstruct_training_samples', 'extract_model_layer', 'analyze_model_layer', 'quantize_layer', 'assemble_moe', 'run_reasoning_model', 'run_yolo_nn', 'run_scene_augmentation', 'run_depth_parallax', 'animate_still', 'reverse_vlm_generate', 'separate_audio_stems', 'inspect_ocr_tokens', 'program_weight_space'] }
     ]
   }
 ];
@@ -404,6 +427,25 @@ const TOOL_WHEN_TO_USE = {
     <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
     <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
       <li>No parameters required — returns live memory counters synchronized with disk storage.</li>
+    </ul>`,
+  reverse_tool: `
+    <div style="font-weight:700;color:var(--accent-cyan);margin-bottom:4px;">🌟 Beginner Overview:</div>
+    <div>Reverse engineering analyzer with strict authorization framing (CTF/lab/consent) and structured evidence ledgers.</div>
+    <div style="margin-top:8px;font-weight:700;color:var(--accent-purple);">🛠️ Subtools & Actions (What to trigger):</div>
+    <ul style="margin:4px 0 0 16px;padding:0;font-size:0.75rem;">
+      <li><code>action: "status"</code> — Check engine readiness and supported Node.js runtime.</li>
+      <li><code>action: "abort"</code> — Cancel an active running analysis session by sessionId or target.</li>
+      <li><code>action: "list_capabilities"</code> — List static and active dynamic analysis capabilities.</li>
+      <li><code>action: "analyze_javascript"</code> — AST route, sink, and credential scanner for JS/TS.</li>
+      <li><code>action: "analyze_artifact"</code> — Binary magic-bytes, entropy, and packaging inspector.</li>
+      <li><code>action: "get_evidence"</code> — Retrieve stored immutable evidence bundle by evidence ID.</li>
+      <li><code>action: "scan_github"</code> — Recon GitHub repo, releases, AST symbols, call flows, and wiki.</li>
+      <li><code>action: "inspect_model"</code> — Inspect metadata, tensors, and format of GGUF, PyTorch, and ONNX models.</li>
+      <li><code>action: "infer_layer_roles"</code> — Invert layer names to functional roles (Attention, FFN, Backbone, Head).</li>
+      <li><code>action: "trace_layer_execution"</code> — Layer-by-layer forward execution tracing with cached activations.</li>
+      <li><code>action: "reconstruct_training_samples"</code> — Synthesize class prototype exemplars via activation maximization (consent-gated).</li>
+      <li><code>action: "extract_model_layer"</code> — Extract tensor slice to standalone SafeTensors binary.</li>
+      <li><code>action: "analyze_model_layer"</code> — Profile layer weights (Frobenius norm, sparsity, mean, std).</li>
     </ul>`
 };
 
@@ -660,7 +702,7 @@ function collectParams(tool) {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
     } else if (f.id === 'files') {
       params[f.id] = el.value ? el.value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
-    } else if (f.id === 'params' || f.id === 'graphNode' || f.id === 'gates' || f.id === 'script_instructions' || f.id === 'metadata') {
+    } else if (f.id === 'params' || f.id === 'graphNode' || f.id === 'gates' || f.id === 'script_instructions' || f.id === 'metadata' || f.id === 'options') {
       const raw = el.value.trim();
       if (raw) {
         try { params[f.id] = JSON.parse(raw); } catch { params[f.id] = raw; }

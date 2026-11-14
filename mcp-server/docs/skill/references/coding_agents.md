@@ -24,6 +24,9 @@ interface CodingAgentsInput {
   };
   // ── repair loop and generation (all optional) ──
   maxRepairAttempts?: number;                       // retries after a failed check or blocking review (default 4, max 5; AST edits never retry)
+  edits?: Array<{ file: string; anchor: string; anchorIsPrefix?: boolean; position: 'before' | 'after' | 'replace'; lines: string[] }>;  // exact changes as data, applied by script with no model call; list each file in targetFiles too
+  requireRed?: boolean;                             // a green check that was already green before the edit is reported as unverified (default false)
+  hasPostConditions?: boolean;                      // you check the result with your own probes, so an already-green check still counts under requireRed
   samples?: number;                                 // independent first-round candidates from the original file, judged by verifyCommand (default 3 with a verifyCommand, max 5, 1 disables)
   maxDurationMs?: number;                           // wall-clock budget for the whole repair loop (default 300000 = 5 min); ends with outcome 'timed_out'
   review?: boolean;                                 // independent review of the diff before apply (default on; never runs when a verifyCommand exists)
@@ -50,14 +53,26 @@ interface CodingAgentsInput {
   // off by default: lets cmd:/test: rows you wrote in hypotheses.md run an allowlisted command (same allowlist as verifyCommand)
   "hypothesisExec": false,
   // off by default (costs model calls): the model proposes extra assumptions to check, and in enforce mode corrects a refuted goal once
-  "hypothesisModel": false
+  "hypothesisModel": false,
+  // off by default: validate subagent delegation and checks (subagentValidation?: boolean)
+  "subagentValidation": false,
+  // optional: explicit thought-source files to watch instead of auto-detection. Each list holds
+  // absolute or workspace-relative paths for that agent's store (claude: session .jsonl files,
+  // opencode: .db files, codex: rollout files, antigravity: transcript.jsonl files). When
+  // thoughtSources is absent the reader auto-detects Claude jsonl sessions, the OpenCode db,
+  // Codex rollouts and Antigravity brain transcripts for the workspace.
+  "thoughtSources": { "codex": ["C:/sessions/rollout-2026-11-13.jsonl"] }
 }
 ```
+
+**Thought injection on resume:** between resumes you (or laya) can leave messages in `.free-llm-mcp/laya-messages.json` and answers to the agent's questions in `tasks.md`. On the next `resume` the pipeline drains queued messages into a `## Agent's assumptions` section in `tasks.md` (the tasks.md blackboard stays the single source of truth), folds answered questions (`Q1: ...` / `A1: ...`) into the goal, and pauses again when pending questions remain so you can answer them in the file first.
 
 **Assumption check (hypotheses):** before editing, coding_agents lists what the goal and plan assume and checks each against the workspace, with no model involved: every target file should exist, and every code name the goal mentions in backticks or as `name()` should be defined in some file (unless the goal says to add or create it). The result is in `result.hypotheses` and `hypotheses.md` next to `tasks.md` (claim, probe, status, evidence). With `hypothesisGate: "enforce"` a refuted assumption returns `status:"paused"` and a `Blocked before editing` summary instead of an edit; correct the goal or plan and call again. Probe kinds available to the checker: `file:`, `defined:`, `symbol:`, `arity:`, `grep:`, `cite:`, and the command probes `cmd:<exit code>@<command>` (the command exits with that code) and `test:<command>` (the command passes). Command probes run only for rows you wrote yourself, only with `hypothesisExec: true` in the settings file, and only for the commands `verifyCommand` allows (no shell syntax); otherwise the row stays `open` and nothing runs. Wiki claims and model proposals never run commands.
 Use it for known pre-failing, flaky or environment-dependent tests, so they don't keep every check red and send the repair loop chasing them.
 
-**Tracing (environment):** `CODING_AGENTS_TRACE=1` prints one stderr line per stage with elapsed time and Ollama's load / prompt / generation split; `CODING_AGENTS_TRACE_DIR=<dir>` also saves every rejected model reply there.
+**Tracing (environment):** `CODING_AGENTS_TRACE=1` prints one stderr line per stage with elapsed time and Ollama's load / prompt / generation split; `CODING_AGENTS_TRACE_DIR=<dir>` also saves every rejected model reply there, and the replies of the cloud model when the fallback is used (`cloud-sr-<file>` for search/replace, `cloud-full-<file>` for a whole-file reply, saved before any check can reject them).
+
+**What `verifyCommand` accepts:** the runners `npx`, `npm`, `pnpm`, `yarn`, `node`, `pytest`, `python`, `python3`, `go`, `cargo`, `dotnet`, `mvn`, `gradle` and `make`, with no shell syntax or quotes. The inline-code flags `-e`, `--eval`, `-p`, `--print`, `-c`, `--command` and `--exec` are refused only when the command runs `node`, `python` or `python3` (directly or through `npx`/`npm exec`), so `npx tsc -p tsconfig.json --noEmit` and `cargo test -p crate` work. `-c` and `--call` are always refused after `npx`, `npm`, `pnpm` and `yarn`, because they run their argument through a shell.
 
 **Execution model — synchronous vs. background:**
 `dryRun:true` (the default), `action:'plan'`/`pauseOnTaskPlan:true`, and `resolve.action:'rollback'` are all **synchronous** — you get a full result on that call.
@@ -82,7 +97,7 @@ This mirrors `use_free_llm`'s `run`/`continue`/`status`/`abort` pattern (`RunReg
 **Output:**
 ```typescript
 interface CodingAgentsResult {
-  status?: 'applied' | 'rollback' | 'dry_run' | 'paused' | 'running';
+  status?: 'applied' | 'rollback' | 'dry_run' | 'proposed' | 'paused' | 'running';  // proposed: dryRun was false but no resolve was given, so the edit was not applied
   pipelineStage: 'enumerate' | 'locate' | 'anchor' | 'edit' | 'verify' | 'completed'; // last stage reached
   anchors: Array<{ filePath: string; hashTag: string; lineCount: number; capturedAt: number }>; // hashTag is [PATH#SHA8], e.g. src/server.ts#a1b2c3d4, taken before editing
   content?: string;              // the result rendered as Markdown for display
@@ -105,6 +120,8 @@ interface CodingAgentsResult {
   replannedGoal?: string;        // the corrected goal, when hypothesisModel is on and enforce found a refuted assumption
   isPaused?: boolean;
   applied: boolean;
+  partialApply?: boolean;        // true when only some files could be patched/applied (e.g. symbol-loss refusal)
+  durationMs?: number;           // total elapsed wall-clock milliseconds for the run benchmark
   checkpointId?: string;
   restoredFiles?: string[];
   modelUsed?: string;
@@ -120,18 +137,28 @@ interface CodingAgentsResult {
     skippedFailures?: string[];  // failures ignored via skipFailingTests
   };
   repair?: {                     // how the automatic repair loop ended
-    outcome: 'converged' | 'not_converged' | 'stuck' | 'needs_user' | 'error' | 'aborted' | 'timed_out';
+    outcome: 'converged' | 'unverified' | 'not_converged' | 'stuck' | 'cycling' | 'needs_user' | 'error' | 'aborted' | 'timed_out';  // unverified: requireRed was set and the check was already green before the edit
     attemptCount: number;
-    attempts: Array<{ attempt: number; outcome: string; failing?: number; rewrite?: boolean; brief?: string }>;
+    attempts: Array<{ attempt: number; outcome: string; failing?: number; rewrite?: boolean; brief?: string; triage?: string }>;  // triage: why an edit lacked the text the goal supplied
   };
   review?: { verdict: 'ok' | 'concerns' | 'blocked' | 'skipped'; findings: Array<{ blocking: boolean; text: string }> };
   rollbackBrief?: string;        // compiler messages of an edit that was rolled back for a syntax error
+  symbolLoss?: string[];         // top-level names an edit removed although the goal does not mention them; such an edit is not written
 }
 ```
 
 **Repair loop** (`src/tools/coding-agents/repair-loop.ts`, needs a `verifyCommand`):
 - The tests named in `verifyCommand` are shown to the model read-only as the specification; the agent never edits or runs a test it wrote (such edits are withheld and you run them, reporting back with `verifyReport`).
 - First round: `samples` independent candidates from the original file; the closest one (fewest failing cases) is repaired next. The original tree counts as a candidate too.
+- The check runs once per state of the files: the result is keyed on the content of the edited files and of the test files the command names, so an attempt whose starting tree was just checked reuses that result (the trace says `baseline check done cached`). The cache is cleared when a run starts.
+- When the goal says a module exports names (`exports `function f()` and `g``), those names are read from the goal and checked on the edited files; any that no TypeScript/JavaScript file exports are named in the repair brief ("The goal requires these names to be exported, but the edit does not export them"). A baseline that failed to load (only a test-file entry, no case names) is not used to claim that the edit broke tests.
+- A search/replace reply is cleaned before it is applied: markdown fences around the code are dropped (a fence-only SEARCH is empty), and a SEARCH whose text is copied from the read-only test file is reported as such in the retry. A goal that says "change nothing else" is still an add-only goal, so the anchor of an addition cannot be deleted. The cloud calls send the attempt's temperature, so a retry is not answered from the response cache, and callers that pass `isOnePass: true` get the answer without the reasoning (THOUGHTS) text in front of it.
+- An attempt whose test file does not load (only a test-file entry in the failures) counts as the worst attempt, not as "1 failing", so the loop does not build on a module that does not load.
+- When the goal says the code goes at the end of the file ("at the end of", "append ... to"), the instruction tells the model to leave the SEARCH part empty, and an empty SEARCH, or a comment-only SEARCH that is not in the file (the model's placeholder, e.g. `// No existing code to search for`), appends the REPLACE text. Without such wording a missing SEARCH is still refused.
+- A SEARCH/REPLACE block whose `=======` or `>>>>>>> REPLACE` marker is glued to the end of a text line (`}=======`) is read as if the marker were on its own line. When a SEARCH block is not found, the retry prompt lists the closest real lines of the file with their line numbers; lines that share at least two identifiers with the SEARCH are listed even when they are not textually close. The syntax-rollback brief leaves out unresolved-import and missing-type errors from the isolated checker (it says how many) and lists the parse errors. Replies are not given the debugger CLI tips when the caller passes `isOnePass: true`.
+- A SEARCH/REPLACE block against an empty file (a new file) applies its REPLACE body whatever the SEARCH says, since there is nothing to match.
+- The repair brief separates the tests the edit broke (they passed before it) from the ones that were already failing, and lists the lines the edit deleted with nothing in their place.
+- A failing set that repeats after the first round means the loop is going in circles. The first time, the next attempt starts over from the original file, and with `allowCloudFallback` every later attempt goes to the cloud model instead of the local one. The second time, the loop stops with `repair.outcome: "cycling"` and the original files are restored (`status: "rollback"`).
 - Each retry gets a debugger brief: failing case names, assertion lines, stack frames in the edited files, plus targeted hints (a hard-coded test input, a numeric mismatch that suggests checking what a call returns, or a member read but never assigned such as `this.currency` / `self.currency`).
 - More hints in the brief: a function called with different argument counts in one edited file (a half-finished signature change), and Python `takes N positional arguments but M were given` / `unexpected keyword argument`, which spell out "add the parameter to the definition".
 - **Rejected before the check runs:** an edit that adds a second definition of an existing name (the later one wins; traced as the cause of a six-attempt stall) or an import that does not resolve is turned back into a retry with the reason, in the same attempt.

@@ -67,6 +67,7 @@ import { resolvePathWithinRoots, pathParamWithinRoots, relativeSegmentError } fr
 import { WorkspaceScanner } from './cache/workspace.js';
 import { STATE_FILE } from './pipeline/middlewares/constants.js';
 import { createHandshake, renderLeaseModule, requireWikiLease, assertDashboardFetch, LeaseError } from './wiki-lease.js';
+import { globalEpisodicCache } from './tools/coding-agents/episodic-probe-cache.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -198,6 +199,7 @@ export function createExpressApp(): express.Express {
     { pattern: '/api/tool', limit: '10mb' },
     { pattern: '/api/browser_tool', limit: '10mb' },
     { pattern: '/api/cyber_tool', limit: '10mb' },
+    { pattern: '/api/reverse_tool', limit: '10mb' },
     { pattern: '/api/movie_tool', limit: '10mb' },
     { pattern: /^\/api\/movie(\/|$)/, limit: '10mb' },
   ];
@@ -396,8 +398,22 @@ export function createExpressApp(): express.Express {
       // Recent search queries/results logged by SearchRouterMiddleware (v1.0.9).
       app.get('/api/search-logs', async (req, res) => {
         try {
-          const logs = await getRecentSearchLogs();
-          res.json(logs);
+          const { getLocalSearchLogs } = await import('./pipeline/middlewares/SearchRouterMiddleware.js');
+          const [remoteLogs, localLogs] = await Promise.all([
+            getRecentSearchLogs().catch(() => []),
+            getLocalSearchLogs(50).catch(() => []),
+          ]);
+          const seen = new Set<string>();
+          const merged = [...localLogs, ...remoteLogs]
+            .filter(item => {
+              const key = `${item.provider}:${item.query}:${Math.floor(item.timestamp / 1000)}`;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            })
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 50);
+          res.json(merged);
         } catch (err) {
           res.status(500).json({ error: String(err) });
         }
@@ -641,6 +657,11 @@ export function createExpressApp(): express.Express {
               result = await runMovieTool(params);
               break;
             }
+            case 'reverse_tool': {
+              const { reverseTool } = await import('./tools/reverse-tool.js');
+              result = await reverseTool(params);
+              break;
+            }
             default:
               res.status(400).json({ error: `Unknown tool: ${tool}` });
               return;
@@ -824,6 +845,18 @@ export function createExpressApp(): express.Express {
       });
 
       // Cyber Tool Security Registry & Wiki API Endpoint
+            app.post('/api/reverse_tool', express.json({ limit: '10mb' }), async (req, res) => {
+        if (!checkRateLimit(req, res)) return;
+        try {
+          const body = req.body || {};
+          const { reverseTool } = await import('./tools/reverse-tool.js');
+          const result = await reverseTool(body);
+          res.json(result);
+        } catch (err: any) {
+          res.status(500).json({ success: false, error: String(err?.message || err) });
+        }
+      });
+
       app.post('/api/cyber_tool', express.json({ limit: '10mb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
@@ -1457,7 +1490,7 @@ export function createExpressApp(): express.Express {
           }
 
           // Disallow traversal outside allowed file extensions or root boundary if relative
-          const allowedExts = new Set(['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.flac', '.png', '.jpg', '.jpeg', '.webp', '.pdf']);
+          const allowedExts = new Set(['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.mp3', '.m4a', '.wav', '.flac', '.png', '.jpg', '.jpeg', '.webp', '.pdf']);
           const ext = path.extname(resolvedPath).toLowerCase();
           if (!allowedExts.has(ext)) {
             return res.status(400).json({ error: `File type ${ext} not permitted for media preview` });
@@ -2022,6 +2055,8 @@ async function main() {
     } catch (err: any) {
       console.error('[cas] Boot restore failed (non-fatal):', err?.message || err);
     }
+
+    await globalEpisodicCache.load().catch(() => {});
 
     // Periodically check/sync telemetry every hour (supports continuous server runs)
     const telemetryInterval = setInterval(async () => {

@@ -43,11 +43,18 @@ export class ParallelSearchProvider extends BaseSearchProvider {
 
     const json = await response.json() as { results?: Array<{ title: string; url: string; summary: string }> };
     this.recordSuccess();
-    return (json.results || []).map(r => ({
-      provider: 'parallel' as const,
-      title: r.title,
-      url: r.url,
-      snippet: r.summary,
-    }));
+    const seenUrls = new Set<string>();
+    const uniqueResults: UnifiedSearchResult[] = [];
+    for (const r of json.results || []) {
+      if (!r.url || seenUrls.has(r.url)) continue;
+      seenUrls.add(r.url);
+      uniqueResults.push({
+        provider: 'parallel' as const,
+        title: r.title,
+        url: r.url,
+        snippet: r.summary,
+      });
+    }
+    return uniqueResults;
   }
 }

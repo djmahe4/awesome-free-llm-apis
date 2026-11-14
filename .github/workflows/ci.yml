@@ -1,19 +1,20 @@
 name: CI
 
 on:
-  push:
+  pull_request:
+    types:
+      - closed
     branches:
       - '**'
     paths:
       - '**'
-      - '!**.md'
-      - '!docs/**'
       - 'external/agent-prompt/README.md'
   workflow_dispatch:
 
 jobs:
   validate:
     name: Validate data.json & README
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -26,6 +27,8 @@ jobs:
         run: node scripts/validate-data.js
       - name: README generates from data.json
         run: node scripts/generate-readme.js
+      - name: Verify generated endpoint labels
+        run: node --test scripts/test-generated-endpoints.js
       - name: Sources and links still match data.json
         run: |
           git fetch -q origin main || true
@@ -38,6 +41,7 @@ jobs:
 
   test:
     name: Build & Test MCP Server (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -62,9 +66,13 @@ jobs:
           cache-dependency-path: mcp-server/package-lock.json
 
       - name: Set up Python
+        id: setup-python
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install numpy Pillow opencv-python-headless
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
@@ -77,6 +85,8 @@ jobs:
 
       - name: Run tests
         run: npm test
+        env:
+          PYTHON: ${{ steps.setup-python.outputs.python-path }}
 
       - name: Grounding evaluation (planted hallucinations)
         run: npm run eval:grounding

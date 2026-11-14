@@ -189,6 +189,8 @@
     "quickstart": [
       "action",
       "allowCloudFallback",
+      "contextDirs",
+      "contractModel",
       "feedback",
       "lspAction",
       "maxDurationMs",

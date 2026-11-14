@@ -197,6 +197,30 @@ describe('best attempt tracking: repair from the closest attempt, not the latest
     expect(r.repair?.outcome).toBe('converged');
   });
 
+  it.each(['tests/x.test.ts [ tests/x.test.ts ]', 'tests/x.test.ts', 'tests/test_x.py'])(
+    'does not prefer an unloadable suite (%s) over ten failing cases', async (failedFile) => {
+      const broken = withFiles(1, 'BROKEN');
+      broken.verification!.failedCases = [failedFile];
+      const feedback: Array<string | undefined> = [];
+      const results = [withFiles(10, 'BEST'), broken, passed()];
+      await runWithRepairLoop({ ...input, maxRepairAttempts: 2 }, 's', undefined,
+        async (i) => { feedback.push(i.feedback); return results.shift()!; },
+        async () => []);
+      expect(feedback[2]).toBe('brief-10-BEST');
+    });
+
+  it('does not treat an unloadable baseline as a near-miss', async () => {
+    const result = withFiles(10, 'BEST');
+    result.verification!.baselineFailedCases = ['tests/x.test.ts [ tests/x.test.ts ]'];
+    result.verification!.baselineBrief = 'BROKEN BASELINE';
+    const seen: CodingAgentsInput[] = [];
+    const results = [result, passed()];
+    await runWithRepairLoop(input, 's', undefined,
+      async (i) => { seen.push(i); return results.shift()!; }, async () => []);
+    expect(seen[1].feedback).toBe('brief-10-BEST');
+    expect(seen[1].rewrite).toBe(true);
+  });
+
   it('does not restore when the latest attempt is the best', async () => {
     const log: string[] = [];
     const results = [withFiles(3, 'A'), withFiles(1, 'B'), passed()];

@@ -171,13 +171,15 @@ describe('hybrid post-quantum proof: requireWikiLease wall', () => {
   let server: Server;
   let baseUrl: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     resetLeaseState({ rotateKeys: true });
     app = express();
     app.post(WALL_PATH, requireWikiLease, (_req, res) => {
       res.json({ ok: true });
     });
-    server = app.listen(0);
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, resolve);
+    });
     baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });
 
@@ -262,13 +264,15 @@ describe('hybrid post-quantum proof: shipped dashboard client', () => {
   let server: Server;
   let baseUrl: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     resetLeaseState({ rotateKeys: true });
     app = express();
     app.post(WALL_PATH, requireWikiLease, (_req, res) => {
       res.json({ ok: true });
     });
-    server = app.listen(0);
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, resolve);
+    });
     baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });
 

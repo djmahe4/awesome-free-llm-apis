@@ -1,5 +1,6 @@
 import { loadCodingAgentsSettings, isSkippedTest } from './settings.js';
 import { spawn, spawnSync } from 'node:child_process';
+import { withApiTrap } from './api-trap.js';
 
 /**
  * Behavioural gate for coding_agents: a caller-supplied check (normally a test run) that must still
@@ -13,7 +14,10 @@ import { spawn, spawnSync } from 'node:child_process';
 const ALLOWED_EXECUTABLES = new Set([
   'npx', 'npm', 'pnpm', 'yarn', 'node', 'pytest', 'python', 'python3', 'go', 'cargo', 'dotnet', 'mvn', 'gradle', 'make',
 ]);
-const INLINE_CODE_FLAGS = new Set(['-e', '--eval', '-p', '--print', '-c', '--command', '--exec']);
+const INTERPRETERS = new Set(['node', 'python', 'python3']);
+const RUNNER_SHELL_FLAGS = new Set(['-c', '--call']);
+const NODE_INLINE_FLAGS = new Set(['-e', '--eval', '-p', '--print', '-c', '--command', '--exec']);
+const PYTHON_INLINE_FLAGS = new Set(['-c', '--command']);
 const SHELL_CHARS = /[;&|<>`$(){}\\\n\r"'*?~!#]/;
 
 export type VerifyValidation = { ok: true; exe: string; args: string[] } | { ok: false; reason: string };
@@ -27,8 +31,20 @@ export function validateVerifyCommand(command: string): VerifyValidation {
   if (!ALLOWED_EXECUTABLES.has(exe)) {
     return { ok: false, reason: `verifyCommand must start with one of: ${[...ALLOWED_EXECUTABLES].join(', ')}` };
   }
-  const flag = args.find(a => INLINE_CODE_FLAGS.has(a));
-  if (flag) return { ok: false, reason: `inline-code flag ${flag} is not allowed in verifyCommand; point it at a script or test file` };
+  let interpreter = exe;
+  if (exe === 'npx' || exe === 'npm' || exe === 'pnpm' || exe === 'yarn') {
+    const i = args.findIndex(a => !a.startsWith('-') && a !== 'exec' && INTERPRETERS.has(a));
+    if (i !== -1) interpreter = args[i];
+    const flag = args.find(a => RUNNER_SHELL_FLAGS.has(a));
+    if (flag) return { ok: false, reason: `shell flag ${flag} is not allowed in verifyCommand; point it at a script or test file` };
+  }
+  if (interpreter === 'node') {
+    const flag = args.find(a => NODE_INLINE_FLAGS.has(a));
+    if (flag) return { ok: false, reason: `inline-code flag ${flag} is not allowed in verifyCommand; point it at a script or test file` };
+  } else if (interpreter === 'python' || interpreter === 'python3') {
+    const flag = args.find(a => PYTHON_INLINE_FLAGS.has(a));
+    if (flag) return { ok: false, reason: `inline-code flag ${flag} is not allowed in verifyCommand; point it at a script or test file` };
+  }
   return { ok: true, exe, args };
 }
 
@@ -81,12 +97,12 @@ function withoutKey(env: NodeJS.ProcessEnv, key: string): NodeJS.ProcessEnv {
 
 function killTree(pid: number | undefined): void {
   if (!pid) return;
-  if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+  if (process.platform === 'win32') { try { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' }); } catch {} try { process.kill(pid, 'SIGKILL'); } catch {} }
   else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } } }
 }
 
 /** A failed-case entry that names a whole test file (node:test, pytest) rather than one test. */
-const FILE_LEVEL_ENTRY = /[\\/]?[\w.-]+\.(test|spec)\.[cm]?[jt]sx?$|(^|[\\/])test_[\w-]+\.py$|[\w-]+_test\.(py|go)$/i;
+export const FILE_LEVEL_ENTRY = /[\\/]?[\w.-]+\.(test|spec)\.[cm]?[jt]sx?$|(^|[\\/])test_[\w-]+\.py$|[\w-]+_test\.(py|go)$/i;
 
 /**
  * Known pre-failing tests from .free-llm-mcp/coding-agents.json: they do not count. A check whose only
@@ -133,7 +149,8 @@ export async function runVerifyCommand(
       detached: process.platform !== 'win32',
       // No colour: NO_COLOR is the cross-tool convention, PY_COLORS covers pytest. FORCE_COLOR is removed
       // rather than set to 0, because pytest treats it being set at all as "force colour".
-      env: { ...withoutKey(process.env, 'FORCE_COLOR'), CI: '1', NO_COLOR: '1', PY_COLORS: '0' },
+      // withApiTrap: a call to a member a built-in does not have fails with the members it does have (see api-trap.ts).
+      env: withApiTrap({ ...withoutKey(process.env, 'FORCE_COLOR'), CI: '1', NO_COLOR: '1', PY_COLORS: '0' }),
     });
     const append = (d: Buffer) => {
       const text = d.toString();

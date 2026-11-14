@@ -78,8 +78,10 @@ export function resolveLlmFitExecutable(startDir?: string): { binaryPath?: strin
 }
 
 let recommendCache: { data: LlmFitRecommendResult; timestamp: number } | null = null;
+let recommendNegativeAt = 0;
 const modelInfoCache = new Map<string, { data: LlmFitModelInfo | null; timestamp: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const NEGATIVE_CACHE_TTL_MS = 60 * 1000;
 
 /**
  * Runs a command asynchronously, collecting stdout/stderr with a timeout.
@@ -180,10 +182,12 @@ export async function recommendModels(options?: {
   useCase?: string;
   limit?: number;
   workspaceRoot?: string;
+  timeoutMs?: number;
 }): Promise<LlmFitRecommendResult> {
   const { binaryPath, pythonPath } = resolveLlmFitExecutable(options?.workspaceRoot);
   const limit = options?.limit ?? 5;
   const useCase = options?.useCase ?? 'coding';
+  const timeoutMs = options?.timeoutMs ?? 30000;
 
   if (recommendCache && (Date.now() - recommendCache.timestamp < CACHE_TTL_MS)) {
     return {
@@ -191,22 +195,27 @@ export async function recommendModels(options?: {
       models: recommendCache.data.models.slice(0, limit),
     };
   }
+  if (recommendNegativeAt > 0 && (Date.now() - recommendNegativeAt < NEGATIVE_CACHE_TTL_MS)) {
+    throw new Error('llmfit unavailable (cached)');
+  }
 
   let rawOutput = '';
 
   try {
     if (binaryPath) {
       const args = ['recommend', '--json', '--use-case', useCase, '--limit', String(limit)];
-      const res = await runCommand(binaryPath, args);
+      const res = await runCommand(binaryPath, args, timeoutMs);
       rawOutput = res.stdout;
     } else if (pythonPath) {
       const code = `import subprocess, sys; res = subprocess.run(['llmfit', 'recommend', '--json', '--use-case', '${useCase}', '--limit', '${limit}'], capture_output=True, text=True); sys.stdout.write(res.stdout)`;
-      const res = await runCommand(pythonPath, ['-c', code]);
+      const res = await runCommand(pythonPath, ['-c', code], timeoutMs);
       rawOutput = res.stdout;
     } else {
+      recommendNegativeAt = Date.now();
       throw new Error('llmfit is not installed in venv/Scripts');
     }
   } catch (err: any) {
+    recommendNegativeAt = Date.now();
     throw new Error(`llmfit execution failed: ${err.message || err}`);
   }
 

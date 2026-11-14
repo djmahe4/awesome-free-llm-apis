@@ -264,6 +264,63 @@ export function runActionInputProblem(input: Pick<CyberToolInput, 'actionName' |
     return null;
 }
 
+/**
+ * Loads dependency commands and invoked tools from the workspace repository graph.
+ * Reads pre-computed .free-llm-mcp/repo_graph.json if available, or runs
+ * scanWorkspace if explicitly requested or targeting an explicit workspaceRoot.
+ */
+async function loadWorkspaceDependencyContext(workspaceRoot?: string, scanWorkspace?: boolean): Promise<{
+    dependencyCommands: Array<{ file: string; command: string }>;
+    invokedTools: string[];
+}> {
+    const dependencyCommands: Array<{ file: string; command: string }> = [];
+    let invokedTools: string[] = [];
+
+    const effectiveRoot = workspaceRoot || process.cwd();
+    let graph: RepositoryGraph | null = null;
+
+    // 1. Fast-path: read pre-computed repo_graph.json if it exists on disk
+    const graphPath = path.join(effectiveRoot, '.free-llm-mcp', 'repo_graph.json');
+    try {
+        const raw = await fs.readFile(graphPath, 'utf-8');
+        graph = RepositoryGraph.deserialize(effectiveRoot, JSON.parse(raw));
+    } catch {
+        // Not yet indexed or unreadable
+    }
+
+    // 2. Fallback: scan workspace if explicitly requested or targeting an explicit workspaceRoot
+    if (!graph && (scanWorkspace === true || (scanWorkspace !== false && Boolean(workspaceRoot) && workspaceRoot !== process.cwd()))) {
+        try {
+            const { WorkspaceDependencyScanner } = await import('../memory/dependency-scanner.js');
+            const scanner = new WorkspaceDependencyScanner(effectiveRoot);
+            graph = new RepositoryGraph(effectiveRoot);
+            await scanner.scanWorkspace(graph);
+        } catch (e) {
+            console.warn('[cyber_tool] Dependency scan failed:', e);
+        }
+    }
+
+    if (graph) {
+        const codeNodes = graph.getAllNodes().filter(n => n.type === 'code');
+        for (const node of codeNodes) {
+            const metadata = node.metadata as any;
+            if (metadata?.commands) {
+                for (const cmd of metadata.commands) {
+                    dependencyCommands.push({ file: node.id, command: cmd });
+                }
+            }
+        }
+        const invokes = graph.getAllEdges().filter(e => e.type === 'invokes');
+        const invokeSet = new Set<string>();
+        for (const edge of invokes) {
+            invokeSet.add(edge.target);
+        }
+        invokedTools = Array.from(invokeSet);
+    }
+
+    return { dependencyCommands, invokedTools };
+}
+
 export async function cyberTool(input: CyberToolInput) {
     const start = Date.now();
     const action = input.action || 'list_tools';
@@ -455,34 +512,7 @@ export async function cyberTool(input: CyberToolInput) {
                     });
                 }
 
-                // Scan workspace for actual tool usage (commands found in code)
-                let dependencyCommands: Array<{ file: string; command: string }> = [];
-                let invokedTools: string[] = [];
-                try {
-                    const { WorkspaceDependencyScanner } = await import('../memory/dependency-scanner.js');
-                    const scanner = new WorkspaceDependencyScanner(workspaceRoot);
-                    const graph = new RepositoryGraph(workspaceRoot);
-                    await scanner.scanWorkspace(graph);
-
-                    const codeNodes = graph.getAllNodes().filter(n => n.type === 'code');
-                    for (const node of codeNodes) {
-                        const metadata = node.metadata as any;
-                        if (metadata?.commands) {
-                            for (const cmd of metadata.commands) {
-                                dependencyCommands.push({ file: node.id, command: cmd });
-                            }
-                        }
-                    }
-                    const invokes = graph.getAllEdges().filter(e => e.type === 'invokes');
-                    const invokeSet = new Set<string>();
-                    for (const edge of invokes) {
-                        invokeSet.add(edge.target);
-                    }
-                    invokedTools = Array.from(invokeSet);
-                } catch (e) {
-                    // If dependency scan fails, continue with empty context
-                    console.warn('[cyber_tool] Dependency scan failed:', e);
-                }
+                const { dependencyCommands, invokedTools } = await loadWorkspaceDependencyContext(input.workspaceRoot, input.scanWorkspace);
 
                 const walkthrough = await callCoachLLM([
                     { role: 'system', content: COACH_SYSTEM_PROMPT },
@@ -536,34 +566,7 @@ export async function cyberTool(input: CyberToolInput) {
                 });
             }
 
-            // Scan workspace for actual tool usage (commands found in code)
-            let dependencyCommands: Array<{ file: string; command: string }> = [];
-            let invokedTools: string[] = [];
-            try {
-                const { WorkspaceDependencyScanner } = await import('../memory/dependency-scanner.js');
-                const scanner = new WorkspaceDependencyScanner(workspaceRoot);
-                const graph = new RepositoryGraph(workspaceRoot);
-                await scanner.scanWorkspace(graph);
-
-                const codeNodes = graph.getAllNodes().filter(n => n.type === 'code');
-                for (const node of codeNodes) {
-                    const metadata = node.metadata as any;
-                    if (metadata?.commands) {
-                        for (const cmd of metadata.commands) {
-                            dependencyCommands.push({ file: node.id, command: cmd });
-                        }
-                    }
-                }
-                const invokes = graph.getAllEdges().filter(e => e.type === 'invokes');
-                const invokeSet = new Set<string>();
-                for (const edge of invokes) {
-                    invokeSet.add(edge.target);
-                }
-                invokedTools = Array.from(invokeSet);
-            } catch (e) {
-                // If dependency scan fails, continue with empty context
-                console.warn('[cyber_tool] Dependency scan failed:', e);
-            }
+            const { dependencyCommands, invokedTools } = await loadWorkspaceDependencyContext(input.workspaceRoot, input.scanWorkspace);
 
             if (input.mode === 'dag_reverse') {
                 const manifestKey = `dag_manifest/${sessionId}`;

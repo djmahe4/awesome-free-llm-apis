@@ -11,7 +11,7 @@ import { getModelInfo, type LlmFitModelInfo } from './llmfit.js';
  * and the on-disk size otherwise.
  */
 
-export type Need = 'code' | 'vision' | 'embedding' | 'general';
+export type Need = 'code' | 'vision' | 'embedding' | 'general' | 'decision';
 
 export interface ModelProfile {
   name: string;
@@ -49,6 +49,7 @@ export function vramBudgetGb(): number {
 const CODE_NAME_RE = /coder|codellama|devstral|starcoder|deepseek-coder|granite-code|codestral|codegemma|\bcode\b/i;
 const VISION_NAME_RE = /vision|llava|\bvl\b|[-:.]vl[-:.]|qwen\d*(?:\.\d+)?vl|minicpm-v|moondream|bakllava|gemma3|pixtral|llama3\.2-vision/i;
 const EMBED_NAME_RE = /embed|bge|e5-|gte-|minilm|arctic-embed|snowflake|mxbai|nomic/i;
+const DECISION_NAME_RE = /laya/i;
 
 function parseParamsB(text?: string): number | undefined {
   const m = (text || '').match(/([\d.]+)\s*([BMK])/i);
@@ -71,6 +72,7 @@ export function buildProfile(
     capabilitySource = 'name';
     capabilities = [];
     if (EMBED_NAME_RE.test(name)) capabilities.push('embedding');
+    else if (DECISION_NAME_RE.test(name)) capabilities.push('decision');
     else capabilities.push('completion');
     if (VISION_NAME_RE.test(name)) capabilities.push('vision');
   }
@@ -116,6 +118,10 @@ export function scoreModel(p: ModelProfile, need: Need, budgetGb = vramBudgetGb(
     if (p.capabilities.includes('insert')) { score += 10; reasons.push('fill-in-the-middle'); }
     if (p.capabilities.includes('tools')) { score += 5; reasons.push('tool calling'); }
     if (isVisionModel(p)) { score -= 30; reasons.push('vision model (weaker for plain code)'); }
+  } else if (need === 'decision') {
+    if (p.capabilities.includes('decision') || DECISION_NAME_RE.test(p.name)) { score += 100; reasons.push('decision capability'); }
+    else { score -= 100; reasons.push('no decision capability'); }
+    if (isVisionModel(p)) { score -= 30; reasons.push('vision model (weaker for decisions)'); }
   } else {
     // general: prefer a plain text model; vision models are fine but not preferred
     if (isVisionModel(p)) { score -= 15; reasons.push('vision model'); }
@@ -161,9 +167,10 @@ export interface RouterDeps {
   now?: () => number;
 }
 
-const profileCache: { byName: Map<string, ModelProfile>; at: number } = { byName: new Map(), at: 0 };
+const profileCache: { byName: Map<string, ModelProfile>; at: number; negativeAt: number } = { byName: new Map(), at: 0, negativeAt: 0 };
 const CACHE_TTL_MS = 5 * 60_000;
-export function resetModelRouterCache(): void { profileCache.byName.clear(); profileCache.at = 0; }
+const NEGATIVE_TTL_MS = 10_000;
+export function resetModelRouterCache(): void { profileCache.byName.clear(); profileCache.at = 0; profileCache.negativeAt = 0; }
 
 async function timed<T>(p: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([p, new Promise<null>(r => setTimeout(() => r(null), ms))]);
@@ -175,17 +182,32 @@ async function timed<T>(p: Promise<T>, ms: number): Promise<T | null> {
  */
 export async function listModelProfiles(deps: RouterDeps = {}): Promise<ModelProfile[]> {
   const now = deps.now ?? Date.now;
-  if (profileCache.byName.size > 0 && now() - profileCache.at < CACHE_TTL_MS && !deps.fetchImpl) {
-    return [...profileCache.byName.values()];
+  if (!deps.fetchImpl) {
+    if (profileCache.byName.size > 0 && now() - profileCache.at < CACHE_TTL_MS) {
+      return [...profileCache.byName.values()];
+    }
+    if (profileCache.negativeAt > 0 && now() - profileCache.negativeAt < NEGATIVE_TTL_MS) {
+      throw new Error('Ollama /api/tags failed (cached unreachable)');
+    }
   }
   const base = (deps.baseUrl || process.env.OLLAMA_LOCAL_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
   const doFetch = deps.fetchImpl ?? (async (url: string, init?: any) => {
     const { default: nodeFetch } = await import('node-fetch');
-    return nodeFetch(url, init) as any;
+    return nodeFetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(500) }) as any;
   });
 
-  const tagsRes = await doFetch(`${base}/api/tags`);
-  if (!tagsRes.ok) throw new Error(`Ollama /api/tags failed`);
+  let tagsRes: any;
+  try {
+    tagsRes = await doFetch(`${base}/api/tags`);
+  } catch (err) {
+    if (!deps.fetchImpl) profileCache.negativeAt = now();
+    throw err;
+  }
+  if (!tagsRes.ok) {
+    if (!deps.fetchImpl) profileCache.negativeAt = now();
+    throw new Error(`Ollama /api/tags failed`);
+  }
+  if (!deps.fetchImpl) profileCache.negativeAt = 0;
   const tags: Array<{ name: string; size?: number; details?: any }> = (await tagsRes.json()).models ?? [];
 
   const llmfit = deps.llmfitInfo ?? ((n: string) => getModelInfo(n, { memoryBudgetGb: vramBudgetGb(), fast: true }));

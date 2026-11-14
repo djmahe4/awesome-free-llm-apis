@@ -7,7 +7,7 @@ vi.mock('node:child_process', () => ({
 }));
 
 function mockExecOnce(stdout: string) {
-  execFileMock.mockImplementationOnce((_file: string, _args: string[], cb: (err: Error | null, result: { stdout: string; stderr: string }) => void) => {
+  execFileMock.mockImplementationOnce((_file: string, _args: string[], _options: unknown, cb: (err: Error | null, result: { stdout: string; stderr: string }) => void) => {
     cb(null, { stdout, stderr: '' });
   });
 }
@@ -36,7 +36,7 @@ describe('renderPdfPage', () => {
   });
 
   it('returns null when the subprocess invocation itself fails', async () => {
-    execFileMock.mockImplementationOnce((_file: string, _args: string[], cb: (err: Error | null, result?: any) => void) => {
+    execFileMock.mockImplementationOnce((_file: string, _args: string[], _options: unknown, cb: (err: Error | null, result?: any) => void) => {
       cb(new Error('spawn failed'));
     });
 

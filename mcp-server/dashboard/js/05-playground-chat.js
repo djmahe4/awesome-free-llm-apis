@@ -571,7 +571,13 @@ function renderConvList(sessions) {
     convList.innerHTML = '<div class="conv-empty">No conversations yet</div>';
     return;
   }
-  convList.innerHTML = sessions.map(s => {
+  // Thousands of sessions pile up (smoke runs, one-shots); draw the newest ones and the open one, and search for the rest.
+  const MAX_CONV_ROWS = 100;
+  const shown = sessions.slice(0, MAX_CONV_ROWS);
+  const open = sessions.find(s => s.id === activeSessionId);
+  if (open && !shown.includes(open)) shown.push(open);
+  const hidden = sessions.length - shown.length;
+  convList.innerHTML = shown.map(s => {
     const isActive = s.id === activeSessionId;
     const displayName = s.name || (s.id === '__no_ws__' ? '⚡ One-shot [none]' : s.id);
     const sub = s.msgCount ? `${s.msgCount} msgs` : 'empty';
@@ -580,7 +586,7 @@ function renderConvList(sessions) {
       <div class="conv-item-label" style="font-weight:500; font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(displayName)}</div>
       <div class="conv-item-meta" style="font-size:.68rem; opacity:.75;"><span>${sub}</span><span>${ago}</span></div>
     </div>`;
-  }).join('');
+  }).join('') + (hidden > 0 ? `<div class="conv-more">${hidden} older conversations not shown. Type in the search box to find one.</div>` : '');
 
   convList.querySelectorAll('.conv-item').forEach(el => {
     el.addEventListener('click', async () => {
@@ -720,13 +726,13 @@ pgRunBtn.addEventListener('click', async () => {
   const ws = pgWorkspace.value.trim();
   if (ws) {
     params.workspace_root = ws;
-    params.sessionId = activeSessionId;
+    params.sessionId = params.sessionId || activeSessionId;
     if (activeTool.id === 'use_free_llm' && pgAgenticToggle?.checked) {
       params.agentic = true;
     }
   } else {
     // Unify multi-tool retrospective session tracking even in one-shot / standalone sessions
-    params.sessionId = activeSessionId;
+    params.sessionId = params.sessionId || activeSessionId;
   }
 
   function extractHumanReadableUserText(toolId, p) {

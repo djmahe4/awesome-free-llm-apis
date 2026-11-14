@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import path from 'node:path';
+
 /**
  * Opt-in timing trace (CODING_AGENTS_TRACE=1): one stderr line per pipeline event with the time since the
  * run started, so a slow run shows which stage the minutes went to. Off by default, no cost when off.
@@ -17,9 +19,15 @@ export function caTrace(event: string, detail = ''): void {
   console.error(`[ca-trace] +${((Date.now() - started) / 1000).toFixed(1)}s ${event}${detail ? ` ${detail}` : ''}`);
 }
 
+export function caTraceDir(): string | undefined {
+  const explicit = process.env.CODING_AGENTS_TRACE_DIR;
+  if (explicit) return explicit;
+  return caTraceOn() ? path.join(process.cwd(), '.free-llm-mcp', 'ca-traces') : undefined;
+}
+
 /** With CODING_AGENTS_TRACE_DIR set, saves a full model reply there so a rejected one can be inspected. */
 export function caTraceDump(label: string, content: string): void {
-  const dir = process.env.CODING_AGENTS_TRACE_DIR;
+  const dir = caTraceDir();
   if (!dir) return;
   try {
     fs.mkdirSync(dir, { recursive: true });

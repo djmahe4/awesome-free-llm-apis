@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { extractEmbeddedSnippets, extractDefinedSymbols } from './embedded-snippet-scanner.js';
+import type { DiskSymbolDb } from './disk-symbol-db.js';
 
 export interface Node {
     id: string;
@@ -165,6 +166,25 @@ export class RepositoryGraph {
         }
         return graph;
     }
+
+    toDiskSymbolDb(db: DiskSymbolDb, repoHash: string): void {
+        for (const node of this.nodes.values()) {
+            db.putNode(repoHash, {
+                id: node.id,
+                kind: node.type as any,
+                filePath: node.id,
+                metadata: node.metadata,
+            });
+        }
+        for (const edge of this.edges) {
+            db.putEdge(repoHash, {
+                source: edge.source,
+                target: edge.target,
+                kind: edge.type as any,
+                confidence: edge.confidence,
+            });
+        }
+    }
 }
 
 /** Identifiers that are too common to be trustworthy invokes-edge signals without type/scope resolution. */
@@ -207,13 +227,17 @@ export class WorkspaceDependencyScanner {
             graph.addNode(relativePath, 'code', { language: 'js/ts', size: stats.size, commands: [], exports });
             this.extractJsTsImports(fileContent, currentDir, relativePath, graph);
             this.extractCommandDocstrings(fileContent, relativePath, graph, ext);
-            this.fileContentCache.set(relativePath, fileContent);
+            if (stats.size <= 2 * 1024 * 1024) {
+                this.fileContentCache.set(relativePath, fileContent);
+            }
         } else if (ext === '.py') {
             const exports = WorkspaceDependencyScanner.generateSemanticProfile(fileContent, ext).exports;
             graph.addNode(relativePath, 'code', { language: 'python', size: stats.size, commands: [], exports });
             this.extractPythonImports(fileContent, currentDir, relativePath, graph);
             this.extractCommandDocstrings(fileContent, relativePath, graph, ext);
-            this.fileContentCache.set(relativePath, fileContent);
+            if (stats.size <= 2 * 1024 * 1024) {
+                this.fileContentCache.set(relativePath, fileContent);
+            }
         } else if (ext === '.go') {
             graph.addNode(relativePath, 'code', { language: 'go', size: stats.size, commands: [] });
             this.extractGoImports(fileContent, currentDir, relativePath, graph);

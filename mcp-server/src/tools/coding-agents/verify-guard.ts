@@ -117,6 +117,43 @@ export interface RepairBriefInput {
   patchedFiles: string[];
   /** Current content of the edited files, for cheap static hints (e.g. a member read but never assigned). */
   fileContents?: Record<string, string>;
+  /** Cases that already failed before this edit. With it, the brief separates what the edit broke from what was red already. */
+  baselineFailedCases?: string[];
+  /** Lines the edit removed with nothing equal in their place (see deletedLines). */
+  deletedLines?: string[];
+  /** Names the goal says the module exports that the edited file does not export. */
+  missingExports?: string[];
+}
+
+/** Test runners append a duration ("... 4ms", "(12 ms)"); it changes between runs, so it is not part of a case's identity. */
+const caseKey = (c: string) => c.replace(/\s*\(?\d+(?:\.\d+)?\s*m?s\)?\s*$/, '').trim();
+
+/** The cases that failed before the edit, or undefined when the baseline failed without naming any (e.g. the module did not load). */
+export function informativeBaseline(b: { ok: boolean; failedCases: string[] }): string[] | undefined {
+  if (b.ok) return [];
+  const named = b.failedCases.filter(c => !/^\S+\.(?:test|spec)\.[cm]?[jt]sx?(?:\s*\[.*\])?$/i.test(c));
+  return named.length > 0 ? named : undefined;
+}
+const TRIVIAL_LINE = /^[\s{}()[\];,]*$/;
+
+/**
+ * Lines of `before` that do not appear in `after` (counted, so a line kept once out of two counts once), ignoring
+ * blank and bracket-only lines. A small model asked to replace one loop also deleted the next one in three attempts
+ * out of three, and nothing told it so (#109).
+ */
+export function deletedLines(before: string | null | undefined, after: string): string[] {
+  if (!before) return [];
+  const left = new Map<string, number>();
+  for (const l of after.split(/\r?\n/)) { const t = l.trim(); left.set(t, (left.get(t) ?? 0) + 1); }
+  const out: string[] = [];
+  for (const l of before.split(/\r?\n/)) {
+    const t = l.trim();
+    if (TRIVIAL_LINE.test(t)) continue;
+    const n = left.get(t) ?? 0;
+    if (n > 0) left.set(t, n - 1);
+    else out.push(t);
+  }
+  return out;
 }
 
 /**
@@ -282,6 +319,73 @@ export function inconsistentCalls(rawSrc: string): Array<{ name: string; counts:
 const KEY_LINE_RE =/\b(FAIL(ED)?|ERROR|AssertionError|Assertion failed|Traceback|panic:|expected|received|actual|TypeError|ReferenceError|SyntaxError|✗|×|not ok)\b|^\s*[✗×]|^\s*E\s{2,}/i;
 const FRAME_RE = /[\w./\\-]+\.[a-z]{1,4}:\d+(:\d+)?/i;
 const BRIEF_CAP = 2000;
+/**
+ * Restates "+ key: A" / "- key: B" pairs from a diff body as one sentence per property. A small model that saw the diff still
+ * applied a casing fix ('Agent' -> 'agent') where the test wanted a different word ('assistant'); naming the difference
+ * (casing only vs a different value) tells it which edit is needed.
+ */
+export function diffValueHints(diffs: string[], max = 4): string[] {
+  const hints: string[] = [];
+  const seen = new Set<string>();
+  for (const block of diffs) {
+    const rows = block.split('\n');
+    for (let i = 0; i < rows.length - 1 && hints.length < max; i++) {
+      let gotMatch: RegExpMatchArray | null = null;
+      let wantMatch: RegExpMatchArray | null = null;
+
+      // 1. "+ key: got" followed by "- key: want" (e.g. node:test format)
+      const plusFirst = rows[i].match(/^\s*\+\s+([\w$"']+):\s*(.+?),?\s*$/);
+      const minusSecond = rows[i + 1].match(/^\s*-\s+([\w$"']+):\s*(.+?),?\s*$/);
+      if (plusFirst && minusSecond && plusFirst[1] === minusSecond[1]) {
+        gotMatch = plusFirst;
+        wantMatch = minusSecond;
+      }
+
+      // 2. "- key: want" followed by "+ key: got" (e.g. Jest / Vitest / unified diff format)
+      if (!gotMatch || !wantMatch) {
+        const minusFirst = rows[i].match(/^\s*-\s+([\w$"']+):\s*(.+?),?\s*$/);
+        const plusSecond = rows[i + 1].match(/^\s*\+\s+([\w$"']+):\s*(.+?),?\s*$/);
+        if (minusFirst && plusSecond && minusFirst[1] === plusSecond[1]) {
+          wantMatch = minusFirst;
+          gotMatch = plusSecond;
+        }
+      }
+
+      // 3. Expected/Received key-value pairs
+      if (!gotMatch || !wantMatch) {
+        const expFirst = rows[i].match(/^\s*(?:Expected|want):\s*(?:([\w$"']+):\s*)?(.+?),?\s*$/i);
+        const recSecond = rows[i + 1].match(/^\s*(?:Received|actual|got):\s*(?:([\w$"']+):\s*)?(.+?),?\s*$/i);
+        if (expFirst && recSecond && (expFirst[1] === recSecond[1] || (!expFirst[1] && !recSecond[1]))) {
+          const key = expFirst[1] || 'value';
+          wantMatch = [rows[i], key, expFirst[2]];
+          gotMatch = [rows[i + 1], key, recSecond[2]];
+        } else {
+          const recFirst = rows[i].match(/^\s*(?:Received|actual|got):\s*(?:([\w$"']+):\s*)?(.+?),?\s*$/i);
+          const expSecond = rows[i + 1].match(/^\s*(?:Expected|want):\s*(?:([\w$"']+):\s*)?(.+?),?\s*$/i);
+          if (recFirst && expSecond && (recFirst[1] === expSecond[1] || (!recFirst[1] && !expSecond[1]))) {
+            const key = recFirst[1] || 'value';
+            gotMatch = [rows[i], key, recFirst[2]];
+            wantMatch = [rows[i + 1], key, expSecond[2]];
+          }
+        }
+      }
+
+      if (!gotMatch || !wantMatch || gotMatch[1] !== wantMatch[1]) continue;
+      const key = gotMatch[1].replace(/["']/g, '');
+      const sig = `${key}|${gotMatch[2]}|${wantMatch[2]}`;
+      if (seen.has(sig)) continue;
+      seen.add(sig);
+      const strip = (v: string) => v.replace(/^['"`]|['"`]$/g, '');
+      const caseOnly = strip(gotMatch[2]).toLowerCase() === strip(wantMatch[2]).toLowerCase();
+      hints.push(caseOnly
+        ? `\`${key}\`: your code gives ${gotMatch[2]}, the test expects ${wantMatch[2]}. They differ only in letter case.`
+        : `\`${key}\`: your code gives ${gotMatch[2]}, the test expects ${wantMatch[2]}. These are different values, not a casing difference: add an explicit mapping from ${gotMatch[2]} to ${wantMatch[2]} (a lookup table or a condition) instead of transforming the text.`);
+    }
+  }
+  return hints;
+}
+
+const OPAQUE_VALUE_RE = /^\s*(?:actual|expected):\s*\[(?:Array|Object|Function)\],?\s*$/;
 
 /** Quoted strings and ip/number-like tokens in failing case names: the inputs the tests use. */
 function caseInputs(cases: string[]): string[] {
@@ -320,15 +424,38 @@ export function buildRepairBrief(i: RepairBriefInput): string {
   const key: string[] = [];
   const frames: string[] = [];
   for (const l of lines) {
-    if (KEY_LINE_RE.test(l)) key.push(l.trim());
+    // node:test prints `actual: [Array]` for any array or object: it names the keyword but carries no value.
+    if (KEY_LINE_RE.test(l) && !OPAQUE_VALUE_RE.test(l)) key.push(l.trim());
     if (FRAME_RE.test(l) && patchedBase.some(b => norm(l).includes(b))) frames.push(l.trim());
+  }
+  // The "+ actual - expected" body is what shows WHICH value is wrong ("+ role: 'User'" / "- role: 'user'"), and none
+  // of its lines contain a keyword, so the key-line filter used to drop it: the model was told only that two arrays differ.
+  const diffs: string[] = [];
+  for (let k = 0; k < lines.length && diffs.length < 3; k++) {
+    if (!/^\s*\+\s*actual\s*-\s*expected\s*$/i.test(lines[k])) continue;
+    const block: string[] = [];
+    for (let m = k + 1; m < lines.length && block.length < 24; m++) {
+      if (/^\s*(at |generatedMessage\b|code:|test at )/.test(lines[m])) break;
+      block.push(lines[m]);
+    }
+    if (block.length) diffs.push(block.join('\n'));
   }
   const dedupe = (a: string[]) => [...new Set(a)];
   const parts: string[] = [PERSONA, `Check: ${i.command} (${i.timedOut ? 'timed out' : `exit ${i.exitCode}`})`];
   const cases = i.failedCases ?? [];
-  if (cases.length) {
-    const shown = cases.slice(0, 15);
-    parts.push(`Failing cases (${cases.length}):\n${shown.join('\n')}${cases.length > shown.length ? `\n(+${cases.length - shown.length} more)` : ''}`);
+  const list = (a: string[]) => `${a.slice(0, 15).join('\n')}${a.length > 15 ? `\n(+${a.length - 15} more)` : ''}`;
+  if (cases.length && i.baselineFailedCases) {
+    // What the edit broke comes first: those tests passed a moment ago, so the edit itself is the cause.
+    const before = new Set(i.baselineFailedCases.map(caseKey));
+    const broke = cases.filter(c => !before.has(caseKey(c)));
+    const still = cases.filter(c => before.has(caseKey(c)));
+    if (broke.length) parts.push(`Your edit broke ${broke.length === 1 ? 'this test, which' : `these ${broke.length} tests, which`} passed before it. Fix ${broke.length === 1 ? 'it' : 'them'} first; usually the edit removed or changed code ${broke.length === 1 ? 'it relies' : 'they rely'} on:\n${list(broke)}`);
+    if (still.length) parts.push(`Still failing, as before the edit (${still.length}):\n${list(still)}`);
+  } else if (cases.length) {
+    parts.push(`Failing cases (${cases.length}):\n${list(cases)}`);
+  }
+  if (i.deletedLines && i.deletedLines.length) {
+    parts.push(`Your edit deleted these lines and nothing in it replaces them. If the goal did not ask for that, keep them:\n${i.deletedLines.slice(0, 15).join('\n')}`);
   }
   if (/Missing expected exception|did not throw|expected .* to throw/i.test(i.outputTail)) {
     parts.push('A call that should have thrown returned normally: the current logic ACCEPTS that input. Find the part that accepts it (a regex or condition that is too permissive) and tighten that. Do not add a special case for the input.');
@@ -343,6 +470,7 @@ export function buildRepairBrief(i: RepairBriefInput): string {
       parts.push(`${file} reads ${missing.map(m => `${py ? 'self' : 'this'}.${m}`).join(', ')} but never assigns ${missing.length > 1 ? 'them' : 'it'}, so ${missing.length > 1 ? 'they are' : 'it is'} never set: store the value (for example in ${py ? '__init__' : 'the constructor'}) before using it.`);
     }
   }
+  if (i.missingExports && i.missingExports.length > 0) parts.push(`The goal requires these names to be exported, but the edit does not export them: ${i.missingExports.join(', ')}. Add the export keyword to each declaration.`);
   const arity = arityErrorHint(i.outputTail || '');
   if (arity) parts.push(arity);
   for (const [file, content] of Object.entries(i.fileContents ?? {})) {
@@ -353,12 +481,22 @@ export function buildRepairBrief(i: RepairBriefInput): string {
   }
   if (cases.length > 3) parts.push('Several cases fail: rewrite the whole function from the requirements instead of patching single lines.');
   if (i.timedOut) parts.push('The check timed out: the edit probably introduced a hang or an infinite loop.');
+  if (diffs.length) parts.push('What differs ("+" is the value your code produced, "-" is the value the test expects):\n' + diffs.join('\n---\n'));
+  const valueHints = diffValueHints(diffs);
+  if (valueHints.length) parts.push(valueHints.join('\n'));
   if (key.length) parts.push('Failures:\n' + dedupe(key).slice(0, 12).join('\n'));
   if (frames.length) parts.push('Frames in your edit:\n' + dedupe(frames).slice(0, 6).join('\n'));
   if (!key.length && !frames.length && lines.length) parts.push('Output:\n' + collapseSimilarLines(lines, { head: 4, tail: 8 }).join('\n'));
   if (!lines.length && !i.timedOut) parts.push('The check printed nothing.');
   const text = parts.join('\n\n');
   return text.length > BRIEF_CAP ? `${text.slice(0, BRIEF_CAP)}\n... (brief truncated)` : text;
+}
+
+/** True when a substantial line of a SEARCH block is a line of the read-only tests shown as the specification, i.e. the model copied from the tests instead of the file it must edit. */
+export function searchComesFromTests(search: string, testContext: string): boolean {
+  if (!testContext) return false;
+  const testLines = new Set(testContext.split(/\r?\n/).map(l => l.trim()).filter(l => l.length >= 12));
+  return search.split(/\r?\n/).map(l => l.trim()).some(l => l.length >= 12 && testLines.has(l));
 }
 
 const TEST_CTX_PER_FILE = 5000;
@@ -395,15 +533,25 @@ export async function readVerifyTestContext(command: string, workspaceRoot: stri
  * after every edit; the pipeline already computes these diagnostics, they just never reached the retry.
  */
 export function buildSyntaxBrief(diagnostics: Array<{ filePath: string; line?: number; message: string; severity?: string }>): string {
-  const errors = diagnostics.filter(d => d.severity === 'error');
-  if (errors.length === 0) return '';
-  const shown = errors.slice(0, 10).map(d => `${d.filePath}${d.line ? `:${d.line}` : ''} ${d.message.split('\n')[0].slice(0, 200)}`);
-  const more = errors.length > shown.length ? `\n(+${errors.length - shown.length} more)` : '';
+  const all = diagnostics.filter(d => d.severity === 'error');
+  // Ambient "install type definitions for node" advice is never about the edit.
+  const substantive = all.filter(d => !/install type definitions for node|add 'node' to the types field/i.test(d.message));
+  // The isolated per-file check has no node_modules and no sibling files, so every import looks unresolved (#114). While a
+  // real parse or type error exists, those resolution lines are left out and counted, so they cannot lead the brief. With
+  // ONLY resolution errors the brief still lists them: an empty brief made the repair loop think it had converged.
+  const resolution = (d: { message: string }) => /Cannot find (?:name|module)\b|or its corresponding type declarations/i.test(d.message);
+  const real = substantive.filter(d => !resolution(d));
+  const effective = real.length > 0 ? real : (substantive.length > 0 ? substantive : all);
+  if (effective.length === 0) return '';
+  const shown = effective.slice(0, 10).map(d => `${d.filePath}${d.line ? `:${d.line}` : ''} ${d.message.split('\n')[0].slice(0, 200)}`);
+  const more = effective.length > shown.length ? `\n(+${effective.length - shown.length} more)` : '';
+  const leftOut = substantive.length - effective.length;
   return [
-    'Your last edit was rolled back: the file does not parse (syntax errors).',
+    'Your last edit was rolled back: the file does not parse or has compiler/type errors.',
     `Errors:\n${shown.join('\n')}${more}`,
     'Rules: return a corrected edit that is valid code. Do not run commands or tests; the user runs them.',
-  ].join('\n');
+    leftOut > 0 ? `${leftOut} unresolved import or module resolution error(s) from the isolated check were left out; they are not caused by your edit.` : '',
+  ].filter(Boolean).join('\n');
 }
 
 /** Appends a debugger brief to the goal for a retry. */

@@ -31,7 +31,7 @@ Discipline for orchestrating multiple free LLM providers via the `@mcp:free-llm-
 | Fast Chat | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | `cloudflare` | 100% success, ~1300ms ⚡ |
 | Coding | `qwen/qwen3-coder-480b-a35b:free` | `openrouter` | 480B coder, FREE |
 | Deep Reasoning | `deepseek-ai/DeepSeek-R1` | `openrouter` | Chain-of-thought |
-| High-Tier Reasoning | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia` | Planning/subtask planner |
+| High-Tier Reasoning | `nvidia/nemotron-3.5-bolt-e4b` | `nvidia` | Planning/subtask planner |
 | Bulk Tasks | `Qwen/Qwen2.5-72B-Instruct` | `siliconflow` | 1,000 RPM — best for bulk |
 
 ---
@@ -276,6 +276,23 @@ Multi-agent declarative harness execution and coordination engine.
 
 ---
 
+### `reverse_tool` [v1.1.3]
+Reverse engineering analysis engine and static artifact forensics inspector.
+- **Authorization Framing**: Enforces `'ctf'` | `'lab'` | `'consent'` on all deep analysis actions (`analyze_javascript`, `analyze_artifact`, `get_evidence`, `scan_github`).
+- **GitHub Recon & Asset Forensics**: Discovers release binaries/ASARs/models, indexes tree descriptors, extracts AST symbols/call flows on demand, and generates architectural wiki documentation (`scan_github`).
+- **Resilient AST Extraction**: Sliding-window AST scanner for JavaScript/TypeScript routes, sinks, and API secrets.
+- **Artifact Forensics**: Format detection (ELF, PE, WASM, ASAR, GGUF), Shannon entropy calculation, dual 1-byte/wide-character extraction, and Trojan Source detection.
+- **Cryptographic Evidence Ledger**: SHA-256 evidence bundles with deterministic IDs and discrepancy tracking.
+- **Optional Dependencies Required for ML / Studio / Audio Forensics**:
+  - Python 3.9+ with `numpy` is required for ML actions (`inspect_model`, `quantize_layer`, `reverse_vlm_generate`, `inspect_ocr_tokens`, etc.).
+  - `torch` and `torchvision` are required for NN engine execution (`run_yolo_nn`, layer extraction, and model weights ablation).
+  - `PIL` (`Pillow`) and `cv2` (`opencv-python`) are required for object isolation, GrabCut, and 2.5D/3D parallax rendering (`run_depth_parallax`, `animate_still`, `run_scene_augmentation`).
+  - `demucs` or `torchaudio` is required for stem separation (`separate_audio_stems`).
+  - `fitz` (`PyMuPDF`) or `pytesseract` (with Tesseract binary) is required for vector glyphs and OCR bounding (`inspect_ocr_tokens`).
+- Full reference in [reverse_tool.md](references/reverse_tool.md).
+
+---
+
 ## 🧭 Prompting & Steering Directives
 
 ### 1. The `override` keyword (in-prompt, bypasses `.gitignore`)
@@ -333,6 +350,7 @@ preferred persona: coder
   - [`coding_agents`](references/coding_agents.md)
   - [`agent_harness`](references/agent_harness.md)
   - [`movie_tool`](references/movie_tool.md)
+  - [`reverse_tool`](references/reverse_tool.md)
   - [`manage_memory`](references/manage_memory.md)
   - [`store_workspace_skill`](references/store_workspace_skill.md)
 
@@ -340,9 +358,37 @@ preferred persona: coder
 
 ## 🔍 Quick Agent Diagnostics & Dashboard
 
+### 1. Locating the MCP Server Folder & Clone Setup
+If the `@mcp:free-llm-apis` server or `mcp-server/` folder is not found in the immediate directory:
+
+1. **Search candidate locations first**:
+   - PowerShell:
+     ```powershell
+     Get-ChildItem -Path . -Filter "mcp-server" -Recurse -Depth 2 -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+     ```
+   - Bash:
+     ```bash
+     find . -maxdepth 3 -type d -name "mcp-server" 2>/dev/null
+     ```
+   - Common locations to check: `mcp-server/`, `../mcp-server/`, `./tools/mcp-server/`, or the active repository root.
+
+2. **Clone repo with depth 1 if missing**:
+   If the repository or MCP server is not present locally, clone it using shallow depth (`--depth 1`):
+   ```bash
+   git clone --depth 1 https://github.com/djmahe4/awesome-free-llm-apis.git
+   cd awesome-free-llm-apis/mcp-server
+   npm install --legacy-peer-deps
+   ```
+
+### 2. Runtime & Provider Diagnostics
 1. **Verify Server Health**: Call `validate_provider` with target provider (e.g. `groq`).
 2. **Check Token Budgets**: Call `get_token_stats` to audit quota consumption.
 3. **Monitor Visual Dashboard (`http://localhost:3000`)**: Open `http://localhost:3000` to view real-time latency, token usage by memory layer, `keywords[]` match highlights, and `agentic: true` vs `agentic: false` payload comparisons.
+4. **Reverse Tool Optional Dependencies**:
+   Inspect optional Python dependencies via `python -c "import torch, PIL, cv2; print('OK')"` or verify via `reverse_tool` action `status`. Install required extras in the virtualenv:
+   ```bash
+   pip install numpy pillow opencv-python torch torchvision torchaudio pymupdf
+   ```
 
 > [!WARNING]
 > **Consecutive Subtask Failures**: If the agent experiences consecutive failures during execution, it is likely due to:
@@ -355,7 +401,7 @@ preferred persona: coder
 > --- 5. REASONING / PLANNING PROVIDERS ---
 > (Critical for agentic subtask decomposition, ordered by active model count)
 >
-> nvidia       (13 models)
+> nvidia       (12 models)
 > pollinations (9 models)
 > openrouter   (9 models)
 > kilocode     (8 models)

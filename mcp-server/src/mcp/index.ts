@@ -39,7 +39,7 @@ async function deriveSessionIdFromArgs(args: Record<string, any> | null | undefi
 
 export async function createMCPServer(): Promise<Server> {
   const server = new Server(
-    { name: 'free-llm-apis', version: '1.1.2' },
+    { name: 'free-llm-apis', version: '1.1.3' },
     { capabilities: { tools: {} } }
   );
 
@@ -148,16 +148,19 @@ export async function createMCPServer(): Promise<Server> {
       },
       {
         name: 'vision_tool',
-        description: 'Analyze a local image using a vision-capable model via use_free_llm.',
+        description: 'Analyze a local image or a selected PDF page with a vision-capable model. Returns the final analysis when it finishes within 25 seconds; otherwise returns a taskId. Poll with action:"status", retry a failed/timed-out task with action:"continue", or cancel with action:"abort". PDF rendering and provider fallback share a 60-second task deadline; responses include validation errors and PDF extraction/visual-page metadata.',
         inputSchema: {
           type: 'object' as const,
           properties: {
             workspace_root: { type: 'string', description: 'Absolute workspace path' },
-            image_path: { type: 'string', description: 'Image URI using file:/// scheme' },
+            image_path: { type: 'string', description: 'Required for action:"run"; file:/// URI to an image or PDF. Add :<page> to select a PDF page.' },
             prompt: { type: 'string', description: 'Optional analysis prompt' },
             model: { type: 'string', description: 'Optional vision model id' },
+            action: { type: 'string', enum: ['run', 'status', 'continue', 'abort'], description: 'run (default) starts/executes analysis; status polls a task; continue retries a failed or timed-out task; abort cancels it.' },
+            taskId: { type: 'string', description: 'Task ID returned by run; required for status, continue, and abort.' },
+            sessionId: { type: 'string', description: 'Optional alias for taskId.' },
           },
-          required: ['workspace_root', 'image_path'],
+          required: [],
         },
       },
        {
@@ -754,6 +757,16 @@ export async function createMCPServer(): Promise<Server> {
           'Actual per-subtask EDITING during resume is unchanged: local_llm_patch runs first, falling',
           'back to the cloud model only if the local one fails or is unavailable.',
           '',
+          'WORKSPACE SCOPE: code patches are hard-blocked outside workspaceRoot. The live blackboard',
+          'uses current workspace source outlines, recent matching logs/JSON, and read-only SQLite samples;',
+          'contextKeywords optionally narrows debugging records. Logs/JSON older than 30 days are excluded.',
+          'Agent thought history is read only and workspace-matched; a human must check its permission box',
+          'in tasks.md before resume. Agent patches cannot modify tasks.md or that approval.',
+          'CONTEXT WINDOW: callers may set contextWindow.radius (0-5) and taskIds (up to 8 existing task IDs)',
+          'to request extra read-only DAG rows. Valid IDs are included in full; if requested context exceeds budget,',
+          'generation stops and asks the caller to narrow the task/context. Overall objective and active task stay pinned;',
+          'tasks.md remains read-only.',
+          '',
           'BLACKBOARD (tasks.md): each task in tasks.md carries its planner-assigned file/context plus an',
           'append-only log of every resume attempt (files touched, model used, applied, diagnostic count,',
           'or the failure reason) — the AI-agent <-> local_llm_patch interaction history, not just a',
@@ -767,6 +780,9 @@ export async function createMCPServer(): Promise<Server> {
             allowCloudFallback: { type: 'boolean', description: 'Let a failed local edit fall back to free cloud models. This sends the file and goal to a third-party provider, so it is off by default (also settable in <workspace>/.free-llm-mcp/coding-agents.json).' },
             samples: { type: 'number', description: 'Independent first-round candidates from the original file, judged by verifyCommand (default 3 with a verifyCommand, max 5, 1 disables).' },
             maxRepairAttempts: { type: 'number', description: 'Automatic retries after a failed check or a blocking review (default 4, max 5; AST edits never retry).' },
+            edits: { type: 'array', description: 'Exact changes as data, applied by script with no model call. Each edit needs a file also listed in targetFiles, an anchor line (anchorIsPrefix to match its start), a position (before, after or replace) and the lines. All or nothing per file: a missing or ambiguous anchor changes nothing.', items: { type: 'object', properties: { file: { type: 'string' }, anchor: { type: 'string' }, anchorIsPrefix: { type: 'boolean' }, position: { type: 'string', enum: ['before', 'after', 'replace'] }, lines: { type: 'array', items: { type: 'string' } } }, required: ['file', 'anchor', 'position', 'lines'] } },
+            requireRed: { type: 'boolean', description: 'Report a green check as unverified (not converged) when it was already green before the edit, because such a check proves nothing about the edit. Default false.' },
+            hasPostConditions: { type: 'boolean', description: 'Set when you check the result with probes of your own, so a check that was already green still counts under requireRed.' },
             maxDurationMs: { type: 'number', description: 'Wall-clock budget for the whole repair loop in ms (default 300000). Ends with repair.outcome timed_out and restores the original files if the check is still red.' },
             review: { type: 'boolean', description: 'Independent review of the diff before apply (default true; never runs when a verifyCommand is given, the tests judge then).' },
             temperature: { type: 'number', description: 'Sampling temperature for generation (default 0). The repair loop raises it on retries.' },
@@ -776,6 +792,10 @@ export async function createMCPServer(): Promise<Server> {
             workspaceRoot: { type: 'string', description: 'Workspace root path (defaults to current working directory)' },
             dryRun: { type: 'boolean', description: 'Whether to return the line-anchored patch plan without mutating disk, synchronously (default true). false triggers real background execution — see description.' },
             targetFiles: { type: 'array', items: { type: 'string' }, description: 'Explicit list of target file paths to edit or create (bypasses RAG location)' },
+            contextKeywords: { type: 'array', items: { type: 'string' }, description: 'Optional case-insensitive terms used to select matching recent workspace logs/JSON for debugging; files older than 30 days and non-matching records are excluded.' },
+            contextDirs: { type: 'array', items: { type: 'string' }, maxItems: 3, description: 'Optional extra directories (for example another application\'s data folder) whose DATA SHAPE the local editor should know: tables, columns and merged JSON shapes of a few rows, never values. Opt-in by naming them; read-only, local, never sent to a cloud model. At most 3.' },
+            contractModel: { type: 'string', description: 'Optional installed local model name (for example a larger one than the editor) that reads the tests and writes a short call/return contract per export before a module is rebuilt one export at a time. Off when unset; local only; skipped if the model is not installed.' },
+            contextWindow: { type: 'object', description: 'Read-only DAG context request; active task and overall objective remain pinned. radius expands nearby task rows (0-5, default 1); taskIds adds up to 8 existing tasks from tasks.md in full. Unknown IDs are reported and ignored. If requested context exceeds budget, patch generation stops rather than truncating it. This never edits tasks.md.', properties: { radius: { type: 'integer', minimum: 0, maximum: 5 }, taskIds: { type: 'array', maxItems: 8, items: { type: 'string' } } } },
             topKFiles: { type: 'number', description: 'Maximum candidate files to locate with VectorStore RAG (default 5)' },
             sessionId: { type: 'string', description: 'Optional caller-chosen alias, preserved in memory: recorded on first use and accepted by every later status/abort/resume poll (workspaceRoot not required for polling). The canonical sessionId returned in results is always derived from workspaceRoot — stable per workspace, never rotates — so CAS history, checkpoints, and the run key stay unified even if ad-hoc ids are passed.' },
             verifyLspDiagnostics: { type: 'boolean', description: 'Verify syntactic/AST diagnostics before completing plan (default true)' },
@@ -784,6 +804,7 @@ export async function createMCPServer(): Promise<Server> {
             verifyReport: { type: 'object', description: 'Output of a check YOU ran (used when an edit changed tests, so the agent did not run them, or was withheld). { exitCode, output, command? }. A failure comes back as result.verification.repairBrief (a debugger-style brief); nothing on disk changes.', properties: { exitCode: { type: 'number' }, output: { type: 'string' }, command: { type: 'string' } }, required: ['exitCode', 'output'] },
             feedback: { type: 'string', description: 'Debugger brief from a previous failed attempt (result.verification.repairBrief); appended to the goal so the retry fixes the production code instead of starting blind.' },
             pauseOnTaskPlan: { type: 'boolean', description: 'Same effect as action:"plan" — decompose the goal into tasks.md and pause instead of executing' },
+            pauseBeforeMultiFile: { type: 'boolean', description: 'Pause before implicit multi-file edits; review tasks.md and resume one file-scoped task at a time. Set true to pause, or false (default) for batch behavior.' },
             astEditOps: {
               type: 'array',
               description: 'Structural ast-grep-style rewrites ($$$VAR pattern matching) to apply instead of LLM generation for this call — deterministic, no local/cloud model involved',
@@ -932,6 +953,84 @@ export async function createMCPServer(): Promise<Server> {
           },
           required: ['action']
         }
+      },
+      {
+        name: 'reverse_tool',
+        description: [
+          'Reverse engineering analysis engine and static artifact inspector.',
+          '',
+          'USER STORY: Analyze compiled artifacts, JavaScript ASTs, and evidence files with authorization scoping.',
+          '',
+          'ACTIONS:',
+          '  - status: Check engine environment, supported Node.js version, and capabilities.',
+          '  - abort: Cancel an active running analysis session by sessionId or target.',
+          '  - list_capabilities: List callable and blocked capabilities from static analysis and REA engine.',
+          '  - analyze_javascript: Parse JavaScript/TypeScript files for AST-level security risks and behavior.',
+          '  - analyze_artifact: Inspect binary, ELF, PE, or archive artifacts.',
+          '  - get_evidence: Retrieve stored evidence and metadata by ID.',
+          '  - scan_github: Recon remote GitHub repo releases, AST symbols, call flows, and wiki.',
+          '  - inspect_model: Inspect metadata, format, architecture, and tensors of GGUF, PyTorch, and ONNX models.',
+          '  - infer_layer_roles: Invert layer names to semantic roles (Self-Attention, FFN, Backbone, SPPF, Head).',
+          '  - trace_layer_execution: Step-by-step layer forward tracing with cached activation tensors and statistics.',
+          '  - reconstruct_training_samples: Activation maximization prototype synthesis and memorization probing (consent-gated).',
+          '  - extract_model_layer: Slice layer tensor to standalone SafeTensors binary.',
+          '  - analyze_model_layer: Statistical weight profiling (Frobenius norm, sparsity, mean, std).',
+          '  - quantize_layer: Block quantization of model layer weights (Q4_0, Q8_0, MXFP8).',
+          '  - assemble_moe: Mixture-of-Experts composite routing and SwiGLU forward execution.',
+          '  - run_reasoning_model: Autoregressive reasoning runtime with RoPE and thinking trace generation.',
+          '  - run_yolo_nn: Pure-NumPy YOLOv8 neural network forward pass and detection decoding.',
+          '  - run_scene_augmentation: Apply supported 2D image operations.',
+          '  - run_depth_parallax: Estimate local depth and render labelled pseudo-3D parallax.',
+          '  - animate_still: Render a bounded pseudo-3D animation from one image.',
+          '  - reverse_vlm_generate: Generate an image from reverse VLM feature projections.',
+          '  - separate_audio_stems: Separate consented audio with configured local Demucs weights.',
+          '  - inspect_ocr_tokens: Inspect OCR tokens and spatial layout.',
+          '  - program_weight_space: Spectral SVD analysis, attractor ablation, and loop suppression in weight space.',
+        ].join('\n'),
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            action: {
+              type: 'string',
+              enum: [
+                'status',
+                'abort',
+                'list_capabilities',
+                'analyze_javascript',
+                'analyze_artifact',
+                'get_evidence',
+                'scan_github',
+                'inspect_model',
+                'infer_layer_roles',
+                'trace_layer_execution',
+                'reconstruct_training_samples',
+                'extract_model_layer',
+                'analyze_model_layer',
+                'quantize_layer',
+                'assemble_moe',
+                'run_reasoning_model',
+                'run_yolo_nn',
+                'run_scene_augmentation',
+                'run_depth_parallax',
+                'animate_still',
+                'reverse_vlm_generate',
+                'separate_audio_stems',
+                'inspect_ocr_tokens',
+                'program_weight_space'
+              ],
+              description: 'Reverse engineering action to perform'
+            },
+            target: { type: 'string', description: 'Target file path, GitHub repository (owner/repo or URL), or evidence ID' },
+            authorization: {
+              type: 'string',
+              enum: ['ctf', 'lab', 'consent'],
+              description: 'Authorization framing required for analysis'
+            },
+            sessionId: { type: 'string', description: 'Session identifier for async polling and status retrieval' },
+            options: { type: 'object', description: 'Additional analysis options' }
+          },
+          required: ['action']
+        }
       }
     ],
   }));
@@ -968,7 +1067,7 @@ export async function createMCPServer(): Promise<Server> {
       } else if (name === 'vision_tool') {
         const result = await visionTool(args as any);
         response = {
-          content: [{ type: 'text' as const, text: toMarkdownResponse(result.response) }],
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         };
       } else if (name === 'load_skill_prompt') {
         const result = await loadSkillPrompt(args as any);
@@ -1056,6 +1155,13 @@ export async function createMCPServer(): Promise<Server> {
       } else if (name === 'movie_tool') {
         const { runMovieTool } = await import('../tools/movie-tool.js');
         const result = await runMovieTool(args as any);
+        response = {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          isError: !result?.success,
+        };
+      } else if (name === 'reverse_tool') {
+        const { reverseTool } = await import('../tools/reverse-tool.js');
+        const result = await reverseTool(args as any);
         response = {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
           isError: !result?.success,

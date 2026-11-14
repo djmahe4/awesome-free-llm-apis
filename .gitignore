@@ -42,3 +42,7 @@ tests/movie-tool-motion.test.ts
 dashboard/assets/
 mcp-server/scripts/smoke/results/latest.json
 mcp-server/scripts/smoke/results/history.jsonl
+mcp-server/tests/helpers/avst-workspace-fixture.ts
+mcp-server/tests/context-avst-workspace.test.ts
+__pycache__/
+*.pyc

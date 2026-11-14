@@ -1,7 +1,21 @@
 import { caTrace, caTraceReset } from './trace.js';
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
-import type { CodingAgentsInput, CodingAgentsResult, RepairAttempt } from './types.js';
+import { formatCodingAgentsMarkdown, type CodingAgentsInput, type CodingAgentsResult, type RepairAttempt } from './types.js';
 import { detectSpecialCasing } from './verify-guard.js';
+import { resetVerifyCache } from './verify-cache.js';
+import { loadCodingAgentsSettings } from './settings.js';
+import { alreadyAdded } from './work-order.js';
+import { runSteps, splitSteps } from './goal-steps.js';
+import { deriveExportSteps, exportStepPreparer } from './export-steps.js';
+import { FILE_LEVEL_ENTRY } from './verify-command.js';
+import { classifyMistake, recordMistake, remediationsFor, failureFact, recordFailureFact, failureFactsFor } from './mistakes.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { checkWorkOrder, noChangeBrief, unfinishedBrief, type WorkOrderCheck } from './work-order-decision.js';
+
+/** The failing set as an identity: case names without their durations, sorted. Empty when nothing is known. */
+const failingSignature = (cases: string[] | undefined) =>
+  (cases ?? []).map(c => c.replace(/\s*\(?\d+(?:\.\d+)?\s*m?s\)?\s*$/, '').trim()).sort().join('\n');
 
 /**
  * Bounded repair loop around one pipeline run.
@@ -53,6 +67,14 @@ export function filesImplicated(targets: string[], failedCases: string[], brief:
   return hit.length > 0 && hit.length < targets.length ? hit : [];
 }
 
+/** How many tests an attempt leaves failing; a suite that never loads says nothing about its tests, so it ranks last (#128). */
+function failureScore(cases: string[] | undefined): number | undefined {
+  if (cases === undefined) return undefined;
+  const fileOnly = (c: string) => /^\S+\.(?:test|spec)\.[cm]?[jt]sx?(?:\s*\[.*\])?$/i.test(c) || FILE_LEVEL_ENTRY.test(c.replace(/^(.+?) \[ \1 \]$/, '$1'));
+  const named = cases.filter(c => !fileOnly(c)).length;
+  return named === 0 && cases.length > 0 ? 999 : named;
+}
+
 function attemptOutcome(r: CodingAgentsResult): string {
   if (r.rollbackBrief) return 'rolled_back_syntax';
   if (r.verification?.status) return r.verification.status;
@@ -64,11 +86,21 @@ function attemptOutcome(r: CodingAgentsResult): string {
 function briefOf(r: CodingAgentsResult, input: CodingAgentsInput): string | undefined {
   // An edit that does not parse is rolled back before any check can run; its compiler messages are the feedback.
   if (r.rollbackBrief && !r.applied) return r.rollbackBrief;
+  // Only when an apply was asked for (a proposal is not "failed" for being unapplied) and only for errors that are real:
+  // the isolated per-file check reports every import as unresolved (semantic codes >= 2000), which is not about the edit.
+  const realErrors = (r.diagnostics ?? []).filter(d => d.severity === 'error' && !(d.source === 'ast-syntactic' && typeof d.code === 'number' && d.code >= 2000));
+  if (!r.applied && input.resolve?.action === 'apply' && realErrors.length > 0) {
+    const errs = realErrors;
+    return `Your edit could not be applied due to compiler errors:\n${errs.map(e => `${e.filePath}${e.line ? `:${e.line}` : ''} ${e.message}`).join('\n')}`;
+  }
   // With a verifyCommand the check is the judge (the reviewer does not even run: in live runs a 7B
   // reviewer repeatedly insisted spec-correct code was wrong).
   if (input.verifyCommand) {
-    if ((r.verification?.status !== 'regressed' && r.verification?.status !== 'not_green') || !r.verification.repairBrief) return undefined;
-    return r.verification.repairBrief;
+    if (r.verification?.repairBrief) return r.verification.repairBrief;
+    if ((r.verification?.status === 'regressed' || r.verification?.status === 'not_green') && r.verification.outputTail) {
+      return `Verification command "${input.verifyCommand}" failed:\n${r.verification.outputTail.slice(0, 2000)}`;
+    }
+    return undefined;
   }
   if (input.review !== false && r.review?.verdict === 'blocked' && r.review.brief) return r.review.brief;
   return undefined;
@@ -81,7 +113,13 @@ export async function runWithRepairLoop(
   runner: Runner,
   rollback?: Rollback,
   restoreFiles?: RestoreFiles,
+  workOrder: typeof checkWorkOrder = checkWorkOrder,
 ): Promise<CodingAgentsResult> {
+  const explicitSteps = input.edits ? [] : splitSteps(input.goal);
+  const steps = explicitSteps.length > 0 || input.edits ? explicitSteps : await deriveExportSteps(input);
+  if (steps.length > 0) {
+    return runSteps(input, steps, step => runWithRepairLoop(step, sessionId, run, runner, rollback, restoreFiles, workOrder), rollback, explicitSteps.length > 0 ? undefined : exportStepPreparer(input));
+  }
   // Deterministic AST edits cannot be "re-generated", so there is nothing to repair by retrying.
   const retriable = !(input.astEditOps && input.astEditOps.length > 0);
   const repairBudget = retriable ? Math.min(MAX_REPAIR_ATTEMPTS, Math.max(0, input.maxRepairAttempts ?? DEFAULT_REPAIR_ATTEMPTS)) : 0;
@@ -105,6 +143,13 @@ export async function runWithRepairLoop(
   const createdFiles = new Set<string>();
   const deadline = Date.now() + (Number.isFinite(input.maxDurationMs) && (input.maxDurationMs as number) > 0 ? (input.maxDurationMs as number) : DEFAULT_MAX_DURATION_MS);
   let outcome: NonNullable<CodingAgentsResult['repair']>['outcome'] = 'converged';
+  // Failing sets already seen after the sampling phase, to notice a loop that goes back and forth (#106).
+  const seenFailing = new Set<string>();
+  let cycleSeen = false;
+  // After a cycle the local model has shown it repeats itself; with cloud fallback allowed, the rest goes to the cloud model.
+  const cloudAllowed = input.allowCloudFallback ?? (input.workspaceRoot ? loadCodingAgentsSettings(input.workspaceRoot).allowCloudFallback : false);
+  let escalated = false;
+  let fellBackFromCloudToLocal = false;
 
   // Narrow a patch-in-place retry to the files the failure implicates; the rest stay as reference.
   const narrowTo = (cases: string[], brief: string): Partial<CodingAgentsInput> => {
@@ -113,6 +158,16 @@ export async function runWithRepairLoop(
     return hit.length > 0 ? { targetFiles: hit, relatedFiles: input.targetFiles.filter(f => !hit.includes(f)) } : {};
   };
 
+  if (input.workspaceRoot && input.targetFiles?.length) {
+    const root = input.workspaceRoot;
+    const contents = await Promise.all(input.targetFiles.map(f => fs.readFile(path.resolve(root, f), 'utf-8').catch(() => '')));
+    if (alreadyAdded(input.goal, contents)) {
+      return { sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: input.targetFiles, anchors: [], patchPlan: [], patchSummary: '', diagnostics: [], applied: false, message: 'The lines this goal adds are already in the target files, so nothing was changed.' };
+    }
+  }
+  // A known mistake on these files opens the first attempt's brief (#149).
+  const known = input.workspaceRoot && input.targetFiles?.length ? [...await remediationsFor(input.workspaceRoot, input.targetFiles).catch(() => []), ...await failureFactsFor(input.workspaceRoot, input.targetFiles).catch(() => [])] : [];
+  if (known.length > 0) current = { ...current, feedback: [...known, ...(current.feedback ? [current.feedback] : [])].join('\n') };
   for (let n = 1; ; n++) {
     if (run?.controller.signal.aborted && n === 1) {
       result = { sessionId, goal: input.goal, pipelineStage: 'completed', relevantFiles: [], anchors: [], patchPlan: [], patchSummary: '', diagnostics: [], applied: false };
@@ -121,8 +176,9 @@ export async function runWithRepairLoop(
     }
     // The pipeline counts files per run; without this reset the status poll reads "2/1 file(s)" on attempt 2.
     if (run) run.completedCount = 0;
-    if (n === 1) caTraceReset(sessionId);
+    if (n === 1) { caTraceReset(sessionId); resetVerifyCache(); }
     caTrace(`attempt ${n} start`, `temp=${current.temperature ?? 0}${current.rewrite ? ' rewrite' : ''}`);
+    if (escalated) current = { ...current, preferCloud: true };
     result = await runner(current, sessionId, run);
     caTrace(`attempt ${n} end`, String(result.verification?.status ?? (result.applied ? 'applied' : 'proposed')));
     if (!originalCheckpoint && result.checkpointId && result.applied) originalCheckpoint = result.checkpointId;
@@ -139,7 +195,19 @@ export async function runWithRepairLoop(
         brief += `\n\nYour last edit hard-coded the input ${hard.map(h => `"${h}"`).join(', ')}. That is not a fix: find what makes the code accept or mishandle it in general, and change that.`;
       }
     }
-    const failing = result.verification?.failedCases?.length;
+    const unfinished = !brief && result.applied && !result.error ? unfinishedBrief(input.goal, (result.patchPlan ?? []) as Array<{ fullPatchedContent?: unknown }>) : undefined;
+    let check: WorkOrderCheck | undefined;
+    if (brief) {
+      check = await workOrder({ goal: input.goal, patchPlan: (result.patchPlan ?? []) as Array<{ fullPatchedContent?: unknown }>, brief, cloudAllowed, preferCloud: !!current.preferCloud });
+      brief = check.brief;
+      if (check.preferCloud !== undefined) { input = { ...input, preferCloud: check.preferCloud }; escalated = check.preferCloud; }
+    }
+    if (unfinished) brief = unfinished;
+    if (!brief && result.applied && !result.error) brief = noChangeBrief((result.patchPlan ?? []) as Array<{ unchanged?: boolean }>);
+    const failing = failureScore(result.verification?.failedCases);
+    if (result.symbolLoss?.length) {
+      brief = 'Your last edit removed ' + result.symbolLoss.join(', ') + ', which the goal does not mention. Keep every existing declaration.' + (brief ? '\n\n' + brief : '');
+    }
     if (brief && failing !== undefined) {
       const files = (result.patchPlan ?? [])
         .filter(p => typeof (p as any).fullPatchedContent === 'string')
@@ -149,25 +217,62 @@ export async function runWithRepairLoop(
       // The tree we started from is also a candidate: if it was closer to green than this attempt, the
       // next attempt repairs THAT (with the baseline's brief) instead of rewriting or building on a regression.
       const v = result.verification;
-      if (v?.baselineBrief && v.baselineFailedCases && v.baselineFailedCases.length < failing && v.baselineFailedCases.length < (best?.failing ?? Infinity) + (latestIsBest ? 1 : 0)) {
-        best = { failing: v.baselineFailedCases.length, brief: v.baselineBrief, files: [], isOriginal: true };
+      const baselineFailing = failureScore(v?.baselineFailedCases) ?? Infinity;
+      if (v?.baselineBrief && baselineFailing < failing && baselineFailing < (best?.failing ?? Infinity) + (latestIsBest ? 1 : 0)) {
+        best = { failing: baselineFailing, brief: v.baselineBrief, files: [], isOriginal: true };
         latestIsBest = false;
       }
     }
     attempts.push({
       attempt: n,
+      ...(check?.cause ? { triage: check.cause } : {}),
       outcome: attemptOutcome(result),
       ...(result.verification?.failedCases ? { failing: result.verification.failedCases.length } : {}),
       ...(current.rewrite ? { rewrite: true } : {}),
       ...(brief ? { brief: brief.slice(0, 600) } : {}),
     });
 
-    if (result.error) { outcome = 'error'; break; }
+    if (result.error) {
+      if (current.preferCloud && !fellBackFromCloudToLocal) {
+        fellBackFromCloudToLocal = true;
+        escalated = false;
+        input = { ...input, preferCloud: false };
+        current = { ...input, temperature: current.temperature };
+        continue;
+      }
+      outcome = 'error';
+      break;
+    }
     if (result.verification?.status === 'needs_user') { outcome = 'needs_user'; break; }
-    if (!brief) { outcome = 'converged'; break; }
+    if (!brief) { outcome = input.requireRed && !input.hasPostConditions && result.verification?.baselineOk === true ? 'unverified' : 'converged'; break; }
+    if (check?.action === 'stop') { outcome = 'stuck'; break; }
     if (run?.controller.signal.aborted) { outcome = 'aborted'; break; }
     if (Date.now() >= deadline) { outcome = 'timed_out'; break; }
     if (n > budget) { outcome = 'not_converged'; break; }
+
+    // A failing set seen before means the loop is going in circles (observed live: 18, 1, 18, 1, 18, 1, 18 failing,
+    // the budget spent without trying anything new). The first time, start over from the original with the best
+    // brief; the second time, stop. Only after sampling, where independent candidates may repeat by chance.
+    const signature = failingSignature(result.verification?.failedCases);
+    if (n > samples && signature) {
+      if (seenFailing.has(signature)) {
+        if (cycleSeen || !rollback || !originalCheckpoint || !best) { outcome = 'cycling'; break; }
+        cycleSeen = true;
+        escalated = cloudAllowed;
+        caTrace('repair cycle', escalated ? 'starting over from the original with the cloud model' : 'starting over from the original');
+        await rollback(originalCheckpoint, [...createdFiles]);
+        current = {
+          ...input, rewrite: true, temperature: 0.3,
+          feedback: `${best.brief}\n\nThe last attempts went back and forth between the same failures. Start again from the original file and change only what the goal asks for; keep every other line.`,
+        };
+        lastBrief = best.brief;
+        // not cleared: landing on a failing set seen before, even after starting over, means another lap
+        continue;
+      }
+      seenFailing.add(signature);
+    } else if (signature) {
+      seenFailing.add(signature);
+    }
 
     // ── sampling phase: independent candidates from the original ─────────────────────────
     if (n < samples) {
@@ -227,31 +332,53 @@ export async function runWithRepairLoop(
     }
     // A patch-in-place retry edits only the files the failure points at: re-editing files that already pass
     // broke them in traced multi-file runs. A rewrite starts from the original tree, so it keeps all files.
+    // Escalate the task DAG context window radius on retries so stalled agents see broader sibling context.
+    const escalatedRadius = Math.min(2 + (n - samples), 4);
     current = {
       ...input, feedback: nextBrief, temperature: RETRY_TEMPERATURE(n - samples + 2),
+      contextWindow: {
+        ...input.contextWindow,
+        radius: Math.max(input.contextWindow?.radius ?? 1, escalatedRadius),
+      },
       ...(rewrite ? { rewrite: true } : narrowTo(result.verification?.failedCases ?? [], nextBrief)),
     };
   }
 
   // Test-first work keeps a still-red attempt applied so the next one can build on it. If it never went
   // green, do not leave the user's tree changed by an unverified attempt: restore the original.
-  if ((outcome === 'not_converged' || outcome === 'stuck' || outcome === 'aborted' || outcome === 'timed_out') && result.verification?.status === 'not_green' && result.applied && originalCheckpoint && rollback) {
+  if ((outcome === 'not_converged' || outcome === 'stuck' || outcome === 'aborted' || outcome === 'timed_out' || outcome === 'cycling') && result.verification?.status === 'not_green' && result.applied && originalCheckpoint && rollback) {
     result.restoredFiles = await rollback(originalCheckpoint, [...createdFiles]);
     result.applied = false;
+    // The status was settled by the attempt, which had applied its edit; it no longer has (#105).
+    result.status = 'rollback';
     result.message = outcome === 'aborted'
       ? `Aborted after ${attempts.length} attempt(s); the original files were restored.`
       : outcome === 'timed_out'
         ? `The time budget ran out after ${attempts.length} attempt(s) and the check was still red, so the original files were restored. Raise maxDurationMs or narrow the goal.`
         : `The check never went green after ${attempts.length} attempt(s), so the original files were restored. The last proposal is in patchSummary; result.verification.repairBrief says what was still failing.`;
+  } else if (outcome === 'unverified') {
+    result.message = 'The check already passed before the edit (it did not fail before), so it does not prove the edit does what the goal asks. The edit is applied; add post-conditions or a failing test first.';
   } else if (outcome === 'aborted') {
     result.message = `Aborted after ${attempts.length} attempt(s).`;
   } else if (outcome === 'timed_out') {
     result.message = `The time budget ran out after ${attempts.length} attempt(s).`;
   }
 
+  const mistake = classifyMistake({ outcome, symbolLoss: result.symbolLoss });
+  if (mistake && input.workspaceRoot && input.targetFiles?.length) await recordMistake(input.workspaceRoot, mistake, input.targetFiles).catch(() => undefined);
+  if (mistake && input.workspaceRoot && input.targetFiles?.length) {
+    const fact = failureFact(result.verification?.outputTail, input.workspaceRoot);
+    if (fact) await recordFailureFact(input.workspaceRoot, input.targetFiles, fact).catch(() => undefined);
+  }
+
   // Only attach the record when the loop mattered (a check or a review took part).
   if (input.verifyCommand || result.review || attempts.length > 1) {
     result.repair = { outcome, attemptCount: attempts.length, attempts };
+  }
+  // the markdown was rendered by the last attempt, before the loop's own outcome and any rollback
+  if (result.status === 'rollback' || result.repair) {
+    result.content = formatCodingAgentsMarkdown(result);
+    result.markdown = result.content;
   }
   return result;
 }

@@ -29,6 +29,7 @@ export function normalizeCodingAgentsHttpInput(
       dryRun: b.dryRun ?? true,
       topKFiles: b.topKFiles ?? 5,
       verifyLspDiagnostics: b.verifyLspDiagnostics ?? true,
+      pauseBeforeMultiFile: b.pauseBeforeMultiFile ?? false,
     } as CodingAgentsInput,
   };
 }

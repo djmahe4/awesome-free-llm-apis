@@ -14,10 +14,18 @@ describe('retentionOf', () => {
   });
 
   it('matches the exact formula the browser dashboard uses (dag-blackboard.js)', () => {
+    const now = Date.now();
+    const node = { confidence: 0.7, lastReviewedAt: now - 10 * 86400000, halfLifeDays: 20 };
+    const days = 10;
+    const expected = 0.7 * Math.pow(2, -days / 20);
+    expect(retentionOf(node, now)).toBeCloseTo(expected, 10);
+  });
+
+  it('defaults now to Date.now() when omitted', () => {
     const node = { confidence: 0.7, lastReviewedAt: Date.now() - 10 * 86400000, halfLifeDays: 20 };
     const days = 10;
     const expected = 0.7 * Math.pow(2, -days / 20);
-    expect(retentionOf(node)).toBeCloseTo(expected, 10);
+    expect(retentionOf(node)).toBeCloseTo(expected, 4);
   });
 });
 

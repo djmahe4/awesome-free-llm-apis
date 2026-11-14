@@ -1,15 +1,18 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { newDuplicateDefinitions } from './duplicate-defs.js';
 import { localLlmPatch } from '../local-llm-patch.js';
-import { caTrace } from './trace.js';
+import { caTrace, caTraceDump } from './trace.js';
 import { crossFileContext } from './cross-file.js';
 import { newImportProblems } from './import-check.js';
 import { loadCodingAgentsSettings, SETTINGS_FILE } from './settings.js';
-import { readVerifyTestContext } from './verify-guard.js';
+import { readVerifyTestContext, searchComesFromTests } from './verify-guard.js';
 import {
   extractWindowForInstruction,
   parseSearchReplaceBlocksDetailed,
   applySearchReplaceBlocks,
   isAdditiveInstruction,
+  isEndOfFileInstruction,
   searchReplaceRegressesTsErrors,
   looksLikeHallucinatedReplacement,
   generateSearchReplacePatch,
@@ -17,7 +20,16 @@ import {
   windowReplyIsSuspicious,
 } from './patch-gen.js';
 import type { CodingAgentsInput, CodingAgentsResult, TaskItem } from './types.js';
+import { buildHypothesisBlackboard, buildTaskDagBlackboard } from './tasks.js';
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
+import { applyAnchored } from './anchored-edit.js';
+import { anchoredWindow, applyEdits } from './anchored-edit.js';
+import { buildSymbolContextBlock } from './symbol-graph-cache.js';
+import { buildCodingAgentWorkspaceContext, sanitizeContextForCloud } from '../../harness/coding-agent-context.js';
+import { apiFactsFor } from './api-facts.js';
+import { buildExternalContext } from '../../harness/external-context.js';
+import { readAgentThoughtDags, expandAgentThoughtContext } from '../../harness/agent-thought-context.js';
+import { FileStructureDag } from '../../harness/file-outline.js';
 
 /** Everything the per-file generation step reads from the run (extracted from runCodingAgentsPipeline). */
 export interface FilePatchContext {
@@ -32,11 +44,44 @@ export interface FilePatchContext {
   resolvedModel: string | null | undefined;
   originalContent: string;
   activeGoal: string;
+  objective?: string;
   loadedTasks?: TaskItem[];
   nextPendingTask?: TaskItem;
   changeFiles: string[];
   runContents: Map<string, string>;
   editedInRun: Set<string>;
+  thoughtContextApproved?: boolean;
+  structureDag?: FileStructureDag;
+}
+
+function detectTargetConvention(workspaceRoot: string, relPath: string, verifyCommand?: string): string {
+  const ext = path.extname(relPath).toLowerCase();
+  if (['.ts', '.tsx', '.js', '.mjs', '.cjs'].includes(ext)) {
+    let isEsm = ext === '.mjs';
+    if (!isEsm) {
+      try {
+        let dir = path.resolve(workspaceRoot, path.dirname(relPath));
+        const root = path.resolve(workspaceRoot);
+        while (dir.startsWith(root)) {
+          const pkgPath = path.join(dir, 'package.json');
+          if (fs.existsSync(pkgPath)) {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+            if (pkg.type === 'module') {
+              isEsm = true;
+              break;
+            }
+          }
+          const parent = path.dirname(dir);
+          if (parent === dir) break;
+          dir = parent;
+        }
+      } catch { }
+    }
+    if (isEsm) {
+      return ' Project convention: This is an ECMAScript module ("type": "module"). All relative imports must use relative paths starting with "./" or "../" and include the explicit ".js" file extension.';
+    }
+  }
+  return '';
 }
 
 /**
@@ -45,26 +90,89 @@ export interface FilePatchContext {
  * original when nothing was usable) and whether the file failed.
  */
 export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patchedContent: string; failed: boolean }> {
-  const { input, result, relPath, fullPath, workspaceRoot, sessionId, run, resolvedModel, originalContent, activeGoal, loadedTasks, nextPendingTask, changeFiles, runContents, editedInRun } = ctx;
+  const { input, result, relPath, fullPath, workspaceRoot, sessionId, run, resolvedModel, originalContent, activeGoal, objective, loadedTasks, nextPendingTask, changeFiles, runContents, editedInRun } = ctx;
   let patchedContent = originalContent;
   let failed = false;
     let appliedPatch = false;
     let lastFailureReason: string | undefined;
 
-    // Compose DAG task context string if tasks exist
-    const tasksContext = loadedTasks
-      ? `Active Task: [${nextPendingTask?.id || 'adhoc'}] ${activeGoal}\nOverall Plan:\n` +
-        loadedTasks.map(t => `- [${t.status === 'completed' ? 'x' : (t.status === 'in_progress' ? '~' : ' ')}] ${t.task}`).join('\n')
+    // A goal that quotes an anchor line and supplies the lines to add needs no model (#148).
+    const fileEdits = input.edits?.filter(e => e.file.replace(/\\/g, '/') === relPath.replace(/\\/g, '/'));
+    const anchored = input.edits ? (fileEdits?.length ? applyEdits(patchedContent, fileEdits) : { status: 'already_done' as const }) : applyAnchored(patchedContent, activeGoal);
+    if (anchored.status === 'applied') return { patchedContent: anchored.content, failed: false };
+    if (anchored.status === 'already_done') return { patchedContent, failed: false };
+    if (anchored.status === 'no_anchor' || anchored.status === 'ambiguous') {
+      result.diagnostics.push({ filePath: relPath, message: anchored.status === 'ambiguous' ? `The anchor line in the goal matches ${anchored.indexes.length} lines (lines ${anchored.indexes.map(i => i + 1).join(', ')}); quote the whole line or more of it so it matches one.` : 'The anchor line in the goal was not found in the file; check that it is quoted exactly.', severity: 'error', source: 'llm-patch' });
+      return { patchedContent, failed: true };
+    }
+
+    const tasksContext = loadedTasks?.length
+      ? buildTaskDagBlackboard(loadedTasks, nextPendingTask?.id, 2400, {
+          objective: objective ?? input.goal,
+          windowRadius: input.contextWindow?.radius,
+          requestedTaskIds: input.contextWindow?.taskIds,
+        })
       : undefined;
+    const hypothesisContext = result.hypotheses?.length
+      ? buildHypothesisBlackboard(result.hypotheses, 1600)
+      : undefined;
+    if (tasksContext && tasksContext.length > 2400) {
+      result.diagnostics.push({ filePath: relPath, message: 'Pinned objective, active task, or requested DAG context exceeds the 2400-character budget. Shorten the task or make the prompt more specific to the needed context (for example, request fewer contextWindow task IDs); patch generation stopped rather than truncating the contract.', severity: 'error', source: 'llm-patch' });
+      return { patchedContent, failed: true };
+    }
+    if (hypothesisContext && hypothesisContext.length > 1600) {
+      result.diagnostics.push({ filePath: relPath, message: 'Validated hypothesis context exceeds the 1600-character budget. Narrow the task or probes and remove redundant evidence without deleting refutations; patch generation stopped rather than dropping validator evidence.', severity: 'error', source: 'hypothesis' });
+      return { patchedContent, failed: true };
+    }
 
     const crossContext = changeFiles.length > 1 ? crossFileContext(relPath, changeFiles, runContents, editedInRun) : '';
     const goalForFile = crossContext ? `${activeGoal}\n\n${crossContext}` : activeGoal;
-    const baseInstruction = tasksContext
-      ? `${goalForFile}\n\n[DAG Context]\n${tasksContext}`
+    // The tests the verifyCommand runs are the specification: show them (read-only) and seed workspace grounding with them.
+    const specCommand = input.verifyCommand ?? input.specCommand;
+    const testContext = specCommand ? await readVerifyTestContext(specCommand, workspaceRoot) : '';
+    const workspaceContext = buildCodingAgentWorkspaceContext({
+      workspaceRoot,
+      query: `${activeGoal} ${relPath} ${testContext ? testContext.slice(0, 2000) : ''} ${tasksContext ?? ''} ${hypothesisContext ?? ''}`,
+      targetFile: relPath,
+      debugKeywords: input.contextKeywords,
+      fileOverrides: runContents,
+      structureDag: ctx.structureDag,
+    });
+    let thoughtContext = '';
+    if (ctx.thoughtContextApproved) {
+      const settings = loadCodingAgentsSettings(workspaceRoot);
+      const dags = await readAgentThoughtDags({ workspaceRoot, config: settings.thoughtSources, maxSources: 20 });
+      thoughtContext = expandAgentThoughtContext(dags, `${activeGoal} ${relPath}`, 5000);
+    }
+    const apiFacts = apiFactsFor(`${activeGoal} ${relPath} ${testContext}`);
+    // contextDirs: the DATA SHAPE of directories the caller named (structure only, no values). Appended to the LOCAL model's
+    // instruction only: the cloud fallbacks below keep using augmentedInstruction / fileInstruction without it.
+    const externalContext = input.contextDirs?.length ? buildExternalContext({ dirs: input.contextDirs }) : '';
+    const localOnly = externalContext ? `\n\n${externalContext}` : '';
+    const contextBlocks = [
+      ...(tasksContext ? [`[DAG Context]\n${tasksContext}`] : []),
+      ...(hypothesisContext ? [hypothesisContext] : []),
+      ...(apiFacts ? [apiFacts] : []),
+      ...(workspaceContext ? [workspaceContext] : []),
+      ...(thoughtContext ? [`[Approved matching agent thought history]\n${thoughtContext}`] : []),
+    ];
+    const hasSubstantiveSourceContext = workspaceContext.split(/\n(?=\[)/u).some(block => {
+      if (!block.startsWith('[Current source excerpts:')) return false;
+      return block.slice(block.indexOf('\n') + 1).trim().length >= 40;
+    });
+    const skipContextGathering = hasSubstantiveSourceContext;
+    const baseInstruction = contextBlocks.length
+      ? `${goalForFile}\n\n${contextBlocks.join('\n\n')}`
       : goalForFile;
-    // The tests the verifyCommand runs are the specification: show them (read-only).
-    const testContext = input.verifyCommand ? await readVerifyTestContext(input.verifyCommand, workspaceRoot) : '';
-    const augmentedInstruction = testContext ? `${baseInstruction}\n\n${testContext}` : baseInstruction;
+    const endOfFileHint = isEndOfFileInstruction(activeGoal) ? ' To add code at the end of the file, leave the SEARCH part empty and put the new code in REPLACE.' : '';
+    const baseAugmented = testContext ? `${baseInstruction}${endOfFileHint}\n\n${testContext}` : baseInstruction + endOfFileHint;
+    const targetFile = relPath;
+    const symbolCtxBlock = (input as any)._symbolGraph
+      ? buildSymbolContextBlock(targetFile, (input as any)._symbolGraph)
+      : '';
+    const augmentedInstruction = symbolCtxBlock
+      ? `${baseAugmented}\n\n${symbolCtxBlock}`
+      : baseAugmented;
 
     // Try SEARCH/REPLACE first, local model then cloud — see
     // generateSearchReplacePatch: unchanged content never passes through
@@ -74,24 +182,35 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
     // parses or every block fails to match — e.g. the model ignores the
     // requested format entirely.
     // rewrite mode (set by the repair loop) skips patching for small files and regenerates them.
-    const rewriteSmallFile = !!input.rewrite && patchedContent.split(/\r?\n/).length <= 200;
-    if (resolvedModel && !rewriteSmallFile) {
+    // Also skip SEARCH/REPLACE for brand-new or empty files — an empty file has no existing lines to anchor on.
+    const isNewOrEmpty = !patchedContent || patchedContent.trim() === '';
+    const rewriteSmallFile = (!!input.rewrite && patchedContent.split(/\r?\n/).length <= 200) || isNewOrEmpty;
+    const conventionHint = detectTargetConvention(workspaceRoot, relPath, input.verifyCommand);
+    const fileInstruction = isNewOrEmpty
+      ? `${augmentedInstruction}\n\nNote: ${relPath} is currently empty. Generate the complete valid implementation code from scratch. Do not paste or echo the goal or instruction text as code; start directly with the required code definitions.${conventionHint}`
+      : augmentedInstruction;
+    // The repair loop escalates to the cloud model when the local one keeps repeating a wrong edit (#106).
+    const cloudFirst = !!input.preferCloud && (input.allowCloudFallback ?? loadCodingAgentsSettings(workspaceRoot).allowCloudFallback);
+    const localModel = cloudFirst ? null : resolvedModel;
+    if (cloudFirst) caTrace('cloud first (escalated by the repair loop)', relPath);
+    if (localModel && !rewriteSmallFile) {
       try {
         // Routed through localLlmPatch (not a direct chatLocal call) so
         // this shares the exact same model-invocation, context-gathering,
         // and refusal-detection code as the full-content path below —
         // including the same test/mock seam.
         const lineCount = patchedContent.split(/\r?\n/).length;
-        const windowInfo = lineCount > 150 ? extractWindowForInstruction(patchedContent, augmentedInstruction, 150) : null;
+        const wideWindow = lineCount > 150 ? extractWindowForInstruction(patchedContent, augmentedInstruction, 150) : null;
         // One informed retry: a SEARCH/REPLACE call costs ~5 s; the fallback below regenerates the
         // file (~125 s for 600 lines on a 7B, traced live) and is riskier. Tell the model why its
         // first reply could not be used and ask again in the same format.
         for (let srTry = 0; srTry < 2 && !appliedPatch; srTry++) {
+        const windowInfo = lineCount > 150 ? (anchoredWindow(patchedContent, activeGoal, srTry) ?? wideWindow) : null;
         caTrace('local search-replace', `${relPath}${srTry ? ' (retry)' : ''}`);
         const srInstruction = srTry === 0 ? augmentedInstruction : `${augmentedInstruction}\n\nYour previous SEARCH/REPLACE reply could not be used: ${lastFailureReason}. Reply again with corrected SEARCH/REPLACE blocks: copy every SEARCH line exactly from the excerpt, and put new imports with the other imports at the top of the file.`;
         const srLlmResult = await localLlmPatch({
           filePath: fullPath,
-          instruction: srInstruction,
+          instruction: `${srInstruction}${localOnly}`,
           workspace_root: workspaceRoot,
           sessionId,
           temperature: input.temperature,
@@ -99,6 +218,7 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
           ...(input.think ? { think: input.think } : {}),
           ...(run ? { signal: run.controller.signal } : {}),
           outputFormat: 'search-replace',
+          skipContextGathering,
           contentOverride: windowInfo ? windowInfo.window : patchedContent,
           excerptRange: windowInfo
             ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }
@@ -112,7 +232,8 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
             // Apply against the FULL current content by exact text match —
             // independent of whatever window was shown to the model, so
             // there's no line-offset bookkeeping to get wrong.
-            const { content, appliedCount, failures } = applySearchReplaceBlocks(patchedContent, blocks, { additive: isAdditiveInstruction(activeGoal) });
+            const { content, appliedCount, failures } = applySearchReplaceBlocks(patchedContent, blocks, { additive: isAdditiveInstruction(activeGoal), allowAppend: isEndOfFileInstruction(activeGoal) });
+            if (appliedCount === 0 && testContext && blocks.some(b => searchComesFromTests(b.search, testContext))) failures.unshift(`your SEARCH text is copied from the read-only test file shown as the specification, not from ${relPath}, the file you must edit`);
             if (incomplete > 0) failures.push(`${incomplete} block(s) were cut off before the REPLACE marker and were not applied`);
             const regressed = appliedCount > 0 && await searchReplaceRegressesTsErrors(relPath, patchedContent, content);
             // New imports must resolve in the REAL workspace (the in-memory TS gate ignores unresolved modules).
@@ -121,7 +242,7 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
             const duplicateDefs = appliedCount > 0 && !regressed ? newDuplicateDefinitions(relPath, patchedContent, content) : [];
             if (appliedCount > 0 && !regressed && importProblems.length === 0 && duplicateDefs.length === 0) {
               patchedContent = content;
-              result.modelUsed = resolvedModel;
+              result.modelUsed = localModel;
               result.usedFallbackModel = false;
               appliedPatch = true;
               if (failures.length > 0) {
@@ -140,6 +261,14 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
               lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: ${appliedCount} block(s) matched, but applying them increases the file's compiler error count — rejected atomically (partial async/signature migrations are worse than no change)`;
             } else {
               lastFailureReason = `Local model (${resolvedModel}) SEARCH/REPLACE: no blocks applied (${failures.join('; ') || 'unknown reason'})`;
+              if (failures.length > 0) {
+                result.diagnostics.push({
+                  filePath: relPath,
+                  message: `Local model (${resolvedModel}) SEARCH/REPLACE: 0 block(s) applied, ${failures.length} skipped: ${failures.join('; ')}`,
+                  severity: 'warning',
+                  source: 'llm-patch',
+                });
+              }
             }
           }
         } else if (srLlmResult.error) {
@@ -165,10 +294,10 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
     // retry instead of auto-escalating within one call.
     // A large module is not regenerated whole after SEARCH/REPLACE failed twice: that is the slowest
     // path (minutes on a 7B) and the one that drops or renames code. The repair loop retries instead.
-    const skipWholeFileRegen = !!resolvedModel && !rewriteSmallFile && !appliedPatch
+    const skipWholeFileRegen = !!localModel && !rewriteSmallFile && !appliedPatch
       && patchedContent.split(/\r?\n/).length > 300 && /^\s*export\s+/m.test(patchedContent);
     if (skipWholeFileRegen) caTrace('whole-file regeneration skipped (large module)', relPath);
-    if (resolvedModel && !appliedPatch && !skipWholeFileRegen) {
+    if (localModel && !appliedPatch && !skipWholeFileRegen) {
       // Visible record that SEARCH/REPLACE failed and the pipeline is
       // dropping to a strategy that can't structurally prevent scope
       // drift — observed live: SR failed here (a vision-language model
@@ -194,23 +323,25 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
         // right before the corruption guard runs on the reconstructed
         // full content — matching the cloud path's guard timing exactly.
         const hasExports = /^\s*export\s+/m.test(patchedContent);
-        const windowInfo = !hasExports ? extractWindowForInstruction(patchedContent, activeGoal) : null;
+        const windowInfo = !hasExports && !isNewOrEmpty ? extractWindowForInstruction(patchedContent, activeGoal) : null;
         caTrace('local full/window patch', relPath);
         const llmResult = await localLlmPatch({
           filePath: fullPath,
-          instruction: augmentedInstruction,
+          instruction: `${fileInstruction}${localOnly}`,
           workspace_root: workspaceRoot,
           sessionId,
           temperature: input.temperature,
           ...(input.model && resolvedModel ? { model: resolvedModel } : {}),
           ...(input.think ? { think: input.think } : {}),
           ...(run ? { signal: run.controller.signal } : {}),
-          contentOverride: windowInfo ? windowInfo.window : undefined,
+          skipContextGathering,
+          contentOverride: isNewOrEmpty ? '' : (windowInfo ? windowInfo.window : undefined),
           excerptRange: windowInfo
             ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }
             : undefined,
         });
         if (llmResult.success && llmResult.patch?.trim()) {
+          let fullImportProblems: string[] = [];
           const replyLines = llmResult.patch.split(/\r?\n/);
           const fullLines = patchedContent.split(/\r?\n/);
           const originalWindowLines = windowInfo ? fullLines.slice(windowInfo.startIdx, windowInfo.endIdx) : [];
@@ -226,9 +357,13 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
             lastFailureReason = `Local model (${resolvedModel}) mangled a ${originalWindowLines.length}-line excerpt instead of reproducing it verbatim (duplicated/dropped/reordered lines) — not used`;
           } else if (originalContent && looksLikeHallucinatedReplacement(originalContent, candidatePatch)) {
             lastFailureReason = `Local model (${resolvedModel}) produced a full-file replacement with no trace of the original file's content — likely hallucinated, not used`;
+          } else if ((fullImportProblems = await newImportProblems(relPath, originalContent, candidatePatch, workspaceRoot)).length > 0) {
+            // The SEARCH/REPLACE path already refuses an edit that adds an unresolvable import; a new or fully
+            // regenerated file went through unchecked (live: `from './harness.js'`, a module that does not exist).
+            lastFailureReason = `Local model (${resolvedModel}) wrote a file whose imports do not resolve: ${fullImportProblems.join('; ')}`;
           } else {
             patchedContent = candidatePatch;
-            result.modelUsed = resolvedModel;
+            result.modelUsed = localModel;
             result.usedFallbackModel = false;
             appliedPatch = true;
           }
@@ -261,14 +396,15 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
       // generation — a stronger cloud model is more likely to follow
       // the format correctly, and success here is unconditionally safe
       // (unchanged content never passed through the model).
-      try {
-        const { useFreeLLM } = await import('../use-free-llm.js');
-        caTrace('cloud search-replace fallback', relPath);
-        const srResult = await generateSearchReplacePatch(
-          patchedContent,
-          activeGoal,
-          relPath,
-          tasksContext,
+      if (!isNewOrEmpty) {
+        try {
+          const { useFreeLLM } = await import('../use-free-llm.js');
+          caTrace('cloud search-replace fallback', relPath);
+          const srResult = await generateSearchReplacePatch(
+            patchedContent,
+            symbolCtxBlock ? (activeGoal + "\n\n" + symbolCtxBlock) : activeGoal,
+            relPath,
+            tasksContext,
           async (prompt) => {
             const res = await useFreeLLM({
               messages: [
@@ -281,8 +417,11 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
               sessionId,
               isOnePass: true,
               skipIndexing: true,
+              temperature: input.temperature,
             });
-            return res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
+            const reply = res?.choices?.[0]?.message?.content || (res as any)?.content || (typeof res === 'string' ? res : '');
+            caTraceDump('cloud-sr-' + relPath, reply);
+            return reply;
           }
         );
         const cloudRegressed = srResult.appliedCount > 0
@@ -306,19 +445,24 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
       } catch {
         // Fall through to the older cloud strategy below regardless of why.
       }
+      }
     }
 
-    if (!appliedPatch && cloudAllowed) {
+    // A large module is not regenerated in the cloud either: that path drops or renames code (#148).
+    const largeModule = !rewriteSmallFile && patchedContent.split(/\r?\n/).length > 300 && /^\s*export\s+/m.test(patchedContent);
+    if (!appliedPatch && cloudAllowed && largeModule) caTrace('cloud full-file fallback skipped (large module)', relPath);
+    if (!appliedPatch && cloudAllowed && !largeModule) {
       const localReason = lastFailureReason;
       caTrace('cloud full-file fallback', relPath);
       const { patch: cloudPatch, failureReason } = await generateCodePatchWithCloudLLM(
         fullPath,
-        activeGoal,
+        sanitizeContextForCloud(fileInstruction),
         patchedContent,
         workspaceRoot,
         sessionId,
         tasksContext
       );
+      caTraceDump('cloud-full-' + relPath, cloudPatch ?? '');
       if (cloudPatch?.trim() && originalContent && looksLikeHallucinatedReplacement(originalContent, cloudPatch)) {
         lastFailureReason = `${localReason ? `${localReason} ` : ''}Cloud fallback also produced a full-file replacement with no trace of the original file's content — likely hallucinated, not used`;
       } else if (cloudPatch?.trim()) {

@@ -1,25 +1,51 @@
 # .pre-commit-config.yaml
 # Automates code quality gates: tsc compiler check, tool/docs/skills/dashboard sync,
 # and quickstart/playground schema validation.
+# Set PRE_COMMIT_PYTHON (or PYTHON) to override the Python interpreter; defaults to `python`.
 
 exclude: ^(node_modules|dist|\.agents|mcp-server/node_modules|mcp-server/dist)/|\.min\.js$|\.map$
 
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
-    hooks:
-      - id: trailing-whitespace
-        exclude: '\.min\.js$|\.map$'
-      - id: end-of-file-fixer
-        exclude: '\.min\.js$|\.map$'
-      - id: check-yaml
-        args: ['--unsafe']
-      - id: check-json
-      - id: check-merge-conflict
-      - id: detect-private-key
-
   - repo: local
     hooks:
+      - id: trailing-whitespace
+        name: Trim Trailing Whitespace
+        entry: sh -c 'exec "${PRE_COMMIT_PYTHON:-${PYTHON:-python}}" -m pre_commit_hooks.trailing_whitespace_fixer "$@"' --
+        language: system
+        types: [text]
+        exclude: '\.min\.js$|\.map$'
+
+      - id: end-of-file-fixer
+        name: Fix End of Files
+        entry: sh -c 'exec "${PRE_COMMIT_PYTHON:-${PYTHON:-python}}" -m pre_commit_hooks.end_of_file_fixer "$@"' --
+        language: system
+        types: [text]
+        exclude: '\.min\.js$|\.map$'
+
+      - id: check-yaml
+        name: Check Yaml
+        entry: sh -c 'exec "${PRE_COMMIT_PYTHON:-${PYTHON:-python}}" -m pre_commit_hooks.check_yaml --unsafe "$@"' --
+        language: system
+        types: [yaml]
+
+      - id: check-json
+        name: Check JSON
+        entry: sh -c 'exec "${PRE_COMMIT_PYTHON:-${PYTHON:-python}}" -m pre_commit_hooks.check_json "$@"' --
+        language: system
+        types: [json]
+
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+        entry: sh -c 'exec "${PRE_COMMIT_PYTHON:-${PYTHON:-python}}" -m pre_commit_hooks.check_merge_conflict "$@"' --
+        language: system
+        types: [text]
+
+      - id: detect-private-key
+        name: Detect Private Key
+        entry: sh -c 'exec "${PRE_COMMIT_PYTHON:-${PYTHON:-python}}" -m pre_commit_hooks.detect_private_key "$@"' --
+        language: system
+        types: [text]
+
       - id: verify-precommit-quality-and-tools
         name: TypeScript Compiler & Tool/Docs/Dashboard Sync
         entry: npm run verify:precommit --prefix mcp-server

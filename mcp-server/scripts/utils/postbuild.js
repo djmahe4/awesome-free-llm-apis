@@ -3,10 +3,11 @@
  * @description Handles post-build cleanup, script synchronization, and directory preparation for the production distribution.
  * Usage: node scripts/utils/postbuild.js
  */
-import { mkdirSync, copyFileSync, existsSync } from 'node:fs';
+import fs, { mkdirSync, copyFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
+import { torchInstallPlan, opencvInstallPlan } from './optional-deps.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '../..');
@@ -15,6 +16,20 @@ const copies = [
   { from: 'src/providers/gemini_client.py', to: 'dist/providers/gemini_client.py' },
   { from: 'scripts/utils/update_prompt_json.py', to: 'dist/scripts/update_prompt_json.py' },
   { from: 'scripts/utils/pdf_screenshot.py', to: 'dist/scripts/pdf_screenshot.py' },
+  { from: 'scripts/model_inspector.py', to: 'dist/scripts/model_inspector.py' },
+  { from: 'scripts/quant_engine.py', to: 'dist/scripts/quant_engine.py' },
+  { from: 'scripts/moe_engine.py', to: 'dist/scripts/moe_engine.py' },
+  { from: 'scripts/reasoning_engine.py', to: 'dist/scripts/reasoning_engine.py' },
+  { from: 'scripts/yolo_nn_engine.py', to: 'dist/scripts/yolo_nn_engine.py' },
+  { from: 'scripts/torch_nn_engine.py', to: 'dist/scripts/torch_nn_engine.py' },
+  { from: 'scripts/weight_space_programmer.py', to: 'dist/scripts/weight_space_programmer.py' },
+  { from: 'scripts/scene_augmentation.py', to: 'dist/scripts/scene_augmentation.py' },
+  { from: 'scripts/vlm_reverse_generator.py', to: 'dist/scripts/vlm_reverse_generator.py' },
+  { from: 'scripts/audio_separator.py', to: 'dist/scripts/audio_separator.py' },
+  { from: 'scripts/depth_parallax_engine.py', to: 'dist/scripts/depth_parallax_engine.py' },
+  { from: 'scripts/headless_media_compiler.py', to: 'dist/scripts/headless_media_compiler.py' },
+  { from: 'scripts/sandboxes/python-sandbox-runner.py', to: 'dist/scripts/sandboxes/python-sandbox-runner.py' },
+  { from: 'scripts/utils/generate_model_fixtures.py', to: 'dist/scripts/utils/generate_model_fixtures.py' },
 ];
 
 console.log('Running post-build tasks...');
@@ -34,19 +49,63 @@ try {
     execSync(`"${sysPython}" -m venv "${venvDir}"`, { stdio: 'inherit' });
   }
 
-  console.log('Installing/upgrading Python dependencies (pymupdf, google-genai, duckduckgo-mcp-server, kokoro-onnx, soundfile, llmfit)...');
-  execSync(`"${pythonPath}" -m pip install pymupdf google-genai duckduckgo-mcp-server kokoro-onnx soundfile llmfit`, { stdio: 'inherit' });
+  console.log('Installing/upgrading Python dependencies (pymupdf, google-genai, duckduckgo-mcp-server, kokoro-onnx, soundfile, llmfit, numpy, RestrictedPython)...');
+  execSync(`"${pythonPath}" -m pip install pymupdf google-genai duckduckgo-mcp-server kokoro-onnx soundfile llmfit numpy RestrictedPython`, { stdio: 'inherit' });
   console.log('Python virtual environment setup complete.');
 } catch (err) {
   console.error('Warning: Python virtual environment setup failed. Details:', err.message);
+}
+
+// Step 1b (optional): Optional heavy Python deps (PyTorch for .pt inspection, headless OpenCV for parallax/OCR).
+const venvPython = process.platform === 'win32'
+  ? resolve(root, 'venv', 'Scripts', 'python.exe')
+  : resolve(root, 'venv', 'bin', 'python');
+
+const optionalDeps = [
+  {
+    label: 'PyTorch',
+    importName: 'torch',
+    skipEnv: 'SKIP_TORCH',
+    fallbackNote: '.pt checkpoints will not be readable',
+    getPlan: (present) => torchInstallPlan({ env: process.env, platform: process.platform, torchPresent: present }),
+  },
+  {
+    label: 'OpenCV',
+    importName: 'cv2',
+    skipEnv: 'SKIP_OPENCV',
+    fallbackNote: 'depth parallax & OCR will use pure-NumPy fallbacks',
+    getPlan: (present) => opencvInstallPlan({ env: process.env, opencvPresent: present }),
+  },
+];
+
+for (const dep of optionalDeps) {
+  try {
+    let present = false;
+    try { execSync(`"${venvPython}" -c "import ${dep.importName}"`, { stdio: 'ignore' }); present = true; } catch { /* not installed */ }
+    const plan = dep.getPlan(present);
+    if (plan.install) {
+      console.log(`Installing optional ${dep.label} (${plan.reason}); set ${dep.skipEnv}=1 to skip...`);
+      execSync(`"${venvPython}" -m pip ${plan.args.join(' ')}`, { stdio: 'inherit' });
+    } else {
+      console.log(`Skipping optional ${dep.label}: ${plan.reason}.`);
+    }
+  } catch (err) {
+    console.warn(`Warning: optional ${dep.label} install failed; ${dep.fallbackNote}. Details:`, err.message);
+  }
 }
 
 for (const { from, to } of copies) {
   const src = resolve(root, from);
   const dest = resolve(root, to);
   mkdirSync(dirname(dest), { recursive: true });
-  copyFileSync(src, dest);
-  console.log(`  copied ${from} → ${to}`);
+  if (fs.existsSync(src)) {
+    copyFileSync(src, dest);
+    console.log(`  copied ${from} → ${to}`);
+
+  } else {
+    console.warn(`Warning: source file missing, skipping copy: ${src}`);
+  }
+
 }
 
 // Step 1.5: Pre-download embedding models
@@ -108,5 +167,3 @@ try {
 } catch (err) {
   console.warn('Warning: Cyber tools index sync skipped. Details:', err.message);
 }
-
-

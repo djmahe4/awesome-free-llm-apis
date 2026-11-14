@@ -4,6 +4,11 @@ import { dirname } from 'node:path';
 import { debounce } from '../utils/debounce.js';
 import type { ChatRequest, ChatResponse } from '../providers/types.js';
 
+/**
+ * Bump when the steps that rewrite a reply change, so replies stored by older code are not served (#141).
+ */
+export const REPLY_FORMAT_VERSION = 'v2-2026-11';
+
 export class ResponseCache {
   private cache: LRUCache<string, ChatResponse>;
   private persistPath: string | null = null;
@@ -50,6 +55,7 @@ export class ResponseCache {
       max_tokens: request.max_tokens,
       top_p: request.top_p,
       _ws: workspaceHash, // Workspace state hash
+      _fmt: REPLY_FORMAT_VERSION,
     });
   }
 

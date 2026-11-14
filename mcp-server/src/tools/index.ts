@@ -16,3 +16,5 @@ export { loadSkillPrompt } from './load-skill-prompt.js';
 export type { LoadSkillPromptInput } from './load-skill-prompt.js';
 export { executeSkill } from './execute-skill.js';
 export type { ExecuteSkillInput, ExecuteSkillResult } from './execute-skill.js';
+export { reverseTool } from './reverse-tool.js';
+export type { ReverseToolInput, ReverseAuthorization } from './reverse-tool.js';

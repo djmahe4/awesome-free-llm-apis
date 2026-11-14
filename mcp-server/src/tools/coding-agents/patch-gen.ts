@@ -148,9 +148,20 @@ export function parseSearchReplaceBlocks(text: string): SearchReplaceBlock[] {
  * closed with a REPLACE marker (typically a reply cut off at the output limit). Such a
  * block is not applied, but callers must be able to tell it was lost.
  */
+/** Markdown fences around the code of a reply are not source code: a fence-only SEARCH is empty, and a fenced REPLACE loses its fence lines unless the SEARCH is itself fenced text. */
+function unfenceBlock(b: SearchReplaceBlock): SearchReplaceBlock {
+  const fenceOpen = /^\s*```[\w-]*\s*$/;
+  const fenceClose = /^\s*```\s*$/;
+  const sLines = b.search.split(/\r?\n/);
+  if (sLines.length > 0 && sLines.every(l => fenceOpen.test(l) || fenceClose.test(l)) && b.search.trim() !== '') return unfenceBlock({ search: '', replace: b.replace });
+  if (b.search.trim() !== '' && fenceOpen.test(sLines[0])) return b;
+  const rLines = b.replace.split(/\r?\n/);
+  if (rLines.length >= 2 && fenceOpen.test(rLines[0]) && fenceClose.test(rLines[rLines.length - 1])) return { search: b.search, replace: rLines.slice(1, -1).join('\n') };
+  return b;
+}
 export function parseSearchReplaceBlocksDetailed(text: string): { blocks: SearchReplaceBlock[]; incomplete: number } {
   const blocks: SearchReplaceBlock[] = [];
-  const lines = text.split(/\r?\n/);
+  const lines = text.replace(/([^\s=])(={5,})[ \t]*$/gm, (_m, a, b) => a + String.fromCharCode(10) + b).replace(/([^\s>])(>{5,}[ \t]*(?:REPLACE)?)[ \t]*$/gim, (_m, a, b) => a + String.fromCharCode(10) + b).split(/\r?\n/);
   let state: 'OUTSIDE' | 'IN_SEARCH' | 'IN_REPLACE' = 'OUTSIDE';
   let curSearch: string[] = [];
   let curReplace: string[] = [];
@@ -198,7 +209,7 @@ export function parseSearchReplaceBlocksDetailed(text: string): { blocks: Search
     }
   }
 
-  return { blocks, incomplete: state === 'OUTSIDE' ? 0 : 1 };
+  return { blocks: blocks.map(unfenceBlock), incomplete: state === 'OUTSIDE' ? 0 : 1 };
 }
 
 /** "// Add this import", "// Insert this line": the model annotating its own edit, never wanted in the file. */
@@ -373,7 +384,13 @@ export function closestLines(workingLines: string[], searchLines: string[], maxL
   for (let i = 0; i < workingLines.length; i++) {
     if (!workingLines[i].trim()) continue;
     const score = Math.max(...wanted.map(w => lineSimilarity(workingLines[i], w)));
-    if (score >= 0.55) scored.push({ i, score });
+    if (score >= 0.55) {
+      scored.push({ i, score });
+    } else {
+      const have = new Set(workingLines[i].toLowerCase().match(/[a-z_$][a-z0-9_$]*/g) ?? []);
+      const shared = new Set((wanted.join(' ').toLowerCase().match(/[a-z_$][a-z0-9_$]*/g) ?? []).filter(w => have.has(w))).size;
+      if (shared >= 2) scored.push({ i, score: shared / 100 });
+    }
   }
   scored.sort((a, b) => b.score - a.score || a.i - b.i);
   const top = scored.slice(0, maxLines).sort((a, b) => a.i - b.i);
@@ -447,9 +464,15 @@ export interface ApplyOptions {
 const ADD_WORDS = /\b(add|insert|append|introduce|implement|create|new)\b/i;
 const CHANGE_WORDS = /\b(remove|delete|replace|rename|change|fix|rewrite|refactor|modify|update|swap|drop|move)\b/i;
 
-/** True for instructions that only add code (so REPLACE must keep its SEARCH anchor). */
+/** True for instructions that only add code (so REPLACE must keep its SEARCH anchor). A negated change word, as in "change nothing else", is not a request to change. */
 export function isAdditiveInstruction(instruction: string): boolean {
-  return ADD_WORDS.test(instruction) && !CHANGE_WORDS.test(instruction);
+  const asked = instruction.replace(/\b(?:do not|don't|never|without)\s+(?:\w+\s+){0,2}?(?:change|changing|modify|modifying|touch|touching|replace|replacing|remove|removing|delete|deleting|rewrite|rewriting|rename|renaming)\b[^.;\n]*|\b(?:change|modify|touch|replace|remove|delete|rewrite|rename)\s+(?:nothing|none)\b[^.;\n]*/gi, ' ');
+  return ADD_WORDS.test(asked) && !CHANGE_WORDS.test(asked);
+}
+
+/** True when the instruction says the new code goes at the end of the file, so an empty SEARCH may append. */
+export function isEndOfFileInstruction(instruction: string): boolean {
+  return /\b(?:at the (?:very )?end of|to the end of|append(?:ed|s)?)\b/i.test(instruction);
 }
 
 /**
@@ -476,7 +499,13 @@ export function reindentReplace(searchLines: string[], fileLines: string[], repl
   return replaceLines.map(l => (l.trim() ? l.slice(cut) : l));
 }
 
-export function applySearchReplaceBlocks(
+/** A comment-only SEARCH that is not in the file is a placeholder for "nothing to match": the model means append. */
+function isPlaceholderSearch(search: string, workingLines: string[]): boolean {
+  const lines = search.split(/\r?\n/).filter(l => l.trim() !== '');
+  if (lines.length === 0) return false;
+  if (!lines.every(l => /^\s*(?:\/\/|#|\/\*|\*)/.test(l))) return false;
+  return findLineBlockMatch(workingLines, search.split(/\r?\n/)).index === -1;
+}export function applySearchReplaceBlocks(
   content: string,
   blocks: SearchReplaceBlock[],
   options: ApplyOptions = {}
@@ -492,7 +521,7 @@ export function applySearchReplaceBlocks(
   const failures: string[] = [];
 
   for (const { search, replace } of blocks) {
-    if (!search) {
+    if (!search || workingLines.every(l => l.trim() === '') || (options.allowAppend && isPlaceholderSearch(search, workingLines))) {
       if (options.allowAppend || content.trim() === '') {
         // New or empty file, or an explicit append: the text goes at the end.
         const addition = replace.split(/\r?\n/);
@@ -714,7 +743,7 @@ export async function generateSearchReplacePatch(
     return { content: currentContent, appliedCount: 0, failures: [], hardFailure: 'No SEARCH/REPLACE blocks found in response' };
   }
 
-  const { content, appliedCount, failures } = applySearchReplaceBlocks(currentContent, blocks, { additive: isAdditiveInstruction(instruction) });
+  const { content, appliedCount, failures } = applySearchReplaceBlocks(currentContent, blocks, { additive: isAdditiveInstruction(instruction), allowAppend: isEndOfFileInstruction(instruction) });
   if (incomplete > 0) failures.push(`${incomplete} block(s) were cut off before the REPLACE marker and were not applied`);
   return { content, appliedCount, failures };
 }

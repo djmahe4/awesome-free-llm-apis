@@ -1075,6 +1075,22 @@ mark.wiki-line-hit {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: 190px;
+}
+/* A details element cannot size its own content as a flex box, so the body is bounded here and the list scrolls inside it. */
+details.conv-card[open] > .conv-card-body {
+  display: flex;
+  flex-direction: column;
+  max-height: 250px;
+  overflow: hidden;
+}
+.conv-more {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 8px;
 }
 .conv-item {
   padding: 8px 12px;
@@ -1524,3 +1540,33 @@ mark.wiki-line-hit {
   background: rgba(255, 255, 255, 0.25);
   color: #fff;
 }
+
+/* ─── ML studio: guided path ─────────────────────────────────── */
+.ml-step { margin-bottom: 12px; }
+.ml-step-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  background: var(--accent-purple); color: #fff; font-size: .72rem; font-weight: 700;
+}
+.ml-step-lead { font-size: .8rem; color: var(--text-secondary); line-height: 1.55; margin: 0 0 12px; max-width: 70ch; }
+.ml-step-nav { display: flex; justify-content: flex-end; margin-top: 14px; }
+.ml-step-body > .card, .ml-lab > .card-body > .card { box-shadow: none; }
+.ml-path-strip { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.ml-path-dot {
+  font-size: .72rem; padding: 5px 10px; border-radius: 999px; cursor: pointer;
+  background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-subtle);
+}
+.ml-path-dot b { color: var(--accent-purple); margin-right: 4px; }
+.ml-path-dot:hover { border-color: var(--accent-purple); color: var(--text-primary); }
+.ml-build-now {
+  font-size: .78rem; line-height: 1.6; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--bg-secondary); border-left: 3px solid var(--accent-cyan); color: var(--text-secondary);
+}
+.ml-build-now strong { color: var(--text-primary); }
+.ml-build-bars {
+  display: flex; align-items: flex-end; gap: 3px; height: 90px; margin-top: 10px; padding: 6px 8px;
+  background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); overflow-x: auto;
+}
+.ml-build-bar { flex: 0 0 14px; background: var(--accent-purple); border-radius: 3px 3px 0 0; opacity: .75; }
+.ml-build-bar.latest { background: var(--accent-cyan); opacity: 1; }
+.ml-reassemble-empty { font-size: .78rem; color: var(--text-muted); padding: 8px 0; }

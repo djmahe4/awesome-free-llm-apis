@@ -9,6 +9,16 @@ import { loadCodingAgentsSettings } from '../src/tools/coding-agents/settings.js
 // Slice 3: hypotheses are derived from the goal and plan (no model), checked before anything is edited, and the
 // gate setting (off / warn / enforce) decides whether a refuted assumption stops the run.
 
+// No model is reached from this file (issue #110): the plan action decomposes the goal through useFreeLLM and a run
+// edits through localLlmPatch. Both are replaced, so the file takes seconds and its result does not depend on what
+// is installed. The mocks are shared so a test can assert that nothing was asked.
+const model = vi.hoisted(() => ({
+    useFreeLLM: vi.fn(async (_req: unknown) => ({ choices: [{ message: { content: '[]' } }] })),
+    localLlmPatch: vi.fn(async (_req: unknown) => ({ success: false, error: 'no model in unit tests' })),
+}));
+vi.mock('../src/tools/use-free-llm.js', () => ({ useFreeLLM: model.useFreeLLM }));
+vi.mock('../src/tools/local-llm-patch.js', async (importOriginal) => ({ ...(await importOriginal<object>()), localLlmPatch: model.localLlmPatch }));
+
 let ws = '';
 beforeAll(async () => {
     ws = await fs.mkdtemp(path.join(os.tmpdir(), 'gate-'));
@@ -133,14 +143,20 @@ describe('plan action and run gate through CodingAgentsHandler', () => {
         expect(r.hypotheses.map((h: any) => [h.probe, h.status])).toEqual([['defined:getUser', 'confirmed'], ['defined:fetchUser', 'refuted']]);
         const md = await fs.readFile(path.join(pws, 'hypotheses.md'), 'utf-8');
         expect(md).toMatch(/\| h2 \|.*fetchUser.*\| refuted \|/);
+        const tasks = await fs.readFile(path.join(pws, 'tasks.md'), 'utf-8');
+        expect(tasks).toContain('Context permissions');
+        expect(tasks).toContain('Hypothesis validation');
+        expect(tasks).toMatch(/REFUTED.*fetchUser/);
+        expect(r.content).toContain('Hypothesis Validation');
+        expect(r.content).toContain('fetchUser');
         expect(r.diagnostics.some((d: any) => d.source === 'hypothesis' && d.severity === 'warning')).toBe(true);
         expect(r.patchSummary).toMatch(/assumption/i);
     });
 
     it('enforce: a run with a refuted assumption stops before editing and makes no model call', async () => {
         await setGate('enforce');
-        const lp = await import('../src/tools/local-llm-patch.js');
-        const spy = vi.spyOn(lp, 'localLlmPatch');
+        model.localLlmPatch.mockClear();
+        model.useFreeLLM.mockClear();
         const { CodingAgentsHandler } = await import('../src/tools/coding-agents.js');
         const before = await fs.readFile(path.join(pws, 'src/a.ts'), 'utf-8');
         let r: any = await CodingAgentsHandler({ goal: 'make `fetchUser` cache its result', workspaceRoot: pws, targetFiles: ['src/a.ts'], dryRun: false, sessionId: 'gate-run-1', review: false } as any);
@@ -151,8 +167,39 @@ describe('plan action and run gate through CodingAgentsHandler', () => {
         expect(r.status).toBe('paused');
         expect(r.applied).toBe(false);
         expect(r.patchSummary).toMatch(/^Blocked before editing/);
-        expect(spy).not.toHaveBeenCalled();
+        expect(model.localLlmPatch).not.toHaveBeenCalled();
+        expect(model.useFreeLLM).not.toHaveBeenCalled();
         expect(await fs.readFile(path.join(pws, 'src/a.ts'), 'utf-8')).toBe(before);
-        spy.mockRestore();
+    });
+});
+
+// Issue #104: the text between two code spans ("`A` and `B`") was read as a code name.
+describe('words between code spans are not names', () => {
+    const probes = (goal: string) => deriveHypotheses({ goal, files: FILES } as any).map(h => h.probe);
+
+    it('"and" between two spans is not a name', () => {
+        expect(probes('Create src/x.ts that exports `type A = 1`, `interface B {}` and `function c()`')).not.toContain('defined:and');
+        // a code span longer than 80 characters used to throw the pairing of backticks off by one
+        expect([...probes("Create src/x.ts that exports `type T = 'aaaaaaaaaa' | 'bbbbbbbbbb' | 'cccccccccc' | 'dddddddddd' | 'eeeeeeeeee' | 'ffffffffff' | 'gggggggggg'`, `interface B {}` and `function getUser()` and `Cart`")].sort()).toEqual(['defined:Cart', 'defined:getUser']);
+    });
+    it('other plain words between spans are not names either', () => {
+        expect(probes('fix `getUser` or `Cart`, then the rest')).toEqual(['defined:getUser', 'defined:Cart']);
+        expect(probes('use `getUser` with `Cart` for the checkout')).toEqual(['defined:getUser', 'defined:Cart']);
+    });
+    it('real names in spans are still taken', () => {
+        expect(probes('make `getUser` cache and `Cart` smaller')).toEqual(['defined:getUser', 'defined:Cart']);
+    });
+    it('does not treat package, environment, or SQLite schema names as workspace declarations', () => {
+        expect(probes('Use package `fzstd` with `ZED_THREADS_DB`, table `threads` and `folder_paths`.'))
+            .toEqual([]);
+    });
+    it('does not globally suppress a code symbol named threads', () => {
+        expect(probes('Use `threads` to process worker jobs.')).toEqual(['defined:threads']);
+        expect(probes('Use `threads` table for persistence.')).toEqual([]);
+    });
+    it('only ignores environment names when used as environment configuration', () => {
+        expect(probes('Use `zed_data_dir` helper to locate the workspace.')).toEqual(['defined:zed_data_dir']);
+        expect(probes('Read environment variable `zed_data_dir` before startup.')).toEqual([]);
+        expect(probes('Read `zed_data_dir` environment variable before startup.')).toEqual([]);
     });
 });

@@ -47,7 +47,9 @@ describe('IntelligentRouterMiddleware Full Repro', () => {
             getTokenState: vi.fn().mockReturnValue({}),
             getProviderStats: vi.fn().mockReturnValue({}),
             recordProviderSuccess: vi.fn(),
-            recordProviderFailure: vi.fn()
+            recordProviderFailure: vi.fn(),
+            isModelDisabled: vi.fn().mockReturnValue(false),
+            isProviderBlocked: vi.fn().mockReturnValue(false)
         };
         middleware = new IntelligentRouterMiddleware(mockExecutor as any);
     });

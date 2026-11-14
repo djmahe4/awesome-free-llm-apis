@@ -21,11 +21,18 @@ function timeoutNotice(filePath: string, tool: string, seconds: number): Diagnos
   return { filePath, message: `${tool} timed out after ${seconds}s; this file was not checked`, severity: 'warning', source: 'subprocess' };
 }
 
+let cachedPythonCmd: string | null | undefined = undefined;
+
 export function getPythonCmd(): string | null {
-  for (const cmd of ['python', 'python3']) {
+  if (cachedPythonCmd !== undefined) return cachedPythonCmd;
+  const candidates = process.env.PYTHON ? [process.env.PYTHON, 'python', 'python3'] : ['python', 'python3'];
+  for (const cmd of candidates) {
     try {
-      const res = spawnSync(cmd, ['--version'], { encoding: 'utf-8', timeout: 3000, windowsHide: true });
-      if (res.status === 0) return cmd;
+      const res = spawnSync(cmd, ['--version'], { encoding: 'utf-8', timeout: 10_000, windowsHide: true });
+      if (res.status === 0) {
+        cachedPythonCmd = cmd;
+        return cmd;
+      }
     } catch { /* try next */ }
   }
   return null;
@@ -162,7 +169,9 @@ export async function runTsMorphCheck(
       },
     });
 
-    const srcFile = project.createSourceFile(filePath, fullContent, { overwrite: true });
+    const isJs = /\.[cm]?js$/i.test(filePath);
+    const virtualPath = isJs ? filePath.replace(/\.[cm]?js$/i, '.ts') : filePath;
+    const srcFile = project.createSourceFile(virtualPath, fullContent, { overwrite: true });
 
     // Context7: sourceFile.getPreEmitDiagnostics() — syntactic + semantic, global, options
     const diagnostics = srcFile.getPreEmitDiagnostics();
@@ -201,7 +210,9 @@ export async function extractTsMorphSymbols(
   try {
     const { Project, SyntaxKind } = await import('ts-morph');
     const project = new Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true });
-    const srcFile = project.createSourceFile(filePath, fullContent, { overwrite: true });
+    const isJs = /\.[cm]?js$/i.test(filePath);
+    const virtualPath = isJs ? filePath.replace(/\.[cm]?js$/i, '.ts') : filePath;
+    const srcFile = project.createSourceFile(virtualPath, fullContent, { overwrite: true });
 
     const symbols: string[] = [];
     // Context7: forEachDescendant for visitor pattern across all descendants

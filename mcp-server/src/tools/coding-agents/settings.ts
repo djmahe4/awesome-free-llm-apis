@@ -23,6 +23,33 @@ export interface CodingAgentsSettings {
   hypothesisExec: boolean;
   /** Asks the model for extra assumptions to check, and for one corrected goal when enforce finds a refuted one. Off by default (costs model calls). */
   hypothesisModel: boolean;
+  subagentValidation: boolean;
+  /** Explicit thought-source session IDs to watch; undefined = auto-detect workspace-matched sessions. */
+  thoughtSources?: { claude?: string[]; opencode?: string[]; codex?: string[]; antigravity?: string[]; zed?: string[] };
+}
+
+function parseStringList(value: unknown): string[] | undefined {
+  return Array.isArray(value)
+    ? value.filter((s: unknown): s is string => typeof s === 'string' && s.trim() !== '')
+    : undefined;
+}
+
+export function parseThoughtSources(value: unknown): CodingAgentsSettings['thoughtSources'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const v = value as Record<string, unknown>;
+  const claude = parseStringList(v['claude']);
+  const opencode = parseStringList(v['opencode']);
+  const codex = parseStringList(v['codex']);
+  const antigravity = parseStringList(v['antigravity']);
+  const zed = parseStringList(v['zed']);
+  if (!claude && !opencode && !codex && !antigravity && !zed) return undefined;
+  return {
+    ...(claude ? { claude } : {}),
+    ...(opencode ? { opencode } : {}),
+    ...(codex ? { codex } : {}),
+    ...(antigravity ? { antigravity } : {}),
+    ...(zed ? { zed } : {}),
+  };
 }
 
 export function loadCodingAgentsSettings(workspaceRoot: string): CodingAgentsSettings {
@@ -35,9 +62,11 @@ export function loadCodingAgentsSettings(workspaceRoot: string): CodingAgentsSet
       hypothesisGate: raw?.hypothesisGate === 'off' || raw?.hypothesisGate === 'enforce' ? raw.hypothesisGate : 'warn',
       hypothesisExec: raw?.hypothesisExec === true,
       hypothesisModel: raw?.hypothesisModel === true,
+      subagentValidation: raw?.subagentValidation === true,
+      thoughtSources: parseThoughtSources(raw?.thoughtSources),
     };
   } catch {
-    return { skipFailingTests: [], allowCloudFallback: false, hypothesisGate: 'warn', hypothesisExec: false, hypothesisModel: false };
+    return { skipFailingTests: [], allowCloudFallback: false, hypothesisGate: 'warn', hypothesisExec: false, hypothesisModel: false, subagentValidation: false };
   }
 }
 

@@ -26,7 +26,8 @@ export class OVHcloudProvider extends BaseProvider {
    * that can be enabled by setting OVHCLOUD_API_KEY='free' or 'keyless' (or a paid Kepler token).
    */
   override isAvailable(): boolean {
-    const key = process.env[this.envVar];
+    const key = (process.env[this.envVar] || '').trim().toLowerCase();
+    if (key === 'free' || key === 'keyless') return true;
     if (!key || key.trim() === '') return false;
     return super.isAvailable();
   }

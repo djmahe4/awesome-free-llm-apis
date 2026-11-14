@@ -120,6 +120,7 @@ export interface TraceEvent {
     | 'monitor_progress'
     | 'monitor_done'
     | 'declaration_tamper'
+    | 'deviation'
     | 'phase';
   data: unknown;
   tokens?: { input: number; output: number; reservedRemaining: number };

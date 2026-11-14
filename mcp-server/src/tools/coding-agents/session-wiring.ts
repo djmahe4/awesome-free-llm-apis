@@ -92,6 +92,44 @@ export async function scanCodeFiles(dir: string, maxFiles = 100): Promise<string
   return result;
 }
 
+export async function scanCodingAgentContextFiles(
+  workspaceRoot: string,
+  targetFiles: string[],
+  referenceText: string,
+): Promise<string[]> {
+  const root = await fs.realpath(path.resolve(workspaceRoot)).catch(() => path.resolve(workspaceRoot));
+  const files = new Set<string>();
+  const isInside = (candidate: string) => {
+    const rel = path.relative(root, candidate);
+    return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+  };
+  const addFile = async (candidate: string) => {
+    const absolute = path.resolve(root, candidate);
+    if (!isInside(absolute)) return;
+    const real = await fs.realpath(absolute).catch(() => null);
+    if (!real || !isInside(real)) return;
+    const stat = await fs.stat(real).catch(() => null);
+    if (stat?.isFile()) files.add(path.relative(root, real).replace(/\\/g, '/'));
+  };
+
+  for (const target of targetFiles) {
+    const targetPath = path.resolve(root, target);
+    if (!isInside(targetPath)) continue;
+    const directory = await fs.realpath(path.dirname(targetPath)).catch(() => null);
+    if (!directory || !isInside(directory)) continue;
+    for (const relative of await scanCodeFiles(directory, 100)) {
+      await addFile(path.resolve(directory, relative));
+    }
+  }
+
+  const references = /(?:^|[\s("'`])((?:[\w.-]+\/)*[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|cs|rb|php|swift|kt|c|cpp|h|hpp))(?=$|[\s)"'`,;:])/gim;
+  for (const match of referenceText.matchAll(references)) {
+    if (files.size >= 100) break;
+    await addFile(match[1]);
+  }
+  return Array.from(files).sort();
+}
+
 // ── Main Handler ──────────────────────────────────────────────────────────────
 
 // Background pipeline runs, keyed by sessionId — non-dry-run execution can involve
