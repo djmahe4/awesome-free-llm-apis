@@ -581,10 +581,12 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       result.relevantFiles = matchedPaths.length > 0 ? matchedPaths : codeFiles.slice(0, topK);
     }
 
-    // Multi-file edits are intentionally interactive by default. A single model
-    // call cannot reliably coordinate several dependent files without feedback;
-    // create a file-scoped plan and let the caller resume one task at a time.
-    if (input.pauseBeforeMultiFile !== false
+    // Multi-file edits can pause to review file-scoped plans interactively.
+    // Preserves backward compatibility: default is false (batch execution), unless
+    // explicitly enabled via input.pauseBeforeMultiFile === true or CODING_AGENTS_PAUSE_BEFORE_MULTI_FILE=true.
+    const shouldPause = input.pauseBeforeMultiFile === true ||
+      (input.pauseBeforeMultiFile === undefined && process.env.CODING_AGENTS_PAUSE_BEFORE_MULTI_FILE === 'true');
+    if (shouldPause
       && input.action !== 'resume'
       && !dryRun
       && !input.edits?.length

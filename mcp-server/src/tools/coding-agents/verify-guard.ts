@@ -330,18 +330,56 @@ export function diffValueHints(diffs: string[], max = 4): string[] {
   for (const block of diffs) {
     const rows = block.split('\n');
     for (let i = 0; i < rows.length - 1 && hints.length < max; i++) {
-      const got = rows[i].match(/^\s*\+\s+([\w$"']+):\s*(.+?),?\s*$/);
-      const want = rows[i + 1].match(/^\s*-\s+([\w$"']+):\s*(.+?),?\s*$/);
-      if (!got || !want || got[1] !== want[1]) continue;
-      const key = got[1].replace(/["']/g, '');
-      const sig = `${key}|${got[2]}|${want[2]}`;
+      let gotMatch: RegExpMatchArray | null = null;
+      let wantMatch: RegExpMatchArray | null = null;
+
+      // 1. "+ key: got" followed by "- key: want" (e.g. node:test format)
+      const plusFirst = rows[i].match(/^\s*\+\s+([\w$"']+):\s*(.+?),?\s*$/);
+      const minusSecond = rows[i + 1].match(/^\s*-\s+([\w$"']+):\s*(.+?),?\s*$/);
+      if (plusFirst && minusSecond && plusFirst[1] === minusSecond[1]) {
+        gotMatch = plusFirst;
+        wantMatch = minusSecond;
+      }
+
+      // 2. "- key: want" followed by "+ key: got" (e.g. Jest / Vitest / unified diff format)
+      if (!gotMatch || !wantMatch) {
+        const minusFirst = rows[i].match(/^\s*-\s+([\w$"']+):\s*(.+?),?\s*$/);
+        const plusSecond = rows[i + 1].match(/^\s*\+\s+([\w$"']+):\s*(.+?),?\s*$/);
+        if (minusFirst && plusSecond && minusFirst[1] === plusSecond[1]) {
+          wantMatch = minusFirst;
+          gotMatch = plusSecond;
+        }
+      }
+
+      // 3. Expected/Received key-value pairs
+      if (!gotMatch || !wantMatch) {
+        const expFirst = rows[i].match(/^\s*(?:Expected|want):\s*(?:([\w$"']+):\s*)?(.+?),?\s*$/i);
+        const recSecond = rows[i + 1].match(/^\s*(?:Received|actual|got):\s*(?:([\w$"']+):\s*)?(.+?),?\s*$/i);
+        if (expFirst && recSecond && (expFirst[1] === recSecond[1] || (!expFirst[1] && !recSecond[1]))) {
+          const key = expFirst[1] || 'value';
+          wantMatch = [rows[i], key, expFirst[2]];
+          gotMatch = [rows[i + 1], key, recSecond[2]];
+        } else {
+          const recFirst = rows[i].match(/^\s*(?:Received|actual|got):\s*(?:([\w$"']+):\s*)?(.+?),?\s*$/i);
+          const expSecond = rows[i + 1].match(/^\s*(?:Expected|want):\s*(?:([\w$"']+):\s*)?(.+?),?\s*$/i);
+          if (recFirst && expSecond && (recFirst[1] === expSecond[1] || (!recFirst[1] && !expSecond[1]))) {
+            const key = recFirst[1] || 'value';
+            gotMatch = [rows[i], key, recFirst[2]];
+            wantMatch = [rows[i + 1], key, expSecond[2]];
+          }
+        }
+      }
+
+      if (!gotMatch || !wantMatch || gotMatch[1] !== wantMatch[1]) continue;
+      const key = gotMatch[1].replace(/["']/g, '');
+      const sig = `${key}|${gotMatch[2]}|${wantMatch[2]}`;
       if (seen.has(sig)) continue;
       seen.add(sig);
       const strip = (v: string) => v.replace(/^['"`]|['"`]$/g, '');
-      const caseOnly = strip(got[2]).toLowerCase() === strip(want[2]).toLowerCase();
+      const caseOnly = strip(gotMatch[2]).toLowerCase() === strip(wantMatch[2]).toLowerCase();
       hints.push(caseOnly
-        ? `\`${key}\`: your code gives ${got[2]}, the test expects ${want[2]}. They differ only in letter case.`
-        : `\`${key}\`: your code gives ${got[2]}, the test expects ${want[2]}. These are different values, not a casing difference: add an explicit mapping from ${got[2]} to ${want[2]} (a lookup table or a condition) instead of transforming the text.`);
+        ? `\`${key}\`: your code gives ${gotMatch[2]}, the test expects ${wantMatch[2]}. They differ only in letter case.`
+        : `\`${key}\`: your code gives ${gotMatch[2]}, the test expects ${wantMatch[2]}. These are different values, not a casing difference: add an explicit mapping from ${gotMatch[2]} to ${wantMatch[2]} (a lookup table or a condition) instead of transforming the text.`);
     }
   }
   return hints;

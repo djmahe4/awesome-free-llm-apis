@@ -804,7 +804,7 @@ export async function createMCPServer(): Promise<Server> {
             verifyReport: { type: 'object', description: 'Output of a check YOU ran (used when an edit changed tests, so the agent did not run them, or was withheld). { exitCode, output, command? }. A failure comes back as result.verification.repairBrief (a debugger-style brief); nothing on disk changes.', properties: { exitCode: { type: 'number' }, output: { type: 'string' }, command: { type: 'string' } }, required: ['exitCode', 'output'] },
             feedback: { type: 'string', description: 'Debugger brief from a previous failed attempt (result.verification.repairBrief); appended to the goal so the retry fixes the production code instead of starting blind.' },
             pauseOnTaskPlan: { type: 'boolean', description: 'Same effect as action:"plan" — decompose the goal into tasks.md and pause instead of executing' },
-            pauseBeforeMultiFile: { type: 'boolean', description: 'Pause by default before implicit multi-file edits; review tasks.md and resume one file-scoped task at a time. Set false for explicit batch behavior.' },
+            pauseBeforeMultiFile: { type: 'boolean', description: 'Pause before implicit multi-file edits; review tasks.md and resume one file-scoped task at a time. Set true to pause, or false (default) for batch behavior.' },
             astEditOps: {
               type: 'array',
               description: 'Structural ast-grep-style rewrites ($$$VAR pattern matching) to apply instead of LLM generation for this call — deterministic, no local/cloud model involved',

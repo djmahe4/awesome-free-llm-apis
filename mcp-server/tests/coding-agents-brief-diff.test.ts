@@ -57,6 +57,17 @@ describe('diffValueHints', () => {
     expect(diffValueHints(["  +     a: 1,\n  -     b: 2,"])).toEqual([]);
     expect(diffValueHints(["  +     role: 'X',\n  -     role: 'y',\n  +     role: 'X',\n  -     role: 'y',"])).toHaveLength(1);
   });
+  it('supports reverse diff order (- expected, + received) common in Jest and Vitest', () => {
+    const hints = diffValueHints(["  -     role: 'assistant',\n  +     role: 'Agent',\n        text: 'hello'"]);
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toContain("your code gives 'Agent', the test expects 'assistant'");
+    expect(hints[0]).toContain('explicit mapping');
+  });
+  it('supports Expected and Received key-value diff outputs', () => {
+    const hints = diffValueHints(["  Expected: role: 'user'\n  Received: role: 'User'"]);
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toContain('differ only in letter case');
+  });
   it('reaches the brief', () => {
     const brief = buildRepairBrief({ command: 'node t.js', exitCode: 1, outputTail: OUTPUT.replace("role: 'user'", "role: 'assistant'"), patchedFiles: [] });
     expect(brief).toContain('explicit mapping');

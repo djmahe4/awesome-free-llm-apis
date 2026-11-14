@@ -787,8 +787,20 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
       ...(options?.workspaceRoot ? [String(options.workspaceRoot)] : []),
     ];
 
-    const isOllamaTarget = typeof target === 'string' && /^ollama:[a-zA-Z0-9._:/-]+$/.test(target.trim()) && !target.includes('..');
-    if (!isOllamaTarget && !isSafeAllowedPath(target, allowedRoots)) {
+    const trimmedTarget = typeof target === 'string' ? target.trim() : '';
+    const startsWithOllama = trimmedTarget.startsWith('ollama:');
+    if (startsWithOllama) {
+      const isOllamaTarget = /^ollama:(?:[a-zA-Z0-9_.-]+(?::[0-9]+)?\/)?(?:[a-zA-Z0-9_.-]+\/)?[a-zA-Z0-9_.-]+(?::[a-zA-Z0-9_.-]+)?$/.test(trimmedTarget)
+        && !trimmedTarget.includes('..');
+      if (!isOllamaTarget) {
+        return {
+          success: false,
+          action,
+          target,
+          error: 'Invalid Ollama model target format.',
+        };
+      }
+    } else if (!isSafeAllowedPath(target, allowedRoots)) {
       return {
         success: false,
         action,
@@ -1100,15 +1112,36 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
     const runInfo = runKey ? RunRegistry.start(runKey) : undefined;
     if (targetSession && effectiveSessionId) latestSessionByTarget.set(targetSession, effectiveSessionId);
 
+    const defaultTimeoutMs = action === 'separate_audio_stems' ? 5 * 60_000 : 120_000;
+    const requestedTimeout = Number(options?.timeoutMs ?? options?.timeout);
+    const effectiveTimeoutMs = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+      ? Math.min(requestedTimeout, 15 * 60_000)
+      : defaultTimeoutMs;
+
+    let progressTimer: NodeJS.Timeout | undefined;
+    if (runKey && action === 'separate_audio_stems') {
+      RunRegistry.progress(runKey, 'Separating audio stems: initialized', 0, 100);
+      progressTimer = setInterval(() => {
+        const info = RunRegistry.get(runKey);
+        if (info && !info.done) {
+          const elapsedSec = Math.round((Date.now() - info.startedAt) / 1000);
+          RunRegistry.progress(runKey, `Separating audio stems in progress (${elapsedSec}s elapsed)`, 50, 100);
+        }
+      }, 5_000);
+    }
+
     const executeAction = async (): Promise<ReverseToolResult> => {
       try {
         const { stdout } = await execFileAsync(pythonBin, args, {
           maxBuffer: 10 * 1024 * 1024,
-          timeout: action === 'separate_audio_stems' ? 15 * 60_000 : 120_000,
+          timeout: effectiveTimeoutMs,
           encoding: 'utf8',
           signal: runInfo?.controller?.signal,
         });
         const data = JSON.parse(stdout);
+        if (runKey && action === 'separate_audio_stems') {
+          RunRegistry.progress(runKey, 'Stem separation complete', 100, 100);
+        }
         return {
           success: true,
           action,
@@ -1122,6 +1155,8 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
           target,
           error: err.message || String(err),
         };
+      } finally {
+        if (progressTimer) clearInterval(progressTimer);
       }
     };
 

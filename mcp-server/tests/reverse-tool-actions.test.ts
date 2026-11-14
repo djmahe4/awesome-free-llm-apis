@@ -199,4 +199,41 @@ describe('reverseTool MCP handler', () => {
     expect(res.success).toBe(false);
     expect(res.error).toContain('Evidence not found');
   });
+
+  it('validates ollama targets strictly without allowing malformed model specifiers', async () => {
+    const resMalformed = await reverseTool({
+      action: 'inspect_model',
+      target: 'ollama:foo/bar/baz/qux:1:2:3:4//:',
+      authorization: 'lab',
+    });
+    expect(resMalformed.success).toBe(false);
+    expect(resMalformed.error).toContain('Invalid Ollama model target format');
+
+    const resTrailingColon = await reverseTool({
+      action: 'inspect_model',
+      target: 'ollama:llama3:',
+      authorization: 'lab',
+    });
+    expect(resTrailingColon.success).toBe(false);
+    expect(resTrailingColon.error).toContain('Invalid Ollama model target format');
+  });
+
+  it('requires consent and explicitConsentAck for separate_audio_stems', async () => {
+    const resNoConsent = await reverseTool({
+      action: 'separate_audio_stems',
+      target: 'tests/fixtures/sample.wav',
+      authorization: 'lab',
+    });
+    expect(resNoConsent.success).toBe(false);
+    expect(resNoConsent.error).toContain('Audio stem separation requires authorization: "consent"');
+
+    const resNoAck = await reverseTool({
+      action: 'separate_audio_stems',
+      target: 'tests/fixtures/sample.wav',
+      authorization: 'consent',
+      options: { explicitConsentAck: false },
+    });
+    expect(resNoAck.success).toBe(false);
+    expect(resNoAck.error).toContain('options.explicitConsentAck: true');
+  });
 });

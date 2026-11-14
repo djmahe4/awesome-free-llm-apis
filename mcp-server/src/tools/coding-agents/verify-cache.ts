@@ -17,7 +17,7 @@ import { commandTargets } from './verify-guard.js';
 type Runner = (command: string, cwd: string) => Promise<VerifyRunResult>;
 
 const cache = new Map<string, VerifyRunResult>();
-const MAX_ENTRIES = 32;
+const MAX_ENTRIES = 128; // Increased from 32 to prevent cache churn in complex multi-round repair loops
 
 export function resetVerifyCache(): void {
   cache.clear();

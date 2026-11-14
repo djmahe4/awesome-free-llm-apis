@@ -97,12 +97,15 @@ function wrapModule(exportsObject, request) {
 }
 const cache = new Map();
 const load = Module._load;
-Module._load = function (request, parent, isMain) {
-  const out = load.apply(this, arguments);
-  if (!trapped(request)) return out;
-  if (!cache.has(request)) cache.set(request, wrapModule(out, request));
-  return cache.get(request);
-};
+if (typeof load === 'function') {
+  Module._load = function (request, parent, isMain) {
+    if (!trapped(request)) return load.apply(this, arguments);
+    const out = load.apply(this, arguments);
+    if (!out || (typeof out !== 'object' && typeof out !== 'function')) return out;
+    if (!cache.has(request)) cache.set(request, wrapModule(out, request));
+    return cache.get(request);
+  };
+}
 globalThis.__codingAgentsApiTrap = request => {
   if (!cache.has(request)) cache.set(request, wrapModule(process.getBuiltinModule(request), request));
   return cache.get(request);
