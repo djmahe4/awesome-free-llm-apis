@@ -49,7 +49,7 @@ export function vramBudgetGb(): number {
 const CODE_NAME_RE = /coder|codellama|devstral|starcoder|deepseek-coder|granite-code|codestral|codegemma|\bcode\b/i;
 const VISION_NAME_RE = /vision|llava|\bvl\b|[-:.]vl[-:.]|qwen\d*(?:\.\d+)?vl|minicpm-v|moondream|bakllava|gemma3|pixtral|llama3\.2-vision/i;
 const EMBED_NAME_RE = /embed|bge|e5-|gte-|minilm|arctic-embed|snowflake|mxbai|nomic/i;
-const DECISION_NAME_RE = /laya/i;
+const DECISION_NAME_RE = /\blaya\b/i;
 
 function parseParamsB(text?: string): number | undefined {
   const m = (text || '').match(/([\d.]+)\s*([BMK])/i);

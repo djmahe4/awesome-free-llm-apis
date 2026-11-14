@@ -36,11 +36,12 @@ export class ThoughtDatasetWriter {
 
   async append(row: DatasetRow): Promise<void> {
     try {
-      const stat = fs.statSync(this.filePath);
+      const stat = await fs.promises.stat(this.filePath);
       if (stat.size > MAX_FILE_BYTES) {
-        fs.renameSync(this.filePath, this.filePath + `.${Date.now()}.bak`);
+        await fs.promises.rename(this.filePath, this.filePath + `.${Date.now()}.bak`);
       }
     } catch {
+      // File does not exist yet or cannot be stated; proceed to append
     }
 
     const jsonlRow = {
@@ -56,7 +57,7 @@ export class ThoughtDatasetWriter {
       expert_label: row.expert_label ?? ThoughtDatasetWriter.expertLabel(row.tool),
       circuit_confidence: row.circuit_confidence ?? null,
     };
-    fs.appendFileSync(this.filePath, JSON.stringify(jsonlRow) + '\n', 'utf8');
+    await fs.promises.appendFile(this.filePath, JSON.stringify(jsonlRow) + '\n', 'utf8');
   }
 
   static expertLabel(tool: string): string {

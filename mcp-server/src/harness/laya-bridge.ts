@@ -30,7 +30,8 @@ async function resolveModel(deps?: LayaBridgeDeps): Promise<string> {
     const profiles = deps?.profiles ?? await listModelProfiles(deps?.baseUrl ? { baseUrl: deps.baseUrl } : {});
     const best = rankProfiles(profiles, 'decision').find(r => r.fitsBudget && r.score > 0);
     if (best) return best.name;
-  } catch {
+  } catch (err) {
+    console.warn('[laya-bridge] Failed to resolve decision model profile, using fallback:', (err as Error)?.message ?? err);
   }
   return LAYA_MODEL;
 }
@@ -62,7 +63,10 @@ export async function validateThoughtDeviation(
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) return NOT_AVAILABLE;
+    if (!res.ok) {
+      console.warn(`[laya-bridge] validateThoughtDeviation endpoint returned HTTP ${res.status}`);
+      return NOT_AVAILABLE;
+    }
     const json: any = await res.json();
     const a = json?.answers?.alignment;
     const unsafe = json?.answers?.unsafe;
@@ -76,7 +80,8 @@ export async function validateThoughtDeviation(
       unsafe_prob: Number.isFinite(unsafe_prob) ? unsafe_prob : 0,
       latency_ms: Date.now() - t0,
     };
-  } catch {
+  } catch (err) {
+    console.warn('[laya-bridge] validateThoughtDeviation request failed, falling back to NOT_AVAILABLE:', (err as Error)?.message ?? err);
     return NOT_AVAILABLE;
   }
 }
@@ -110,7 +115,8 @@ export async function quantumOracleScore(thoughts: string[]): Promise<number | n
     const branches: Array<{ confidence: number }> = (analyzed as any)?.state?.branches ?? [];
     if (!branches.length) return null;
     return branches.reduce((s, b) => s + (b.confidence ?? 0), 0) / branches.length;
-  } catch {
+  } catch (err) {
+    console.warn('[laya-bridge] quantumOracleScore execution failed:', (err as Error)?.message ?? err);
     return null;
   }
 }
