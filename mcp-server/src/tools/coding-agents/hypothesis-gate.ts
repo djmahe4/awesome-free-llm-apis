@@ -265,7 +265,7 @@ export function deriveHypotheses(input: DeriveInput): Hypothesis[] {
   const moduleHost = input.targetFiles?.[0] ?? targets[0];
   if (moduleHost) {
     const specs = new Set<string>();
-    for (const m of input.goal.matchAll(/\bnode:[a-z][\w/]*/g)) specs.add(m[0]);
+    for (const m of input.goal.matchAll(/\bnode:[a-z0-9_][\w/]*/gi)) specs.add(m[0]);
     for (const spec of specs) add(`the goal uses the module \`${spec}\`, which resolves from ${moduleHost}`, `module:${spec}@${moduleHost}`);
   }
 

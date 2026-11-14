@@ -786,7 +786,13 @@ export async function checkThoughtDeviation(
       data: { callId, policy, alignment: result.alignment, drift_prob: result.drift_prob, unsafe_prob: result.unsafe_prob, latency_ms: result.latency_ms, trail_source: trailSource },
     }).catch(() => {});
     return result;
-  } catch {
+  } catch (err: any) {
+    await store.appendTrace({
+      runId: run.runId,
+      role,
+      type: 'error',
+      data: { stage: 'deviation_check', callId, error: err?.message || String(err) },
+    }).catch(() => {});
     return null;
   }
 }

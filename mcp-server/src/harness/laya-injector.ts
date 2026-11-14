@@ -211,6 +211,7 @@ export function readAgentQuestions(content: string): AgentQuestions {
 export function removeConsumedQuestions(tasksPath: string): void {
   if (!fs.existsSync(tasksPath)) return;
   const content = fs.readFileSync(tasksPath, 'utf8');
+  const questions = readAgentQuestions(content);
   const lines = content.split(/\r?\n/);
   const headingIdx = lines.findIndex(l => l.trim() === QUESTIONS_HEADING);
   if (headingIdx === -1) return;
@@ -218,6 +219,13 @@ export function removeConsumedQuestions(tasksPath: string): void {
   for (let i = headingIdx + 1; i < lines.length; i++) {
     if (/^##?\s+/.test(lines[i])) { endIdx = i; break; }
   }
+  // If there are still pending questions, retain them under the heading
+  if (questions.pending.length > 0) {
+    const retained = [QUESTIONS_HEADING, ...questions.pending.map((q, i) => `Q${i + 1}: ${q}`), ''];
+    fs.writeFileSync(tasksPath, [...lines.slice(0, headingIdx), ...retained, ...lines.slice(endIdx)].join('\n'), 'utf8');
+    return;
+  }
+  // All questions consumed: remove the questions section
   fs.writeFileSync(tasksPath, [...lines.slice(0, headingIdx), ...lines.slice(endIdx)].join('\n'), 'utf8');
 }
 

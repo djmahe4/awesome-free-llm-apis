@@ -1141,7 +1141,7 @@ ${after.outputTail}`,
           result.applied = false;
           result.restoredFiles = [...files, ...deletedNewFiles];
           // Hand the compiler messages to a retry (the loop would otherwise see only a silent rollback).
-          const syntaxBrief = buildSyntaxBrief(diagnosticsList as any);
+          const syntaxBrief = buildSyntaxBrief(diagnosticsList);
           if (syntaxBrief) result.rollbackBrief = syntaxBrief;
           result.patchSummary = `Automatically rolled back ${restoredCount} file(s)${deletedNewFiles.length ? ` and removed ${deletedNewFiles.length} newly-created file(s)` : ''}: the applied patch introduced ${diagnosticsList.filter(d => d.severity === 'error').length} compiler error(s), which usually means the LLM's output doesn't actually belong to the target file. Checkpoint: ${result.checkpointId}. Re-run with a more explicit goal, astEditOps, or action:"resume".`;
         } catch (rollbackErr: any) {

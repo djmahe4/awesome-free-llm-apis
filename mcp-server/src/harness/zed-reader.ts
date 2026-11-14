@@ -74,18 +74,18 @@ function parseFolderPaths(value: string | null | undefined): string[] {
 
 export function listZedSessions(
   db: NonNullable<ReturnType<typeof openZedDb>>,
-  workspaceRoot: string,
+  workspaceRoot?: string,
 ): ZedSession[] {
   const rows = db.prepare(
     'SELECT id, summary, updated_at, folder_paths FROM threads ORDER BY updated_at DESC LIMIT 500',
   ).all() as Array<Record<string, unknown>>;
-  const workspace = normalizePath(workspaceRoot);
+  const workspace = workspaceRoot ? normalizePath(workspaceRoot) : undefined;
   return rows.map(row => ({
     id: String(row.id ?? ''),
     title: typeof row.summary === 'string' ? row.summary : undefined,
     updatedAt: typeof row.updated_at === 'string' ? row.updated_at : undefined,
     folderPaths: parseFolderPaths(typeof row.folder_paths === 'string' ? row.folder_paths : undefined),
-  })).filter(session => session.folderPaths.some(folder => {
+  })).filter(session => !workspace || session.folderPaths.some(folder => {
     const normalized = normalizePath(folder);
     return normalized === workspace || normalized.startsWith(`${workspace}/`);
   }));

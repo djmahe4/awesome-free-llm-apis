@@ -3,6 +3,9 @@ name: CI
 on:
   pull_request:
     types:
+      - opened
+      - synchronize
+      - reopened
       - closed
     branches:
       - '**'
@@ -14,7 +17,7 @@ on:
 jobs:
   validate:
     name: Validate data.json & README
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true || github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -39,7 +42,7 @@ jobs:
 
   test:
     name: Build & Test MCP Server (${{ matrix.os }})
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true || github.event.action != 'closed'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

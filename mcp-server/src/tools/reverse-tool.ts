@@ -85,11 +85,16 @@ export function inspectPythonDeps(pythonBin?: string): { pil: boolean; cv2: bool
   return { pil: false, cv2: false, torch: false };
 }
 
+export function resetPythonCache(): void {
+  cachedPythonBin = null;
+  cachedOptionalDeps = null;
+}
+
 export function resolvePythonPath(): string {
   if (process.env.PYTHON) {
     return process.env.PYTHON;
   }
-  if (cachedPythonBin) {
+  if (cachedPythonBin && (cachedPythonBin === 'python' || cachedPythonBin === 'python3' || fs.existsSync(cachedPythonBin))) {
     return cachedPythonBin;
   }
   const isWin = process.platform === 'win32';
