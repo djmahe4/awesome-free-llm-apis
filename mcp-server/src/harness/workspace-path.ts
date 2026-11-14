@@ -14,8 +14,11 @@ export function containsWorkspacePath(text: string, workspaceRoot: string): bool
   const root = normalizeWorkspacePath(workspaceRoot);
   let index = normalizedText.indexOf(root);
   while (index !== -1) {
+    const prev = index > 0 ? normalizedText[index - 1] : undefined;
     const next = normalizedText[index + root.length];
-    if (next === undefined || next === '/' || /[\s"'`,;)}\]]/.test(next)) return true;
+    const prevOk = prev === undefined || /[\s"'`(\[{<]/.test(prev);
+    const nextOk = next === undefined || next === '/' || next === '`' || /[\s"',;)}\]>:]/.test(next);
+    if (prevOk && nextOk) return true;
     index = normalizedText.indexOf(root, index + 1);
   }
   return false;

@@ -17,7 +17,7 @@ export function classifyColumn(name: string): PiiClass {
 const NON_NAME_WORDS = new Set([
   'the', 'this', 'that', 'and', 'but', 'for', 'you', 'your', 'with', 'from', 'have', 'has', 'had',
   'are', 'was', 'were', 'been', 'will', 'would', 'can', 'could', 'should', 'may', 'might', 'must',
-  'not', 'all', 'any', 'new', 'use', 'used', 'using', 'node', 'zed', 'test', 'file', 'files',
+  'not', 'all', 'any', 'new', 'use', 'used', 'using', 'node', 'test', 'file', 'files',
   'code', 'line', 'lines', 'error', 'errors', 'llm', 'api', 'mcp', 'http', 'https', 'read',
   'write', 'made', 'set', 'get', 'let', 'its', 'his', 'her', 'one', 'two', 'run', 'end', 'sum',
   'md', 'ts', 'js', 'json', 'sql', 'db', 'sqlite', 'claude', 'codex', 'gemini', 'openai',
@@ -215,7 +215,7 @@ export interface DirScanArgs {
   map_dbs?: boolean;
 }
 
-export async function scanWorkspace(args: DirScanArgs): Promise<DirScanResult> {
+export function scanWorkspace(args: DirScanArgs): DirScanResult {
   const { workspace_root, max_depth, files_per_folder, skip_dirs, budget_ms, map_dbs } = args;
   const scanner = new WorkspaceDirScanner(workspace_root);
   return scanner.scanDir({

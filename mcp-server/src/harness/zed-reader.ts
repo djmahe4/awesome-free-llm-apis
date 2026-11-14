@@ -188,6 +188,7 @@ export function buildZedThoughtDag(sessionId: string, title: string, data: Recor
     const message = entry[role];
     if (!message || typeof message !== 'object') continue;
     const record = message as Record<string, unknown>;
+    let currentThoughtNodeId: string | null = null;
     for (const block of Array.isArray(record.content) ? record.content : []) {
       if (!block || typeof block !== 'object') continue;
       const item = block as Record<string, unknown>;
@@ -199,12 +200,14 @@ export function buildZedThoughtDag(sessionId: string, title: string, data: Recor
         node.toolCallId = typeof call.id === 'string' ? call.id : undefined;
         node.input = typeof call.raw_input === 'string' ? call.raw_input : stringifyContext(call.input);
         if (node.toolCallId) toolCalls.set(node.toolCallId, node.id);
+        currentThoughtNodeId = node.id;
         continue;
       }
       const blockText = messageText({ content: [block] }, role);
       if (!blockText.length) continue;
       const text = `${role === 'User' ? 'User' : 'Assistant'}:\n${blockText.join('\n\n')}`;
-      add(nodes.length === 0 ? 'root' : 'thought', text, typeof entry.timestamp === 'string' ? entry.timestamp : undefined);
+      const thoughtNode = add(nodes.length === 0 ? 'root' : 'thought', text, typeof entry.timestamp === 'string' ? entry.timestamp : undefined);
+      currentThoughtNodeId = thoughtNode.id;
       if (!goal && role === 'User') goal = blockText.join('\n\n');
     }
     const results = record.tool_results;
@@ -217,8 +220,9 @@ export function buildZedThoughtDag(sessionId: string, title: string, data: Recor
             : stringifyContext(part)).join('\n')
           : stringifyContext(result.output ?? result.content ?? rawResult);
         if (!output.trim()) continue;
-        const parentId = toolCalls.get(callId) ?? (nodes.length ? nodes[nodes.length - 1].id : null);
-        add('tool_result', output, typeof entry.timestamp === 'string' ? entry.timestamp : undefined, parentId).toolCallId = callId;
+        const targetCallId = typeof result.tool_use_id === 'string' ? result.tool_use_id : callId;
+        const parentId = toolCalls.get(targetCallId) ?? toolCalls.get(callId) ?? currentThoughtNodeId;
+        add('tool_result', output, typeof entry.timestamp === 'string' ? entry.timestamp : undefined, parentId).toolCallId = targetCallId;
       }
     }
   }
