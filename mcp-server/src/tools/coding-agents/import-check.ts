@@ -11,19 +11,21 @@ import { builtinModules, isBuiltin } from 'node:module';
 
 const JS_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.d.ts', '.json'];
 const BUILTINS = new Set(builtinModules);
-const KNOWN_PREFIX_BUILTINS = new Set(['sqlite', 'test', 'test/reporters', 'sea']);
+const PREFIX_ONLY_BUILTINS = new Set(['sqlite', 'test', 'test/reporters', 'sea']);
 
-function isNodeBuiltin(spec: string): boolean {
-  if (typeof isBuiltin === 'function') {
-    if (isBuiltin(spec)) return true;
-    const prefixed = spec.startsWith('node:') ? spec : `node:${spec}`;
-    if (isBuiltin(prefixed)) return true;
-  }
+function isNodePrefixedBuiltin(spec: string): boolean {
+  if (typeof isBuiltin === 'function' && isBuiltin(spec)) return true;
   const bare = spec.replace(/^node:/, '');
   const base = bare.split('/')[0];
   if (BUILTINS.has(spec) || BUILTINS.has(bare) || BUILTINS.has(base)) return true;
-  if (KNOWN_PREFIX_BUILTINS.has(bare) || KNOWN_PREFIX_BUILTINS.has(base)) return true;
+  if (PREFIX_ONLY_BUILTINS.has(bare) || PREFIX_ONLY_BUILTINS.has(base)) return true;
   return false;
+}
+
+function isNodeBareBuiltin(spec: string): boolean {
+  if (typeof isBuiltin === 'function' && isBuiltin(spec)) return true;
+  const base = spec.split('/')[0];
+  return BUILTINS.has(spec) || BUILTINS.has(base);
 }
 
 function jsSpecifiers(src: string): string[] {
@@ -162,11 +164,11 @@ export async function newImportProblems(relPath: string, before: string, after: 
         // A `node:` prefix is not a pass: a model rewrote a correct `node:sqlite` to `node:sqlite3` and the repair loop
         // then kept it. Prefix-only builtins (node:sqlite, node:test) are listed WITH the prefix in builtinModules.
         if (spec.startsWith('node:')) {
-          if (isNodeBuiltin(spec)) continue;
+          if (isNodePrefixedBuiltin(spec)) continue;
           problems.push(`${relPath}: '${spec}' is not a Node.js built-in module`);
           continue;
         }
-        if (isNodeBuiltin(spec)) continue;
+        if (isNodeBareBuiltin(spec)) continue;
         if (!(await jsPackageInstalled(fromDir, root, spec))) problems.push(`${relPath}: package '${spec.split('/')[0].startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]}' is not installed in this workspace`);
       }
     }

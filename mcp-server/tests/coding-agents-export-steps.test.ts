@@ -110,5 +110,6 @@ describe('node: imports are checked, not waved through', () => {
     const root = workspace({ 'src/a.js': '' });
     expect(await newImportProblems('src/a.js', '', 'const { DatabaseSync } = require("node:sqlite3");', root)).toEqual([expect.stringContaining("'node:sqlite3' is not a Node.js built-in module")]);
     expect(await newImportProblems('src/a.js', '', 'require("node:sqlite"); require("node:fs"); require("node:test"); require("node:fs/promises");', root)).toEqual([]);
+    expect(await newImportProblems('src/a.js', '', 'require("sqlite");', root)).toEqual([expect.stringContaining("package 'sqlite' is not installed in this workspace")]);
   });
 });
