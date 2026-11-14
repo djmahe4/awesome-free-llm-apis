@@ -153,8 +153,6 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'stepfun-ai/step-5-preview': { capability: 0.92, contextWindow: 128000, isVision: true, isReasoning: true },
     'meta/muse-glimmer-30b': { capability: 0.92, contextWindow: 128000, isVision: true, isReasoning: true },
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': { capability: 0.90, contextWindow: 128000, isVision: true, isReasoning: true },
-    'nvidia/nemotron-3-nano-30b-a3b': { capability: 0.82, contextWindow: 128000 },
-    'nvidia/nemotron-3-ultra-550b-a55b': { capability: 0.88, contextWindow: 300000, isReasoning: true },
     'nvidia/nemotron-3-ultra-550b-a55b:free': { capability: 0.88, contextWindow: 300000, isReasoning: true },
     'nvidia/llama-3.3-nemotron-super-49b-v1': { capability: 0.90, contextWindow: 128000 },
     'nvidia/llama-3.1-nemotron-nano-vl-8b-v1': { capability: 0.82, contextWindow: 128000, isVision: true },
@@ -163,7 +161,6 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'nvidia/nemotron-mini-4b-instruct:free': { capability: 0.65, contextWindow: 32000 },
     'meta/llama-3.2-11b-vision-instruct': { capability: 0.80, contextWindow: 128000, isVision: true },
     'meta/llama-3.2-90b-vision-instruct': { capability: 0.86, contextWindow: 128000, isVision: true },
-    'google/diffusiongemma-26b-a4b-it': { capability: 0.88, contextWindow: 128000, isReasoning: true },
     'moonshotai/kimi-k3': { capability: 0.92, contextWindow: 128000, isReasoning: true },
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free': { capability: 0.90, contextWindow: 256000, isVision: true, isReasoning: true },
     'minimax-m2.7': { capability: 0.85, contextWindow: 128000 },
@@ -178,10 +175,8 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
     'nvidia/nemotron-3.5-super-vl:free': { capability: 0.93, contextWindow: 500000, isVision: true, isReasoning: true },
     // Recursive Flint (40B-A2.5B, Apache-2.0): SWE-bench Verified 74.2, Terminal-Bench 2.1 54.9 (self-reported, unverified).
     'recursive/flint-v1.0:free': { capability: 0.87, contextWindow: 131072, isCoder: true },
-    'nvidia/nemotron-3-super-120b-a12b': { capability: 0.93, contextWindow: 1000000, isReasoning: true },
     'nvidia/ising-calibration-1-35b-a3b': { capability: 0.86, contextWindow: 64000, isVision: true },
     'nvidia/ising-calibration-1.5-31b': { capability: 0.90, contextWindow: 128000, isVision: true, isReasoning: true },
-    'nvidia/nemotron-3.5-content-safety': { capability: 0.75, contextWindow: 32000 },
     '@cf/zai-org/glm-4.7-flash': { capability: 0.86, contextWindow: 128000 },
     'mistral-Nemo-Instruct-2407': { capability: 0.85, contextWindow: 128000 },
 
