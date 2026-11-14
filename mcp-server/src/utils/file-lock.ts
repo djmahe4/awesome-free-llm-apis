@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import * as fsSync from 'node:fs';
 import path from 'path';
 
 
@@ -92,6 +93,57 @@ export async function withFileLock<T>(filePath: string, fn: () => Promise<T>, ti
             await fs.unlink(lockPath);
         } catch {
             // Non-blocking cleanup fallback
+        }
+    }
+}
+
+/**
+ * Synchronous variant of withFileLock for synchronous callers.
+ * Uses fs.openSync with 'wx' flag to acquire an exclusive lock.
+ */
+export function withFileLockSync<T>(filePath: string, fn: () => T, timeoutMs = 5000): T {
+    const lockPath = `${filePath}.lock`;
+    const start = Date.now();
+    let acquired = false;
+
+    while (true) {
+        try {
+            fsSync.mkdirSync(path.dirname(lockPath), { recursive: true });
+            const fd = fsSync.openSync(lockPath, 'wx');
+            fsSync.writeSync(fd, String(process.pid));
+            fsSync.closeSync(fd);
+            acquired = true;
+            break;
+        } catch (err: any) {
+            if (err.code === 'EEXIST' || err.code === 'EPERM' || err.code === 'EACCES') {
+                try {
+                    const stat = fsSync.statSync(lockPath);
+                    let holderPid = NaN;
+                    try { holderPid = parseInt(fsSync.readFileSync(lockPath, 'utf8'), 10); } catch {}
+                    const age = Date.now() - stat.mtimeMs;
+                    const hasValidPid = Number.isFinite(holderPid) && holderPid > 0;
+                    if ((hasValidPid && !isPidAlive(holderPid)) || (!hasValidPid && age > 30000)) {
+                        try { fsSync.unlinkSync(lockPath); } catch {}
+                    }
+                } catch {}
+                if (Date.now() - start > timeoutMs) {
+                    throw new Error(`Timeout waiting for sync lock on file: ${filePath}`);
+                }
+                const until = Date.now() + 25;
+                while (Date.now() < until) { /* spin-wait for short lock contention */ }
+            } else {
+                throw err;
+            }
+        }
+    }
+
+    try {
+        return fn();
+    } finally {
+        if (acquired) {
+            try {
+                fsSync.unlinkSync(lockPath);
+            } catch {}
         }
     }
 }

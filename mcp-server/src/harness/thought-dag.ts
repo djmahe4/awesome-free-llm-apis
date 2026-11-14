@@ -153,6 +153,73 @@ export async function buildThoughtDag(jsonlPath: string, opts?: BuildOptions): P
   return { sessionId, goal, nodes, byId };
 }
 
+export interface LinearThoughtEntry {
+  id: string;
+  text: string;
+  timeCreated?: string;
+}
+
+export function buildLinearThoughtDag(
+  sessionId: string,
+  entries: LinearThoughtEntry[],
+): ThoughtDag {
+  const nodes: DagNode[] = [];
+  const byId = new Map<string, DagNode>();
+  let parent: string | null = null;
+  for (const entry of entries) {
+    if (!entry.text.trim()) continue;
+    const id = `${sessionId}:${entry.id}`;
+    const node: DagNode = {
+      id,
+      parent,
+      kind: nodes.length === 0 ? 'root' : 'thought',
+      text: entry.text,
+      depth: parent ? (byId.get(parent)?.depth ?? 0) + 1 : 0,
+      timestamp: entry.timeCreated,
+    };
+    nodes.push(node);
+    byId.set(id, node);
+    parent = id;
+  }
+  return { sessionId, goal: nodes[0]?.text ?? '', nodes, byId };
+}
+
+export function expandThoughtDag(dag: ThoughtDag, query: string, maxChars = 16000): string {
+  if (!dag.nodes.length || maxChars <= 0) return '';
+  const terms = new Set((query.toLowerCase().match(/[\p{L}\p{N}_./\\-]{3,}/gu) ?? []));
+  const selected = new Set<string>();
+  const ranked = dag.nodes.map((node, index) => ({
+    node,
+    index,
+    score: Array.from(terms).reduce((score, term) => score + Number(node.text.toLowerCase().includes(term)), 0),
+  })).sort((a, b) => b.score - a.score || b.index - a.index);
+  for (const entry of ranked) {
+    if (entry.score === 0 && selected.size > 0) break;
+    let node: DagNode | undefined = entry.node;
+    let guard = 0;
+    while (node && guard++ < dag.nodes.length) {
+      selected.add(node.id);
+      node = node.parent ? dag.byId.get(node.parent) : undefined;
+    }
+  }
+  if (selected.size === 0) {
+    for (const node of dag.nodes.slice(-10)) selected.add(node.id);
+  }
+  for (const node of dag.nodes) {
+    if (node.kind === 'tool_result' && node.parent && selected.has(node.parent)) selected.add(node.id);
+  }
+  const lines = [`[Agent context: ${dag.sessionId}]`];
+  let size = lines[0].length;
+  for (const node of dag.nodes) {
+    if (!selected.has(node.id)) continue;
+    const line = `${'  '.repeat(Math.min(node.depth, 10))}[${node.kind}] ${node.text}`;
+    if (size + line.length + 1 > maxChars) continue;
+    lines.push(line);
+    size += line.length + 1;
+  }
+  return lines.length > 1 ? lines.join('\n') : '';
+}
+
 export function traceRoot(dag: ThoughtDag, id: string): DagNode | null {
   let node = dag.byId.get(id);
   if (!node) return null;

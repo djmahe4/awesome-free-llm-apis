@@ -634,18 +634,18 @@ def run_bbox_object_pseudo3d_transform(
         front = (sx >= 0) & (sx < pw - 1) & (sy >= 0) & (sy < ph - 1)
         xs_clip = np.clip(sx, 0, pw - 2)
         ys_clip = np.clip(sy, 0, ph - 2)
-        x0 = np.floor(xs_clip).astype(int)
-        x1 = x0 + 1
-        y0 = np.floor(ys_clip).astype(int)
-        y1 = y0 + 1
-        wx = (xs_clip - x0)[:, :, None]
-        wy = (ys_clip - y0)[:, :, None]
-        top = patch[y0, x0] * (1 - wx) + patch[y0, x1] * wx
-        bottom = patch[y1, x0] * (1 - wx) + patch[y1, x1] * wx
+        grid_x0 = np.floor(xs_clip).astype(int)
+        grid_x1 = grid_x0 + 1
+        grid_y0 = np.floor(ys_clip).astype(int)
+        grid_y1 = grid_y0 + 1
+        wx = (xs_clip - grid_x0)[:, :, None]
+        wy = (ys_clip - grid_y0)[:, :, None]
+        top = patch[grid_y0, grid_x0] * (1 - wx) + patch[grid_y0, grid_x1] * wx
+        bottom = patch[grid_y1, grid_x0] * (1 - wx) + patch[grid_y1, grid_x1] * wx
         rot_patch = np.clip(top * (1 - wy) + bottom * wy, 0, 255).astype(np.uint8)
-        alpha_top = patch_mask[y0, x0] * (1 - (xs_clip - x0)) + patch_mask[y0, x1] * (xs_clip - x0)
-        alpha_bottom = patch_mask[y1, x0] * (1 - (xs_clip - x0)) + patch_mask[y1, x1] * (xs_clip - x0)
-        source_alpha = alpha_top * (1 - (ys_clip - y0)) + alpha_bottom * (ys_clip - y0)
+        alpha_top = patch_mask[grid_y0, grid_x0] * (1 - (xs_clip - grid_x0)) + patch_mask[grid_y0, grid_x1] * (xs_clip - grid_x0)
+        alpha_bottom = patch_mask[grid_y1, grid_x0] * (1 - (xs_clip - grid_x0)) + patch_mask[grid_y1, grid_x1] * (xs_clip - grid_x0)
+        source_alpha = alpha_top * (1 - (ys_clip - grid_y0)) + alpha_bottom * (ys_clip - grid_y0)
         valid_mask = front.astype(np.float32) * source_alpha
         feather_mask = valid_mask[:, :, None]
 

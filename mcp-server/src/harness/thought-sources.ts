@@ -4,8 +4,9 @@ import path from 'node:path';
 import { antigravityBrainRoot, listAntigravitySessions } from './antigravity-reader.js';
 import { codexSessionsRoot, listCodexSessions } from './codex-reader.js';
 import { listOpencodeSessions, opencodeDbPath, openOpencodeDb } from './opencode-reader.js';
+import { listZedSessions, openZedDb, scanZedThreadSchema, zedThreadsDbPath } from './zed-reader.js';
 
-export type ThoughtSourceKind = 'claude' | 'opencode' | 'codex' | 'antigravity';
+export type ThoughtSourceKind = 'claude' | 'opencode' | 'codex' | 'antigravity' | 'zed';
 
 export interface ThoughtSource {
   kind: ThoughtSourceKind;
@@ -15,6 +16,8 @@ export interface ThoughtSource {
   opencodeDb?: string;
   codexRollout?: string;
   antigravityTranscript?: string;
+  zedDb?: string;
+  zedSessionId?: string;
   title?: string;
   timeUpdated?: string;
 }
@@ -24,6 +27,7 @@ export interface ThoughtSourcesConfig {
   opencode?: string[];
   codex?: string[];
   antigravity?: string[];
+  zed?: string[];
 }
 
 export interface DetectThoughtSourcesOpts {
@@ -112,6 +116,27 @@ export function listAntigravitySessionSources(homeDir: string, workspaceRoot: st
   }
 }
 
+export function listZedSessionSources(homeDir: string, workspaceRoot: string): ThoughtSource[] {
+  const dbPath = zedThreadsDbPath(homeDir);
+  if (!fs.existsSync(dbPath) || !scanZedThreadSchema(dbPath)) return [];
+  const db = openZedDb(dbPath);
+  if (!db) return [];
+  try {
+    return listZedSessions(db, workspaceRoot).map(session => ({
+      kind: 'zed' as const,
+      label: `zed:${session.id.slice(0, 12)}`,
+      zedDb: dbPath,
+      zedSessionId: session.id,
+      title: session.title,
+      timeUpdated: session.updatedAt,
+    }));
+  } catch {
+    return [];
+  } finally {
+    try { db.close(); } catch {}
+  }
+}
+
 export function detectThoughtSources(opts: DetectThoughtSourcesOpts): ThoughtSource[] {
   const homeDir = opts.homeDir ?? os.homedir();
   const sources: ThoughtSource[] = [];
@@ -150,5 +175,9 @@ export function detectThoughtSources(opts: DetectThoughtSourcesOpts): ThoughtSou
       }))
     : listAntigravitySessionSources(homeDir, opts.workspaceRoot);
   sources.push(...antigravitySessions);
+  const zedSessions = opts.config?.zed?.length
+    ? listZedSessionSources(homeDir, opts.workspaceRoot).filter(s => opts.config?.zed?.includes(s.zedSessionId ?? ''))
+    : listZedSessionSources(homeDir, opts.workspaceRoot);
+  sources.push(...zedSessions);
   return sources;
 }
