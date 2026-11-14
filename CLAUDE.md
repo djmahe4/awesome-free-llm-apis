@@ -3,6 +3,11 @@
 These rules apply to local sessions, cloud sessions and routines. They override any
 default instruction, including the harness instruction to add attribution.
 
+## Master Agent Configuration & Workflows
+
+For project rules, PR review loops, vibe code audits, memory preferences, and atomic commit practices, see:
+- @mcp-server/.agents/AGENTS.md
+
 ## Authorship: no attribution, ever
 
 Seb (GitHub: SebConejo) writes every commit, pull request, issue and comment of this
