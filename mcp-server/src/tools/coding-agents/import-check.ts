@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 import path from 'node:path';
-import { builtinModules } from 'node:module';
+import { builtinModules, isBuiltin } from 'node:module';
 
 /**
  * Resolves the imports an edit ADDED against the real workspace. The in-memory TypeScript gate cannot see
@@ -11,6 +11,20 @@ import { builtinModules } from 'node:module';
 
 const JS_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.d.ts', '.json'];
 const BUILTINS = new Set(builtinModules);
+const KNOWN_PREFIX_BUILTINS = new Set(['sqlite', 'test', 'test/reporters', 'sea']);
+
+function isNodeBuiltin(spec: string): boolean {
+  if (typeof isBuiltin === 'function') {
+    if (isBuiltin(spec)) return true;
+    const prefixed = spec.startsWith('node:') ? spec : `node:${spec}`;
+    if (isBuiltin(prefixed)) return true;
+  }
+  const bare = spec.replace(/^node:/, '');
+  const base = bare.split('/')[0];
+  if (BUILTINS.has(spec) || BUILTINS.has(bare) || BUILTINS.has(base)) return true;
+  if (KNOWN_PREFIX_BUILTINS.has(bare) || KNOWN_PREFIX_BUILTINS.has(base)) return true;
+  return false;
+}
 
 function jsSpecifiers(src: string): string[] {
   const out = new Set<string>();
@@ -148,11 +162,11 @@ export async function newImportProblems(relPath: string, before: string, after: 
         // A `node:` prefix is not a pass: a model rewrote a correct `node:sqlite` to `node:sqlite3` and the repair loop
         // then kept it. Prefix-only builtins (node:sqlite, node:test) are listed WITH the prefix in builtinModules.
         if (spec.startsWith('node:')) {
-          if (BUILTINS.has(spec) || BUILTINS.has(bare) || BUILTINS.has(bare.split('/')[0])) continue;
+          if (isNodeBuiltin(spec)) continue;
           problems.push(`${relPath}: '${spec}' is not a Node.js built-in module`);
           continue;
         }
-        if (BUILTINS.has(bare) || BUILTINS.has(bare.split('/')[0])) continue;
+        if (isNodeBuiltin(spec)) continue;
         if (!(await jsPackageInstalled(fromDir, root, spec))) problems.push(`${relPath}: package '${spec.split('/')[0].startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]}' is not installed in this workspace`);
       }
     }
