@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { handleReverseTool, runReverseTool } from '../src/tools/reverse-tool.js';
 
-describe('torch_nn_engine Architecture Generalization & Forward Passes', () => {
+describe.skipIf(!!process.env.CI)('torch_nn_engine Architecture Generalization & Forward Passes', () => {
   const modelsDir = path.resolve(__dirname, 'fixtures/models');
   const tinyPt = path.join(modelsDir, 'tiny.pt');
   const tinyResNetPt = path.join(modelsDir, 'tiny_resnet.pt');

@@ -145,7 +145,7 @@ export function detectThoughtSources(opts: DetectThoughtSourcesOpts): ThoughtSou
   for (const file of claudeFiles) {
     sources.push({
       kind: 'claude',
-      label: `claude:${path.basename(file, '.jsonl').slice(0, 12)}`,
+      label: `claude:${path.basename(file.replace(/\\/g, '/'), '.jsonl').slice(0, 12)}`,
       claudeJsonl: file,
     });
   }
