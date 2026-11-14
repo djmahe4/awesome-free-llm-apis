@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { withFileLock } from '../utils/file-lock.js';
 import type { ThoughtBundle } from './context-injection-hook.js';
 import type { AlignmentResult } from './laya-bridge.js';
 
@@ -48,34 +49,36 @@ export class ThoughtDatasetWriter {
   }
 
   async append(row: DatasetRow): Promise<void> {
-    try {
-      const stat = fs.statSync(this.filePath);
-      if (stat.size > MAX_FILE_BYTES) {
-        fs.renameSync(this.filePath, this.filePath + `.${Date.now()}.bak`);
+    await withFileLock(this.filePath, async () => {
+      try {
+        const stat = fs.statSync(this.filePath);
+        if (stat.size > MAX_FILE_BYTES) {
+          fs.renameSync(this.filePath, this.filePath + `.${Date.now()}.bak`);
+        }
+      } catch {
       }
-    } catch {
-    }
 
-    const jsonlRow = {
-      thought_id: row.thought.id,
-      thought_text: row.thought.text,
-      thought_source: row.thought.source,
-      timestamp: row.thought.timestamp,
-      tool: row.tool,
-      action: row.action,
-      goal: row.goal,
-      alignment: row.alignment,
-      drift_prob: row.drift_prob,
-      expert_label: row.expert_label ?? ThoughtDatasetWriter.expertLabel(row.tool),
-      circuit_confidence: row.circuit_confidence ?? null,
-      parent_thought_id: row.parent_thought_id ?? null,
-      root_thought_id: row.root_thought_id ?? null,
-      depth: row.depth ?? null,
-      tool_call_id: row.tool_call_id ?? null,
-      result_ok: row.result_ok ?? null,
-      expert_source: row.expert_source ?? 'fallback',
-    };
-    fs.appendFileSync(this.filePath, JSON.stringify(jsonlRow) + '\n', 'utf8');
+      const jsonlRow = {
+        thought_id: row.thought.id,
+        thought_text: row.thought.text,
+        thought_source: row.thought.source,
+        timestamp: row.thought.timestamp,
+        tool: row.tool,
+        action: row.action,
+        goal: row.goal,
+        alignment: row.alignment,
+        drift_prob: row.drift_prob,
+        expert_label: row.expert_label ?? ThoughtDatasetWriter.expertLabel(row.tool),
+        circuit_confidence: row.circuit_confidence ?? null,
+        parent_thought_id: row.parent_thought_id ?? null,
+        root_thought_id: row.root_thought_id ?? null,
+        depth: row.depth ?? null,
+        tool_call_id: row.tool_call_id ?? null,
+        result_ok: row.result_ok ?? null,
+        expert_source: row.expert_source ?? 'fallback',
+      };
+      fs.appendFileSync(this.filePath, JSON.stringify(jsonlRow) + '\n', 'utf8');
+    });
   }
 
   static expertLabel(tool: string): string {

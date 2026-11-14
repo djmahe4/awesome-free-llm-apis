@@ -648,6 +648,16 @@ function resolveStepDispatch(
   // This exact object is both hashed for approval-binding and passed to the
   // tool — one source of truth, so what a human approves is what runs.
   const systemPrompt = 'You are a research agent. Answer with grounded findings only; cite sources inline. Do not fabricate citations.';
+  const roleKeywords: Record<string, string[]> = {
+    researcher: ['research', 'reasoning', 'deepseek', 'r1', 'paper'],
+    analyst: ['analysis', 'nemotron', 'synthesis', 'comparison'],
+    scraper: ['browser', 'extract', 'scrape'],
+    coder: ['coding', 'qwen', 'deepseek', 'codellama', 'coder'],
+  };
+  const roleModel = (decl.roles[role] as any)?.model;
+  const keywords = roleKeywords[role] ?? ['general'];
+  const taskType = role === 'coder' ? 'coding' : role === 'researcher' ? 'research' : 'chat';
+
   const useFreeLlmPayload = {
     messages: [
       { role: 'system', content: memoryBlock ? `${systemPrompt}\n\n${memoryBlock}` : systemPrompt },
@@ -657,6 +667,9 @@ function resolveStepDispatch(
     workspace_root: workspaceRoot,
     sessionId: registryKey,
     isOnePass: true,
+    keywords,
+    taskType,
+    ...(roleModel ? { model: roleModel } : {}),
   };
   const loadSkillPromptPayload = {
     type: 'search',
@@ -677,6 +690,14 @@ function resolveStepDispatch(
       ? [...new Set([...matchedSkill.tags, ...(CYBER_TERMS_REGEX.test(stepGoal) ? ['cyber'] : [])])]
       : CYBER_TERMS_REGEX.test(stepGoal) ? ['cyber'] : [],
     ...(matchedSkill?.dir ? { skillDir: matchedSkill.dir } : {}),
+  };
+  const codingAgentsPayload = {
+    goal: stepGoal,
+    workspaceRoot: workspaceRoot ?? process.cwd(),
+    sessionId: registryKey,
+    dryRun: false,
+    allowCloudFallback: true,
+    ...(roleModel ? { model: roleModel } : {}),
   };
 
   const dispatchMap: Record<string, { payload: any; execute: () => Promise<any> }> = {

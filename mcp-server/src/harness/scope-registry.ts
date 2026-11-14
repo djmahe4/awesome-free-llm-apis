@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { withFileLock } from '../utils/file-lock.js';
 import type { ShortTermMemory } from '../memory/short-term.js';
 
 export interface ScopeClaim {
@@ -82,38 +83,42 @@ export class FileScopeRegistry {
   }
 
   async acquireScope(input: { runId: string; agentId: string; files: string[] }): Promise<ScopeResult> {
-    const claims = await this.loadClaims();
-    const normalizedFiles = input.files.map(f => path.normalize(f).toLowerCase());
-    const conflicts: string[] = [];
+    return await withFileLock(this.scopePath, async () => {
+      const claims = await this.loadClaims();
+      const normalizedFiles = input.files.map(f => path.normalize(f).toLowerCase());
+      const conflicts: string[] = [];
 
-    for (const existing of claims) {
-      if (existing.runId === input.runId && existing.agentId === input.agentId) continue;
-      for (const ef of existing.files) {
-        if (normalizedFiles.includes(path.normalize(ef).toLowerCase())) {
-          conflicts.push(ef);
+      for (const existing of claims) {
+        if (existing.runId === input.runId && existing.agentId === input.agentId) continue;
+        for (const ef of existing.files) {
+          if (normalizedFiles.includes(path.normalize(ef).toLowerCase())) {
+            conflicts.push(ef);
+          }
         }
       }
-    }
 
-    if (conflicts.length > 0) {
-      return { acquired: false, conflicts };
-    }
+      if (conflicts.length > 0) {
+        return { acquired: false, conflicts };
+      }
 
-    const newClaim: ScopeClaim = {
-      runId: input.runId,
-      agentId: input.agentId,
-      files: input.files,
-      claimedAt: Date.now()
-    };
-    claims.push(newClaim);
-    await this.saveClaims(claims);
-    return { acquired: true, claim: newClaim };
+      const newClaim: ScopeClaim = {
+        runId: input.runId,
+        agentId: input.agentId,
+        files: input.files,
+        claimedAt: Date.now()
+      };
+      claims.push(newClaim);
+      await this.saveClaims(claims);
+      return { acquired: true, claim: newClaim };
+    });
   }
 
   async releaseScope(runId: string, agentId?: string): Promise<void> {
-    let claims = await this.loadClaims();
-    claims = claims.filter(c => !(c.runId === runId && (!agentId || c.agentId === agentId)));
-    await this.saveClaims(claims);
+    await withFileLock(this.scopePath, async () => {
+      let claims = await this.loadClaims();
+      claims = claims.filter(c => !(c.runId === runId && (!agentId || c.agentId === agentId)));
+      await this.saveClaims(claims);
+    });
   }
 }
 
@@ -142,10 +147,12 @@ export class ReasoningScopeRegistry {
   }
 
   async registerReasoningScope(entry: Omit<ReasoningScopeEntry, 'timestamp'>): Promise<void> {
-    const entries = await this.loadEntries();
-    const fullEntry: ReasoningScopeEntry = { ...entry, timestamp: Date.now() };
-    entries.push(fullEntry);
-    await this.saveEntries(entries);
+    await withFileLock(this.reasoningPath, async () => {
+      const entries = await this.loadEntries();
+      const fullEntry: ReasoningScopeEntry = { ...entry, timestamp: Date.now() };
+      entries.push(fullEntry);
+      await this.saveEntries(entries);
+    });
 
     if (this.memory) {
       const memKey = `reasoning:${entry.runId}:${entry.agentId}:${entry.role}`;

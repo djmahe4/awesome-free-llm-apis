@@ -760,13 +760,12 @@ export async function generateCodePatchWithCloudLLM(
     const { useFreeLLM } = await import('../use-free-llm.js');
     const filename = path.basename(filePath);
 
-    // For large non-module files (HTML, classic browser JS — no `export` declarations),
-    // asking for COMPLETE file causes LLMs to truncate → hallucination guard fires.
+    // For large files, asking for COMPLETE file causes LLMs to truncate → hallucination guard fires.
     // Instead, use a sliding window: extract ~120 lines around the best anchor,
     // ask LLM to patch ONLY that window, then splice back into the full content.
     // The spliced result keeps 99%+ original lines → guard passes automatically.
-    const hasExports = /^\s*export\s+/m.test(currentContent);
-    const windowInfo = !hasExports ? extractWindowForInstruction(currentContent, instruction) : null;
+    const fileLineCount = currentContent.split(/\r?\n/).length;
+    const windowInfo = fileLineCount > 120 ? extractWindowForInstruction(currentContent, instruction) : null;
 
     let prompt: string;
     let systemContent: string;

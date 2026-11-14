@@ -1,5 +1,5 @@
 import { generateFilePatch } from './generate-file-patch.js';
-import { caTrace } from './trace.js';
+import { caTrace, caGetTraceEvents } from './trace.js';
 import { validateVerifyCommand, runVerifyCommand } from './verify-command.js';
 import { assessPatchesForVerify, buildRepairBrief, buildSyntaxBrief, withFeedback, isTestFile, deletedLines, type PatchFact, informativeBaseline } from './verify-guard.js';
 import { cachedVerify } from './verify-cache.js';
@@ -9,6 +9,7 @@ import { runWithRepairLoop } from './repair-loop.js';
 import { lostSymbols } from './symbol-loss.js';
 import path from 'node:path';
 import fs from 'fs-extra';
+import { withFileLock } from '../../utils/file-lock.js';
 import { VectorStore, DocumentNode } from '../../memory/VectorStore.js';
 import { logToolCall } from '../../utils/ChatLogger.js';
 import { RunRegistry, RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
@@ -232,6 +233,7 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
 
   const finalizeResult = async (): Promise<CodingAgentsResult> => {
     result.durationMs = Date.now() - start;
+    result.traces = caGetTraceEvents();
     if (result.status !== 'paused' && result.status !== 'undo_file' && result.status !== 'file_history') {
       result.status = (result.restoredFiles && result.restoredFiles.length > 0)
         ? 'rollback'
@@ -338,7 +340,9 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       const tasks = await decomposeGoalIntelligently(input.goal, workspaceRoot, planCandidateFiles, sessionId);
       let tasksMarkdown = withAgentThoughtContextApproval(serializeTasksMarkdown(input.goal, tasks));
       if (result.hypotheses) tasksMarkdown = withHypothesisSummary(tasksMarkdown, result.hypotheses);
-      await fs.writeFile(tasksFilePath, tasksMarkdown, 'utf-8');
+      await withFileLock(tasksFilePath, async () => {
+        await fs.writeFile(tasksFilePath, tasksMarkdown, 'utf-8');
+      });
       result.pipelineStage = 'completed';
       result.tasksPlan = tasks;
       result.tasksFile = 'tasks.md';
@@ -350,8 +354,10 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
       const planGate = await runHypothesisGate({ mode: resolveGateMode(workspaceRoot), goal: input.goal, files: planCandidateFiles, targetFiles: input.targetFiles, tasks, workspaceRoot });
       if (planGate.hypotheses.length > 0) {
         await writeHypothesesFile(workspaceRoot, input.goal, planGate.hypotheses).catch(() => {});
-        const tasksMarkdown = await fs.readFile(tasksFilePath, 'utf-8');
-        await fs.writeFile(tasksFilePath, withHypothesisSummary(tasksMarkdown, planGate.hypotheses), 'utf-8');
+        await withFileLock(tasksFilePath, async () => {
+          const currentTasksMarkdown = await fs.readFile(tasksFilePath, 'utf-8');
+          await fs.writeFile(tasksFilePath, withHypothesisSummary(currentTasksMarkdown, planGate.hypotheses), 'utf-8');
+        });
         result.hypotheses = planGate.hypotheses;
         result.hypothesesFile = 'hypotheses.md';
         if (planGate.refuted.length > 0) {
@@ -1183,7 +1189,9 @@ ${after.outputTail}`,
 
       let tasksMarkdown = withAgentThoughtContextApproval(serializeTasksMarkdown(planGoal, loadedTasks), thoughtContextApproved);
       if (result.hypotheses) tasksMarkdown = withHypothesisSummary(tasksMarkdown, result.hypotheses);
-      await fs.writeFile(tasksFilePath, tasksMarkdown, 'utf-8');
+      await withFileLock(tasksFilePath, async () => {
+        await fs.writeFile(tasksFilePath, tasksMarkdown, 'utf-8');
+      });
       result.tasksPlan = loadedTasks;
       result.tasksFile = 'tasks.md';
       const remaining = loadedTasks.filter(t => t.status === 'pending');

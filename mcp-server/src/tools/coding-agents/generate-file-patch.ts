@@ -294,8 +294,9 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
     // retry instead of auto-escalating within one call.
     // A large module is not regenerated whole after SEARCH/REPLACE failed twice: that is the slowest
     // path (minutes on a 7B) and the one that drops or renames code. The repair loop retries instead.
+    const fileLineCount = patchedContent.split(/\r?\n/).length;
     const skipWholeFileRegen = !!localModel && !rewriteSmallFile && !appliedPatch
-      && patchedContent.split(/\r?\n/).length > 300 && /^\s*export\s+/m.test(patchedContent);
+      && fileLineCount > 300 && /^\s*export\s+/m.test(patchedContent);
     if (skipWholeFileRegen) caTrace('whole-file regeneration skipped (large module)', relPath);
     if (localModel && !appliedPatch && !skipWholeFileRegen) {
       // Visible record that SEARCH/REPLACE failed and the pipeline is
@@ -322,9 +323,11 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
         // splices nothing itself, so the excerpt is spliced back here,
         // right before the corruption guard runs on the reconstructed
         // full content — matching the cloud path's guard timing exactly.
-        const hasExports = /^\s*export\s+/m.test(patchedContent);
-        const windowInfo = !hasExports && !isNewOrEmpty ? extractWindowForInstruction(patchedContent, activeGoal) : null;
-        caTrace('local full/window patch', relPath);
+        const lineCount = patchedContent.split(/\r?\n/).length;
+        const windowInfo = !isNewOrEmpty && lineCount > 120
+          ? (anchoredWindow(patchedContent, activeGoal, 0) ?? extractWindowForInstruction(patchedContent, activeGoal))
+          : null;
+        caTrace(windowInfo ? `local sliding-window patch (${windowInfo.startIdx + 1}-${windowInfo.endIdx})` : 'local full-file patch', relPath);
         const llmResult = await localLlmPatch({
           filePath: fullPath,
           instruction: `${fileInstruction}${localOnly}`,
@@ -449,7 +452,7 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
     }
 
     // A large module is not regenerated in the cloud either: that path drops or renames code (#148).
-    const largeModule = !rewriteSmallFile && patchedContent.split(/\r?\n/).length > 300 && /^\s*export\s+/m.test(patchedContent);
+    const largeModule = !rewriteSmallFile && fileLineCount > 300 && /^\s*export\s+/m.test(patchedContent);
     if (!appliedPatch && cloudAllowed && largeModule) caTrace('cloud full-file fallback skipped (large module)', relPath);
     if (!appliedPatch && cloudAllowed && !largeModule) {
       const localReason = lastFailureReason;

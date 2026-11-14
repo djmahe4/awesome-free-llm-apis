@@ -2,21 +2,32 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * Opt-in timing trace (CODING_AGENTS_TRACE=1): one stderr line per pipeline event with the time since the
- * run started, so a slow run shows which stage the minutes went to. Off by default, no cost when off.
+ * Timing trace: tracks pipeline events with timestamp offsets.
+ * In-memory buffer captures timeline for caller transparency.
+ * If CODING_AGENTS_TRACE=1, also logs to stderr.
  */
 let started = Date.now();
+let inMemoryTraces: Array<{ time: number; event: string; detail?: string }> = [];
 
 export const caTraceOn = () => process.env.CODING_AGENTS_TRACE === '1';
 
 export function caTraceReset(label: string): void {
   started = Date.now();
+  inMemoryTraces = [{ time: 0, event: 'start', detail: label }];
   if (caTraceOn()) console.error(`[ca-trace] +0.0s start ${label}`);
 }
 
 export function caTrace(event: string, detail = ''): void {
-  if (!caTraceOn()) return;
-  console.error(`[ca-trace] +${((Date.now() - started) / 1000).toFixed(1)}s ${event}${detail ? ` ${detail}` : ''}`);
+  const elapsed = +((Date.now() - started) / 1000).toFixed(2);
+  inMemoryTraces.push({ time: elapsed, event, ...(detail ? { detail } : {}) });
+  if (inMemoryTraces.length > 200) inMemoryTraces.shift();
+  if (caTraceOn()) {
+    console.error(`[ca-trace] +${elapsed.toFixed(1)}s ${event}${detail ? ` ${detail}` : ''}`);
+  }
+}
+
+export function caGetTraceEvents(): Array<{ time: number; event: string; detail?: string }> {
+  return [...inMemoryTraces];
 }
 
 export function caTraceDir(): string | undefined {

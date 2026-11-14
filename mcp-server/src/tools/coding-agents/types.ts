@@ -243,6 +243,8 @@ export interface CodingAgentsResult {
   usedFallbackModel?: boolean;
   wiringFiles?: string[];
   wiringContext?: string[];
+  /** Execution trace events and timing offsets for transparency across pipeline stages. */
+  traces?: Array<{ time: number; event: string; detail?: string }>;
   partialApply?: boolean;
   durationMs?: number;
 }

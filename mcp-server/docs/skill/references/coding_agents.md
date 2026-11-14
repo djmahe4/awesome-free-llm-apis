@@ -144,6 +144,7 @@ interface CodingAgentsResult {
   review?: { verdict: 'ok' | 'concerns' | 'blocked' | 'skipped'; findings: Array<{ blocking: boolean; text: string }> };
   rollbackBrief?: string;        // compiler messages of an edit that was rolled back for a syntax error
   symbolLoss?: string[];         // top-level names an edit removed although the goal does not mention them; such an edit is not written
+  traces?: Array<{ time: number; event: string; detail?: string }>; // In-memory ring buffer of execution stage and telemetry trace events
 }
 ```
 
