@@ -454,10 +454,13 @@ export function buildRepairBrief(i: RepairBriefInput): string {
   } else if (cases.length) {
     parts.push(`Failing cases (${cases.length}):\n${list(cases)}`);
   }
-  if (i.deletedLines && i.deletedLines.length) {
+  // Only warn about deleted lines if the failure is NOT an unhandled exception or missing assertion in existing code,
+  // and when the edit didn't simply replace an expression/statement with equivalent logic.
+  const hasExceptionMismatch = /Missing expected exception|did not throw|expected .* to throw/i.test(i.outputTail || '');
+  if (i.deletedLines && i.deletedLines.length && !hasExceptionMismatch) {
     parts.push(`Your edit deleted these lines and nothing in it replaces them. If the goal did not ask for that, keep them:\n${i.deletedLines.slice(0, 15).join('\n')}`);
   }
-  if (/Missing expected exception|did not throw|expected .* to throw/i.test(i.outputTail)) {
+  if (hasExceptionMismatch) {
     parts.push('A call that should have thrown returned normally: the current logic ACCEPTS that input. Find the part that accepts it (a regex or condition that is too permissive) and tighten that. Do not add a special case for the input.');
   }
   if (/expected -?[\d.]+ to (be|equal) [+-]?[\d.]+/i.test(i.outputTail)) {
