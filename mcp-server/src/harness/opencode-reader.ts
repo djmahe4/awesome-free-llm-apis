@@ -35,11 +35,12 @@ export function openOpencodeDb(dbPath: string): SqliteDb | null {
 export function listOpencodeSessions(db: NonNullable<ReturnType<typeof openOpencodeDb>>, directoryFilter?: string): OpencodeSession[] {
   let rows: Array<Record<string, unknown>>;
   if (directoryFilter) {
-    const needle = directoryFilter.toLowerCase().replace(/\\/g, '/');
+    const escapeSqlLike = (str: string) => str.replace(/([%_\\])/g, '\\$1');
+    const needle = escapeSqlLike(directoryFilter.toLowerCase().replace(/\\/g, '/'));
     rows = db.prepare(`
       SELECT id, directory, title, time_updated
       FROM session
-      WHERE LOWER(REPLACE(COALESCE(directory, ''), '\\', '/')) LIKE ?
+      WHERE LOWER(REPLACE(COALESCE(directory, ''), '\\', '/')) LIKE ? ESCAPE '\\'
       ORDER BY time_updated DESC
       LIMIT 200
     `).all(`%${needle}%`) as Array<Record<string, unknown>>;

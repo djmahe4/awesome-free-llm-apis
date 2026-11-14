@@ -56,14 +56,27 @@ function parseTranscriptLine(line: string): ParsedLine | null {
 function firstUserInputText(transcriptPath: string): string | undefined {
   let fd: number | null = null;
   try {
-    const buffer = Buffer.alloc(64 * 1024);
     fd = fs.openSync(transcriptPath, 'r');
-    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
-    const raw = buffer.toString('utf8', 0, bytesRead);
-    for (const line of raw.split(/\r?\n/)) {
-      const parsed = parseTranscriptLine(line);
-      if (!parsed || parsed.type !== 'USER_INPUT' || !parsed.content) continue;
-      return stripUserRequestTag(parsed.content);
+    const bufSize = 64 * 1024;
+    const buffer = Buffer.alloc(bufSize);
+    let bytesRead = 0;
+    let remainder = '';
+    while ((bytesRead = fs.readSync(fd, buffer, 0, bufSize, null)) > 0) {
+      const chunk = remainder + buffer.toString('utf8', 0, bytesRead);
+      const lines = chunk.split(/\r?\n/);
+      remainder = lines.pop() ?? '';
+      for (const line of lines) {
+        const parsed = parseTranscriptLine(line);
+        if (parsed && parsed.type === 'USER_INPUT' && parsed.content) {
+          return stripUserRequestTag(parsed.content);
+        }
+      }
+    }
+    if (remainder) {
+      const parsed = parseTranscriptLine(remainder);
+      if (parsed && parsed.type === 'USER_INPUT' && parsed.content) {
+        return stripUserRequestTag(parsed.content);
+      }
     }
   } catch {
     return undefined;
