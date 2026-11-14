@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { newDuplicateDefinitions } from './duplicate-defs.js';
 import { localLlmPatch } from '../local-llm-patch.js';
 import { caTrace, caTraceDump } from './trace.js';
@@ -18,10 +20,16 @@ import {
   windowReplyIsSuspicious,
 } from './patch-gen.js';
 import type { CodingAgentsInput, CodingAgentsResult, TaskItem } from './types.js';
+import { buildHypothesisBlackboard, buildTaskDagBlackboard } from './tasks.js';
 import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
 import { applyAnchored } from './anchored-edit.js';
 import { anchoredWindow, applyEdits } from './anchored-edit.js';
 import { buildSymbolContextBlock } from './symbol-graph-cache.js';
+import { buildCodingAgentWorkspaceContext } from '../../harness/coding-agent-context.js';
+import { apiFactsFor } from './api-facts.js';
+import { buildExternalContext } from '../../harness/external-context.js';
+import { readAgentThoughtDags, expandAgentThoughtContext } from '../../harness/agent-thought-context.js';
+import { FileStructureDag } from '../../harness/file-outline.js';
 
 /** Everything the per-file generation step reads from the run (extracted from runCodingAgentsPipeline). */
 export interface FilePatchContext {
@@ -36,11 +44,44 @@ export interface FilePatchContext {
   resolvedModel: string | null | undefined;
   originalContent: string;
   activeGoal: string;
+  objective?: string;
   loadedTasks?: TaskItem[];
   nextPendingTask?: TaskItem;
   changeFiles: string[];
   runContents: Map<string, string>;
   editedInRun: Set<string>;
+  thoughtContextApproved?: boolean;
+  structureDag?: FileStructureDag;
+}
+
+function detectTargetConvention(workspaceRoot: string, relPath: string, verifyCommand?: string): string {
+  const ext = path.extname(relPath).toLowerCase();
+  if (['.ts', '.tsx', '.js', '.mjs', '.cjs'].includes(ext)) {
+    let isEsm = ext === '.mjs';
+    if (!isEsm) {
+      try {
+        let dir = path.resolve(workspaceRoot, path.dirname(relPath));
+        const root = path.resolve(workspaceRoot);
+        while (dir.startsWith(root)) {
+          const pkgPath = path.join(dir, 'package.json');
+          if (fs.existsSync(pkgPath)) {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+            if (pkg.type === 'module') {
+              isEsm = true;
+              break;
+            }
+          }
+          const parent = path.dirname(dir);
+          if (parent === dir) break;
+          dir = parent;
+        }
+      } catch { }
+    }
+    if (isEsm) {
+      return ' Project convention: This is an ECMAScript module ("type": "module"). All relative imports must use relative paths starting with "./" or "../" and include the explicit ".js" file extension.';
+    }
+  }
+  return '';
 }
 
 /**
@@ -49,7 +90,7 @@ export interface FilePatchContext {
  * original when nothing was usable) and whether the file failed.
  */
 export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patchedContent: string; failed: boolean }> {
-  const { input, result, relPath, fullPath, workspaceRoot, sessionId, run, resolvedModel, originalContent, activeGoal, loadedTasks, nextPendingTask, changeFiles, runContents, editedInRun } = ctx;
+  const { input, result, relPath, fullPath, workspaceRoot, sessionId, run, resolvedModel, originalContent, activeGoal, objective, loadedTasks, nextPendingTask, changeFiles, runContents, editedInRun } = ctx;
   let patchedContent = originalContent;
   let failed = false;
     let appliedPatch = false;
@@ -65,19 +106,64 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
       return { patchedContent, failed: true };
     }
 
-    // Compose DAG task context string if tasks exist
-    const tasksContext = loadedTasks
-      ? `Active Task: [${nextPendingTask?.id || 'adhoc'}] ${activeGoal}\nOverall Plan:\n` +
-        loadedTasks.map(t => `- [${t.status === 'completed' ? 'x' : (t.status === 'in_progress' ? '~' : ' ')}] ${t.task}`).join('\n')
+    const tasksContext = loadedTasks?.length
+      ? buildTaskDagBlackboard(loadedTasks, nextPendingTask?.id, 2400, {
+          objective: objective ?? input.goal,
+          windowRadius: input.contextWindow?.radius,
+          requestedTaskIds: input.contextWindow?.taskIds,
+        })
       : undefined;
+    const hypothesisContext = result.hypotheses?.length
+      ? buildHypothesisBlackboard(result.hypotheses, 1600)
+      : undefined;
+    if (tasksContext && tasksContext.length > 2400) {
+      result.diagnostics.push({ filePath: relPath, message: 'Pinned objective, active task, or requested DAG context exceeds the 2400-character budget. Shorten the task or make the prompt more specific to the needed context (for example, request fewer contextWindow task IDs); patch generation stopped rather than truncating the contract.', severity: 'error', source: 'llm-patch' });
+      return { patchedContent, failed: true };
+    }
+    if (hypothesisContext && hypothesisContext.length > 1600) {
+      result.diagnostics.push({ filePath: relPath, message: 'Validated hypothesis context exceeds the 1600-character budget. Narrow the task or probes and remove redundant evidence without deleting refutations; patch generation stopped rather than dropping validator evidence.', severity: 'error', source: 'hypothesis' });
+      return { patchedContent, failed: true };
+    }
 
     const crossContext = changeFiles.length > 1 ? crossFileContext(relPath, changeFiles, runContents, editedInRun) : '';
     const goalForFile = crossContext ? `${activeGoal}\n\n${crossContext}` : activeGoal;
-    const baseInstruction = tasksContext
-      ? `${goalForFile}\n\n[DAG Context]\n${tasksContext}`
+    // The tests the verifyCommand runs are the specification: show them (read-only) and seed workspace grounding with them.
+    const specCommand = input.verifyCommand ?? input.specCommand;
+    const testContext = specCommand ? await readVerifyTestContext(specCommand, workspaceRoot) : '';
+    const workspaceContext = buildCodingAgentWorkspaceContext({
+      workspaceRoot,
+      query: `${activeGoal} ${relPath} ${testContext ? testContext.slice(0, 2000) : ''} ${tasksContext ?? ''} ${hypothesisContext ?? ''}`,
+      targetFile: relPath,
+      debugKeywords: input.contextKeywords,
+      fileOverrides: runContents,
+      structureDag: ctx.structureDag,
+    });
+    let thoughtContext = '';
+    if (ctx.thoughtContextApproved) {
+      const settings = loadCodingAgentsSettings(workspaceRoot);
+      const dags = await readAgentThoughtDags({ workspaceRoot, config: settings.thoughtSources, maxSources: 20 });
+      thoughtContext = expandAgentThoughtContext(dags, `${activeGoal} ${relPath}`, 5000);
+    }
+    const apiFacts = apiFactsFor(`${activeGoal} ${relPath} ${testContext}`);
+    // contextDirs: the DATA SHAPE of directories the caller named (structure only, no values). Appended to the LOCAL model's
+    // instruction only: the cloud fallbacks below keep using augmentedInstruction / fileInstruction without it.
+    const externalContext = input.contextDirs?.length ? buildExternalContext({ dirs: input.contextDirs }) : '';
+    const localOnly = externalContext ? `\n\n${externalContext}` : '';
+    const contextBlocks = [
+      ...(tasksContext ? [`[DAG Context]\n${tasksContext}`] : []),
+      ...(hypothesisContext ? [hypothesisContext] : []),
+      ...(apiFacts ? [apiFacts] : []),
+      ...(workspaceContext ? [workspaceContext] : []),
+      ...(thoughtContext ? [`[Approved matching agent thought history]\n${thoughtContext}`] : []),
+    ];
+    const hasSubstantiveSourceContext = workspaceContext.split(/\n(?=\[)/u).some(block => {
+      if (!block.startsWith('[Current source excerpts:')) return false;
+      return block.slice(block.indexOf('\n') + 1).trim().length >= 40;
+    });
+    const skipContextGathering = hasSubstantiveSourceContext;
+    const baseInstruction = contextBlocks.length
+      ? `${goalForFile}\n\n${contextBlocks.join('\n\n')}`
       : goalForFile;
-    // The tests the verifyCommand runs are the specification: show them (read-only).
-    const testContext = input.verifyCommand ? await readVerifyTestContext(input.verifyCommand, workspaceRoot) : '';
     const endOfFileHint = isEndOfFileInstruction(activeGoal) ? ' To add code at the end of the file, leave the SEARCH part empty and put the new code in REPLACE.' : '';
     const baseAugmented = testContext ? `${baseInstruction}${endOfFileHint}\n\n${testContext}` : baseInstruction + endOfFileHint;
     const targetFile = relPath;
@@ -99,8 +185,9 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
     // Also skip SEARCH/REPLACE for brand-new or empty files — an empty file has no existing lines to anchor on.
     const isNewOrEmpty = !patchedContent || patchedContent.trim() === '';
     const rewriteSmallFile = (!!input.rewrite && patchedContent.split(/\r?\n/).length <= 200) || isNewOrEmpty;
+    const conventionHint = detectTargetConvention(workspaceRoot, relPath, input.verifyCommand);
     const fileInstruction = isNewOrEmpty
-      ? `${augmentedInstruction}\n\nNote: ${relPath} is currently empty. Generate the complete valid implementation code from scratch. Do not paste or echo the goal or instruction text as code; start directly with the required code definitions.`
+      ? `${augmentedInstruction}\n\nNote: ${relPath} is currently empty. Generate the complete valid implementation code from scratch. Do not paste or echo the goal or instruction text as code; start directly with the required code definitions.${conventionHint}`
       : augmentedInstruction;
     // The repair loop escalates to the cloud model when the local one keeps repeating a wrong edit (#106).
     const cloudFirst = !!input.preferCloud && (input.allowCloudFallback ?? loadCodingAgentsSettings(workspaceRoot).allowCloudFallback);
@@ -123,7 +210,7 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
         const srInstruction = srTry === 0 ? augmentedInstruction : `${augmentedInstruction}\n\nYour previous SEARCH/REPLACE reply could not be used: ${lastFailureReason}. Reply again with corrected SEARCH/REPLACE blocks: copy every SEARCH line exactly from the excerpt, and put new imports with the other imports at the top of the file.`;
         const srLlmResult = await localLlmPatch({
           filePath: fullPath,
-          instruction: srInstruction,
+          instruction: `${srInstruction}${localOnly}`,
           workspace_root: workspaceRoot,
           sessionId,
           temperature: input.temperature,
@@ -131,6 +218,7 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
           ...(input.think ? { think: input.think } : {}),
           ...(run ? { signal: run.controller.signal } : {}),
           outputFormat: 'search-replace',
+          skipContextGathering,
           contentOverride: windowInfo ? windowInfo.window : patchedContent,
           excerptRange: windowInfo
             ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }
@@ -239,19 +327,21 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
         caTrace('local full/window patch', relPath);
         const llmResult = await localLlmPatch({
           filePath: fullPath,
-          instruction: fileInstruction,
+          instruction: `${fileInstruction}${localOnly}`,
           workspace_root: workspaceRoot,
           sessionId,
           temperature: input.temperature,
           ...(input.model && resolvedModel ? { model: resolvedModel } : {}),
           ...(input.think ? { think: input.think } : {}),
           ...(run ? { signal: run.controller.signal } : {}),
+          skipContextGathering,
           contentOverride: isNewOrEmpty ? '' : (windowInfo ? windowInfo.window : undefined),
           excerptRange: windowInfo
             ? { startLine: windowInfo.startIdx + 1, endLine: windowInfo.endIdx, totalLines: windowInfo.lineCount }
             : undefined,
         });
         if (llmResult.success && llmResult.patch?.trim()) {
+          let fullImportProblems: string[] = [];
           const replyLines = llmResult.patch.split(/\r?\n/);
           const fullLines = patchedContent.split(/\r?\n/);
           const originalWindowLines = windowInfo ? fullLines.slice(windowInfo.startIdx, windowInfo.endIdx) : [];
@@ -267,6 +357,10 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
             lastFailureReason = `Local model (${resolvedModel}) mangled a ${originalWindowLines.length}-line excerpt instead of reproducing it verbatim (duplicated/dropped/reordered lines) — not used`;
           } else if (originalContent && looksLikeHallucinatedReplacement(originalContent, candidatePatch)) {
             lastFailureReason = `Local model (${resolvedModel}) produced a full-file replacement with no trace of the original file's content — likely hallucinated, not used`;
+          } else if ((fullImportProblems = await newImportProblems(relPath, originalContent, candidatePatch, workspaceRoot)).length > 0) {
+            // The SEARCH/REPLACE path already refuses an edit that adds an unresolvable import; a new or fully
+            // regenerated file went through unchecked (live: `from './harness.js'`, a module that does not exist).
+            lastFailureReason = `Local model (${resolvedModel}) wrote a file whose imports do not resolve: ${fullImportProblems.join('; ')}`;
           } else {
             patchedContent = candidatePatch;
             result.modelUsed = localModel;

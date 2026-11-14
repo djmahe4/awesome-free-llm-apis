@@ -72,6 +72,7 @@ export function codeEditCandidates(availableModels: string[], pinned?: string): 
  */
 export function replyBudget(isSearchReplace: boolean, content: string): number {
   if (isSearchReplace) return 2048;
+  if (!content || !content.trim()) return 4096;
   return Math.min(8192, Math.max(1024, Math.ceil((content.length / 3) * 1.3) + 512));
 }
 
@@ -108,6 +109,8 @@ export interface LocalLlmPatchInput {
   think?: 'auto' | 'on' | 'off';
   /** @internal cancels the model call in flight (coding_agents passes its run's abort signal). */
   signal?: AbortSignal;
+  /** @internal skip generic RAG when coding_agents already supplied curated workspace/DAG context. */
+  skipContextGathering?: boolean;
 }
 
 /** Extra reply tokens for a thinking model's reasoning on top of the edit's own budget. */
@@ -230,7 +233,7 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
     // A windowed excerpt already IS the relevant region — skip whole-repo
     // context gathering, which would only dilute a prompt that's already
     // scoped down to exactly what needs editing.
-    const shouldGatherContext = fileExists && CODE_CONTEXT_EXTS.has(targetExt) && !input.excerptRange;
+    const shouldGatherContext = fileExists && CODE_CONTEXT_EXTS.has(targetExt) && !input.excerptRange && !input.skipContextGathering;
 
     if (shouldGatherContext) {
       try {
