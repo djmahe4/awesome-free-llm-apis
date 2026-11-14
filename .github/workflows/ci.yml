@@ -69,7 +69,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install numpy Pillow
+        run: pip install numpy Pillow opencv-python-headless PyMuPDF torch --extra-index-url https://download.pytorch.org/whl/cpu
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
