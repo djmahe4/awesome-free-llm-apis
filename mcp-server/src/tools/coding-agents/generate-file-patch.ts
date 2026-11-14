@@ -25,7 +25,7 @@ import type { RunInfo } from '../../pipeline/middlewares/RunRegistry.js';
 import { applyAnchored } from './anchored-edit.js';
 import { anchoredWindow, applyEdits } from './anchored-edit.js';
 import { buildSymbolContextBlock } from './symbol-graph-cache.js';
-import { buildCodingAgentWorkspaceContext } from '../../harness/coding-agent-context.js';
+import { buildCodingAgentWorkspaceContext, sanitizeContextForCloud } from '../../harness/coding-agent-context.js';
 import { apiFactsFor } from './api-facts.js';
 import { buildExternalContext } from '../../harness/external-context.js';
 import { readAgentThoughtDags, expandAgentThoughtContext } from '../../harness/agent-thought-context.js';
@@ -456,7 +456,7 @@ export async function generateFilePatch(ctx: FilePatchContext): Promise<{ patche
       caTrace('cloud full-file fallback', relPath);
       const { patch: cloudPatch, failureReason } = await generateCodePatchWithCloudLLM(
         fullPath,
-        fileInstruction,
+        sanitizeContextForCloud(fileInstruction),
         patchedContent,
         workspaceRoot,
         sessionId,

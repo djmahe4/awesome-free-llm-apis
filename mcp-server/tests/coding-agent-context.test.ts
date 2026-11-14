@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { buildCodingAgentWorkspaceContext } from '../src/harness/coding-agent-context.js';
+import { buildCodingAgentWorkspaceContext, sanitizeContextForCloud } from '../src/harness/coding-agent-context.js';
 import { assertPatchPathAllowed, isProtectedWritePath } from '../src/harness/write-guard.js';
 import { assertSafe } from '../src/tools/coding-agents/diff.js';
 import { AGENT_THOUGHT_CONTEXT_APPROVAL, buildHypothesisBlackboard, buildTaskDagBlackboard, codingTaskSucceeded, hasAgentThoughtContextApproval, parseTasksMarkdown, validationTasksBlackboard, withAgentThoughtContextApproval, withHypothesisSummary } from '../src/tools/coding-agents/tasks.js';
@@ -200,6 +200,22 @@ describe('coding-agent live context', () => {
     expect(context).toContain('event-1');
     expect(context).toContain('reader failure payload E-42');
     expect(context).toContain('values preserved');
+
+    // Cloud safety: row values can be suppressed via option or sanitized before cloud prompt dispatch
+    const cloudSafeContext = buildCodingAgentWorkspaceContext({
+      workspaceRoot: root,
+      query: 'reader failure events',
+      debugKeywords: ['E-42'],
+      includeRowValues: false,
+    });
+    expect(cloudSafeContext).toContain('failure_events');
+    expect(cloudSafeContext).toContain('row values redacted');
+    expect(cloudSafeContext).not.toContain('reader failure payload E-42');
+
+    const sanitized = sanitizeContextForCloud(context);
+    expect(sanitized).toContain('failure_events');
+    expect(sanitized).toContain('row values redacted for cloud');
+    expect(sanitized).not.toContain('reader failure payload E-42');
   });
 });
 

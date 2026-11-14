@@ -14,6 +14,8 @@ export interface CodingAgentContextOptions {
   fileOverrides?: ReadonlyMap<string, string>;
   structureDag?: FileStructureDag;
   maxChars?: number;
+  /** Whether to sample actual SQLite row values (local only) or schema only (cloud safe). Defaults to true. */
+  includeRowValues?: boolean;
 }
 
 const SOURCE_EXT = /\.(?:ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|cs|rb|php|swift|kt|c|cpp|h|hpp)$/i;
@@ -115,7 +117,7 @@ function readDataContext(filePath: string, maxChars: number, query: string, debu
   }
 }
 
-function sampleDatabase(dbInfo: ScannedDb, terms: string[], budget: number): string {
+function sampleDatabase(dbInfo: ScannedDb, terms: string[], budget: number, includeRowValues = true): string {
   let db: DatabaseSync | undefined;
   try {
     db = new DatabaseSync(dbInfo.path, { readOnly: true });
@@ -125,10 +127,12 @@ function sampleDatabase(dbInfo: ScannedDb, terms: string[], budget: number): str
     })).sort((a, b) => b.score - a.score || a.table.name.localeCompare(b.table.name));
     const rows: string[] = [`SQLite ${dbInfo.path}`];
     for (const { table } of ranked.slice(0, 3)) {
-      const quoted = `"${table.name.replace(/"/g, '""')}"`;
-      const samples = db.prepare(`SELECT * FROM ${quoted} LIMIT 5`).all();
       rows.push(`Table ${table.name} (${table.rowCount} rows; ${table.columns.map(column => `${column.name} ${column.type}`).join(', ')})`);
-      for (const row of samples) rows.push(JSON.stringify(row));
+      if (includeRowValues) {
+        const quoted = `"${table.name.replace(/"/g, '""')}"`;
+        const samples = db.prepare(`SELECT * FROM ${quoted} LIMIT 5`).all();
+        for (const row of samples) rows.push(JSON.stringify(row));
+      }
       const size = rows.join('\n').length;
       if (size >= budget) break;
     }
@@ -138,6 +142,21 @@ function sampleDatabase(dbInfo: ScannedDb, terms: string[], budget: number): str
   } finally {
     try { db?.close(); } catch { }
   }
+}
+
+/**
+ * Strips raw database row sample values from workspace context before it is
+ * passed to external/cloud LLM providers, preserving the schema (tables and columns).
+ */
+export function sanitizeContextForCloud(context: string): string {
+  if (!context) return context;
+  return context.replace(
+    /\[Live database sample; values preserved: ([^\]]+)\]\n([\s\S]*?)(?=\n\n\[|$)/g,
+    (_match, rel, body) => {
+      const schemaLines = body.split('\n').filter((line: string) => !line.trim().startsWith('{'));
+      return `[Live database schema (row values redacted for cloud): ${rel}]\n${schemaLines.join('\n')}`;
+    }
+  );
 }
 
 export function buildCodingAgentWorkspaceContext(options: CodingAgentContextOptions): string {
@@ -368,8 +387,13 @@ export function buildCodingAgentWorkspaceContext(options: CodingAgentContextOpti
     .map(entry => ({ ...entry, score: scoreText(`${entry.rel} ${entry.db.tables.map(table => table.name).join(' ')}`, terms) }))
     .sort((a, b) => b.score - a.score || a.rel.localeCompare(b.rel));
   for (const entry of dbs.filter(item => item.score > 0).slice(0, 2)) {
-    const data = sampleDatabase(entry.db, terms, 3000);
-    if (data) blocks.push(`[Live database sample; values preserved: ${entry.rel}]\n${data}`);
+    const data = sampleDatabase(entry.db, terms, 3000, options.includeRowValues !== false);
+    if (data) {
+      const header = options.includeRowValues !== false
+        ? `[Live database sample; values preserved: ${entry.rel}]`
+        : `[Live database schema (row values redacted): ${entry.rel}]`;
+      blocks.push(`${header}\n${data}`);
+    }
   }
   if (inventory.length) {
     const text = inventory.join('\n');
