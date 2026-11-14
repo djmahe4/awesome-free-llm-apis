@@ -97,4 +97,22 @@ describe('WorkspaceIndexer Integration', () => {
         expect(result.indexedFiles).toBe(1);
         expect(result.skippedFiles).toBeGreaterThanOrEqual(1);
     });
+
+    it('should deduplicate concurrent indexWorkspace calls on the same workspace root', async () => {
+        writeFileSync(path.join(testWs, 'test1.ts'), 'export const a = 1;');
+        writeFileSync(path.join(testWs, 'test2.md'), '# Markdown');
+
+        const indexerA = new WorkspaceIndexer(testWs);
+        const indexerB = new WorkspaceIndexer(testWs);
+
+        // Run both concurrently
+        const [resA, resB] = await Promise.all([
+            indexerA.indexWorkspace(testWs, false),
+            indexerB.indexWorkspace(testWs, false)
+        ]);
+
+        expect(resA).toBeDefined();
+        expect(resB).toBeDefined();
+        expect(resA.totalFiles).toBe(resB.totalFiles);
+    });
 });

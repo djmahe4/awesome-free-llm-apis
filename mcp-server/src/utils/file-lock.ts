@@ -42,7 +42,7 @@ async function reapIfStale(lockPath: string): Promise<void> {
 
     let shouldReap = false;
     if (hasValidPid) {
-        shouldReap = !isPidAlive(holderPid);
+        shouldReap = !isPidAlive(holderPid) || age > 30000;
     } else {
         // Fallback for corrupted/unreadable locks: break lock if older than 30 seconds
         shouldReap = age > 30000;
@@ -122,7 +122,7 @@ export function withFileLockSync<T>(filePath: string, fn: () => T, timeoutMs = 5
                     try { holderPid = parseInt(fsSync.readFileSync(lockPath, 'utf8'), 10); } catch {}
                     const age = Date.now() - stat.mtimeMs;
                     const hasValidPid = Number.isFinite(holderPid) && holderPid > 0;
-                    if ((hasValidPid && !isPidAlive(holderPid)) || (!hasValidPid && age > 30000)) {
+                    if ((hasValidPid && (!isPidAlive(holderPid) || age > 30000)) || (!hasValidPid && age > 30000)) {
                         try { fsSync.unlinkSync(lockPath); } catch {}
                     }
                 } catch {}

@@ -17,6 +17,7 @@ export interface IndexingResult {
 
 export class WorkspaceIndexer {
     private workspaceScanner: WorkspaceScanner;
+    private static activeIndexingByRoot = new Map<string, Promise<IndexingResult>>();
 
     constructor(workspaceRoot: string) {
         this.workspaceScanner = new WorkspaceScanner(workspaceRoot);
@@ -24,9 +25,27 @@ export class WorkspaceIndexer {
 
     /**
      * Proactively index the workspace files.
-     * Uses hash-based tracking to avoid redundant indexing.
+     * Uses hash-based tracking to avoid redundant indexing and deduplicates concurrent runs.
      */
     async indexWorkspace(workspaceRoot: string, force: boolean = false): Promise<IndexingResult> {
+        const canonicalRoot = path.resolve(workspaceRoot);
+        if (!force) {
+            const inFlight = WorkspaceIndexer.activeIndexingByRoot.get(canonicalRoot);
+            if (inFlight) {
+                return inFlight;
+            }
+        }
+
+        const runPromise = this._runIndexWorkspace(canonicalRoot, force);
+        WorkspaceIndexer.activeIndexingByRoot.set(canonicalRoot, runPromise);
+        try {
+            return await runPromise;
+        } finally {
+            WorkspaceIndexer.activeIndexingByRoot.delete(canonicalRoot);
+        }
+    }
+
+    private async _runIndexWorkspace(workspaceRoot: string, force: boolean = false): Promise<IndexingResult> {
         const wsHash = await this.workspaceScanner.getWorkspaceHash(workspaceRoot);
 
         if (force) {

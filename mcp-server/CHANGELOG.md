@@ -32,7 +32,7 @@
 
 - **Strict Path Confinement**: Hardened directory traversal guards across reverse tool, file outlines, scanner, and harness workspace paths.
 - **PR #174 Review Hardening**: Bounded audio stem separation timeout with real-time polling progress heartbeat; tightened Ollama model target validation against malformed specifiers; preserved backward compatibility for `pauseBeforeMultiFile` (batch execution by default); broadened `diffValueHints` parsing across multiple test framework output formats (`-/+`, `+/-`, `Expected:`/`Received:`); safeguarded global `Module._load` hooking in `api-trap` preload; improved repair loop fallback tracking readability; and expanded `verify-cache` size limit to 128 entries to support deep repair iterations.
-- **Atomic Concurrency & Lock Resilience**: Cross-platform file locking (`src/utils/file-lock.ts`) and safe concurrency primitives preventing race conditions during parallel agent executions.
+- **Atomic Concurrency & Lock Resilience**: Cross-platform file locking (`src/utils/file-lock.ts`) and safe concurrency primitives preventing race conditions during parallel agent executions; in-process promise deduplication in `WorkspaceIndexer` preventing redundant concurrent index runs; hardened stale lock reaping when lock age exceeds 30s; and gated expensive whole-tree workspace scans behind `scanWorkspace: true` in `cyber_tool` to prevent 90s test timeouts.
 - **CI & Sandbox Optimization**: Streamlined CI workflows to trigger specifically on PR merges; untracked transient test fixtures.
 
 ### 🌐 Providers & Models
