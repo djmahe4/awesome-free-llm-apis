@@ -1010,13 +1010,18 @@ async function runSteps(
         actionNames = fromGoal.length > 0 ? fromGoal : ['whois', 'dig', 'robots_txt', 'check_headers'];
       }
 
-      const hostMatches = [...stepGoal.matchAll(/\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b/gi)]
-        .map(m => m[0].toLowerCase());
-      const preferredHost = hostMatches.find(h =>
-        h.includes('newrelic') || h.endsWith('.nr-data.net') || h.endsWith('.nr-ops.net')
-      ) ?? (typeof constraints.target === 'string' ? constraints.target : undefined)
-        ?? hostMatches[0]
-        ?? 'docs.newrelic.com';
+      const hostMatches = [...stepGoal.matchAll(/\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b/gi)].map(m => m[0].toLowerCase());
+
+      // Prioritize explicit constraints, then the first host found in the goal, then an optional env/config default
+      const explicitTarget = typeof constraints.target === 'string' && constraints.target.trim()
+	  ? constraints.target.trim().toLowerCase()
+	  : undefined;
+
+      const preferredHost =
+	  explicitTarget ??
+	  hostMatches[0] ??
+	  process.env.DEFAULT_TARGET_HOST; // Optional: leave undefined if no default is desired
+
 
       const payload = {
         action: 'run_action' as const,
