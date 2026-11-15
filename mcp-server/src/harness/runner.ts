@@ -952,13 +952,13 @@ async function runSteps(
       }).catch(() => {});
     }
 
-    // P5b — a role whose declared tool is 'cyber_tool' attaches to a
-    // detached osint scan (gatedDetach) instead of completing synchronously.
-    // Fixes the real design gap found while scoping P5b: the step engine
-    // had no way to represent "attached, still running" as a first-class
-    // pause with its own resume semantics — see HarnessRun.pendingMonitor
-    // and resumeMonitoredRun below for the other half of this.
-    if (decl.roles[role]?.tools?.[0]?.tool === 'cyber_tool') {
+    const firstToolRule = decl.roles[role]?.tools?.[0];
+    const isCyberFirst = firstToolRule?.tool === 'cyber_tool';
+    const cyberWantsRunAction = isCyberFirst
+      && Array.isArray(firstToolRule?.actions)
+      && firstToolRule.actions.includes('run_action');
+
+    if (isCyberFirst && !cyberWantsRunAction) {
       const target = stepInputText(i, originalGoal, handoff, i === startIndex ? memoryContext : undefined).trim();
       const detachPayload = { action: 'osint', target, autoSearch: true, sessionId: registryKey };
       const detachArgsHash = hashArgs(detachPayload);
@@ -972,7 +972,7 @@ async function runSteps(
       await beginTaskAttempt(store, originalGoal, stepId, `step ${callId}: attaching cyber_tool osint scan on '${target}'`);
       const attach = await gatedDetach(store, run, decl, role, 'cyber_tool', 'osint', detachPayload, 500, callId, async () => {
         const { cyberTool } = await import('../tools/cyber-tool.js');
-        await cyberTool(detachPayload as any); // returns almost immediately — the actual search runs detached inside cyber-tool.ts's own IIFE
+        await cyberTool(detachPayload as any);
         return { handle: `osint:${registryKey}:${target}` };
       });
       if (!attach.ok) {
@@ -982,8 +982,6 @@ async function runSteps(
         return { content: lastContent, lastRole, finalHandoff: handoff };
       }
       run.status = 'monitoring';
-      // Full plan id — resumeMonitoredRun's endTaskAttempt uses it as the
-      // tasks.md cursor (strips to the base role for its own traces/handoff).
       run.pendingMonitor = { monitorId: attach.monitorId, stepIndex: i, role: stepId };
       await endTaskAttempt(store, originalGoal, stepId, 'pending', `step ${callId}: attached, monitoring (${attach.monitorId})`);
       return { content: lastContent, lastRole, finalHandoff: handoff };
@@ -993,7 +991,68 @@ async function runSteps(
     let goalTokens = 0;
     let stepContent: string | undefined;
 
-    if (role === 'scraper') {
+    if (cyberWantsRunAction) {
+      const stepGoal = stepInputText(i, originalGoal, handoff, i === startIndex ? memoryContext : undefined);
+      const constraints = (firstToolRule?.constraints ?? {}) as Record<string, unknown>;
+      const bridge = typeof constraints.bridge === 'string' && constraints.bridge
+        ? constraints.bridge
+        : (decl.cyberTools?.[0] ?? 'katana');
+      const authorization = typeof constraints.authorization === 'string' && constraints.authorization
+        ? (constraints.authorization as 'ctf' | 'lab' | 'consent')
+        : 'consent';
+
+      const KNOWN_ACTIONS = ['whois', 'dig', 'robots_txt', 'check_headers', 'nmap', 'port_scan'];
+      let actionNames: string[];
+      if (Array.isArray(constraints.actionNames) && constraints.actionNames.length > 0) {
+        actionNames = constraints.actionNames.filter((a): a is string => typeof a === 'string');
+      } else {
+        const fromGoal = KNOWN_ACTIONS.filter(a => stepGoal.toLowerCase().includes(a));
+        actionNames = fromGoal.length > 0 ? fromGoal : ['whois', 'dig', 'robots_txt', 'check_headers'];
+      }
+
+      const hostMatches = [...stepGoal.matchAll(/\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b/gi)]
+        .map(m => m[0].toLowerCase());
+      const preferredHost = hostMatches.find(h =>
+        h.includes('newrelic') || h.endsWith('.nr-data.net') || h.endsWith('.nr-ops.net')
+      ) ?? (typeof constraints.target === 'string' ? constraints.target : undefined)
+        ?? hostMatches[0]
+        ?? 'docs.newrelic.com';
+
+      const payload = {
+        action: 'run_action' as const,
+        bridge,
+        authorization,
+        target: preferredHost,
+        actionNames,
+        workspaceRoot: run.workspaceRoot ?? workspaceRoot,
+        sessionId: registryKey,
+      };
+
+      await beginTaskAttempt(store, originalGoal, stepId, `step ${callId}: cyber_tool run_action ${actionNames.join(',')} on ${preferredHost}`);
+      goalTokens = contextManager.countStringTokens(stepGoal);
+      const estimate = goalTokens + 2000;
+      callResult = await gatedCall(
+        store, run, decl, role, 'cyber_tool', 'run_action', payload, estimate, callId,
+        async () => {
+          const { cyberTool } = await import('../tools/cyber-tool.js');
+          const results: unknown[] = [];
+          for (const actionName of actionNames) {
+            const one = await cyberTool({
+              action: 'run_action',
+              bridge,
+              authorization,
+              target: preferredHost,
+              actionName,
+              workspaceRoot: payload.workspaceRoot,
+              sessionId: registryKey,
+            } as any);
+            results.push({ actionName, result: one });
+          }
+          return { response: JSON.stringify(results, null, 2) };
+        }
+      );
+      stepContent = applyResearchResult(run, role, callResult, goalTokens, isAborted()).content;
+    } else if (role === 'scraper') {
       // Escalation step (P4b): its input is a URL extracted from the prior
       // handoff, not a text prompt — decideEscalation already confirmed one
       // exists before this step was ever inserted, but re-check defensively.

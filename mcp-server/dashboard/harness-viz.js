@@ -163,7 +163,7 @@ class HarnessVisualizer {
       <div style="font-weight:700;color:${node.color};">${this.esc(node.label)}</div>
       <div style="font-size:.7rem;color:var(--text-secondary);">${this.esc(node.sub || node.type)}</div>
       ${node.tier ? `<span class="badge badge-cyan" style="margin-top:3px;font-size:0.62rem;">Wiki ${this.esc(node.tier)}</span>` : ''}
-      ${node.data?.findings ? `<div style="margin-top:4px;font-size:.68rem;color:var(--text-muted);">${this.esc(node.data.findings.slice(0, 100))}…</div>` : ''}
+      ${node.data?.findings ? `<div style="margin-top:4px;font-size:.68rem;color:var(--text-muted);white-space:pre-wrap;">${this.esc(this.formatFindings(node.data.findings).slice(0, 100))}…</div>` : ''}
     `;
   }
 
@@ -176,7 +176,7 @@ class HarnessVisualizer {
         <span style="font-size:.72rem;color:var(--text-muted);">${this.esc(node.sub || '')}</span>
         <button class="btn btn-secondary btn-sm" onclick="this.parentElement.parentElement.innerHTML = 'Inspect metadata, claims, and nexus rays by clicking any node.'" style="margin-left:auto;padding:2px 8px;font-size:.7rem;">Reset</button>
       </div>
-      ${node.data?.findings ? `<div style="width:100%;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:.72rem;background:rgba(0,0,0,0.3);padding:6px;border-radius:4px;">${this.esc(node.data.findings)}</div>` : ''}
+      ${node.data?.findings ? `<div style="width:100%;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:.72rem;background:rgba(0,0,0,0.3);padding:6px;border-radius:4px;white-space:pre-wrap;">${this.esc(this.formatFindings(node.data.findings))}</div>` : ''}
     `;
   }
 
@@ -643,9 +643,45 @@ class HarnessVisualizer {
   }
 
   esc(str) {
+    let s = str;
+    if (s != null && typeof s === 'object') {
+      try {
+        s = JSON.stringify(s);
+      } catch {
+        s = String(s);
+      }
+    }
     const div = document.createElement('div');
-    div.textContent = str || '';
+    div.textContent = s || '';
     return div.innerHTML;
+  }
+
+  formatFindings(findings) {
+    if (findings == null || findings === '') return '';
+    if (typeof findings === 'string') return findings;
+    if (Array.isArray(findings)) {
+      return findings.map(f => {
+        if (typeof f === 'string') return f;
+        if (f && typeof f === 'object') {
+          if (typeof f.claim === 'string') return f.claim;
+          try {
+            return JSON.stringify(f);
+          } catch {
+            return String(f);
+          }
+        }
+        return String(f);
+      }).join('\n');
+    }
+    if (typeof findings === 'object') {
+      if (typeof findings.claim === 'string') return findings.claim;
+      try {
+        return JSON.stringify(findings);
+      } catch {
+        return String(findings);
+      }
+    }
+    return String(findings);
   }
 }
 

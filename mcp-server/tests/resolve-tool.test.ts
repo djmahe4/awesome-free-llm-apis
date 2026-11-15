@@ -35,6 +35,25 @@ describe('matchTools', () => {
   it('unrelated prompt matches nothing', () => {
     expect(matchTools('how do I bake bread', REG)).toEqual([]);
   });
+  it('matches via registry descriptions when provided', () => {
+    const desc = {
+      sqlmap: 'sqlmap is an open-source tool for automating SQL injection and database takeover',
+      nmap: 'nmap is a network scanning tool for discovering hosts and services on a network.',
+    };
+    const m = matchTools('automating SQL injection database takeover', REG, desc);
+    expect(m[0]).toMatchObject({ name: 'sqlmap', kind: 'desc' });
+    expect(splitMatches(m).confident.map(x => x.name)).toEqual(['sqlmap']);
+    const n = matchTools('discovering hosts and services on a network', REG, desc);
+    expect(n[0]).toMatchObject({ name: 'nmap', kind: 'desc' });
+  });
+  it('description matches lose to exact name matches', () => {
+    const desc = { nmap: 'network scanning tool for hosts' };
+    const m = matchTools('tell me about nmap', REG, desc);
+    expect(m[0]).toMatchObject({ name: 'nmap', kind: 'exact' });
+  });
+  it('without a descriptions map, description-only prompts still miss', () => {
+    expect(matchTools('automating SQL injection database takeover', REG)).toEqual([]);
+  });
   it('intent and source detection', () => {
     expect(detectIntent('what libraries does it use')).toBe('dependencies');
     expect(detectIntent('does it ship any skills')).toBe('skills');
@@ -49,11 +68,12 @@ const ok = (data: any, url = 'https://x') => ({ found: true as const, data, url 
 const miss = (reason: any, detail = 'd', hints?: any) => ({ found: false as const, reason, detail, hints });
 const understood = { meta: { fullName: 'o/r', description: 'desc', htmlUrl: 'https://github.com/o/r', defaultBranch: 'main', topics: [], stars: 1, archived: false, fork: false }, treeTruncated: false, fileCount: 1, manifests: [], dependencies: [{ name: 'left', ecosystem: 'npm' as const, source: 'package.json' }], skills: { total: 3, roots: ['.claude/skills'], samples: [] }, mcp: { configFiles: ['.mcp.json'], serverFiles: [] }, usage: { install: [], run: [] }, notes: [] };
 
-function deps(over: Partial<{ gh: any; docker: any; apt: any }> = {}): ResolveDeps & { calls: string[] } {
+function deps(over: Partial<{ gh: any; docker: any; apt: any; descriptions?: Record<string, string> }> = {}): ResolveDeps & { calls: string[] } {
   const calls: string[] = [];
   return {
     calls,
     loadRegistry: async () => REG,
+    loadDescriptions: async () => over.descriptions ?? {},
     github: { understand: async (o: string, r: string) => { calls.push(`gh:${o}/${r}`); return over.gh ?? ok(understood); } },
     docker: { resolve: async (p: any) => { calls.push(`docker:${p.name}`); return over.docker ?? miss('not_found'); } },
     apt: { resolve: async (p: any) => { calls.push(`apt:${p.name}`); return over.apt ?? miss('not_found'); } },
@@ -114,6 +134,12 @@ describe('resolveTool', () => {
     const r: any = await resolveTool({ prompt: 'hexstrik-ai dependencies', sessionId: 's' }, d);
     expect(r).toMatchObject({ status: 'question', options: ['hexstrike-ai'] });
     expect(d.calls).toEqual([]);
+  });
+
+  it('a unique description hit is confident and looked up without asking', async () => {
+    const d = deps({ descriptions: { sqlmap: 'automating SQL injection and database takeover' } });
+    const r: any = await resolveTool({ prompt: 'automating SQL injection database takeover', sessionId: 's' }, d);
+    expect(r).toMatchObject({ status: 'answer', tool: 'sqlmap', source: 'github' });
   });
 
   it('unverified same-name candidates become a question; confirming is labelled user-confirmed', async () => {

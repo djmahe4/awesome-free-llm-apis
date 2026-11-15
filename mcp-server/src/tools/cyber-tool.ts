@@ -337,11 +337,13 @@ export async function cyberTool(input: CyberToolInput) {
         }
         if (action === 'list_tools') {
             const tools = await CyberToolsRegistry.loadRegistry();
+            const { enrichToolsWithDescriptions } = await import('../utils/cyber-tools-index.js');
+            const enriched = await enrichToolsWithDescriptions(tools);
             result = {
                 success: true,
-                totalTools: Object.keys(tools).length,
+                totalTools: Object.keys(enriched).length,
                 registryPath: CyberToolsRegistry.getRegistryFilePath(),
-                tools
+                tools: enriched
             };
         } else if (action === 'get_tool') {
             if (!input.toolName) throw new Error('toolName parameter required for get_tool action');

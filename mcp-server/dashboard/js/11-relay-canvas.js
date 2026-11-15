@@ -391,7 +391,7 @@ if (relayCanvas) {
         relayTooltip.innerHTML = `
           <div style="font-weight:700;color:${found.color};">${esc(found.label)}</div>
           <div style="font-size:.7rem;color:var(--text-secondary);">${esc(found.sub || found.type)}</div>
-          ${found.data?.findings ? `<div style="margin-top:4px;font-size:.68rem;color:var(--text-muted);">${esc(found.data.findings.slice(0, 100))}…</div>` : ''}
+          ${found.data?.findings ? `<div style="margin-top:4px;font-size:.68rem;color:var(--text-muted);white-space:pre-wrap;">${esc(formatFindings(found.data.findings).slice(0, 100))}…</div>` : ''}
         `;
       }
     } else {
@@ -413,7 +413,7 @@ if (relayCanvas) {
             <span style="font-size:.72rem;color:var(--text-muted);">${esc(relaySelectedNode.sub || '')}</span>
             <button class="btn btn-secondary btn-sm" onclick="this.parentElement.parentElement.innerHTML = 'Inspect metadata and inter-agent relays by clicking any canvas node.'" style="margin-left:auto;padding:2px 8px;font-size:.7rem;">Reset</button>
           </div>
-          ${relaySelectedNode.data?.findings ? `<div style="width:100%;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:.72rem;background:rgba(0,0,0,0.3);padding:6px;border-radius:4px;">${esc(relaySelectedNode.data.findings)}</div>` : ''}
+          ${relaySelectedNode.data?.findings ? `<div style="width:100%;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:.72rem;background:rgba(0,0,0,0.3);padding:6px;border-radius:4px;white-space:pre-wrap;">${esc(formatFindings(relaySelectedNode.data.findings))}</div>` : ''}
         `;
       }
     }

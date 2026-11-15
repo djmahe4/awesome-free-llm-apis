@@ -6,6 +6,7 @@ import { AptPackageClient } from '../utils/AptPackageClient.js';
 import { GithubRepoClient } from '../utils/GithubRepoClient.js';
 import { PackageRegistryClient } from '../utils/PackageRegistryClient.js';
 import { detectIntent, detectSource, matchTools, splitMatches, type Intent, type SourceName } from '../utils/ToolResolver.js';
+import { loadToolDescriptions } from '../utils/cyber-tools-index.js';
 import type { GroundingHint, Lookup } from '../utils/grounding.js';
 
 /**
@@ -32,6 +33,7 @@ export interface ResolveDeps {
   apt: Pick<AptPackageClient, 'resolve'>;
   packages: Pick<PackageRegistryClient, 'enrich'>;
   loadRegistry: () => Promise<Record<string, { url: string; urlType?: string }>>;
+  loadDescriptions?: () => Promise<Record<string, string>>;
 }
 
 interface SessionState {
@@ -172,7 +174,8 @@ async function resolveToolInner(input: ResolveToolInput, deps: ResolveDeps): Pro
   }
   if (!tool && pending?.kind === 'tool' && choice) tool = byLower.get(choice.toLowerCase());
   if (!tool && prompt) {
-    const { confident, suggestions } = splitMatches(matchTools(prompt, registry));
+    const descriptions = await (deps.loadDescriptions ?? loadToolDescriptions)();
+    const { confident, suggestions } = splitMatches(matchTools(prompt, registry, descriptions));
     if (confident.length === 1) tool = confident[0].name;
     else if (confident.length > 1) {
       state.pending = { kind: 'tool', options: confident.map(m => m.name), intent };

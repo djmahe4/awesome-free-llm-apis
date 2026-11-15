@@ -9,7 +9,7 @@ const REG = {
   ffuf: { url: 'https://github.com/ffuf/ffuf' },
 };
 const nf = async () => ({ found: false, reason: 'not_found', detail: 'stub' });
-const deps = { loadRegistry: async () => REG, github: { understand: nf }, docker: { resolve: nf }, apt: { resolve: nf }, packages: { enrich: async (x: unknown) => x } } as unknown as ResolveDeps;
+const deps = { loadRegistry: async () => REG, loadDescriptions: async () => ({}), github: { understand: nf }, docker: { resolve: nf }, apt: { resolve: nf }, packages: { enrich: async (x: unknown) => x } } as unknown as ResolveDeps;
 
 beforeEach(() => resetResolveSessions());
 

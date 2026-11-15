@@ -88,7 +88,7 @@ describe.skipIf(!existsSync(APPSEC_DECL_PATH))('appsec harness declaration (T3)'
 
   it('allows cyber_tool/run_action on the katana bridge for recon and security_analyst, fail-closed everywhere else', async () => {
     const decl = await loadHarnessDeclaration('appsec', CTF_KATANA_ROOT);
-    const katanaArgs = { bridge: 'katana', actionName: 'port_scan', target: 'example.com' };
+    const katanaArgs = { bridge: 'katana', actionName: 'port_scan', target: 'example.com', authorization: 'consent' };
 
     expect(evaluate(decl, 'recon', 'cyber_tool', 'run_action', katanaArgs).kind).toBe('allow');
     expect(evaluate(decl, 'security_analyst', 'cyber_tool', 'run_action', katanaArgs).kind).toBe('allow');

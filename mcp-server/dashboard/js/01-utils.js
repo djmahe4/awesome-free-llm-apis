@@ -13,9 +13,45 @@ function modelBadge(model, provider) {
 
 function esc(str) {
   if (str == null || str === '') return '';
+  let s = str;
+  if (typeof s === 'object') {
+    try {
+      s = JSON.stringify(s);
+    } catch {
+      s = String(s);
+    }
+  }
   const d = document.createElement('div');
-  d.textContent = String(str);
+  d.textContent = String(s);
   return d.innerHTML;
+}
+
+function formatFindings(findings) {
+  if (findings == null || findings === '') return '';
+  if (typeof findings === 'string') return findings;
+  if (Array.isArray(findings)) {
+    return findings.map(f => {
+      if (typeof f === 'string') return f;
+      if (f && typeof f === 'object') {
+        if (typeof f.claim === 'string') return f.claim;
+        try {
+          return JSON.stringify(f);
+        } catch {
+          return String(f);
+        }
+      }
+      return String(f);
+    }).join('\n');
+  }
+  if (typeof findings === 'object') {
+    if (typeof findings.claim === 'string') return findings.claim;
+    try {
+      return JSON.stringify(findings);
+    } catch {
+      return String(findings);
+    }
+  }
+  return String(findings);
 }
 
 // Single shared HTML escaper (loaded before dag-blackboard.js and
