@@ -30,7 +30,9 @@ export function getMcpDir(): string {
  * and `-` only, no leading dot, no `..`, at most 64 characters, never empty.
  */
 export function sanitizeSessionId(id: string): string {
-  let s = String(id ?? '').replace(/[^\w.-]+/g, '_').replace(/\.{2,}/g, '_').replace(/^[._-]+/, '');
+  const trimmed = String(id ?? '').trim();
+  if (trimmed === '__no_ws__') return '__no_ws__';
+  let s = trimmed.replace(/[^\w.-]+/g, '_').replace(/\.{2,}/g, '_').replace(/^\.+/, '');
   s = s.slice(0, 64);
   return s || 'session';
 }

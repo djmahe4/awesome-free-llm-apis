@@ -215,6 +215,76 @@ function renderLocalPatchCard(res) {
   return html;
 }
 
+function extractConceptAnimationData(res) {
+  if (!res) return null;
+  if (typeof res === 'object') {
+    if (res.htmlBundle || (res.artifactId && res.concept)) return res;
+    if (res.data && (res.data.htmlBundle || (res.data.artifactId && res.data.concept))) return res.data;
+    if (Array.isArray(res.content) && res.content[0]?.text) {
+      try {
+        const parsed = JSON.parse(res.content[0].text);
+        return extractConceptAnimationData(parsed);
+      } catch {}
+    }
+  }
+  return null;
+}
+
+function renderConcept3DCard(rawRes) {
+  const res = extractConceptAnimationData(rawRes);
+  if (!res || (!res.htmlBundle && !res.artifactId)) return '';
+  const artifactId = res.artifactId || '';
+  const concept = res.concept || 'Concept 3D Visualization';
+  const style = res.style || 'cyber';
+  const facts = res.groundedFacts || [];
+
+  const iframeSrc = artifactId
+    ? `/api/3d-animations/${encodeURIComponent(artifactId)}?format=html`
+    : '';
+
+  let html = `<div class="card concept-3d-card" style="margin-top:16px; border-color: var(--accent-purple); overflow:hidden;">`;
+  html += `<div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">`;
+  html += `<div>✨ 3D Concept Animator: <span class="badge badge-purple">${esc(style)}</span> <span class="badge badge-cyan">${esc(concept)}</span></div>`;
+  if (artifactId) {
+    html += `<a href="/api/3d-animations/${encodeURIComponent(artifactId)}?format=html" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration:none;">Open in Tab ↗</a>`;
+  }
+  html += `</div>`;
+
+  html += `<div class="card-body" style="padding:0; position:relative; background:#000;">`;
+  if (iframeSrc) {
+    html += `<iframe src="${iframeSrc}" style="width:100%; height:420px; border:none; display:block;" sandbox="allow-scripts allow-same-origin"></iframe>`;
+  } else if (res.htmlBundle) {
+    const safeSrcdoc = String(res.htmlBundle).replace(/"/g, '&quot;');
+    html += `<iframe srcdoc="${safeSrcdoc}" style="width:100%; height:420px; border:none; display:block;" sandbox="allow-scripts"></iframe>`;
+  }
+  html += `</div>`;
+
+  if (facts && facts.length > 0) {
+    html += `<div class="card-footer" style="padding:8px 12px; font-size:0.75rem; background:rgba(0,0,0,0.3); border-top:1px solid var(--glass-border);">`;
+    html += `<strong>🔍 Grounded Sources (${facts.length}):</strong><div style="margin-top:4px; display:flex; flex-direction:column; gap:2px;">`;
+    html += facts.map(f => `<div>• <a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-cyan); text-decoration:none;">${esc(f.title)}</a> <span style="color:var(--text-muted); font-size:0.7rem;">via ${esc(f.provider)}</span></div>`).join('');
+    html += `</div></div>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.concept-fullscreen-btn');
+    if (btn && btn.dataset.bundle) {
+      const html = decodeURIComponent(btn.dataset.bundle);
+      const w = window.open('about:blank', '_blank');
+      if (w) {
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+      }
+    }
+  });
+}
+
 async function renderResponse(data) {
   const result = data.result ?? data;
   let baseHtml = '';
@@ -237,6 +307,9 @@ async function renderResponse(data) {
 
   let extras = '';
   if (result && typeof result === 'object') {
+    if (result.htmlBundle || (result.data && result.data.htmlBundle)) {
+      extras += renderConcept3DCard(result.htmlBundle ? result : result.data);
+    }
     if (result.feedback && result.feedback.driftScore !== undefined) {
       extras += renderQuantumFeedback(result.feedback);
     }

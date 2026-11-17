@@ -144,7 +144,7 @@
   window.initMlLearningTab = function () {
     startOpticsLoop();
     startDagLoop();
-    renderDepthMap();
+    if (typeof renderDepthMap === 'function') renderDepthMap();
     if (window.MLStateBus.dag.nodes.length === 0) {
       loadModelGraph(window.MLStateBus.model.path);
     }
@@ -155,7 +155,7 @@
       if (mlPanel.classList.contains('active')) {
         startOpticsLoop();
         startDagLoop();
-        renderDepthMap();
+        if (typeof renderDepthMap === 'function') renderDepthMap();
       } else {
         stopOpticsLoop();
         stopDagLoop();
@@ -3146,7 +3146,7 @@
   recalculateMatrix();
   renderSvdBars();
   drawInversionPrototype([0.824, -0.412, 0.991, -0.105], 0);
-  renderDepthMap();
+  if (typeof renderDepthMap === 'function') renderDepthMap();
   startDagLoop();
   bootLoad = true;
   loadModelGraph(window.MLStateBus.model.path).finally(() => { bootLoad = false; });
