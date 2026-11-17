@@ -52,7 +52,12 @@ const TOOLS = [
     id: 'manage_memory', label: 'manage_memory', icon: '🧠',
     tag: 'Memory',
     fields: [
-      { id: 'action',         label: 'Action', type: 'select', options: ['search','list','stats','clear','wiki_search','wiki_write','wiki_list','wiki_read','node_add','node_link','node_list','node_get','node_review','graph_query','adr_write','adr_list','eisenhower_add','eisenhower_list','eisenhower_complete','pomodoro_start','pomodoro_stop','pomodoro_list'] },
+      { id: 'action',         label: 'Action', type: 'select', options: ['search','list','stats','clear','wiki_search','wiki_write','wiki_list','wiki_read','node_add','node_link','node_list','node_get','node_review','graph_query','adr_write','adr_list','eisenhower_add','eisenhower_list','eisenhower_complete','pomodoro_start','pomodoro_stop','pomodoro_list','audit_file','audit_documentation'] },
+      { id: 'workspace_root', label: 'Workspace Root', type: 'text', placeholder: 'C:/path/to/workspace', showFor: ['audit_file','audit_documentation'] },
+      { id: 'filePaths',      label: 'File Paths (comma-separated)', type: 'text', placeholder: 'src/server.ts, docs/index.md', showFor: ['audit_file','audit_documentation'] },
+      { id: 'includeTests',   label: 'Include tests', type: 'toggle', showFor: ['audit_file','audit_documentation'] },
+      { id: 'hypothesize',    label: 'Hypothesize with offline model', type: 'toggle', showFor: ['audit_file','audit_documentation'] },
+      { id: 'compareGraph',   label: 'Compare against DiskSymbolDb graph', type: 'toggle', showFor: ['audit_file','audit_documentation'] },
       { id: 'query',          label: 'Query', type: 'text', placeholder: 'authentication patterns', showFor: ['search','wiki_search'] },
       { id: 'limit',          label: 'Limit (results)', type: 'number', placeholder: '5', showFor: ['search','wiki_search'] },
       { id: 'title',          label: 'Title', type: 'text', placeholder: 'Auth Overview', showFor: ['wiki_write','wiki_read','adr_write'] },

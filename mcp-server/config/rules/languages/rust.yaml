@@ -2,6 +2,12 @@ name: rust
 language: rust
 extensions:
   - .rs
+comments:
+  doc_blocks:
+    - pattern: "^[ \\t]*\\/\\/\\/[ \\t]*(.*)$"
+    - pattern: "^[ \\t]*\\/\\/![ \\t]*(.*)$"
+  single_line:
+    - pattern: "^[ \\t]*\\/\\/(?!\\/|!)[ \\t]*(.*)$"
 sinks:
   - type: unsafe_block
     regex: "\\bunsafe\\b[ \\t]*\\{"
@@ -9,9 +15,48 @@ sinks:
   - type: command_injection
     regex: "\\bCommand::new\\b"
     pattern: "\\bCommand::new\\b"
+  - type: raw_pointer_deref
+    regex: "\\*\\s*(?:const|mut)\\s+[A-Za-z0-9_]+"
+    pattern: "\\*\\s*(?:const|mut)\\s+[A-Za-z0-9_]+"
 
 symbols:
   - id: rust-fn-declaration
     kind: function
-    pattern: "\\b(?:pub\\s+)?(?:async\\s+)?fn\\s+([A-Za-z0-9_]+)\\s*(?:<[^>]+>)?\\s*\\(([^)]*)\\)"
-    message: "Rust function declaration"
+    pattern: "\\b(?:pub(?:\\s*\\([^)]*\\))?\\s+)?(?:async\\s+)?(?:unsafe\\s+)?(?:extern\\s+(?:\"[^\"]+\"\\s+)?)?fn\\s+([A-Za-z0-9_]+)\\s*(?:<[^>]+>)?\\s*\\(([^)]*)\\)"
+    message: "Rust function or method declaration"
+  - id: rust-struct-declaration
+    kind: struct
+    pattern: "\\b(?:pub(?:\\s*\\([^)]*\\))?\\s+)?struct\\s+([A-Za-z0-9_]+)(?:<[^>]+>)?"
+    message: "Rust struct declaration"
+  - id: rust-enum-declaration
+    kind: enum
+    pattern: "\\b(?:pub(?:\\s*\\([^)]*\\))?\\s+)?enum\\s+([A-Za-z0-9_]+)(?:<[^>]+>)?"
+    message: "Rust enum declaration"
+  - id: rust-trait-declaration
+    kind: interface
+    pattern: "\\b(?:pub(?:\\s*\\([^)]*\\))?\\s+)?(?:unsafe\\s+)?trait\\s+([A-Za-z0-9_]+)(?:<[^>]+>)?"
+    message: "Rust trait definition"
+  - id: rust-impl-block
+    kind: class
+    pattern: "\\bimpl(?:<[^>]+>)?\\s+(?:(?:[A-Za-z0-9_:]+|<[^>]+>)\\s+for\\s+)?([A-Za-z0-9_]+)(?:<[^>]+>)?"
+    message: "Rust impl block"
+  - id: rust-memory-management
+    kind: concept
+    pattern: "\\b(?:std::alloc::|alloc::|std::mem::(?:forget|transmute|take|replace)|std::sync::(?:Arc|Mutex|RwLock)|std::rc::Rc|std::cell::(?:RefCell|Cell)|Box::(?:new|from_raw|into_raw)|std::ptr::(?:null|null_mut|copy|write|read))\\b"
+    message: "Rust memory management and smart pointer allocations"
+  - id: rust-use-import
+    kind: module
+    pattern: "\\buse\\s+([A-Za-z0-9_:]+)(?:\\s+as\\s+[A-Za-z0-9_]+)?\\s*;"
+    message: "Rust use statement import"
+  - id: rust-type-alias
+    kind: interface
+    pattern: "\\b(?:pub(?:\\s*\\([^)]*\\))?\\s+)?type\\s+([A-Za-z0-9_]+)(?:<[^>]+>)?\\s*="
+    message: "Rust type alias"
+  - id: rust-macro-def
+    kind: decorator
+    pattern: "\\bmacro_rules!\\s+([A-Za-z0-9_]+)"
+    message: "Rust macro rules definition"
+  - id: rust-const-declaration
+    kind: constant
+    pattern: "\\b(?:pub(?:\\s*\\([^)]*\\))?\\s+)?const\\s+([A-Z][A-Z0-9_]{2,})\\s*:"
+    message: "Rust constant definition"

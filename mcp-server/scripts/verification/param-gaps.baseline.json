@@ -44,16 +44,21 @@
   },
   "manage_memory": {
     "playground": [
-      "workspace_root"
+      "applyFeedback"
     ],
     "quickstart": [
       "aborted",
+      "applyFeedback",
       "autoClassify",
+      "compareGraph",
       "content",
       "durationMinutes",
+      "filePaths",
       "from",
+      "hypothesize",
       "important",
       "includeCompleted",
+      "includeTests",
       "label",
       "links",
       "namespace",

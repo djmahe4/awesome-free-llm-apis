@@ -164,6 +164,16 @@ async function initTelemetry(force = false) {
 
 
 
+export async function startServer(port: number = 0, host: string = '127.0.0.1'): Promise<{ server: import('net').Server; port: number; app: express.Express }> {
+  const app = createExpressApp();
+  const server = await new Promise<import('net').Server>((resolve, reject) => {
+    const s = app.listen(port, host, () => resolve(s));
+    s.once('error', reject);
+  });
+  const addr = server.address() as import('net').AddressInfo;
+  return { server, port: addr.port, app };
+}
+
 export function createExpressApp(): express.Express {
   const app = express();
 
