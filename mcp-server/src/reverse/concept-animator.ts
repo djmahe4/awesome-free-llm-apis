@@ -157,7 +157,7 @@ export class ConceptAnimator {
     #error-boundary { display: none; position: absolute; inset: 0; background: rgba(15, 23, 42, 0.95); z-index: 50; padding: 24px; color: #f87171; font-size: 13px; font-family: monospace; overflow: auto; }
     #error-boundary pre { background: #000; padding: 12px; border-radius: 6px; border: 1px solid #ef4444; }
   </style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body>
