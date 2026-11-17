@@ -212,13 +212,8 @@ describe('T6 session-memory', () => {
 
   describe('dashboard exposure', () => {
     async function getRunDetail(runId: string) {
-      const { createExpressApp } = await import('../src/server.js');
-      const app = createExpressApp();
-      const server = await new Promise<import('net').Server>((resolve) => {
-        const s = app.listen(0, '127.0.0.1', () => resolve(s));
-      });
-      const addr = server.address() as AddressInfo;
-      const port = addr.port;
+      const { startServer } = await import('../src/server.js');
+      const { server, port } = await startServer(0, '127.0.0.1');
       try {
         const res = await fetch(`http://127.0.0.1:${port}/api/harness/runs/${encodeURIComponent(runId)}?workspace=${encodeURIComponent(tmpDir)}`);
         return { status: res.status, body: await res.json() };
