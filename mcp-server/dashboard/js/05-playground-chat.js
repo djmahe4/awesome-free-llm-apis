@@ -394,7 +394,9 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
 
   const outputContainerId = `tool-out-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   let resultBodyHtml = '';
-  if (parsedResult && typeof parsedResult === 'object' && Array.isArray(parsedResult.patchPlan) && parsedResult.patchPlan.length) {
+  if (parsedResult && typeof parsedResult === 'object' && (parsedResult.htmlBundle || (parsedResult.data && parsedResult.data.htmlBundle))) {
+    resultBodyHtml = renderConcept3DCard(parsedResult.htmlBundle ? parsedResult : parsedResult.data);
+  } else if (parsedResult && typeof parsedResult === 'object' && Array.isArray(parsedResult.patchPlan) && parsedResult.patchPlan.length) {
     resultBodyHtml = parsedResult.patchPlan.map(p => {
       const diffText = p.unifiedDiff || p.diff || (p.replacementSnippet ? `@@ -${p.startLine} +${p.startLine} @@\n${p.replacementSnippet}` : '');
       const diffLines = diffText ? diffText.split('\n') : [];
