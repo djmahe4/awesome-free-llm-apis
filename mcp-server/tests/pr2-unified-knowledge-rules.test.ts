@@ -1,0 +1,111 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { DiskSymbolDb } from '../src/memory/disk-symbol-db.js';
+import { KnowledgeRuleLoader } from '../src/memory/knowledge-builder.js';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
+
+describe('PR 2: Unified Knowledge Store & Multi-Language Engine', () => {
+  let db: DiskSymbolDb;
+  let tmpDir: string;
+  const repoHash = 'test-repo-hash';
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unified-kb-test-'));
+    db = new DiskSymbolDb({ baseDir: tmpDir });
+  });
+
+  afterEach(() => {
+    db.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  describe('Unified DiskSymbolDb Views', () => {
+    it('populates nodes and cleanly filters code vs wiki vs blackboard views', () => {
+      // 1. Code symbol
+      db.putNode(repoHash, {
+        id: 'src/auth.ts#login',
+        kind: 'function',
+        filePath: 'src/auth.ts',
+        signature: '(user, pass)',
+      });
+
+      // 2. Wiki/Doc concept
+      db.putNode(repoHash, {
+        id: 'wiki:auth_design',
+        kind: 'concept',
+        filePath: 'docs/auth.md',
+      });
+
+      // 3. Blackboard node
+      db.putNode(repoHash, {
+        id: 'bb:screenshot-1',
+        kind: 'blackboard',
+        filePath: 'screenshots/shot.png',
+      });
+
+      // Edges
+      db.putEdge(repoHash, {
+        source: 'wiki:auth_design',
+        target: 'src/auth.ts#login',
+        kind: 'references',
+      });
+
+      const codeView = db.getCodeGraph(repoHash);
+      expect(codeView.nodes.length).toBe(1);
+      expect(codeView.nodes[0].id).toBe('src/auth.ts#login');
+
+      const wikiView = db.getWikiView(repoHash);
+      expect(wikiView.nodes.length).toBe(1);
+      expect(wikiView.nodes[0].id).toBe('wiki:auth_design');
+      expect(wikiView.edges.length).toBe(1);
+
+      const bbView = db.getBlackboardView(repoHash);
+      expect(bbView.nodes.length).toBe(1);
+      expect(bbView.nodes[0].id).toBe('bb:screenshot-1');
+    });
+  });
+
+  describe('KnowledgeRuleLoader Multi-Language AST Extraction', () => {
+    it('extracts TypeScript functions with inline contracts', () => {
+      const loader = KnowledgeRuleLoader.getInstance();
+      const tsCode = `
+/**
+ * @contract Validates user credentials
+ * @throws {AuthError} If credentials invalid
+ */
+export async function authenticateUser(username: string, pass: string): Promise<User> {
+  return null as any;
+}
+`;
+      const nodes = loader.extractNodesFromFile('src/auth.ts', tsCode);
+      expect(nodes.length).toBe(1);
+      expect(nodes[0].name).toBe('authenticateUser');
+      expect(nodes[0].kind).toBe('function');
+      expect(nodes[0].contracts).toBeDefined();
+      expect(nodes[0].contracts?.some(c => c.includes('@contract'))).toBe(true);
+      expect(nodes[0].contracts?.some(c => c.includes('@throws'))).toBe(true);
+    });
+
+    it('extracts Python function definitions', () => {
+      const loader = KnowledgeRuleLoader.getInstance();
+      const pyCode = `
+# @contract computes hash
+def calculate_hash(data, salt):
+    pass
+`;
+      const nodes = loader.extractNodesFromFile('services/hash.py', pyCode);
+      expect(nodes.length).toBe(1);
+      expect(nodes[0].name).toBe('calculate_hash');
+      expect(nodes[0].language.toLowerCase()).toBe('python');
+    });
+
+    it('correctly detects test files for exclusion', () => {
+      const loader = KnowledgeRuleLoader.getInstance();
+      expect(loader.isTestFile('src/__tests__/auth.test.ts')).toBe(true);
+      expect(loader.isTestFile('src/auth.spec.ts')).toBe(true);
+      expect(loader.isTestFile('tests/unit/test_app.py')).toBe(true);
+      expect(loader.isTestFile('src/components/Header.tsx')).toBe(false);
+    });
+  });
+});

@@ -9,3 +9,9 @@ sinks:
   - type: sql_injection
     regex: "\\b(?:db\\.Query|db\\.Exec)\\s*\\([^)]*\\+"
     pattern: "\\b(?:db\\.Query|db\\.Exec)\\s*\\([^)]*\\+"
+
+symbols:
+  - id: go-func-declaration
+    kind: function
+    pattern: "^func\\s+(?:\\([^)]+\\)\\s+)?([A-Za-z0-9_]+)\\s*\\(([^)]*)\\)"
+    message: "Go function/method declaration"

@@ -6,7 +6,7 @@ import { getMcpDir } from '../utils/mcp-home.js';
 
 export interface DagNodeRecord {
   id: string;
-  kind: 'module' | 'class' | 'struct' | 'interface' | 'trait' | 'function' | 'method' | 'sink' | 'concept';
+  kind: 'module' | 'class' | 'struct' | 'interface' | 'trait' | 'function' | 'method' | 'sink' | 'concept' | 'doc' | 'blackboard';
   scope?: string;
   filePath: string;
   lineStart?: number;
@@ -21,7 +21,7 @@ export interface DagNodeRecord {
 export interface DagEdgeRecord {
   source: string;
   target: string;
-  kind: 'imports' | 'references' | 'invokes' | 'contains' | 'implements' | 'taints';
+  kind: 'imports' | 'references' | 'invokes' | 'contains' | 'implements' | 'taints' | 'links';
   confidence?: 'high' | 'medium' | 'low';
   metadata?: Record<string, any>;
 }
@@ -356,6 +356,38 @@ export class DiskSymbolDb {
     if (this.isClosed) throw new Error('DiskSymbolDb is closed');
     const rows = this.stmtGetAllEdges.all(repoHash) as any[];
     return rows.map((r) => this.rowToEdge(r));
+  }
+
+  /**
+   * Code-graph view: returns code symbols (module, class, function, method, struct, interface, trait).
+   */
+  getCodeGraph(repoHash: string): { nodes: DagNodeRecord[]; edges: DagEdgeRecord[] } {
+    const codeKinds = new Set(['module', 'class', 'struct', 'interface', 'trait', 'function', 'method', 'sink']);
+    const nodes = this.getAllNodes(repoHash).filter(n => codeKinds.has(n.kind));
+    const nodeIds = new Set(nodes.map(n => n.id));
+    const edges = this.getAllEdges(repoHash).filter(e => nodeIds.has(e.source) || nodeIds.has(e.target));
+    return { nodes, edges };
+  }
+
+  /**
+   * Wiki/concept view: returns documentation, concept, and ADR-related nodes and references/links.
+   */
+  getWikiView(repoHash: string): { nodes: DagNodeRecord[]; edges: DagEdgeRecord[] } {
+    const wikiKinds = new Set(['concept', 'doc']);
+    const nodes = this.getAllNodes(repoHash).filter(n => wikiKinds.has(n.kind));
+    const nodeIds = new Set(nodes.map(n => n.id));
+    const edges = this.getAllEdges(repoHash).filter(e => (nodeIds.has(e.source) || nodeIds.has(e.target)) && (e.kind === 'references' || e.kind === 'links'));
+    return { nodes, edges };
+  }
+
+  /**
+   * Blackboard view: returns free-form blackboard DAG nodes (text, image, pdf_page, etc.) and edges.
+   */
+  getBlackboardView(repoHash: string): { nodes: DagNodeRecord[]; edges: DagEdgeRecord[] } {
+    const nodes = this.getAllNodes(repoHash).filter(n => n.kind === 'blackboard');
+    const nodeIds = new Set(nodes.map(n => n.id));
+    const edges = this.getAllEdges(repoHash).filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+    return { nodes, edges };
   }
 
   deleteNodesByFile(repoHash: string, filePath: string): void {

@@ -12,3 +12,13 @@ sinks:
   - type: deserialization
     regex: "\\b(?:pickle\\.loads?|yaml\\.load)\\s*\\("
     pattern: "\\b(?:pickle\\.loads?|yaml\\.load)\\s*\\("
+
+symbols:
+  - id: py-function-def
+    kind: function
+    pattern: "^[ \\t]*(?:async\\s+)?def\\s+([A-Za-z0-9_]+)\\s*\\(([^)]*)\\)"
+    message: "Python function definition"
+  - id: py-class-def
+    kind: class
+    pattern: "^[ \\t]*class\\s+([A-Za-z0-9_]+)(?:\\s*\\(([^)]*)\\))?\\s*:"
+    message: "Python class definition"

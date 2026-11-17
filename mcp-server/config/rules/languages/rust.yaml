@@ -9,3 +9,9 @@ sinks:
   - type: command_injection
     regex: "\\bCommand::new\\b"
     pattern: "\\bCommand::new\\b"
+
+symbols:
+  - id: rust-fn-declaration
+    kind: function
+    pattern: "\\b(?:pub\\s+)?(?:async\\s+)?fn\\s+([A-Za-z0-9_]+)\\s*(?:<[^>]+>)?\\s*\\(([^)]*)\\)"
+    message: "Rust function declaration"

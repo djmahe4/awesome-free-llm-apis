@@ -16,3 +16,21 @@ sinks:
   - type: dom_xss
     regex: "\\b(?:innerHTML|outerHTML)\\s*="
     pattern: "\\b(?:innerHTML|outerHTML)\\s*="
+
+symbols:
+  - id: ts-function-declaration
+    kind: function
+    pattern: "\\b(?:export\\s+)?(?:async\\s+)?function\\s+([A-Za-z0-9_$]+)\\s*\\(([^)]*)\\)"
+    message: "Function declaration"
+  - id: ts-arrow-function
+    kind: function
+    pattern: "\\b(?:export\\s+)?const\\s+([A-Za-z0-9_$]+)\\s*=\\s*(?:async\\s*)?\\(([^)]*)\\)\\s*(?::\\s*[^=]+)?=>"
+    message: "Arrow function assignment"
+  - id: ts-class-declaration
+    kind: class
+    pattern: "\\b(?:export\\s+)?class\\s+([A-Za-z0-9_$]+)(?:\\s+extends\\s+[A-Za-z0-9_$]+)?(?:\\s+implements\\s+[^{]+)?"
+    message: "Class declaration"
+  - id: ts-interface-declaration
+    kind: interface
+    pattern: "\\b(?:export\\s+)?interface\\s+([A-Za-z0-9_$]+)(?:\\s+extends\\s+[^{]+)?"
+    message: "Interface declaration"
