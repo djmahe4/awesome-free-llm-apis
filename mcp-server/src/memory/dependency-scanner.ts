@@ -174,7 +174,10 @@ export class RepositoryGraph {
             graph.nodes.set(n.id, {
                 id: n.id,
                 type: n.kind as any,
-                metadata: n.metadata,
+                metadata: {
+                    ...n.metadata,
+                    filePath: n.filePath,
+                },
             });
         }
         const edges = db.getAllEdges(repoHash);
@@ -191,10 +194,11 @@ export class RepositoryGraph {
 
     toDiskSymbolDb(db: DiskSymbolDb, repoHash: string): void {
         for (const node of this.nodes.values()) {
+            const resolvedFilePath = node.metadata?.filePath || (node.id.includes('/') || node.id.includes('\\') || /\.[a-z0-9]+$/i.test(node.id) ? node.id : '');
             db.putNode(repoHash, {
                 id: node.id,
                 kind: node.type as any,
-                filePath: node.id,
+                filePath: resolvedFilePath,
                 metadata: node.metadata,
             });
         }
