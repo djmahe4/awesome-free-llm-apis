@@ -572,7 +572,11 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     }
 
     const candidateModels = model ? [model, ...rankCandidateModels(available.filter(m => m !== model))] : rankCandidateModels(available);
-    const targetModel = candidateModels[0];
+    // Fall back to first available local model if rankCandidateModels filtered all out (e.g. only vision models installed)
+    const targetModel = candidateModels[0] || model || available[0];
+    if (!targetModel) {
+      throw new Error('offline_only mode: no suitable local model found');
+    }
 
     const ollamaMessages = messages.map(m => ({
       role: m.role,
