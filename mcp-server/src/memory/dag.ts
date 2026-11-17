@@ -3,6 +3,8 @@ import { existsSync } from 'fs';
 import crypto from 'crypto';
 import path from 'path';
 import { withFileLock } from '../utils/file-lock.js';
+import type { DiskSymbolDb } from './disk-symbol-db.js';
+import { getDiskSymbolDb } from './disk-symbol-db.js';
 
 export interface DagNode {
   id: string;
@@ -40,13 +42,23 @@ export class DagMemory {
   private dir: string;
   private nodesPath: string;
   private edgesPath: string;
+  private diskDb?: DiskSymbolDb;
+  private baseDir?: string;
 
-  constructor(workspaceHash: string, baseDir?: string) {
+  constructor(workspaceHash: string, baseDir?: string, diskDb?: DiskSymbolDb) {
     this.workspaceHash = workspaceHash;
+    this.baseDir = baseDir;
     const root = baseDir ? path.join(baseDir, '.free-llm-mcp', 'memory', 'dag') : path.join(process.cwd(), '.free-llm-mcp', 'memory', 'dag');
     this.dir = path.join(root, workspaceHash);
     this.nodesPath = path.join(this.dir, 'nodes.json');
     this.edgesPath = path.join(this.dir, 'edges.json');
+    this.diskDb = diskDb;
+  }
+
+  private getCanonicalDb(): DiskSymbolDb {
+    if (this.diskDb) return this.diskDb;
+    const dbBaseDir = this.baseDir ? path.join(this.baseDir, '.free-llm-mcp', 'graphs') : undefined;
+    return getDiskSymbolDb(dbBaseDir ? { baseDir: dbBaseDir } : undefined);
   }
 
   private async ensureDir(): Promise<void> {
@@ -59,13 +71,39 @@ export class DagMemory {
     if (!existsSync(this.nodesPath)) return [];
     try {
       return JSON.parse(await fs.readFile(this.nodesPath, 'utf-8')) as DagNode[];
-    } catch {
+    } catch (err) {
+      console.error(`[DagMemory] Failed to read nodes JSON at ${this.nodesPath}:`, err);
       return [];
     }
   }
 
   private async saveNodes(nodes: DagNode[]): Promise<void> {
     await this.ensureDir();
+    // Dual-write to canonical DiskSymbolDb first in a transaction so any db write failures abort early
+    try {
+      const db = this.getCanonicalDb();
+      db.transaction(() => {
+        for (const node of nodes) {
+          db.putNode(this.workspaceHash, {
+            id: node.id,
+            kind: 'blackboard',
+            filePath: node.filePath || '',
+            payload: node.content,
+            tags: node.tags,
+            metadata: {
+              type: node.type,
+              pdfPage: node.pdfPage,
+              confidence: node.confidence,
+              halfLifeDays: node.halfLifeDays,
+              sourceCount: node.sourceCount,
+            },
+          });
+        }
+      });
+    } catch (err) {
+      console.error('[DagMemory] Failed to sync nodes to DiskSymbolDb:', err);
+    }
+
     await withFileLock(this.nodesPath, async () => {
       await fs.writeFile(this.nodesPath, JSON.stringify(nodes, null, 2), 'utf-8');
     });
@@ -75,13 +113,31 @@ export class DagMemory {
     if (!existsSync(this.edgesPath)) return [];
     try {
       return JSON.parse(await fs.readFile(this.edgesPath, 'utf-8')) as DagEdge[];
-    } catch {
+    } catch (err) {
+      console.error(`[DagMemory] Failed to read edges JSON at ${this.edgesPath}:`, err);
       return [];
     }
   }
 
   private async saveEdges(edges: DagEdge[]): Promise<void> {
     await this.ensureDir();
+    // Dual-write to canonical DiskSymbolDb first in a transaction so any db write failures abort early
+    try {
+      const db = this.getCanonicalDb();
+      db.transaction(() => {
+        for (const edge of edges) {
+          db.putEdge(this.workspaceHash, {
+            source: edge.from,
+            target: edge.to,
+            kind: 'links',
+            metadata: { relation: edge.relation },
+          });
+        }
+      });
+    } catch (err) {
+      console.error('[DagMemory] Failed to sync edges to DiskSymbolDb:', err);
+    }
+
     await withFileLock(this.edgesPath, async () => {
       await fs.writeFile(this.edgesPath, JSON.stringify(edges, null, 2), 'utf-8');
     });

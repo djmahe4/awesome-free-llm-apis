@@ -12,3 +12,29 @@ sinks:
   - type: deserialization
     regex: "\\b(?:pickle\\.loads?|yaml\\.load)\\s*\\("
     pattern: "\\b(?:pickle\\.loads?|yaml\\.load)\\s*\\("
+
+symbols:
+  - id: py-function-def
+    kind: function
+    pattern: "^[ \\t]*(?:async\\s+)?def\\s+([A-Za-z0-9_]+)\\s*\\(([^)]*)\\)(?:\\s*->\\s*[^:]+)?:$"
+    message: "Python function or method definition with optional return type"
+  - id: py-class-def
+    kind: class
+    pattern: "^[ \\t]*class\\s+([A-Za-z0-9_]+)(?:\\[[^\\]]+\\])?(?:\\s*\\(([^)]*)\\))?\\s*:"
+    message: "Python class definition with PEP 695 generics and inheritance"
+  - id: py-decorator
+    kind: decorator
+    pattern: "^[ \\t]*@([A-Za-z0-9_\\.]+)(?:\\s*\\(([^)]*)\\))?"
+    message: "Python decorator annotation"
+  - id: py-variable-annotation
+    kind: variable
+    pattern: "^[ \\t]*([A-Za-z0-9_]+)\\s*:\\s*([A-Za-z0-9_\\[\\],\\s\\.]+)(?:\\s*=.*)?$"
+    message: "Python type-annotated module or class attribute"
+  - id: py-constant-assignment
+    kind: constant
+    pattern: "^[ \\t]*([A-Z][A-Z0-9_]{2,})\\s*="
+    message: "Python module-level uppercase constant"
+  - id: py-dotenv-os-environ
+    kind: env_var
+    pattern: "(?:os\\.environ\\.get|os\\.getenv)\\s*\\(\\s*[\"']([A-Za-z0-9_]+)[\"']"
+    message: "Python environment variable lookup from os.getenv / os.environ.get"

@@ -1,0 +1,10 @@
+# Test file patterns to exclude from comment-contract and symbol audit drift
+patterns:
+  - "**/__tests__/**"
+  - "**/*.test.*"
+  - "**/*.spec.*"
+  - "**/test_*.py"
+  - "**/*_test.go"
+  - "**/tests/**"
+  - "**/fixtures/**"
+  - "**/test/**"

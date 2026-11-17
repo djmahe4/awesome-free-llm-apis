@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { removeDir } from './helpers/temp-dir.js';
 import {
   loadToolDescriptions,
   loadToolIndex,
@@ -11,6 +12,7 @@ import {
 
 describe('cyber-tools-index', () => {
   let dir: string;
+  let emptyDir: string | null = null;
 
   beforeEach(async () => {
     resetToolIndexCache();
@@ -25,6 +27,12 @@ describe('cyber-tools-index', () => {
       ]),
       'utf-8',
     );
+  });
+
+  afterEach(async () => {
+    if (dir) await removeDir(dir).catch(() => {});
+    if (emptyDir) await removeDir(emptyDir).catch(() => {});
+    emptyDir = null;
   });
 
   it('loads name→description pairs and skips malformed entries', async () => {
@@ -53,9 +61,9 @@ describe('cyber-tools-index', () => {
   });
 
   it('returns empty maps when tools_config.json is absent', async () => {
-    const empty = await fs.mkdtemp(path.join(os.tmpdir(), 'tool-index-empty-'));
+    emptyDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tool-index-empty-'));
     resetToolIndexCache();
-    expect(await loadToolDescriptions(empty)).toEqual({});
-    expect(await enrichToolsWithDescriptions({ a: { url: 'u' } }, empty)).toEqual({ a: { url: 'u' } });
+    expect(await loadToolDescriptions(emptyDir)).toEqual({});
+    expect(await enrichToolsWithDescriptions({ a: { url: 'u' } }, emptyDir)).toEqual({ a: { url: 'u' } });
   });
 });

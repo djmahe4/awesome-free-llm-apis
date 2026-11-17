@@ -1,0 +1,17 @@
+# Contract keywords and header conventions for static audits
+keywords:
+  - "@contract"
+  - "@pre"
+  - "@post"
+  - "@invariant"
+  - "@throws"
+  - "@returns"
+  - "@sideeffect"
+  - "@threadsafe"
+
+headerPatterns:
+  - "@license"
+  - "SPDX-License-Identifier"
+  - "Copyright"
+  - "Author"
+  - "Overview"

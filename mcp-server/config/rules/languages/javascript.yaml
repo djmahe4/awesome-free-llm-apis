@@ -16,3 +16,37 @@ sinks:
   - type: dom_xss
     regex: "\\b(?:innerHTML|outerHTML)\\s*="
     pattern: "\\b(?:innerHTML|outerHTML)\\s*="
+
+symbols:
+  - id: ts-function-declaration
+    kind: function
+    pattern: "\\b(?:export\\s+)?(?:async\\s+)?function\\s+([A-Za-z0-9_$]+)\\s*\\(([^)]*)\\)"
+    message: "Function declaration"
+  - id: ts-arrow-function
+    kind: function
+    pattern: "\\b(?:export\\s+)?(?:const|let|var)\\s+([A-Za-z0-9_$]+)\\s*=\\s*(?:async\\s*)?(?:\\(([^)]*)\\)|[A-Za-z0-9_$]+)\\s*(?::\\s*[^=]+)?\\s*=>"
+    message: "Arrow function assignment"
+  - id: ts-class-declaration
+    kind: class
+    pattern: "\\b(?:export\\s+)?class\\s+([A-Za-z0-9_$]+)(?:\\s+extends\\s+[A-Za-z0-9_$]+)?(?:\\s+implements\\s+[^{]+)?"
+    message: "Class declaration"
+  - id: ts-interface-declaration
+    kind: interface
+    pattern: "\\b(?:export\\s+)?interface\\s+([A-Za-z0-9_$]+)(?:\\s+extends\\s+[^{]+)?"
+    message: "Interface declaration"
+  - id: ts-type-alias
+    kind: interface
+    pattern: "\\b(?:export\\s+)?type\\s+([A-Za-z0-9_$]+)(?:<[^>]+>)?\\s*="
+    message: "Type alias declaration"
+  - id: ts-decorator
+    kind: decorator
+    pattern: "^[ \\t]*@([A-Za-z0-9_$]+)(?:\\s*\\(([^)]*)\\))?"
+    message: "TypeScript/JavaScript decorator annotation"
+  - id: ts-constant-declaration
+    kind: constant
+    pattern: "\\b(?:export\\s+)?const\\s+([A-Z][A-Z0-9_]{2,})\\s*="
+    message: "Uppercase exported or local constant"
+  - id: ts-process-env
+    kind: env_var
+    pattern: "\\bprocess\\.env\\.([A-Za-z0-9_]+)\\b|\\bprocess\\.env\\[[\"']([A-Za-z0-9_]+)[\"']\\]"
+    message: "Environment variable read via process.env"

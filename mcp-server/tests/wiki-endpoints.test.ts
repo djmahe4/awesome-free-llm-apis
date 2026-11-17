@@ -39,6 +39,10 @@ describe('/api/wiki/* hybrid post-quantum lease endpoints', () => {
   afterEach(async () => {
     server?.close();
     try {
+      const { closeAllDiskSymbolDbs } = await import('../src/memory/disk-symbol-db.js');
+      closeAllDiskSymbolDbs();
+    } catch {}
+    try {
       await fsp.rm(workspaceDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     } catch {}
   });

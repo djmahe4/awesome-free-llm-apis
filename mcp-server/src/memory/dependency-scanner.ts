@@ -167,12 +167,38 @@ export class RepositoryGraph {
         return graph;
     }
 
+    static fromDiskSymbolDb(db: DiskSymbolDb, repoHash: string, workspaceRoot: string): RepositoryGraph {
+        const graph = new RepositoryGraph(workspaceRoot);
+        const nodes = db.getAllNodes(repoHash);
+        for (const n of nodes) {
+            graph.nodes.set(n.id, {
+                id: n.id,
+                type: n.kind as any,
+                metadata: {
+                    ...n.metadata,
+                    filePath: n.filePath,
+                },
+            });
+        }
+        const edges = db.getAllEdges(repoHash);
+        for (const e of edges) {
+            graph.edges.push({
+                source: e.source,
+                target: e.target,
+                type: e.kind as any,
+                confidence: e.confidence === 'low' ? 'low' : undefined,
+            });
+        }
+        return graph;
+    }
+
     toDiskSymbolDb(db: DiskSymbolDb, repoHash: string): void {
         for (const node of this.nodes.values()) {
+            const resolvedFilePath = node.metadata?.filePath || (node.id.includes('/') || node.id.includes('\\') || /\.[a-z0-9]+$/i.test(node.id) ? node.id : '');
             db.putNode(repoHash, {
                 id: node.id,
                 kind: node.type as any,
-                filePath: node.id,
+                filePath: resolvedFilePath,
                 metadata: node.metadata,
             });
         }

@@ -225,6 +225,22 @@ ${sanitizedContent.slice(0, 2000)}`;
                 const serialized = graph.serialize();
                 await fs.writeFile(graphPath, JSON.stringify(serialized, null, 2), 'utf-8');
 
+                // Sync canonical DiskSymbolDb store
+                try {
+                    const { getDiskSymbolDb, closeDiskSymbolDb } = await import('./disk-symbol-db.js');
+                    const graphsDir = path.join(mcpDir, 'graphs');
+                    const diskDb = getDiskSymbolDb({ baseDir: graphsDir });
+                    try {
+                        diskDb.transaction(() => {
+                            graph.toDiskSymbolDb(diskDb, wsHash);
+                        });
+                    } finally {
+                        closeDiskSymbolDb({ baseDir: graphsDir });
+                    }
+                } catch (e) {
+                    console.error('[WorkspaceIndexer] Failed to sync DiskSymbolDb:', e);
+                }
+
                 // Generate Wiki links markdown
                 const wikiMd = scanner.generateWikiLinksMarkdown(graph);
                 await fs.writeFile(wikiPath, wikiMd, 'utf-8');
