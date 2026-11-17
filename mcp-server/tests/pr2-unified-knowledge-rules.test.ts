@@ -87,17 +87,24 @@ export async function authenticateUser(username: string, pass: string): Promise<
       expect(nodes[0].contracts?.some(c => c.includes('@throws'))).toBe(true);
     });
 
-    it('extracts Python function definitions', () => {
+    it('extracts Python function definitions with decorators and return types', () => {
       const loader = KnowledgeRuleLoader.getInstance();
       const pyCode = `
 # @contract computes hash
-def calculate_hash(data, salt):
+@lru_cache(maxsize=128)
+@retry
+def calculate_hash(data: str, salt: str) -> str:
     pass
 `;
       const nodes = loader.extractNodesFromFile('services/hash.py', pyCode);
-      expect(nodes.length).toBe(1);
-      expect(nodes[0].name).toBe('calculate_hash');
-      expect(nodes[0].language.toLowerCase()).toBe('python');
+      const fnNode = nodes.find(n => n.kind === 'function');
+      expect(fnNode).toBeDefined();
+      expect(fnNode?.name).toBe('calculate_hash');
+      expect(fnNode?.language.toLowerCase()).toBe('python');
+      expect(fnNode?.decorators).toBeDefined();
+      expect(fnNode?.decorators?.some(d => d.includes('@lru_cache'))).toBe(true);
+      expect(fnNode?.decorators?.some(d => d.includes('@retry'))).toBe(true);
+      expect(fnNode?.contracts?.some(c => c.includes('@contract'))).toBe(true);
     });
 
     it('correctly detects test files for exclusion', () => {

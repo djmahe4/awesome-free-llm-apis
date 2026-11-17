@@ -7,7 +7,7 @@ export interface ApiRule {
   id: string;
   language: string;
   extensions: string[];
-  kind: 'function' | 'class' | 'interface' | 'struct' | 'method';
+  kind: 'function' | 'class' | 'interface' | 'struct' | 'method' | 'decorator' | 'variable';
   pattern: string;
   message?: string;
   compiledRegex?: RegExp;
@@ -23,12 +23,13 @@ export interface ContractRule {
 export interface ExtractedKnowledgeNode {
   id: string;
   name: string;
-  kind: 'module' | 'class' | 'struct' | 'interface' | 'function' | 'method' | 'doc' | 'concept';
+  kind: 'module' | 'class' | 'struct' | 'interface' | 'function' | 'method' | 'doc' | 'concept' | 'decorator' | 'variable';
   language: string;
   filePath: string;
   lineStart?: number;
   signature?: string;
   contracts?: string[];
+  decorators?: string[];
 }
 
 export class KnowledgeRuleLoader {
@@ -139,12 +140,16 @@ export class KnowledgeRuleLoader {
           const symbolName = match[1];
           if (!symbolName) continue;
 
-          // Search preceding lines for contracts
+          // Search preceding lines for contracts and decorators
           const contracts: string[] = [];
+          const decorators: string[] = [];
           for (let j = Math.max(0, i - 10); j < i; j++) {
-            const checkLine = lines[j];
-            if (checkLine.includes('@contract') || checkLine.includes('@pre') || checkLine.includes('@post') || checkLine.includes('@throws')) {
-              contracts.push(checkLine.trim());
+            const checkLine = lines[j].trim();
+            if (checkLine.startsWith('@') && !checkLine.startsWith('@contract') && !checkLine.startsWith('@pre') && !checkLine.startsWith('@post') && !checkLine.startsWith('@throws') && !checkLine.startsWith('@returns')) {
+              decorators.push(checkLine);
+            }
+            if (checkLine.includes('@contract') || checkLine.includes('@pre') || checkLine.includes('@post') || checkLine.includes('@throws') || checkLine.includes('@returns')) {
+              contracts.push(checkLine);
             }
           }
 
@@ -157,6 +162,7 @@ export class KnowledgeRuleLoader {
             lineStart: i + 1,
             signature: match[2] ? match[2].trim() : undefined,
             contracts: contracts.length > 0 ? contracts : undefined,
+            decorators: decorators.length > 0 ? decorators : undefined,
           });
         }
       }

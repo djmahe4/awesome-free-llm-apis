@@ -34,3 +34,11 @@ symbols:
     kind: interface
     pattern: "\\b(?:export\\s+)?interface\\s+([A-Za-z0-9_$]+)(?:\\s+extends\\s+[^{]+)?"
     message: "Interface declaration"
+  - id: ts-type-alias
+    kind: interface
+    pattern: "\\b(?:export\\s+)?type\\s+([A-Za-z0-9_$]+)(?:<[^>]+>)?\\s*="
+    message: "Type alias declaration"
+  - id: ts-decorator
+    kind: decorator
+    pattern: "^[ \\t]*@([A-Za-z0-9_$]+)(?:\\s*\\(([^)]*)\\))?"
+    message: "TypeScript/JavaScript decorator annotation"
