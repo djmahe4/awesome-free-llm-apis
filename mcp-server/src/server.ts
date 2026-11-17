@@ -672,6 +672,27 @@ export function createExpressApp(): express.Express {
             const { logToolCall } = await import('./utils/ChatLogger.js');
             await logToolCall(sid, tool, params, result, Date.now() - start, false).catch(() => {});
           }
+
+          // MemoryHintMiddleware: append memory promotion hints when relevant keywords match
+          const { extractMemoryHint } = await import('./middleware/memory-hint.js');
+          const hintTargetTexts = [
+            params.task,
+            params.query,
+            params.title,
+            params.content,
+            params.prompt,
+            params.description,
+            params.instruction,
+            ...(Array.isArray(params.keywords) ? params.keywords : []),
+            ...(Array.isArray(params.messages)
+              ? params.messages.map((m: any) => typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content))
+              : []),
+          ];
+          const memoryHint = extractMemoryHint(hintTargetTexts);
+          if (memoryHint && result && typeof result === 'object' && !Array.isArray(result)) {
+            (result as any).memoryHint = memoryHint;
+          }
+
           res.json({ ok: true, latencyMs: Date.now() - start, result });
         } catch (err: any) {
           const sid = params.sessionId || '__no_ws__';

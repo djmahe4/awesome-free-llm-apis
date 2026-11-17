@@ -71,6 +71,8 @@ export interface UseFreeLLMInput {
   // External abort signal to cancel long-running tool execution or HTTP requests
   /** @internal in-process cancellation. */
   signal?: AbortSignal;
+  /** Restricts model invocation strictly to offline local providers (e.g. Ollama local). */
+  offline_only?: boolean;
 }
 
 const workspaceScanner = new WorkspaceScanner(process.cwd());
@@ -548,6 +550,7 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     keywords,
     skill,
     skipIndexing,
+    offline_only,
   } = input;
 
   const promptInput = (input as any).prompt;
@@ -556,6 +559,51 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     messages = [{ role: 'user', content: promptInput }];
   } else if (!messages) {
     messages = [];
+  }
+
+  // offline_only handling: direct local execution under VRAM lock without cloud fallback
+  if (offline_only) {
+    const { listLocalModels, chatLocal, rankCandidateModels } = await import('../providers/ollama-local.js');
+    const { LocalModelLock } = await import('../utils/local-model-lock.js');
+
+    const available = await listLocalModels().catch(() => []);
+    if (!available || available.length === 0) {
+      throw new Error('offline_only mode requested but no local Ollama models are available at http://localhost:11434');
+    }
+
+    const candidateModels = model ? [model, ...rankCandidateModels(available.filter(m => m !== model))] : rankCandidateModels(available);
+    const targetModel = candidateModels[0];
+
+    const ollamaMessages = messages.map(m => ({
+      role: m.role,
+      content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+    }));
+
+    const result = await LocalModelLock.getInstance().runWithLock(async () => {
+      return await chatLocal(targetModel, ollamaMessages, {
+        temperature,
+        maxTokens: max_tokens,
+        signal: input.signal,
+      });
+    }, 120_000, input.signal);
+
+    return {
+      id: `local-ollama-${Date.now()}`,
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: result.model,
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: result.content },
+        finish_reason: result.outputTruncated ? 'length' : 'stop',
+      }],
+      usage: {
+        prompt_tokens: result.promptTokens,
+        completion_tokens: result.completionTokens,
+        total_tokens: result.promptTokens + result.completionTokens,
+      },
+      _providerId: 'ollama-local',
+    };
   }
 
   // Capture the original user prompt for persona detection to avoid false positives from resolved/injected file contents
@@ -576,6 +624,15 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
         ].filter(Boolean).join('\n')
       });
     }
+  }
+
+  // Hint injection for planning / architectural prompts
+  const { extractMemoryHint } = await import('../middleware/memory-hint.js');
+  const userTextForHint = messages.filter(m => m.role === 'user').map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
+  const hint = extractMemoryHint(userTextForHint);
+  if (hint && hint.actions && hint.actions.length > 0) {
+    const hintSystemMsg = `[MEMORY PROMOTION NOTE]: Before answering, consider whether manage_memory actions ${hint.actions.map(a => `"${a}"`).join(' and ')} are relevant (${hint.reason}).`;
+    messages.unshift({ role: 'system', content: hintSystemMsg });
   }
 
   // v1.0.4 Resolution Pass: Resolve file, artifact, ctx7, pdf references in user messages.

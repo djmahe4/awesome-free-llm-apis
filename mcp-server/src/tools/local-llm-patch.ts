@@ -5,6 +5,7 @@ import fs from 'fs-extra';
 import path from 'node:path';
 import { rankNamesForNeed } from '../services/model-router.js';
 import { listLocalModels, chatLocal, modelSupportsThinking, parseJsonlContent, type OllamaLocalChatResult } from '../providers/ollama-local.js';
+import { LocalModelLock } from '../utils/local-model-lock.js';
 import { ContextGatherer } from '../pipeline/middlewares/context-gatherer.js';
 import { logToolCall } from '../utils/ChatLogger.js';
 
@@ -336,17 +337,21 @@ export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlm
         const base = replyBudget(isSearchReplace, fileContent);
         // Only a model that can think gets the flag: off -> false, on -> true, auto -> the model's own default.
         const thinkFlag = !supportsThinking ? undefined : !canThink ? false : thinkMode === 'on' ? true : undefined;
-        chatResult = await chatLocal(candidate, messages, {
-          // Deterministic edits; explicit reply budget so num_ctx is sized for it.
-          temperature: input.temperature ?? 0,
-          maxTokens: canThink ? base + THINKING_HEADROOM : base,
-          signal: input.signal,
-          ...(thinkFlag !== undefined ? { think: thinkFlag } : {}),
-        });
+        chatResult = await LocalModelLock.getInstance().runWithLock(async () => {
+          return await chatLocal(candidate, messages, {
+            // Deterministic edits; explicit reply budget so num_ctx is sized for it.
+            temperature: input.temperature ?? 0,
+            maxTokens: canThink ? base + THINKING_HEADROOM : base,
+            signal: input.signal,
+            ...(thinkFlag !== undefined ? { think: thinkFlag } : {}),
+          });
+        }, 120_000, input.signal);
         // Reasoning still used the whole budget and nothing was answered: one retry with thinking off.
         if (canThink && thinkMode === 'auto' && !chatResult.content.trim() && chatResult.outputTruncated) {
           caTrace('thinking used the whole reply budget; retrying without thinking', candidate);
-          chatResult = await chatLocal(candidate, messages, { temperature: input.temperature ?? 0, maxTokens: base, think: false, signal: input.signal });
+          chatResult = await LocalModelLock.getInstance().runWithLock(async () => {
+            return await chatLocal(candidate, messages, { temperature: input.temperature ?? 0, maxTokens: base, think: false, signal: input.signal });
+          }, 120_000, input.signal);
         }
         // A small model often answers a SEARCH/REPLACE request with the edited excerpt instead; recover
         // the edit from it (SEARCH text taken from the original) rather than discarding a right answer.
