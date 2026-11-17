@@ -42,11 +42,22 @@ describe('ConceptAnimator & animate_concept', () => {
   });
 
   it('generates an animation artifact through reverse_tool handleReverseTool', async () => {
+    const animator = ConceptAnimator.getInstance();
+    vi.spyOn(animator, 'collectGroundedFacts').mockResolvedValueOnce([
+      {
+        title: 'Diffusion Models Beat GANs',
+        url: 'https://arxiv.org/abs/2105.05233',
+        snippet: 'Diffusion models can achieve sample quality superior to current state-of-the-art generative models.',
+        provider: 'mock-search',
+      },
+    ]);
+
     const res = await handleReverseTool({
       action: 'animate_concept',
       target: 'Diffusion Probabilistic Models',
       options: {
         style: 'timeline',
+        offlineOnly: true,
       },
     });
 
@@ -72,16 +83,21 @@ describe('ConceptAnimator & animate_concept', () => {
 
   it('supports followup prompt refinement with artifactId', async () => {
     const animator = ConceptAnimator.getInstance();
-    const art1 = await animator.generateAnimation('RAFT Consensus', { style: 'configurator' });
+    const art1 = await animator.generateAnimation('RAFT Consensus', {
+      style: 'configurator',
+      offlineOnly: true,
+    });
     expect(art1.artifactId).toBeDefined();
 
     const art2 = await animator.generateAnimation('RAFT Consensus', {
       style: 'configurator',
       artifactId: art1.artifactId,
       followupPrompt: 'Speed up packet transit and highlight leader election state',
+      offlineOnly: true,
     });
 
     expect(art2.artifactId).toBe(art1.artifactId);
+    expect(art2.version).toBe(2);
     expect(art2.htmlBundle).toContain('RAFT Consensus');
   });
 });

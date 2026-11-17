@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { SearchProviderRegistry } from '../search/registry.js';
-import { getMcpDir } from '../utils/mcp-home.js';
+import { getMcpDir, sanitizeSessionId } from '../utils/mcp-home.js';
 import type { UnifiedSearchResult } from '../search/types.js';
 
 export interface ConceptAnimationOptions {
@@ -17,6 +17,25 @@ export interface GroundedFact {
   url: string;
   snippet: string;
   provider: string;
+}
+
+function escapeHtml(str: string): string {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function sanitizeUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString();
+    }
+  } catch {}
+  return '#';
 }
 
 export interface ConceptAnimationArtifact {
@@ -125,7 +144,7 @@ export class ConceptAnimator {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>${concept} - 3D Visualizer</title>
+  <title>${escapeHtml(concept)} - 3D Visualizer</title>
   <style>
     body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: ${template.background}; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; color: #f8fafc; }
     #canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
@@ -138,18 +157,18 @@ export class ConceptAnimator {
     #error-boundary { display: none; position: absolute; inset: 0; background: rgba(15, 23, 42, 0.95); z-index: 50; padding: 24px; color: #f87171; font-size: 13px; font-family: monospace; overflow: auto; }
     #error-boundary pre { background: #000; padding: 12px; border-radius: 6px; border: 1px solid #ef4444; }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body>
   <div id="canvas-container"></div>
   <div id="ui-overlay">
-    <div class="badge">${style} • 3D Experience</div>
-    <div class="title">${concept}</div>
+    <div class="badge">${escapeHtml(style)} • 3D Experience</div>
+    <div class="title">${escapeHtml(concept)}</div>
     ${facts && facts.length > 0 ? `
     <div class="facts-card">
       <strong>Verified Sources (${facts.length}):</strong><br/>
-      ${facts.slice(0, 3).map(f => `• <a href="${f.url}" target="_blank" rel="noopener">${f.title.substring(0, 35)}...</a> (${f.provider})`).join('<br/>')}
+      ${facts.slice(0, 3).map(f => `• <a href="${sanitizeUrl(f.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(f.title.substring(0, 35))}...</a> (${escapeHtml(f.provider)})`).join('<br/>')}
     </div>` : ''}
   </div>
   <div id="error-boundary">
@@ -181,20 +200,20 @@ export class ConceptAnimator {
   ): Promise<ConceptAnimationArtifact> {
     const style = options.style || 'cyber';
     const searchQuery = options.searchQuery || concept;
-    const facts = await this.collectGroundedFacts(searchQuery);
+    const facts = options.offlineOnly ? [] : await this.collectGroundedFacts(searchQuery);
 
     let reactThreeCode = '';
     const template = (AST_DESIGN_TEMPLATES as any)[style] || AST_DESIGN_TEMPLATES.cyber;
 
-    // Synthesize robust Three.js scene code tailored to the concept and template AST
-    if (options.followupPrompt && options.artifactId) {
-      // Followup refinement path
+    // Synthesize robust Three.js scene code tailored to the concept, template AST, and followupNote
+    if (options.followupPrompt) {
       reactThreeCode = this.generateFallbackScene(concept, template, options.followupPrompt);
     } else {
       reactThreeCode = this.generateFallbackScene(concept, template);
     }
 
-    const artifactId = options.artifactId || `anim-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const rawArtifactId = options.artifactId || `anim-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const artifactId = sanitizeSessionId(rawArtifactId).replace(/[^a-zA-Z0-9_-]/g, '_');
     const htmlBundle = this.buildStandaloneHtml({
       concept,
       style,
@@ -209,7 +228,7 @@ export class ConceptAnimator {
       groundedFacts: facts,
       htmlBundle,
       createdAt: Date.now(),
-      version: 1,
+      version: options.followupPrompt ? 2 : 1,
     };
 
     try {
@@ -222,6 +241,9 @@ export class ConceptAnimator {
   }
 
   private generateFallbackScene(concept: string, template: any, followupNote?: string): string {
+    const speedMultiplier = followupNote && /speed|fast|quick/i.test(followupNote) ? 2.5 : 1.0;
+    const nodeCount = followupNote && /cluster|more|expand/i.test(followupNote) ? 8 : 5;
+    const accentColor = followupNote && /gold|yellow|amber/i.test(followupNote) ? '0xfbbf24' : '0x38bdf8';
     return `
       const container = document.getElementById('canvas-container');
       const scene = new THREE.Scene();
@@ -264,8 +286,8 @@ export class ConceptAnimator {
 
       const innerGeo = new THREE.SphereGeometry(1.4, 32, 32);
       const innerMat = new THREE.MeshStandardMaterial({
-        color: 0x38bdf8,
-        emissive: 0x0284c7,
+        color: ${accentColor},
+        emissive: ${accentColor},
         emissiveIntensity: 0.6,
         roughness: 0.1
       });
@@ -273,7 +295,7 @@ export class ConceptAnimator {
       group.add(innerMesh);
 
       // Orbiting concept nodes
-      const nodeCount = 5;
+      const nodeCount = ${nodeCount};
       const nodes = [];
       for (let i = 0; i < nodeCount; i++) {
         const angle = (i / nodeCount) * Math.PI * 2;
@@ -295,7 +317,7 @@ export class ConceptAnimator {
       let clock = new THREE.Clock();
       function animate() {
         requestAnimationFrame(animate);
-        const elapsed = clock.getElapsedTime();
+        const elapsed = clock.getElapsedTime() * ${speedMultiplier};
         coreMesh.rotation.y = elapsed * 0.25;
         coreMesh.rotation.x = elapsed * 0.15;
         innerMesh.rotation.y = -elapsed * 0.35;

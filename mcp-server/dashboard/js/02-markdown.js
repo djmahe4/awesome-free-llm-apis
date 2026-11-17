@@ -221,15 +221,23 @@ function renderConcept3DCard(res) {
   const concept = res.concept || 'Concept 3D Visualization';
   const style = res.style || 'cyber';
   const facts = res.groundedFacts || [];
+  const encodedBundle = encodeURIComponent(res.htmlBundle);
 
-  let html = `<div class="card" style="margin-top:16px; border-color: var(--accent-purple); overflow:hidden;">`;
+  // Escaping for HTML attribute embedding
+  const safeSrcdoc = String(res.htmlBundle)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  let html = `<div class="card concept-3d-card" style="margin-top:16px; border-color: var(--accent-purple); overflow:hidden;">`;
   html += `<div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">`;
   html += `<div>✨ 3D Concept Animator: <span class="badge badge-purple">${esc(style)}</span> <span class="badge badge-cyan">${esc(concept)}</span></div>`;
-  html += `<button class="btn btn-outline btn-sm" onclick="(function(){ const w = window.open('about:blank', '_blank'); w.document.write(decodeURIComponent('${encodeURIComponent(res.htmlBundle)}')); w.document.close(); })()">Fullscreen ↗</button>`;
+  html += `<button class="btn btn-outline btn-sm concept-fullscreen-btn" data-bundle="${encodedBundle}">Fullscreen ↗</button>`;
   html += `</div>`;
 
   html += `<div class="card-body" style="padding:0; position:relative; background:#000;">`;
-  html += `<iframe srcdoc="${esc(res.htmlBundle)}" style="width:100%; height:420px; border:none; display:block;" sandbox="allow-scripts allow-same-origin"></iframe>`;
+  html += `<iframe srcdoc="${safeSrcdoc}" style="width:100%; height:420px; border:none; display:block;" sandbox="allow-scripts"></iframe>`;
   html += `</div>`;
 
   if (facts && facts.length > 0) {
@@ -241,6 +249,21 @@ function renderConcept3DCard(res) {
 
   html += `</div>`;
   return html;
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.concept-fullscreen-btn');
+    if (btn && btn.dataset.bundle) {
+      const html = decodeURIComponent(btn.dataset.bundle);
+      const w = window.open('about:blank', '_blank');
+      if (w) {
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+      }
+    }
+  });
 }
 
 async function renderResponse(data) {
