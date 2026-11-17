@@ -7,7 +7,7 @@ export interface ApiRule {
   id: string;
   language: string;
   extensions: string[];
-  kind: 'function' | 'class' | 'interface' | 'struct' | 'method' | 'decorator' | 'variable';
+  kind: 'function' | 'class' | 'interface' | 'struct' | 'method' | 'decorator' | 'variable' | 'constant' | 'env_var';
   pattern: string;
   message?: string;
   compiledRegex?: RegExp;
@@ -23,7 +23,7 @@ export interface ContractRule {
 export interface ExtractedKnowledgeNode {
   id: string;
   name: string;
-  kind: 'module' | 'class' | 'struct' | 'interface' | 'function' | 'method' | 'doc' | 'concept' | 'decorator' | 'variable';
+  kind: 'module' | 'class' | 'struct' | 'interface' | 'function' | 'method' | 'doc' | 'concept' | 'decorator' | 'variable' | 'constant' | 'env_var';
   language: string;
   filePath: string;
   lineStart?: number;
@@ -137,7 +137,7 @@ export class KnowledgeRuleLoader {
         if (!rule.compiledRegex) continue;
         const match = line.match(rule.compiledRegex);
         if (match) {
-          const symbolName = match[1];
+          const symbolName = match[1] || match[2];
           if (!symbolName) continue;
 
           // Search preceding lines for contracts and decorators

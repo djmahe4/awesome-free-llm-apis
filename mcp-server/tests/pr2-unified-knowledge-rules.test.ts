@@ -107,6 +107,23 @@ def calculate_hash(data: str, salt: str) -> str:
       expect(fnNode?.contracts?.some(c => c.includes('@contract'))).toBe(true);
     });
 
+    it('extracts Python constants and environment variables', () => {
+      const loader = KnowledgeRuleLoader.getInstance();
+      const pyCode = `
+MAX_RETRIES = 5
+API_KEY = os.getenv("SECRET_KEY")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+`;
+      const nodes = loader.extractNodesFromFile('config/settings.py', pyCode);
+      const constNode = nodes.find(n => n.name === 'MAX_RETRIES');
+      expect(constNode).toBeDefined();
+      expect(constNode?.kind).toBe('constant');
+
+      const envNodes = nodes.filter(n => n.kind === 'env_var');
+      expect(envNodes.some(e => e.name === 'SECRET_KEY')).toBe(true);
+      expect(envNodes.some(e => e.name === 'DATABASE_URL')).toBe(true);
+    });
+
     it('correctly detects test files for exclusion', () => {
       const loader = KnowledgeRuleLoader.getInstance();
       expect(loader.isTestFile('src/__tests__/auth.test.ts')).toBe(true);

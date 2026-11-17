@@ -42,3 +42,11 @@ symbols:
     kind: decorator
     pattern: "^[ \\t]*@([A-Za-z0-9_$]+)(?:\\s*\\(([^)]*)\\))?"
     message: "TypeScript/JavaScript decorator annotation"
+  - id: ts-constant-declaration
+    kind: constant
+    pattern: "\\b(?:export\\s+)?const\\s+([A-Z][A-Z0-9_]{2,})\\s*="
+    message: "Uppercase exported or local constant"
+  - id: ts-process-env
+    kind: env_var
+    pattern: "\\bprocess\\.env\\.([A-Za-z0-9_]+)\\b|\\bprocess\\.env\\[[\"']([A-Za-z0-9_]+)[\"']\\]"
+    message: "Environment variable read via process.env"

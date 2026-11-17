@@ -30,3 +30,11 @@ symbols:
     kind: variable
     pattern: "^[ \\t]*([A-Za-z0-9_]+)\\s*:\\s*([A-Za-z0-9_\\[\\],\\s\\.]+)(?:\\s*=.*)?$"
     message: "Python type-annotated module or class attribute"
+  - id: py-constant-assignment
+    kind: constant
+    pattern: "^[ \\t]*([A-Z][A-Z0-9_]{2,})\\s*="
+    message: "Python module-level uppercase constant"
+  - id: py-dotenv-os-environ
+    kind: env_var
+    pattern: "(?:os\\.environ\\.get|os\\.getenv)\\s*\\(\\s*[\"']([A-Za-z0-9_]+)[\"']"
+    message: "Python environment variable lookup from os.getenv / os.environ.get"
