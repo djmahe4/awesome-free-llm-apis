@@ -167,6 +167,28 @@ export class RepositoryGraph {
         return graph;
     }
 
+    static fromDiskSymbolDb(db: DiskSymbolDb, repoHash: string, workspaceRoot: string): RepositoryGraph {
+        const graph = new RepositoryGraph(workspaceRoot);
+        const nodes = db.getAllNodes(repoHash);
+        for (const n of nodes) {
+            graph.nodes.set(n.id, {
+                id: n.id,
+                type: n.kind as any,
+                metadata: n.metadata,
+            });
+        }
+        const edges = db.getAllEdges(repoHash);
+        for (const e of edges) {
+            graph.edges.push({
+                source: e.source,
+                target: e.target,
+                type: e.kind as any,
+                confidence: e.confidence === 'low' ? 'low' : undefined,
+            });
+        }
+        return graph;
+    }
+
     toDiskSymbolDb(db: DiskSymbolDb, repoHash: string): void {
         for (const node of this.nodes.values()) {
             db.putNode(repoHash, {
