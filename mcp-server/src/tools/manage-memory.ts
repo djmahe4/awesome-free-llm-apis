@@ -3,6 +3,7 @@ import { WorkspaceScanner } from '../cache/workspace.js';
 import { ContextManager } from '../utils/ContextManager.js';
 import { quantumCompressWithAnchors } from '../utils/quantum-compression.js';
 import type { ProductivityMemory } from '../memory/productivity.js';
+import { MemoryAuditor, type FileAuditCorrection, type DocAuditCorrection } from '../memory/memory-auditor.js';
 
 /**
  * Classifies a new task's urgency/importance for the Eisenhower matrix.
@@ -72,8 +73,16 @@ export interface ManageMemoryInput {
         | 'node_add' | 'node_link' | 'node_list' | 'node_get' | 'node_review' | 'graph_query'
         | 'eisenhower_add' | 'eisenhower_list' | 'eisenhower_complete'
         | 'pomodoro_start' | 'pomodoro_stop' | 'pomodoro_list'
-        | 'adr_write' | 'adr_list';
+        | 'adr_write' | 'adr_list'
+        | 'audit_file' | 'audit_documentation';
     workspace_root?: string;
+    filePaths?: string[];
+    includeTests?: boolean;
+    hypothesize?: boolean;
+    compareGraph?: boolean;
+    applyFeedback?: {
+        corrections: Array<FileAuditCorrection | DocAuditCorrection>;
+    };
     query?: string;
     limit?: number;
     title?: string;
@@ -168,6 +177,32 @@ export async function manageMemory(input: ManageMemoryInput) {
         case 'adr_list': {
             const wiki = memoryManager.getWiki(namespace || wsHash, workspaceRoot);
             return { adrs: await wiki.listAdrs() };
+        }
+        case 'audit_file': {
+            if (!workspaceRoot) throw new Error('audit_file requires `workspace_root`.');
+            if (!input.filePaths || input.filePaths.length === 0) throw new Error('audit_file requires non-empty `filePaths`.');
+            const auditor = new MemoryAuditor();
+            return await auditor.auditFile({
+                workspace_root: workspaceRoot,
+                filePaths: input.filePaths,
+                includeTests: input.includeTests,
+                hypothesize: input.hypothesize,
+                compareGraph: input.compareGraph,
+                applyFeedback: input.applyFeedback as any,
+            });
+        }
+        case 'audit_documentation': {
+            if (!workspaceRoot) throw new Error('audit_documentation requires `workspace_root`.');
+            if (!input.filePaths || input.filePaths.length === 0) throw new Error('audit_documentation requires non-empty `filePaths`.');
+            const auditor = new MemoryAuditor();
+            return await auditor.auditDocumentation({
+                workspace_root: workspaceRoot,
+                filePaths: input.filePaths,
+                includeTests: input.includeTests,
+                hypothesize: input.hypothesize,
+                compareGraph: input.compareGraph,
+                applyFeedback: input.applyFeedback as any,
+            });
         }
         case 'eisenhower_list': {
             const productivity = memoryManager.getProductivity(wsHash, workspaceRoot);
