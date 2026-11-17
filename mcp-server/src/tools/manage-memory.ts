@@ -179,11 +179,11 @@ export async function manageMemory(input: ManageMemoryInput) {
             return { adrs: await wiki.listAdrs() };
         }
         case 'audit_file': {
-            if (!workspaceRoot) throw new Error('audit_file requires `workspace_root`.');
             if (!input.filePaths || input.filePaths.length === 0) throw new Error('audit_file requires non-empty `filePaths`.');
+            const targetRoot = workspaceRoot || process.cwd();
             const auditor = new MemoryAuditor();
             return await auditor.auditFile({
-                workspace_root: workspaceRoot,
+                workspace_root: targetRoot,
                 filePaths: input.filePaths,
                 includeTests: input.includeTests,
                 hypothesize: input.hypothesize,
@@ -192,11 +192,11 @@ export async function manageMemory(input: ManageMemoryInput) {
             });
         }
         case 'audit_documentation': {
-            if (!workspaceRoot) throw new Error('audit_documentation requires `workspace_root`.');
             if (!input.filePaths || input.filePaths.length === 0) throw new Error('audit_documentation requires non-empty `filePaths`.');
+            const targetRoot = workspaceRoot || process.cwd();
             const auditor = new MemoryAuditor();
             return await auditor.auditDocumentation({
-                workspace_root: workspaceRoot,
+                workspace_root: targetRoot,
                 filePaths: input.filePaths,
                 includeTests: input.includeTests,
                 hypothesize: input.hypothesize,
