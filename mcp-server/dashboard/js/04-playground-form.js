@@ -10,6 +10,7 @@ const TOOLS = [
       { id: 'prompt', label: 'User Message', type: 'textarea', placeholder: 'Write a Hello World in Go' },
       { id: 'model',  label: 'Model Override', type: 'model-picker' },
       { id: 'keywords', label: 'Keywords (comma-separated)', type: 'text', placeholder: 'e.g. jwt, security' },
+      { id: 'offline_only', label: 'Offline Only (Local Ollama under VRAM lock)', type: 'checkbox' },
     ]
   },
   {

@@ -62,6 +62,11 @@ export async function createMCPServer(): Promise<Server> {
           '  disables all memory injection, context enrichment, and session persistence — the response',
           '  will be blind to all prior work. A bare call with only `messages` is for one-off queries only.',
           '',
+          'MEMORY PROMOTION:',
+          '  - If request involves planning, architecture, prior decisions, or existing backlog:',
+          '    call manage_memory with action "adr_list" and/or "eisenhower_list" first.',
+          '  - If request involves code structure or refactoring, consider "graph_query" or "wiki_search".',
+          '',
           'INPUTS:',
           '  messages (required)           — Array of {role, content}. Roles: "system" | "user" | "assistant".',
           '  model (optional)              — Specific model ID. If omitted, the router picks the best for the task.',
@@ -73,6 +78,7 @@ export async function createMCPServer(): Promise<Server> {
           '  workspace_root (recommended)  — Absolute path to the project root.',
           '                                  Required to enable memory enrichment, context retrieval,',
           '                                  and workspace-scoped recall. Always provide for project tasks.',
+          '  offline_only (optional)       — Restrict execution strictly to offline local models (e.g. Ollama local).',
           '  google_search (optional)      — Enable Google search for Gemini models (default false).',
           '',
           'OUTPUTS: Assistant response text enriched with workspace memory when agentic=true + workspace_root.',
@@ -121,6 +127,7 @@ export async function createMCPServer(): Promise<Server> {
             agentic: { type: 'boolean', description: 'Enable agentic mode: task decomposition and intelligent system prompt injection' },
             sessionId: { type: 'string', description: 'Unique session identifier required for agentic mode (e.g. UUID or project slug). Partitions state and logs per project.' },
             workspace_root: { type: 'string', description: 'Workspace path for cache-keying and auto-sessionId derivation' },
+            offline_only: { type: 'boolean', description: 'Restrict execution strictly to offline local models (e.g. Ollama local) under VRAM lock.' },
             google_search: { type: 'boolean', description: 'Enable Google search for Gemini models (default false)' },
             skill: { type: 'string', description: 'Optional skill id/name loaded dynamically from remote skill index' },
             skipIndexing: {
@@ -148,7 +155,13 @@ export async function createMCPServer(): Promise<Server> {
       },
       {
         name: 'vision_tool',
-        description: 'Analyze a local image or a selected PDF page with a vision-capable model. Returns the final analysis when it finishes within 25 seconds; otherwise returns a taskId. Poll with action:"status", retry a failed/timed-out task with action:"continue", or cancel with action:"abort". PDF rendering and provider fallback share a 60-second task deadline; responses include validation errors and PDF extraction/visual-page metadata.',
+        description: [
+          'Analyze a local image or a selected PDF page with a vision-capable model. Returns the final analysis when it finishes within 25 seconds; otherwise returns a taskId. Poll with action:"status", retry a failed/timed-out task with action:"continue", or cancel with action:"abort". PDF rendering and provider fallback share a 60-second task deadline; responses include validation errors and PDF extraction/visual-page metadata.',
+          '',
+          'MEMORY PROMOTION:',
+          '- When analyzing architecture diagrams, wireframes, or flowcharts, consider recording findings',
+          '  into manage_memory via "wiki_write" or linking DAG nodes via "node_add".',
+        ].join('\n'),
         inputSchema: {
           type: 'object' as const,
           properties: {
@@ -165,7 +178,12 @@ export async function createMCPServer(): Promise<Server> {
       },
        {
          name: 'load_skill_prompt',
-         description: 'Search for or load a dynamic skill from the agentic-awesome-skills index. Skills are saved locally to the workspace or home directory. A `type:"load"` for a skill with many files downloads them in the BACKGROUND (a skill can legitimately take a while) — the initial call returns immediately with status:"running"; poll with pollAction:"status" and the same sessionId until it returns the loaded prompt.',
+         description: [
+           'Search for or load a dynamic skill from the agentic-awesome-skills index. Skills are saved locally to the workspace or home directory. A `type:"load"` for a skill with many files downloads them in the BACKGROUND (a skill can legitimately take a while) — the initial call returns immediately with status:"running"; poll with pollAction:"status" and the same sessionId until it returns the loaded prompt.',
+           '',
+           'MEMORY PROMOTION:',
+           '- Check manage_memory "wiki_read" / "wiki_search" for skill standards or past skill notes.',
+         ].join('\n'),
          inputSchema: {
            type: 'object' as const,
            properties: {
@@ -221,6 +239,10 @@ export async function createMCPServer(): Promise<Server> {
         description: [
           'Retrieve real-time token and request usage statistics for all loaded providers.',
           '',
+          'MEMORY PROMOTION:',
+          '- Use get_token_stats before long planning or multi-turn sessions to verify quotas;',
+          '  cross-reference with manage_memory "stats" for storage/compression baselines.',
+          '',
           'USER STORY: Monitor per-provider consumption to avoid hitting rate limits. Identify',
           'which providers have remaining quota before selecting a model for the next request.',
           '',
@@ -250,6 +272,10 @@ export async function createMCPServer(): Promise<Server> {
         name: 'validate_provider',
         description: [
           'Run a live health-check and credential validation for a specific LLM provider.',
+          '',
+          'MEMORY PROMOTION:',
+          '- Validate providers before long-running autonomous tasks; use manage_memory "adr_list"',
+          '  to check preferred models and architectural constraints for this workspace.',
           '',
           'USER STORY: Verify that a provider is reachable and its API key is valid before',
           'committing to it for a workflow. Use this for onboarding new providers or debugging',
@@ -1174,6 +1200,43 @@ export async function createMCPServer(): Promise<Server> {
         content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       };
+    }
+
+    // MemoryHintMiddleware: append memory promotion hints when relevant keywords match
+    try {
+      const { extractMemoryHint } = await import('../middleware/memory-hint.js');
+      const argObj = (args || {}) as Record<string, any>;
+      const hintTargetTexts = [
+        argObj.task,
+        argObj.query,
+        argObj.title,
+        argObj.content,
+        argObj.prompt,
+        argObj.description,
+        argObj.instruction,
+        ...(Array.isArray(argObj.keywords) ? argObj.keywords : []),
+        ...(Array.isArray(argObj.messages)
+          ? argObj.messages.map((m: any) => typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content))
+          : []),
+      ];
+      const memoryHint = extractMemoryHint(hintTargetTexts);
+      if (memoryHint && response?.content?.[0]?.text) {
+        try {
+          const parsed = JSON.parse(response.content[0].text);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            parsed.memoryHint = memoryHint;
+            response.content[0].text = JSON.stringify(parsed, null, 2);
+          }
+        } catch {
+          // If response content is raw text/markdown rather than JSON, append structured note
+          response.content.push({
+            type: 'text' as const,
+            text: `\n\n> [MEMORY PROMOTION NOTE]: Suggested tool: ${memoryHint.suggestedTool} (actions: ${memoryHint.actions.join(', ')}). Reason: ${memoryHint.reason}`
+          });
+        }
+      }
+    } catch {
+      // Memory hint failure must never break tool execution
     }
 
     // Fire-and-forget logging — never delays the MCP response
