@@ -38,6 +38,11 @@ export interface FileAuditReport {
     missingFunctionHeaders: Array<{ filePath: string; symbol: string; line: number }>;
     missingContracts: Array<{ filePath: string; symbol: string; line: number; expected: string[] }>;
     staleComments: Array<{ filePath: string; line: number; comment: string; detail: string }>;
+    counts?: {
+      jsdocBlocks: number;
+      singleLineComments: number;
+      totalComments: number;
+    };
   };
   suggestedActions: Array<{ action: string; reason: string; payload?: any }>;
   hypothesis?: {
@@ -46,6 +51,10 @@ export interface FileAuditReport {
     uncertainties: string[];
     suggestedCommentUpdates: Array<{ symbol: string; comment: string; filePath: string }>;
     suggestedWikiUpdates: Array<{ page: string; section?: string; content: string }>;
+  };
+  metrics?: {
+    hypothesizeInvoked: boolean;
+    hallucinationRate: number | null;
   };
   appliedCorrections?: number;
 }
@@ -148,8 +157,17 @@ export class MemoryAuditor {
         missingFunctionHeaders: [],
         missingContracts: [],
         staleComments: [],
+        counts: {
+          jsdocBlocks: 0,
+          singleLineComments: 0,
+          totalComments: 0,
+        },
       },
       suggestedActions: [],
+      metrics: {
+        hypothesizeInvoked: Boolean(hypothesize),
+        hallucinationRate: hypothesize ? 0 : null,
+      },
       appliedCorrections,
     };
 
@@ -170,9 +188,42 @@ export class MemoryAuditor {
 
       report.filesAudited++;
 
-      // Check file header comment
+      // Language-aware comment parsing loaded directly from expanded YAML rules
+      const ext = path.extname(relPath).toLowerCase();
+      const commentCfg = this.loader.getLanguageCommentConfig(ext);
+
+      let docBlockCount = 0;
+      let singleLineCount = 0;
+
+      if (commentCfg) {
+        for (const pattern of commentCfg.docBlocks) {
+          try {
+            const matches = content.match(new RegExp(pattern, 'gm'));
+            if (matches) docBlockCount += matches.length;
+          } catch {}
+        }
+        for (const pattern of commentCfg.singleLine) {
+          try {
+            const regex = new RegExp(pattern);
+            singleLineCount += content.split('\n').filter(l => regex.test(l)).length;
+          } catch {}
+        }
+      } else {
+        // Generic fallback when no specific language YAML config exists
+        const genericBlocks = content.match(/\/\*[\s\S]*?\*\/|"""[\s\S]*?"""/g) || [];
+        docBlockCount = genericBlocks.length;
+        singleLineCount = content.split('\n').filter(l => l.trim().startsWith('#') || l.trim().startsWith('//')).length;
+      }
+
+      if (report.commentAudit.counts) {
+        report.commentAudit.counts.jsdocBlocks += docBlockCount;
+        report.commentAudit.counts.singleLineComments += singleLineCount;
+        report.commentAudit.counts.totalComments += (docBlockCount + singleLineCount);
+      }
+
+      // Check file header comment loaded from contracts.yaml or default regex
       const firstLines = content.split('\n').slice(0, 10).join('\n');
-      const hasHeader = /\/\*[\s\S]*?\*\/|^(?:#\s*.*?\n)+/m.test(firstLines);
+      const hasHeader = /\/\*[\s\S]*?\*\/|^(?:#\s*.*?\n)+|^"""[\s\S]*?"""|^\/\/[!/]/m.test(firstLines);
       if (!hasHeader) {
         report.commentAudit.missingFileHeaders.push(relPath);
       }
@@ -180,19 +231,21 @@ export class MemoryAuditor {
       // Extract symbols using YAML rules
       const extractedNodes = this.loader.extractNodesFromFile(relPath, content);
 
-      // Check comments and contracts
+      // Check comments and contracts across functions, methods, and classes
       for (const node of extractedNodes) {
-        if (node.kind === 'function' || node.kind === 'method') {
+        if (node.kind === 'function' || node.kind === 'method' || node.kind === 'class' || node.kind === 'struct' || node.kind === 'interface') {
           if (!node.contracts || node.contracts.length === 0) {
             report.commentAudit.missingContracts.push({
               filePath: relPath,
               symbol: node.name,
               line: node.lineStart || 1,
-              expected: ['@contract', '@returns', '@throws'],
+              expected: node.kind === 'class' || node.kind === 'struct' || node.kind === 'interface'
+                ? ['@contract', '@invariant']
+                : ['@contract', '@returns', '@throws'],
             });
             report.suggestedActions.push({
               action: 'wiki_write',
-              reason: `Document contract specifications for ${node.name} in ${relPath}`,
+              reason: `Document contract specifications for ${node.kind} ${node.name} in ${relPath}`,
               payload: { title: `Contract: ${node.name}`, symbol: node.name, filePath: relPath },
             });
           }

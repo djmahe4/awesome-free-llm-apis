@@ -32,11 +32,17 @@ export interface ExtractedKnowledgeNode {
   decorators?: string[];
 }
 
+export interface LanguageCommentConfig {
+  docBlocks: string[];
+  singleLine: string[];
+}
+
 export class KnowledgeRuleLoader {
   private static instance: KnowledgeRuleLoader;
   private apiRules: ApiRule[] = [];
   private contractRules: ContractRule[] = [];
   private testExcludePatterns: string[] = [];
+  private languageComments: Map<string, LanguageCommentConfig> = new Map();
   private rulesDir: string;
 
   constructor(rulesDir?: string) {
@@ -70,7 +76,16 @@ export class KnowledgeRuleLoader {
           const parsed = yaml.parse(fs.readFileSync(path.join(langDir, file), 'utf8'));
           const symbols = parsed?.symbols || (Array.isArray(parsed) ? parsed : []);
           const language = parsed?.language || parsed?.name || 'unknown';
-          const extensions = parsed?.extensions || [];
+          const extensions: string[] = parsed?.extensions || [];
+
+          if (parsed?.comments) {
+            const docBlocks: string[] = (parsed.comments.doc_blocks || []).map((x: any) => x.pattern || x);
+            const singleLine: string[] = (parsed.comments.single_line || []).map((x: any) => x.pattern || x);
+            const cfg: LanguageCommentConfig = { docBlocks, singleLine };
+            for (const ext of extensions) {
+              this.languageComments.set(ext.toLowerCase(), cfg);
+            }
+          }
           if (Array.isArray(symbols)) {
             for (const r of symbols) {
               this.apiRules.push({
@@ -177,6 +192,10 @@ export class KnowledgeRuleLoader {
     }
 
     return nodes;
+  }
+
+  public getLanguageCommentConfig(ext: string): LanguageCommentConfig | undefined {
+    return this.languageComments.get(ext.toLowerCase());
   }
 
   public getApiRules(): ApiRule[] {

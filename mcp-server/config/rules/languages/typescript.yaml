@@ -1,0 +1,65 @@
+name: typescript
+language: typescript
+extensions:
+  - .ts
+  - .tsx
+  - .mts
+  - .cts
+comments:
+  doc_blocks:
+    - pattern: "^[ \\t]*\\/\\*\\*[\\s\\S]*?\\*\\/"
+    - pattern: "^[ \\t]*\\/\\*[\\s\\S]*?\\*\\/"
+  single_line:
+    - pattern: "^[ \\t]*\\/\\/[ \\t]*(.*)$"
+sinks:
+  - type: eval_injection
+    regex: "\\b(?:eval|Function)\\s*\\("
+    pattern: "\\b(?:eval|Function)\\s*\\("
+  - type: command_injection
+    regex: "\\b(?:child_process\\.(?:exec|execSync|spawn|spawnSync)|exec|execSync|spawn|spawnSync)\\s*\\("
+    pattern: "\\b(?:child_process\\.(?:exec|execSync|spawn|spawnSync)|exec|execSync|spawn|spawnSync)\\s*\\("
+  - type: type_assertion_any
+    regex: "\\bas\\s+any\\b|<any>"
+    pattern: "\\bas\\s+any\\b|<any>"
+
+symbols:
+  - id: ts-function-declaration
+    kind: function
+    pattern: "\\b(?:export\\s+)?(?:async\\s+)?function\\s+([A-Za-z0-9_$]+)\\s*(?:<[^>]+>)?\\s*\\(([^)]*)\\)(?:\\s*:\\s*[^\\{]+)?"
+    message: "TypeScript function declaration with generics and return type"
+  - id: ts-arrow-function
+    kind: function
+    pattern: "\\b(?:export\\s+)?(?:const|let|var)\\s+([A-Za-z0-9_$]+)\\s*(?::\\s*[^=]+)?\\s*=\\s*(?:async\\s*)?(?:<[^>]+>)?\\s*(?:\\(([^)]*)\\)|[A-Za-z0-9_$]+)\\s*(?::\\s*[^=]+)?\\s*=>"
+    message: "TypeScript typed arrow function assignment"
+  - id: ts-class-declaration
+    kind: class
+    pattern: "\\b(?:export\\s+)?(?:abstract\\s+)?class\\s+([A-Za-z0-9_$]+)(?:<[^>]+>)?(?:\\s+extends\\s+[A-Za-z0-9_$]+(?:<[^>]+>)?)?(?:\\s+implements\\s+[^{]+)?"
+    message: "TypeScript class declaration with generics and inheritance"
+  - id: ts-interface-declaration
+    kind: interface
+    pattern: "\\b(?:export\\s+)?interface\\s+([A-Za-z0-9_$]+)(?:<[^>]+>)?(?:\\s+extends\\s+[^{]+)?"
+    message: "TypeScript interface declaration with inheritance"
+  - id: ts-type-alias
+    kind: interface
+    pattern: "\\b(?:export\\s+)?type\\s+([A-Za-z0-9_$]+)(?:<[^>]+>)?\\s*="
+    message: "TypeScript type alias definition"
+  - id: ts-enum-declaration
+    kind: enum
+    pattern: "\\b(?:export\\s+)?(?:const\\s+)?enum\\s+([A-Za-z0-9_$]+)"
+    message: "TypeScript enum declaration"
+  - id: ts-import-declaration
+    kind: module
+    pattern: "\\bimport\\s+(?:type\\s+)?(?:\\*\\s+as\\s+[A-Za-z0-9_$]+|\\{[^}]*\\}|[A-Za-z0-9_$]+)\\s+from\\s+[\"']([^\"']+)[\"']"
+    message: "TypeScript ES module import statement"
+  - id: ts-decorator
+    kind: decorator
+    pattern: "^[ \\t]*@([A-Za-z0-9_$]+)(?:\\s*\\(([^)]*)\\))?"
+    message: "TypeScript decorator annotation"
+  - id: ts-constant-declaration
+    kind: constant
+    pattern: "\\b(?:export\\s+)?const\\s+([A-Z][A-Z0-9_]{2,})\\s*:"
+    message: "TypeScript typed constant declaration"
+  - id: ts-process-env
+    kind: env_var
+    pattern: "\\bprocess\\.env\\.([A-Za-z0-9_]+)\\b|\\bprocess\\.env\\[[\"']([A-Za-z0-9_]+)[\"']\\]"
+    message: "Environment variable read via process.env"

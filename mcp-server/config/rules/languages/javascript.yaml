@@ -2,10 +2,15 @@ name: javascript
 language: javascript
 extensions:
   - .js
-  - .ts
   - .jsx
-  - .tsx
   - .mjs
+  - .cjs
+comments:
+  doc_blocks:
+    - pattern: "^[ \\t]*\\/\\*\\*[\\s\\S]*?\\*\\/"
+    - pattern: "^[ \\t]*\\/\\*[\\s\\S]*?\\*\\/"
+  single_line:
+    - pattern: "^[ \\t]*\\/\\/[ \\t]*(.*)$"
 sinks:
   - type: eval_injection
     regex: "\\b(?:eval|Function)\\s*\\("
