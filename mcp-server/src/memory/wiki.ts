@@ -152,6 +152,7 @@ export class WikiMemory {
   private wikiDir: string;
   private workspaceHash: string;
   private diskDb?: DiskSymbolDb;
+  private customBaseDir?: string;
 
   /** Workspace the page claims are checked against. Without it pages are written exactly as before. */
   private sourceRoot?: string;
@@ -159,6 +160,7 @@ export class WikiMemory {
   constructor(workspaceHash: string, customBaseDir?: string, sourceRoot?: string, diskDb?: DiskSymbolDb) {
     this.workspaceHash = workspaceHash;
     this.sourceRoot = sourceRoot;
+    this.customBaseDir = customBaseDir;
     this.diskDb = diskDb;
     // the hash/namespace becomes a directory name: it must not be able to walk out of the wiki folder
     if (!workspaceHash || /[\/\u0000]/.test(workspaceHash) || workspaceHash === '.' || workspaceHash.includes('..')) {
@@ -170,7 +172,13 @@ export class WikiMemory {
   }
 
   private getCanonicalDb(): DiskSymbolDb {
-    return this.diskDb || getDiskSymbolDb();
+    if (this.diskDb) return this.diskDb;
+    let baseDir: string | undefined;
+    if (this.customBaseDir) {
+      // If customBaseDir points inside .free-llm-mcp/wiki, locate graphs adjacent to wiki
+      baseDir = path.join(path.dirname(this.customBaseDir), 'graphs');
+    }
+    return getDiskSymbolDb(baseDir ? { baseDir } : undefined);
   }
 
   private async ensureDir(): Promise<void> {

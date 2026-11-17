@@ -63,7 +63,6 @@ export class DiskSymbolDb {
       try {
         baseDir = path.join(getMcpDir(), 'graphs');
       } catch (err) {
-        if (process.env.VITEST) throw err;
         baseDir = path.join(os.homedir(), '.free-llm-mcp', 'graphs');
       }
     }
@@ -458,15 +457,15 @@ export function getDiskSymbolDb(options?: DiskSymbolDbOptions): DiskSymbolDb {
     try {
       baseDir = path.join(getMcpDir(), 'graphs');
     } catch (err) {
-      if (process.env.VITEST) throw err;
       baseDir = path.join(os.homedir(), '.free-llm-mcp', 'graphs');
     }
   }
   const normalized = path.resolve(baseDir);
-  let inst = dbPool.get(normalized);
+  const poolKey = `${normalized}::${options?.maxMemoryBytes ?? 'default'}`;
+  let inst = dbPool.get(poolKey);
   if (!inst) {
     inst = new DiskSymbolDb({ ...options, baseDir: normalized });
-    dbPool.set(normalized, inst);
+    dbPool.set(poolKey, inst);
   }
   return inst;
 }

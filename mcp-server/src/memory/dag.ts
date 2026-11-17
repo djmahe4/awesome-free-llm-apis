@@ -43,9 +43,11 @@ export class DagMemory {
   private nodesPath: string;
   private edgesPath: string;
   private diskDb?: DiskSymbolDb;
+  private baseDir?: string;
 
   constructor(workspaceHash: string, baseDir?: string, diskDb?: DiskSymbolDb) {
     this.workspaceHash = workspaceHash;
+    this.baseDir = baseDir;
     const root = baseDir ? path.join(baseDir, '.free-llm-mcp', 'memory', 'dag') : path.join(process.cwd(), '.free-llm-mcp', 'memory', 'dag');
     this.dir = path.join(root, workspaceHash);
     this.nodesPath = path.join(this.dir, 'nodes.json');
@@ -54,7 +56,9 @@ export class DagMemory {
   }
 
   private getCanonicalDb(): DiskSymbolDb {
-    return this.diskDb || getDiskSymbolDb();
+    if (this.diskDb) return this.diskDb;
+    const dbBaseDir = this.baseDir ? path.join(this.baseDir, '.free-llm-mcp', 'graphs') : undefined;
+    return getDiskSymbolDb(dbBaseDir ? { baseDir: dbBaseDir } : undefined);
   }
 
   private async ensureDir(): Promise<void> {
@@ -75,11 +79,7 @@ export class DagMemory {
 
   private async saveNodes(nodes: DagNode[]): Promise<void> {
     await this.ensureDir();
-    await withFileLock(this.nodesPath, async () => {
-      await fs.writeFile(this.nodesPath, JSON.stringify(nodes, null, 2), 'utf-8');
-    });
-
-    // Dual-write to canonical DiskSymbolDb store using a transaction
+    // Dual-write to canonical DiskSymbolDb first in a transaction so any db write failures abort early
     try {
       const db = this.getCanonicalDb();
       db.transaction(() => {
@@ -101,8 +101,12 @@ export class DagMemory {
         }
       });
     } catch (err) {
-      console.error('[DagMemory] Failed to dual-write nodes to DiskSymbolDb:', err);
+      console.error('[DagMemory] Failed to sync nodes to DiskSymbolDb:', err);
     }
+
+    await withFileLock(this.nodesPath, async () => {
+      await fs.writeFile(this.nodesPath, JSON.stringify(nodes, null, 2), 'utf-8');
+    });
   }
 
   private async loadEdges(): Promise<DagEdge[]> {
@@ -117,11 +121,7 @@ export class DagMemory {
 
   private async saveEdges(edges: DagEdge[]): Promise<void> {
     await this.ensureDir();
-    await withFileLock(this.edgesPath, async () => {
-      await fs.writeFile(this.edgesPath, JSON.stringify(edges, null, 2), 'utf-8');
-    });
-
-    // Dual-write to canonical DiskSymbolDb store using a transaction
+    // Dual-write to canonical DiskSymbolDb first in a transaction so any db write failures abort early
     try {
       const db = this.getCanonicalDb();
       db.transaction(() => {
@@ -135,8 +135,12 @@ export class DagMemory {
         }
       });
     } catch (err) {
-      console.error('[DagMemory] Failed to dual-write edges to DiskSymbolDb:', err);
+      console.error('[DagMemory] Failed to sync edges to DiskSymbolDb:', err);
     }
+
+    await withFileLock(this.edgesPath, async () => {
+      await fs.writeFile(this.edgesPath, JSON.stringify(edges, null, 2), 'utf-8');
+    });
   }
 
   /** Rejects .pptx/.docx file pointers — those media types are excluded from this store. */
