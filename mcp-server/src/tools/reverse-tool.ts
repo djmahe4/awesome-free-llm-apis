@@ -190,7 +190,8 @@ export type ReverseToolAction =
   | 'reverse_vlm_generate'
   | 'separate_audio_stems'
   | 'inspect_ocr_tokens'
-  | 'program_weight_space';
+  | 'program_weight_space'
+  | 'animate_concept';
 
 export const isModelAction = (act: string): boolean => [
   'inspect_model',
@@ -661,6 +662,25 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
         engineCallable,
         engineBlocked,
       },
+    };
+  }
+
+  if (action === 'animate_concept') {
+    if (!target || !target.trim()) {
+      return {
+        success: false,
+        action: 'animate_concept',
+        error: 'Target concept or methodology name is required for animate_concept.',
+      };
+    }
+    const { ConceptAnimator } = await import('../reverse/concept-animator.js');
+    const animator = ConceptAnimator.getInstance();
+    const artifact = await animator.generateAnimation(target.trim(), options as any);
+    return {
+      success: true,
+      action: 'animate_concept',
+      target,
+      data: artifact,
     };
   }
 
@@ -1221,7 +1241,7 @@ export async function reverseTool(input: ReverseToolInput): Promise<ReverseToolR
   return {
     success: false,
     action: action || 'unknown',
-    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "run_scene_augmentation", "run_depth_parallax", "animate_still", "reverse_vlm_generate", "separate_audio_stems", "inspect_ocr_tokens", "program_weight_space".`,
+    error: `Unsupported action: "${action}". Supported actions: "status", "abort", "list_capabilities", "analyze_javascript", "analyze_artifact", "get_evidence", "scan_github", "inspect_model", "infer_layer_roles", "trace_layer_execution", "reconstruct_training_samples", "extract_model_layer", "analyze_model_layer", "quantize_layer", "assemble_moe", "run_reasoning_model", "run_yolo_nn", "run_torch_nn", "run_scene_augmentation", "run_depth_parallax", "animate_still", "reverse_vlm_generate", "separate_audio_stems", "inspect_ocr_tokens", "program_weight_space", "animate_concept".`,
   };
 }
 

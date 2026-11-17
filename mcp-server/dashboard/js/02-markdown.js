@@ -215,6 +215,34 @@ function renderLocalPatchCard(res) {
   return html;
 }
 
+function renderConcept3DCard(res) {
+  if (!res || !res.htmlBundle) return '';
+  const artifactId = res.artifactId || 'anim-card';
+  const concept = res.concept || 'Concept 3D Visualization';
+  const style = res.style || 'cyber';
+  const facts = res.groundedFacts || [];
+
+  let html = `<div class="card" style="margin-top:16px; border-color: var(--accent-purple); overflow:hidden;">`;
+  html += `<div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">`;
+  html += `<div>✨ 3D Concept Animator: <span class="badge badge-purple">${esc(style)}</span> <span class="badge badge-cyan">${esc(concept)}</span></div>`;
+  html += `<button class="btn btn-outline btn-sm" onclick="(function(){ const w = window.open('about:blank', '_blank'); w.document.write(decodeURIComponent('${encodeURIComponent(res.htmlBundle)}')); w.document.close(); })()">Fullscreen ↗</button>`;
+  html += `</div>`;
+
+  html += `<div class="card-body" style="padding:0; position:relative; background:#000;">`;
+  html += `<iframe srcdoc="${esc(res.htmlBundle)}" style="width:100%; height:420px; border:none; display:block;" sandbox="allow-scripts allow-same-origin"></iframe>`;
+  html += `</div>`;
+
+  if (facts && facts.length > 0) {
+    html += `<div class="card-footer" style="padding:8px 12px; font-size:0.75rem; background:rgba(0,0,0,0.3); border-top:1px solid var(--glass-border);">`;
+    html += `<strong>🔍 Grounded Sources (${facts.length}):</strong><div style="margin-top:4px; display:flex; flex-direction:column; gap:2px;">`;
+    html += facts.map(f => `<div>• <a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-cyan); text-decoration:none;">${esc(f.title)}</a> <span style="color:var(--text-muted); font-size:0.7rem;">via ${esc(f.provider)}</span></div>`).join('');
+    html += `</div></div>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
 async function renderResponse(data) {
   const result = data.result ?? data;
   let baseHtml = '';
@@ -237,6 +265,9 @@ async function renderResponse(data) {
 
   let extras = '';
   if (result && typeof result === 'object') {
+    if (result.htmlBundle || (result.data && result.data.htmlBundle)) {
+      extras += renderConcept3DCard(result.htmlBundle ? result : result.data);
+    }
     if (result.feedback && result.feedback.driftScore !== undefined) {
       extras += renderQuantumFeedback(result.feedback);
     }

@@ -1019,6 +1019,7 @@ export async function createMCPServer(): Promise<Server> {
           '  - separate_audio_stems: Separate consented audio with configured local Demucs weights.',
           '  - inspect_ocr_tokens: Inspect OCR tokens and spatial layout.',
           '  - program_weight_space: Spectral SVD analysis, attractor ablation, and loop suppression in weight space.',
+          '  - animate_concept: Synthesize a 3D flow/methodology animation using 3d-web-experience AST templates, grounded live web search, and local LLM error boundaries.',
         ].join('\n'),
         inputSchema: {
           type: 'object' as const,
@@ -1049,7 +1050,8 @@ export async function createMCPServer(): Promise<Server> {
                 'reverse_vlm_generate',
                 'separate_audio_stems',
                 'inspect_ocr_tokens',
-                'program_weight_space'
+                'program_weight_space',
+                'animate_concept'
               ],
               description: 'Reverse engineering action to perform'
             },
