@@ -44,8 +44,7 @@
   },
   "manage_memory": {
     "playground": [
-      "applyFeedback",
-      "workspace_root"
+      "applyFeedback"
     ],
     "quickstart": [
       "aborted",

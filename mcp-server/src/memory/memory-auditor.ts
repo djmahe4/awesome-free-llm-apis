@@ -108,10 +108,29 @@ export class MemoryAuditor {
     let appliedCorrections = 0;
     if (applyFeedback?.corrections && applyFeedback.corrections.length > 0) {
       for (const corr of applyFeedback.corrections) {
+        const targetPath = path.isAbsolute(corr.filePath) ? corr.filePath : path.join(workspace_root, corr.filePath);
         if (corr.change === 'update_wiki') {
           const wiki = memoryManager.getWiki(wsHash, workspace_root);
           await wiki.write(path.basename(corr.filePath, path.extname(corr.filePath)), corr.content, ['audit-correction']);
           appliedCorrections++;
+        } else if (corr.change === 'add_header') {
+          try {
+            const existing = await fs.readFile(targetPath, 'utf-8');
+            await fs.writeFile(targetPath, `${corr.content}\n${existing}`, 'utf-8');
+            appliedCorrections++;
+          } catch {}
+        } else if (corr.change === 'update_comment' || corr.change === 'add_function_doc' || corr.change === 'update_skill') {
+          try {
+            if (corr.line && corr.line > 0) {
+              const existing = await fs.readFile(targetPath, 'utf-8');
+              const lines = existing.split('\n');
+              lines.splice(corr.line - 1, 0, corr.content);
+              await fs.writeFile(targetPath, lines.join('\n'), 'utf-8');
+            } else {
+              await fs.appendFile(targetPath, `\n${corr.content}`, 'utf-8');
+            }
+            appliedCorrections++;
+          } catch {}
         }
       }
     }
@@ -243,9 +262,34 @@ export class MemoryAuditor {
   }
 
   public async auditDocumentation(input: AuditDocInput): Promise<DocAuditReport> {
-    const { workspace_root, filePaths, includeTests = false, hypothesize = false, compareGraph = true } = input;
+    const { workspace_root, filePaths, includeTests = false, hypothesize = false, compareGraph = true, applyFeedback } = input;
     const wsHash = await this.scanner.getWorkspaceHash(workspace_root);
     const diskDb = getDiskSymbolDb();
+
+    // 1. Apply user documentation corrections if passed
+    let appliedCorrections = 0;
+    if (applyFeedback?.corrections && applyFeedback.corrections.length > 0) {
+      for (const corr of applyFeedback.corrections) {
+        const targetPath = path.isAbsolute(corr.filePath) ? corr.filePath : path.join(workspace_root, corr.filePath);
+        if (corr.change === 'update_doc' || corr.change === 'update_skill') {
+          try {
+            await fs.writeFile(targetPath, corr.content, 'utf-8');
+            appliedCorrections++;
+          } catch {}
+        } else if (corr.change === 'add_header') {
+          try {
+            const existing = await fs.readFile(targetPath, 'utf-8');
+            await fs.writeFile(targetPath, `${corr.content}\n${existing}`, 'utf-8');
+            appliedCorrections++;
+          } catch {}
+        } else if (corr.change === 'add_diagram') {
+          try {
+            await fs.appendFile(targetPath, `\n\n\`\`\`mermaid\n${corr.content}\n\`\`\`\n`, 'utf-8');
+            appliedCorrections++;
+          } catch {}
+        }
+      }
+    }
 
     const report: DocAuditReport = {
       success: true,
@@ -256,12 +300,16 @@ export class MemoryAuditor {
         missingArchitectureDocs: [],
       },
       suggestedActions: [],
+      appliedCorrections,
     };
 
     const targets = filePaths.filter(fp => {
       if (!includeTests && this.loader.isTestFile(fp)) return false;
       return true;
     });
+
+    // Cache all nodes once to avoid O(N * M) redundant table scans
+    const allDbNodes = compareGraph ? diskDb.getAllNodes(wsHash) : [];
 
     for (const relPath of targets) {
       const fullPath = path.isAbsolute(relPath) ? relPath : path.join(workspace_root, relPath);
@@ -303,8 +351,7 @@ export class MemoryAuditor {
       if (compareGraph) {
         const symbolRefs = Array.from(content.matchAll(/\[\[([A-Za-z0-9_.-]+)\]\]/g)).map(m => m[1]);
         for (const sym of symbolRefs) {
-          const dbNodes = diskDb.getAllNodes(wsHash);
-          const found = dbNodes.some(n => n.id.includes(sym) || n.filePath.includes(sym));
+          const found = allDbNodes.some(n => n.id.includes(sym) || n.filePath.includes(sym));
           if (!found) {
             report.docDrift.brokenSymbolReferences.push({
               filePath: relPath,
