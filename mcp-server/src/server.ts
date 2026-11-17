@@ -892,6 +892,32 @@ export function createExpressApp(): express.Express {
         }
       });
 
+      // Serve static 3D Concept Animator bundles and metadata
+      app.get('/api/3d-animations/:artifactId', async (req, res) => {
+        try {
+          const rawId = req.params.artifactId || '';
+          const cleanId = rawId.replace(/[^a-zA-Z0-9_-]/g, '');
+          if (!cleanId) {
+            res.status(400).json({ error: 'artifactId is required' });
+            return;
+          }
+          const htmlPath = path.join(getMcpDir(), '3d-animations', `${cleanId}.html`);
+          const jsonPath = path.join(getMcpDir(), '3d-animations', `${cleanId}.json`);
+          if (fs.existsSync(htmlPath)) {
+            const html = fs.readFileSync(htmlPath, 'utf-8');
+            let meta: any = null;
+            if (fs.existsSync(jsonPath)) {
+              try { meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8')); } catch {}
+            }
+            res.json({ success: true, artifactId: cleanId, htmlBundle: html, metadata: meta });
+          } else {
+            res.status(404).json({ error: 'Artifact not found' });
+          }
+        } catch (err: any) {
+          res.status(500).json({ error: err?.message || String(err) });
+        }
+      });
+
       app.post('/api/cyber_tool', express.json({ limit: '10mb' }), async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
