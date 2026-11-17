@@ -227,12 +227,16 @@ ${sanitizedContent.slice(0, 2000)}`;
 
                 // Sync canonical DiskSymbolDb store
                 try {
-                    const { getDiskSymbolDb } = await import('./disk-symbol-db.js');
+                    const { getDiskSymbolDb, closeDiskSymbolDb } = await import('./disk-symbol-db.js');
                     const graphsDir = path.join(mcpDir, 'graphs');
                     const diskDb = getDiskSymbolDb({ baseDir: graphsDir });
-                    diskDb.transaction(() => {
-                        graph.toDiskSymbolDb(diskDb, wsHash);
-                    });
+                    try {
+                        diskDb.transaction(() => {
+                            graph.toDiskSymbolDb(diskDb, wsHash);
+                        });
+                    } finally {
+                        closeDiskSymbolDb({ baseDir: graphsDir });
+                    }
                 } catch (e) {
                     console.error('[WorkspaceIndexer] Failed to sync DiskSymbolDb:', e);
                 }

@@ -470,6 +470,26 @@ export function getDiskSymbolDb(options?: DiskSymbolDbOptions): DiskSymbolDb {
   return inst;
 }
 
+export function closeDiskSymbolDb(options?: DiskSymbolDbOptions): void {
+  let baseDir = options?.baseDir;
+  if (!baseDir) {
+    try {
+      baseDir = path.join(getMcpDir(), 'graphs');
+    } catch (err) {
+      baseDir = path.join(os.homedir(), '.free-llm-mcp', 'graphs');
+    }
+  }
+  const normalized = path.resolve(baseDir);
+  for (const [key, db] of dbPool.entries()) {
+    if (key.startsWith(`${normalized}::`)) {
+      try {
+        db.close();
+      } catch {}
+      dbPool.delete(key);
+    }
+  }
+}
+
 export function closeAllDiskSymbolDbs(): void {
   for (const db of dbPool.values()) {
     try {
