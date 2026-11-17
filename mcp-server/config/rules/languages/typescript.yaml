@@ -18,6 +18,9 @@ sinks:
   - type: command_injection
     regex: "\\b(?:child_process\\.(?:exec|execSync|spawn|spawnSync)|exec|execSync|spawn|spawnSync)\\s*\\("
     pattern: "\\b(?:child_process\\.(?:exec|execSync|spawn|spawnSync)|exec|execSync|spawn|spawnSync)\\s*\\("
+  - type: dom_xss
+    regex: "\\b(?:innerHTML|outerHTML)\\s*="
+    pattern: "\\b(?:innerHTML|outerHTML)\\s*="
   - type: type_assertion_any
     regex: "\\bas\\s+any\\b|<any>"
     pattern: "\\bas\\s+any\\b|<any>"

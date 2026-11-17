@@ -231,21 +231,19 @@ export class MemoryAuditor {
       // Extract symbols using YAML rules
       const extractedNodes = this.loader.extractNodesFromFile(relPath, content);
 
-      // Check comments and contracts across functions, methods, and classes
+      // Check comments and contracts (contracts apply strictly to callable functions and methods)
       for (const node of extractedNodes) {
-        if (node.kind === 'function' || node.kind === 'method' || node.kind === 'class' || node.kind === 'struct' || node.kind === 'interface') {
+        if (node.kind === 'function' || node.kind === 'method') {
           if (!node.contracts || node.contracts.length === 0) {
             report.commentAudit.missingContracts.push({
               filePath: relPath,
               symbol: node.name,
               line: node.lineStart || 1,
-              expected: node.kind === 'class' || node.kind === 'struct' || node.kind === 'interface'
-                ? ['@contract', '@invariant']
-                : ['@contract', '@returns', '@throws'],
+              expected: ['@contract', '@returns', '@throws'],
             });
             report.suggestedActions.push({
               action: 'wiki_write',
-              reason: `Document contract specifications for ${node.kind} ${node.name} in ${relPath}`,
+              reason: `Document contract specifications for ${node.name} in ${relPath}`,
               payload: { title: `Contract: ${node.name}`, symbol: node.name, filePath: relPath },
             });
           }
