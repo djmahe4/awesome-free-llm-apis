@@ -24,7 +24,7 @@ symbols:
     message: "Function declaration"
   - id: ts-arrow-function
     kind: function
-    pattern: "\\b(?:export\\s+)?const\\s+([A-Za-z0-9_$]+)\\s*=\\s*(?:async\\s*)?\\(([^)]*)\\)\\s*(?::\\s*[^=]+)?=>"
+    pattern: "\\b(?:export\\s+)?(?:const|let|var)\\s+([A-Za-z0-9_$]+)\\s*=\\s*(?:async\\s*)?(?:\\(([^)]*)\\)|[A-Za-z0-9_$]+)\\s*(?::\\s*[^=]+)?\\s*=>"
     message: "Arrow function assignment"
   - id: ts-class-declaration
     kind: class

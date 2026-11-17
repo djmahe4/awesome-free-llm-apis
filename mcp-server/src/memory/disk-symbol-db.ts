@@ -386,7 +386,7 @@ export class DiskSymbolDb {
   getBlackboardView(repoHash: string): { nodes: DagNodeRecord[]; edges: DagEdgeRecord[] } {
     const nodes = this.getAllNodes(repoHash).filter(n => n.kind === 'blackboard');
     const nodeIds = new Set(nodes.map(n => n.id));
-    const edges = this.getAllEdges(repoHash).filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+    const edges = this.getAllEdges(repoHash).filter(e => nodeIds.has(e.source) || nodeIds.has(e.target));
     return { nodes, edges };
   }
 

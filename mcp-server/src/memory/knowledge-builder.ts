@@ -119,6 +119,12 @@ export class KnowledgeRuleLoader {
 
   public isTestFile(filePath: string): boolean {
     const normalized = filePath.replace(/\\/g, '/');
+    if (this.testExcludePatterns.length > 0) {
+      for (const pattern of this.testExcludePatterns) {
+        const clean = pattern.replace(/\*\*\//g, '').replace(/\/\*\*/g, '').replace(/\*/g, '');
+        if (clean && normalized.includes(clean)) return true;
+      }
+    }
     const testKeywords = ['__tests__', '.test.', '.spec.', 'test_', '_test.'];
     return testKeywords.some(kw => normalized.includes(kw));
   }
@@ -143,12 +149,14 @@ export class KnowledgeRuleLoader {
           // Search preceding lines for contracts and decorators
           const contracts: string[] = [];
           const decorators: string[] = [];
+          const contractKeywords = ['@contract', '@pre', '@post', '@invariant', '@throws', '@returns', '@sideeffect', '@threadsafe'];
           for (let j = Math.max(0, i - 10); j < i; j++) {
             const checkLine = lines[j].trim();
-            if (checkLine.startsWith('@') && !checkLine.startsWith('@contract') && !checkLine.startsWith('@pre') && !checkLine.startsWith('@post') && !checkLine.startsWith('@throws') && !checkLine.startsWith('@returns')) {
+            const isContract = contractKeywords.some(kw => checkLine.includes(kw));
+            if (checkLine.startsWith('@') && !isContract) {
               decorators.push(checkLine);
             }
-            if (checkLine.includes('@contract') || checkLine.includes('@pre') || checkLine.includes('@post') || checkLine.includes('@throws') || checkLine.includes('@returns')) {
+            if (isContract) {
               contracts.push(checkLine);
             }
           }

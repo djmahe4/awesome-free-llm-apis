@@ -20,8 +20,8 @@ symbols:
     message: "Python function or method definition with optional return type"
   - id: py-class-def
     kind: class
-    pattern: "^[ \\t]*class\\s+([A-Za-z0-9_]+)(?:\\s*\\(([^)]*)\\))?\\s*:"
-    message: "Python class definition with inheritance"
+    pattern: "^[ \\t]*class\\s+([A-Za-z0-9_]+)(?:\\[[^\\]]+\\])?(?:\\s*\\(([^)]*)\\))?\\s*:"
+    message: "Python class definition with PEP 695 generics and inheritance"
   - id: py-decorator
     kind: decorator
     pattern: "^[ \\t]*@([A-Za-z0-9_\\.]+)(?:\\s*\\(([^)]*)\\))?"
