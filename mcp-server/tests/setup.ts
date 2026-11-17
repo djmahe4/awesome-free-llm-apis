@@ -2,6 +2,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs-extra';
 import { afterAll } from 'vitest';
+import { closeAllDiskSymbolDbs } from '../src/memory/disk-symbol-db.js';
 
 const testSandboxDir = path.join(os.tmpdir(), `free-llm-mcp-test-env-${process.pid}`);
 fs.ensureDirSync(testSandboxDir);
@@ -14,6 +15,9 @@ process.env.CACHE_STORE_PATH = path.join(testSandboxDir, 'cache.json');
 process.env.VECTOR_STORAGE_ROOT = path.join(testSandboxDir, 'vector-indices');
 
 afterAll(async () => {
+    try {
+        closeAllDiskSymbolDbs();
+    } catch {}
     try {
         await fs.rm(testSandboxDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     } catch {}

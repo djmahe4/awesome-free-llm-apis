@@ -6,6 +6,8 @@ import path from 'path';
 import { withFileLock } from '../utils/file-lock.js';
 import { wikiConfig } from '../config/wiki-config.js';
 import { checkPageClaims, claimMode, UNVERIFIED_TAG, UNCHECKED_CONFIDENCE_CAP } from './wiki-claims.js';
+import type { DiskSymbolDb } from './disk-symbol-db.js';
+import { getDiskSymbolDb } from './disk-symbol-db.js';
 
 // See long-term.ts/vector.ts for the same rationale.
 const LOCK_WAIT_MS = 30000;
@@ -148,12 +150,16 @@ async function safeUnlink(filePath: string, retries = 5, delay = 10): Promise<vo
 
 export class WikiMemory {
   private wikiDir: string;
+  private workspaceHash: string;
+  private diskDb?: DiskSymbolDb;
 
   /** Workspace the page claims are checked against. Without it pages are written exactly as before. */
   private sourceRoot?: string;
 
-  constructor(workspaceHash: string, customBaseDir?: string, sourceRoot?: string) {
+  constructor(workspaceHash: string, customBaseDir?: string, sourceRoot?: string, diskDb?: DiskSymbolDb) {
+    this.workspaceHash = workspaceHash;
     this.sourceRoot = sourceRoot;
+    this.diskDb = diskDb;
     // the hash/namespace becomes a directory name: it must not be able to walk out of the wiki folder
     if (!workspaceHash || /[\/\u0000]/.test(workspaceHash) || workspaceHash === '.' || workspaceHash.includes('..')) {
       throw new Error(`invalid workspace hash / namespace: ${JSON.stringify(workspaceHash).slice(0, 80)}`);
@@ -161,6 +167,10 @@ export class WikiMemory {
     const homeBase = process.env.FREE_LLM_MCP_HOME || os.homedir();
     const base = customBaseDir || path.join(homeBase, '.free-llm-mcp', 'wiki');
     this.wikiDir = path.join(base, workspaceHash);
+  }
+
+  private getCanonicalDb(): DiskSymbolDb {
+    return this.diskDb || getDiskSymbolDb();
   }
 
   private async ensureDir(): Promise<void> {
@@ -357,6 +367,33 @@ export class WikiMemory {
     await safeRename(tmpPath, targetPath);
 
     await this.enforcePageLimit();
+
+    // Dual-write to canonical DiskSymbolDb store
+    try {
+      const db = this.getCanonicalDb();
+      const nodeId = `wiki::${getFilename(title)}`;
+      db.transaction(() => {
+        db.putNode(this.workspaceHash, {
+          id: nodeId,
+          kind: 'doc',
+          filePath: targetPath,
+          docstring: content.slice(0, 500),
+          tags,
+          payload: title,
+          metadata: { confidence, tier, adr_ref, links },
+        });
+        for (const link of links) {
+          const targetClean = link.replace(/^\[\[|\]\]$/g, '');
+          db.putEdge(this.workspaceHash, {
+            source: nodeId,
+            target: `wiki::${getFilename(targetClean)}`,
+            kind: 'references',
+          });
+        }
+      });
+    } catch (err) {
+      console.error('[WikiMemory] Failed to dual-write page to DiskSymbolDb:', err);
+    }
 
     return {
       title,
