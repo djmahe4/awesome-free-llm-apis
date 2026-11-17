@@ -369,6 +369,15 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
     }
   }
 
+  // Unwrap MCP tool envelope ({ content: [{ type: 'text', text: '...' }] }) if present
+  let innerPayload = parsedResult;
+  if (parsedResult && typeof parsedResult === 'object' && Array.isArray(parsedResult.content) && parsedResult.content[0]?.text) {
+    try {
+      const nested = JSON.parse(parsedResult.content[0].text);
+      if (nested && typeof nested === 'object') innerPayload = nested;
+    } catch {}
+  }
+
   const resultText = (() => {
     if (parsedResult && typeof parsedResult === 'object') {
       if (Array.isArray(parsedResult.content) && parsedResult.content[0]?.text) {
@@ -394,8 +403,12 @@ function addToolCallBubble(tool, args, result, ts, latencyMs, isError) {
 
   const outputContainerId = `tool-out-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   let resultBodyHtml = '';
-  if (parsedResult && typeof parsedResult === 'object' && (parsedResult.htmlBundle || (parsedResult.data && parsedResult.data.htmlBundle))) {
-    resultBodyHtml = renderConcept3DCard(parsedResult.htmlBundle ? parsedResult : parsedResult.data);
+  const conceptData = (typeof extractConceptAnimationData === 'function')
+    ? extractConceptAnimationData(innerPayload)
+    : (innerPayload?.htmlBundle || innerPayload?.data?.htmlBundle ? (innerPayload.htmlBundle ? innerPayload : innerPayload.data) : null);
+
+  if (conceptData) {
+    resultBodyHtml = renderConcept3DCard(conceptData);
   } else if (parsedResult && typeof parsedResult === 'object' && Array.isArray(parsedResult.patchPlan) && parsedResult.patchPlan.length) {
     resultBodyHtml = parsedResult.patchPlan.map(p => {
       const diffText = p.unifiedDiff || p.diff || (p.replacementSnippet ? `@@ -${p.startLine} +${p.startLine} @@\n${p.replacementSnippet}` : '');
@@ -538,6 +551,10 @@ function updateWorkspaceUI() {
       chatBadge.textContent = '📂 Grounded';
       chatBadge.className = 'badge badge-cyan';
     }
+  } else if (activeSessionId && activeSessionId !== '__no_ws__') {
+    chatLabel.textContent = activeSessionId;
+    chatBadge.textContent = '💬 Session';
+    chatBadge.className = 'badge badge-purple';
   } else {
     chatLabel.textContent = 'No workspace — one-shot mode';
     chatBadge.textContent = '⚡ One-shot';
@@ -545,6 +562,30 @@ function updateWorkspaceUI() {
   }
 }
 pgAgenticToggle?.addEventListener('change', updateWorkspaceUI);
+
+// ─── Conversation Switcher & Persistence ─────────────────────────
+async function switchToSession(sid) {
+  if (!sid) return;
+  activeSessionId = sid;
+  localStorage.setItem('mcp-active-session', sid);
+  if (window.history && window.history.replaceState) {
+    const url = new URL(window.location);
+    if (sid === '__no_ws__') {
+      url.searchParams.delete('session');
+    } else {
+      url.searchParams.set('session', sid);
+    }
+    window.history.replaceState({}, '', url);
+  }
+  if (sid === '__no_ws__') {
+    pgWorkspace.value = '';
+    localStorage.setItem('mcp-workspace', '');
+  }
+  chatHistory = await loadChatHistory(sid);
+  rebuildChatLog();
+  updateWorkspaceUI();
+  refreshConvList(convSearch?.value || '');
+}
 
 // ─── Conversation list panel ──────────────────────────────────────
 let _convSearchTimer = null;
@@ -594,17 +635,7 @@ function renderConvList(sessions) {
     el.addEventListener('click', async () => {
       const sid = el.dataset.sid;
       if (sid === activeSessionId) return;
-
-      activeSessionId = sid;
-      if (sid === '__no_ws__') {
-        pgWorkspace.value = '';
-        localStorage.setItem('mcp-workspace', '');
-        updateWorkspaceUI();
-      }
-
-      chatHistory = await loadChatHistory(sid);
-      rebuildChatLog();
-      refreshConvList(convSearch?.value || '');
+      await switchToSession(sid);
     });
   });
 }
@@ -621,8 +652,10 @@ pgNewConvBtn?.addEventListener('click', async () => {
     if (r.ok) {
       const d = await r.json();
       activeSessionId = d.sessionId;
+      localStorage.setItem('mcp-active-session', activeSessionId);
       chatHistory = [];
       rebuildChatLog();
+      updateWorkspaceUI();
       refreshConvList();
       pgStatus.textContent = '✓ New chat ready';
       pgStatus.style.color = 'var(--accent-green)';
@@ -656,19 +689,23 @@ updateWorkspaceUI();
 pgWorkspace.addEventListener('change', async () => {
   const ws = pgWorkspace.value.trim();
   localStorage.setItem('mcp-workspace', ws);
-  updateWorkspaceUI();
-  activeSessionId = await resolveSessionId(ws);
-  chatHistory = await loadChatHistory(activeSessionId);
-  rebuildChatLog();
-  refreshConvList();
+  const newSid = await resolveSessionId(ws);
+  await switchToSession(newSid);
 });
 
-// Initial load
+// Initial load: prioritize URL session query, then localStorage, then workspace-derived
 (async () => {
-  activeSessionId = await resolveSessionId(pgWorkspace.value.trim());
-  chatHistory = await loadChatHistory(activeSessionId);
-  rebuildChatLog();
-  refreshConvList();
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlSession = urlParams.get('session');
+  const savedSession = localStorage.getItem('mcp-active-session');
+  const targetSession = urlSession || savedSession;
+
+  if (targetSession) {
+    await switchToSession(targetSession);
+  } else {
+    const derived = await resolveSessionId(pgWorkspace.value.trim());
+    await switchToSession(derived);
+  }
 })();
 
 // ─── Folder picker ────────────────────────────────────────────────
@@ -709,7 +746,7 @@ pgParamsToggle.addEventListener('click', () => {
 // Background sync for external MCP client tool invocations
 let isRunActive = false;
 setInterval(async () => {
-  if (isRunActive || document.hidden || !activeSessionId || activeSessionId === '__no_ws__') return;
+  if (isRunActive || document.hidden || !activeSessionId) return;
   try {
     const log = await loadChatHistory(activeSessionId);
     if (log.length !== chatHistory.length) {
@@ -812,6 +849,12 @@ pgRunBtn.addEventListener('click', async () => {
         pgLatency.style.display = 'inline-flex';
       }
       pgStatus.textContent = '✓ Success'; pgStatus.style.color = 'var(--accent-green)';
+
+      // Auto-redirect / switch session if tool returned or created a specific session
+      const targetSid = data.result?.sessionId || data.result?.data?.sessionId;
+      if (targetSid && targetSid !== activeSessionId) {
+        await switchToSession(targetSid);
+      }
     }
   } catch (err) {
     const errMsg = `Network error: ${err.message}`;

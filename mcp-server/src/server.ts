@@ -26,7 +26,7 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error(`[CRITICAL] Unhandled Rejection at: ${promise}, reason: ${reason}`);
 });
 
-import { getMcpDir } from './utils/mcp-home.js';
+import { getMcpDir, sanitizeSessionId } from './utils/mcp-home.js';
 import dns from 'dns';
 try {
   dns.setDefaultResultOrder('ipv4first');
@@ -893,28 +893,47 @@ export function createExpressApp(): express.Express {
       });
 
       // Serve static 3D Concept Animator bundles and metadata
-      app.get('/api/3d-animations/:artifactId', async (req, res) => {
+      app.get(['/api/3d-animations/:artifactId', '/api/3d-animations/:artifactId.html'], async (req, res) => {
         try {
-          const rawId = req.params.artifactId || '';
-          const cleanId = rawId.replace(/[^a-zA-Z0-9_-]/g, '');
+          const paramId = (req.params as any).artifactId;
+          const rawId = Array.isArray(paramId) ? String(paramId[0] || '') : String(paramId || '');
+          const cleanId = rawId.replace(/\.html$/i, '').replace(/[^a-zA-Z0-9_-]/g, '');
           if (!cleanId) {
             res.status(400).json({ error: 'artifactId is required' });
             return;
           }
           const htmlPath = path.join(getMcpDir(), '3d-animations', `${cleanId}.html`);
           const jsonPath = path.join(getMcpDir(), '3d-animations', `${cleanId}.json`);
-          if (fs.existsSync(htmlPath)) {
-            const html = fs.readFileSync(htmlPath, 'utf-8');
-            let meta: any = null;
-            if (fs.existsSync(jsonPath)) {
-              try { meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8')); } catch {}
+
+          let html: string;
+          try {
+            html = await fsp.readFile(htmlPath, 'utf-8');
+          } catch (readErr: any) {
+            if (readErr?.code === 'ENOENT') {
+              res.status(404).json({ error: 'Artifact not found' });
+              return;
             }
-            res.json({ success: true, artifactId: cleanId, htmlBundle: html, metadata: meta });
-          } else {
-            res.status(404).json({ error: 'Artifact not found' });
+            throw readErr;
           }
+
+          let meta: any = null;
+          try {
+            const rawMeta = await fsp.readFile(jsonPath, 'utf-8');
+            meta = JSON.parse(rawMeta);
+          } catch {}
+
+          const wantsHtml = req.query.format === 'html' || req.path.endsWith('.html') || (req.accepts(['html', 'json']) === 'html');
+          if (wantsHtml) {
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            res.send(html);
+            return;
+          }
+
+          res.json({ success: true, artifactId: cleanId, htmlBundle: html, metadata: meta });
         } catch (err: any) {
-          res.status(500).json({ error: err?.message || String(err) });
+          console.error('[3d-animations] Failed to retrieve artifact:', err);
+          res.status(500).json({ error: 'Internal server error retrieving 3D animation' });
         }
       });
 
@@ -983,8 +1002,8 @@ export function createExpressApp(): express.Express {
 
           // Denylist: strictly exclude all test/benchmark/fixture/vitest/mock directories that pollute the dashboard
           const DENYLIST_PREFIXES = [
-            'test-', 'bench-', 'smoke-', 'stress-', 'full-stress-', 'e2e-',
-            'simulation-', 'study-', 'vitest-', 'fixture-', 'mock-', 'tmp-'
+            'test-', 'bench-', 'bench_', 'smoke-', 'stress-', 'full-stress-', 'e2e-',
+            'simulation-', 'study-', 'vitest-', 'fixture-', 'mock-', 'tmp-', 'omp-'
           ];
 
           const entries = await fsp.readdir(projectsBase);
@@ -995,8 +1014,8 @@ export function createExpressApp(): express.Express {
           for (let i = 0; i < entries.length; i += MAX_CONCURRENT) {
             const batch = entries.slice(i, i + MAX_CONCURRENT);
             const results = await Promise.all(batch.map(async d => {
-              // Skip test/benchmark artifact directories
-              if (DENYLIST_PREFIXES.some(prefix => d.toLowerCase().startsWith(prefix))) return null;
+              // Skip test/benchmark artifact directories and duplicate no_ws__
+              if (d === 'no_ws__' || DENYLIST_PREFIXES.some(prefix => d.toLowerCase().startsWith(prefix))) return null;
               const full = path.resolve(projectsBase, d);
               if (path.dirname(full) !== path.resolve(projectsBase)) return null;
               try {
@@ -1383,12 +1402,14 @@ export function createExpressApp(): express.Express {
       app.get('/api/chat-log/:sessionId', async (req, res) => {
         if (!checkRateLimit(req, res)) return;
         try {
-          const { sessionId } = req.params;
+          const rawSid = req.params.sessionId || '';
+          const sessionId = rawSid === 'no_ws__' ? '__no_ws__' : rawSid;
           if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
             return res.status(400).json({ error: 'Invalid sessionId' });
           }
           const projectsBase = path.join(getMcpDir(), 'projects');
-          const dirPath = path.resolve(projectsBase, sessionId);
+          const safeSid = sanitizeSessionId(sessionId);
+          const dirPath = path.resolve(projectsBase, safeSid);
           // Path traversal guard: must stay within projectsBase
           if (!dirPath.startsWith(path.resolve(projectsBase) + path.sep) && dirPath !== path.resolve(projectsBase, '__no_ws__')) {
             return res.status(400).json({ error: 'Invalid sessionId' });
@@ -1933,12 +1954,14 @@ export function createExpressApp(): express.Express {
         if (!checkRateLimit(req, res)) return;
         try {
           invalidateSessionsCache();
-          const { sessionId } = req.params;
+          const rawSid = req.params.sessionId || '';
+          const sessionId = rawSid === 'no_ws__' ? '__no_ws__' : rawSid;
           if (!/^(?!\.\..?)([\w\-\.]{1,64}|__no_ws__)$/.test(sessionId)) {
             return res.status(400).json({ error: 'Invalid sessionId' });
           }
           const projectsBase = path.join(getMcpDir(), 'projects');
-          const dir = path.resolve(projectsBase, sessionId);
+          const safeSid = sanitizeSessionId(sessionId);
+          const dir = path.resolve(projectsBase, safeSid);
           const logPath = path.join(dir, 'chat-logs.json');
           const legacyLogPath = path.join(dir, 'chat-log.json');
           await withFileLock(logPath, async () => {
@@ -2026,10 +2049,11 @@ export function createExpressApp(): express.Express {
       const dashboardCsp = [
         "default-src 'self'",
         "script-src 'self' 'sha256-tGpJa3pSXa3a8oU4LBTwCr6knpiQndrqJNGgkEtIEqc=' 'sha256-d+I2Atf7cxRtJBWcPkEbKNzrWQMef8kek1LEMsFvUvo=' https://cdn.jsdelivr.net",
-        "style-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "img-src 'self' data: blob: https:",
         "media-src 'self' blob:",
-        "font-src 'self' data:",
+        "font-src 'self' data: https://fonts.gstatic.com",
+        "frame-src 'self' blob: data:",
         "connect-src 'self'",
         "base-uri 'self'",
         "object-src 'none'",

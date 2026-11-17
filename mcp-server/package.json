@@ -27,6 +27,7 @@
     "fetch-cyber-tools": "node scripts/fetch-cyber-tools.js",
     "smoke:media": "tsx --env-file=.env scripts/smoke/test_media_modalities_smoke.ts",
     "verify:precommit": "tsx scripts/verification/verify-precommit.ts",
+    "smoke:concept-animator": "tsx --env-file=.env scripts/smoke/smoke_concept_animator.ts",
     "assemble:index": "tsx scripts/assemble-index.ts"
   },
   "dependencies": {

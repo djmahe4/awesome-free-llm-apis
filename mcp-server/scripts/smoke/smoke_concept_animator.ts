@@ -18,10 +18,19 @@ async function runSmoke() {
   console.log('Concept:', data?.concept);
   console.log('Style:', data?.style);
   console.log('HTML Bundle Length:', data?.htmlBundle?.length);
-  console.log('Three.js CDN Present:', data?.htmlBundle?.includes('three.js/r128/three.min.js'));
-  console.log('OrbitControls Present:', data?.htmlBundle?.includes('OrbitControls.js'));
-  console.log('Error Boundary Present:', data?.htmlBundle?.includes('error-boundary'));
-  console.log('Canvas Container Present:', data?.htmlBundle?.includes('canvas-container'));
+  const hasThree = data?.htmlBundle?.includes('https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js');
+  const hasControls = data?.htmlBundle?.includes('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js');
+  const hasErrorBoundary = data?.htmlBundle?.includes('error-boundary');
+  const hasCanvas = data?.htmlBundle?.includes('canvas-container');
+
+  console.log('Three.js CDN Present:', hasThree);
+  console.log('OrbitControls Present:', hasControls);
+  console.log('Error Boundary Present:', hasErrorBoundary);
+  console.log('Canvas Container Present:', hasCanvas);
+
+  if (!res.success || !hasThree || !hasControls || !hasErrorBoundary || !hasCanvas) {
+    throw new Error('Smoke assertions failed for Concept Animator bundle validation');
+  }
   console.log('=== Smoke Check Complete ===');
   process.exit(0);
 }
