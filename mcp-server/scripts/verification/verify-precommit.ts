@@ -510,8 +510,18 @@ async function main() {
 
   // 6. Security Vulnerability Audit Check (Fail if moderate, high, or critical)
   console.log('\n6. Verifying package security vulnerabilities (npm audit)...');
+  let currentBranch = '';
+  try {
+    currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: mcpDir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+  } catch {}
+
+  const isMainBranch = currentBranch === 'main' || currentBranch === 'master';
   if (process.env.SKIP_AUDIT === '1') {
-    console.warn('⚠ Notice: SKIP_AUDIT=1 set. Skipping live npm audit gate.');
+    if (isMainBranch) {
+      console.error('✗ Security Audit Policy Violation: SKIP_AUDIT=1 is strictly prohibited on the default branch (main).');
+      process.exit(1);
+    }
+    console.warn(`⚠ Notice: SKIP_AUDIT=1 set on feature branch '${currentBranch}'. Skipping live npm audit gate.`);
   } else {
     try {
       const auditOutput = execSync('npm audit --json', {
