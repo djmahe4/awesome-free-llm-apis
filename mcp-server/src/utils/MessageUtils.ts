@@ -145,3 +145,38 @@ export function isUserConfused(text?: string): boolean {
 
     return false;
 }
+
+/**
+ * Normalizes a list of messages to satisfy frontier provider multi-turn constraints:
+ * 1. Merges consecutive messages with the same role.
+ * 2. Ensures the final non-system turn ends with a user role (prompting completion).
+ */
+export function normalizeConversationTurns(messages: Message[]): Message[] {
+    if (!messages || messages.length === 0) return [];
+
+    const systemMsgs = messages.filter(m => m.role === 'system');
+    const nonSystemMsgs = messages.filter(m => m.role !== 'system');
+
+    if (nonSystemMsgs.length === 0) {
+        return [...systemMsgs, { role: 'user', content: 'Continue' }];
+    }
+
+    const merged: Message[] = [];
+    for (const msg of nonSystemMsgs) {
+        if (merged.length > 0 && merged[merged.length - 1].role === msg.role) {
+            const prev = merged[merged.length - 1];
+            const prevContent = getMessageContent(prev.content);
+            const curContent = getMessageContent(msg.content);
+            prev.content = `${prevContent}\n\n${curContent}`;
+        } else {
+            merged.push({ ...msg });
+        }
+    }
+
+    // Ensure last non-system message is from 'user'
+    if (merged.length > 0 && merged[merged.length - 1].role === 'assistant') {
+        merged.push({ role: 'user', content: 'Please proceed with the requested subtask or provide the next execution response.' });
+    }
+
+    return [...systemMsgs, ...merged];
+}

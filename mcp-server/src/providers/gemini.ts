@@ -162,7 +162,10 @@ export class GeminiProvider extends BaseProvider {
     }
     let normalizedMessages: any[];
     if (filteredMessages.length > 0) {
-      normalizedMessages = filteredMessages;
+      normalizedMessages = filteredMessages.map(m => ({
+        ...m,
+        role: m.role === 'assistant' ? 'model' : (m.role === 'system' ? 'user' : m.role)
+      }));
     } else if (systemParts.length > 0) {
       normalizedMessages = [{ role: 'user', content: systemParts.join('\n\n') }];
     } else {

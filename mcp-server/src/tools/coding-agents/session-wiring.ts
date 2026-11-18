@@ -113,6 +113,7 @@ export async function scanCodingAgentContextFiles(
   };
 
   for (const target of targetFiles) {
+    await addFile(target);
     const targetPath = path.resolve(root, target);
     if (!isInside(targetPath)) continue;
     const directory = await fs.realpath(path.dirname(targetPath)).catch(() => null);
@@ -127,6 +128,76 @@ export async function scanCodingAgentContextFiles(
     if (files.size >= 100) break;
     await addFile(match[1]);
   }
+
+  // Subproject directory discovery (e.g. `(quant-blm)`, `ctf-katana/agent`)
+  const slugCandidates = new Set<string>();
+  const parenthesized = /\(([\w.-]+)\)/g;
+  for (const match of referenceText.matchAll(parenthesized)) {
+    slugCandidates.add(match[1]);
+  }
+  const pathLike = /(?:^|[\s("'`])((?:[\w.-]+[/\\])+[\w.-]+)(?=$|[\s)"'`,;:])/gm;
+  for (const match of referenceText.matchAll(pathLike)) {
+    slugCandidates.add(match[1].replace(/\\/g, '/'));
+  }
+  // Also standalone words that could name top-level directories
+  for (const word of referenceText.split(/[\s,();'"`]+/)) {
+    if (word.length >= 3 && /^[\w.-]+$/.test(word)) slugCandidates.add(word);
+  }
+
+  for (const slug of slugCandidates) {
+    if (files.size >= 100) break;
+    const candidatePath = path.resolve(root, slug);
+    if (!isInside(candidatePath)) continue;
+
+    // Check if slug itself or with an extension is a file
+    for (const ext of ['', '.ts', '.tsx', '.js', '.py', '.go', '.rs', '.json', '.c', '.cpp', '.h']) {
+      const targetWithExt = ext ? `${candidatePath}${ext}` : candidatePath;
+      const realFile = await fs.realpath(targetWithExt).catch(() => null);
+      if (realFile && isInside(realFile)) {
+        const st = await fs.stat(realFile).catch(() => null);
+        if (st?.isFile()) {
+          await addFile(realFile);
+          // Also scan the containing directory to discover sibling modules (e.g. propose.py next to judge.py)
+          const dir = path.dirname(realFile);
+          for (const rel of await scanCodeFiles(dir, 50)) {
+            if (files.size >= 100) break;
+            await addFile(path.resolve(dir, rel));
+          }
+        }
+      }
+    }
+
+    // Check if slug is a directory
+    const realDir = await fs.realpath(candidatePath).catch(() => null);
+    if (realDir && isInside(realDir)) {
+      const stat = await fs.stat(realDir).catch(() => null);
+      if (stat?.isDirectory()) {
+        for (const rel of await scanCodeFiles(realDir, 50)) {
+          if (files.size >= 100) break;
+          await addFile(path.resolve(realDir, rel));
+        }
+      }
+    }
+  }
+
+  // Module stem matching: if words in reference text match base names of files in scanned subdirs
+  const words = new Set(
+    referenceText
+      .toLowerCase()
+      .split(/[\s,();'"`/\\:]+/)
+      .filter(w => w.length >= 3 && /^[\w-]+$/.test(w))
+  );
+  if (words.size > 0 && files.size < 100) {
+    // Check files already discovered to see if their names match
+    const currentList = Array.from(files);
+    for (const f of currentList) {
+      const stem = path.parse(f).name.toLowerCase();
+      if (words.has(stem)) {
+        // Boosted priority, already in files
+      }
+    }
+  }
+
   return Array.from(files).sort();
 }
 

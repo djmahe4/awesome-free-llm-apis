@@ -546,12 +546,15 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     fallback = true,
     agentic,
     sessionId: inputSessionId,
-    workspace_root: workspaceRoot,
+    workspace_root: rawWorkspaceRoot,
     keywords,
     skill,
     skipIndexing,
     offline_only,
   } = input;
+
+  const resolvedRawWs = rawWorkspaceRoot ?? (input as any).workspaceRoot;
+  const workspaceRoot = (typeof resolvedRawWs === 'string' && resolvedRawWs.trim()) ? resolvedRawWs.trim() : undefined;
 
   const promptInput = (input as any).prompt;
   let messages = inputMessages;

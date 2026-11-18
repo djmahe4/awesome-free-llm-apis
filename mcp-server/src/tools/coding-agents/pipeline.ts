@@ -63,8 +63,10 @@ import {
 } from './session-wiring.js';
 
 export async function CodingAgentsHandler(input: CodingAgentsInput): Promise<CodingAgentsResult> {
-  const resolvedRoot = path.resolve(input.workspaceRoot || process.cwd());
-  const derived = stableWorkspaceSessionId(input.workspaceRoot);
+  const rawRoot = input.workspaceRoot ?? (input as any).workspace_root;
+  if (rawRoot && !input.workspaceRoot) input.workspaceRoot = rawRoot;
+  const resolvedRoot = path.resolve(rawRoot || process.cwd());
+  const derived = stableWorkspaceSessionId(rawRoot);
   sessionAliases.set(derived, { root: resolvedRoot, canonical: derived });
   let sessionId = derived;
   if (input.sessionId && input.sessionId !== derived) {
@@ -336,7 +338,13 @@ async function runCodingAgentsPipeline(input: CodingAgentsInput, sessionId: stri
 
     // ── Handle Action: 'plan' or pauseOnTaskPlan ─────────────────────────────
     if (input.action === 'plan' || input.pauseOnTaskPlan) {
-      const planCandidateFiles = await scanCodeFiles(workspaceRoot, 100);
+      const codeFiles: string[] = await scanCodeFiles(workspaceRoot, 100);
+      const contextFiles = await scanCodingAgentContextFiles(
+        workspaceRoot,
+        input.targetFiles ?? [],
+        `${input.goal}\n${input.feedback ?? ''}\n${input.verifyCommand ?? ''}`,
+      );
+      const planCandidateFiles = Array.from(new Set([...contextFiles, ...codeFiles]));
       const tasks = await decomposeGoalIntelligently(input.goal, workspaceRoot, planCandidateFiles, sessionId);
       let tasksMarkdown = withAgentThoughtContextApproval(serializeTasksMarkdown(input.goal, tasks));
       if (result.hypotheses) tasksMarkdown = withHypothesisSummary(tasksMarkdown, result.hypotheses);

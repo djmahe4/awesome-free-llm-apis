@@ -20,6 +20,8 @@ export interface AgentHarnessInput {
 }
 
 export async function agentHarness(input: AgentHarnessInput) {
+  const rawWs = input.workspace_root ?? (input as any).workspaceRoot;
+  if (rawWs && !input.workspace_root) input.workspace_root = rawWs;
   switch (input.action) {
     case 'deploy': {
       if (typeof input.goal !== 'string' || !input.goal.trim()) throw new Error('deploy requires `goal` (non-empty text).');

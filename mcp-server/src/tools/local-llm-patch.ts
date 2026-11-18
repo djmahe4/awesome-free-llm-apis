@@ -168,6 +168,8 @@ function extractCodeFromResponse(text: string): string {
 }
 
 export async function localLlmPatch(input: LocalLlmPatchInput): Promise<LocalLlmPatchResult> {
+  const rawWs = input.workspace_root ?? (input as any).workspaceRoot;
+  if (rawWs && !input.workspace_root) input.workspace_root = rawWs;
   const start = Date.now();
   const sessionId = input.sessionId || 'local-llm-patch-adhoc';
   let result: LocalLlmPatchResult;

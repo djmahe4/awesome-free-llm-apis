@@ -70,8 +70,12 @@ async def main():
             else:
                 parts.append(types.Part(text=content))
 
+            # Google GenAI SDK requires role to be 'user' or 'model' (not 'assistant' or 'system')
+            raw_role = m.get("role", "user")
+            sdk_role = "model" if raw_role == "assistant" else ("user" if raw_role == "system" else raw_role)
+
             sdk_messages.append(types.Content(
-                role=m["role"],
+                role=sdk_role,
                 parts=parts
             ))
 

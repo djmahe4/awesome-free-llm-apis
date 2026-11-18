@@ -153,12 +153,20 @@ export class SubtaskDecomposer {
         const steps = placeholders.size === 0 ? SubtaskDecomposer.decomposeGoalCore(goal) : SubtaskDecomposer.decomposeGoalCore(tokenized);
         const tasks = steps.map(task => ({ id: newQueueTaskId(), task }));
         const resolvedContext = Object.fromEntries(placeholders);
+        const targetDirective = goal.match(/(?:^|\n)\s*(?:target(?:\s*file)?|module)\s*:\s*([^\s\r\n]+\.[a-zA-Z0-9]+)/i);
+        if (targetDirective) {
+            resolvedContext['target_file'] = targetDirective[1].trim();
+        }
         return { tasks, resolvedContext };
     }
 
     private static decomposeGoalCore(goal: string): string[] {
         let items: string[] = [];
         const lines = goal.split('\n').map(l => l.trim()).filter(Boolean);
+
+        // Detect explicit target file directive in preamble/title (e.g. "Target: path/to/file.py")
+        const targetDirective = goal.match(/(?:^|\n)\s*(?:target(?:\s*file)?|module)\s*:\s*([^\s\r\n]+\.[a-zA-Z0-9]+)/i);
+        const primaryTarget = targetDirective ? targetDirective[1].trim() : undefined;
 
         const lineModes = lines.map(line => {
             if (line.startsWith('>')) {
@@ -183,6 +191,16 @@ export class SubtaskDecomposer {
                 .split(/\n+/)
                 .map(l => l.replace(/^\s*\d+[.)]\s*/, '').trim())
                 .filter(l => l.length > 0);
+        }
+
+        if (primaryTarget) {
+            items = items.map(item => {
+                const itemHasFile = /\b[a-zA-Z0-9_\-\/\\.]+\.(ts|js|py|go|rs|c|cpp|h|hpp|java|cs|json|md)\b/i.test(item);
+                if (!itemHasFile) {
+                    return `[Target: ${primaryTarget}] ${item}`;
+                }
+                return item;
+            });
         }
 
         if (items.length === 0) {

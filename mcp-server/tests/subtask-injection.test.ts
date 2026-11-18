@@ -165,4 +165,19 @@ Network Forensics with Wireshark and Cryptography Fundamentals`;
             vi.restoreAllMocks();
         }
     });
+
+    it('propagates preamble Target directive to subtasks lacking explicit file paths', () => {
+        const goal = `
+Perform an adversarial contract audit on the invariant_reasoner:
+Target: ctf-katana/agent/invariant_reasoner.py
+Questions to probe:
+1. EFFECT_TO_CWE Collisions & Ambiguities: For instance, out_of_bounds_write could be CWE-787.
+2. Malformed / Adversarial model outputs: Unparseable JSON.
+        `.trim();
+        const { tasks, resolvedContext } = decomposeGoal(goal);
+        expect(resolvedContext['target_file']).toBe('ctf-katana/agent/invariant_reasoner.py');
+        expect(tasks.length).toBe(2);
+        expect(tasks[0].task).toContain('[Target: ctf-katana/agent/invariant_reasoner.py]');
+        expect(tasks[1].task).toContain('[Target: ctf-katana/agent/invariant_reasoner.py]');
+    });
 });
