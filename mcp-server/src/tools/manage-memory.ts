@@ -263,7 +263,7 @@ export async function manageMemory(input: ManageMemoryInput) {
         case 'decompose_task': {
             if (!workspaceRoot) throw new Error('decompose_task requires `workspace_root`.');
             const targetGoal = task || query || content;
-            if (!targetGoal) throw new Error('decompose_task requires `task`, `query`, or `content` specifying the goal to decompose.');
+            if (!targetGoal) throw new Error('decompose_task requires `task` specifying the goal to decompose.');
             const decomposer = new TaskDecomposer();
             return await decomposer.decomposeTask({
                 goal: targetGoal,
