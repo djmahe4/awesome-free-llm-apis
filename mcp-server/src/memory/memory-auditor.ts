@@ -6,6 +6,7 @@ import { memoryManager } from './index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
 import { extractMermaidBlocks, classifyDiagramIntent, MERMAID_DIAGRAM_TYPES } from './mermaid-classifier.js';
 import { auditAndPromoteSafePractices, type SafePracticesAuditResult } from './safe-practices.js';
+import { LocalModelLock } from '../utils/local-model-lock.js';
 
 export interface FileAuditCorrection {
   nodeId?: string;
@@ -455,4 +456,178 @@ export class MemoryAuditor {
 
     return report;
   }
+
+  /**
+   * Remediates skill drift with local model checking and graceful cloud fallback reminder.
+   */
+  public async applySkillDriftRemediation(input: {
+    skillContent: string;
+    driftReason: string;
+    workspaceRoot?: string;
+    allowCloudFallback?: boolean;
+    forceDeterministic?: boolean;
+  }): Promise<{
+    success: boolean;
+    remediationType: 'deterministic_template' | 'llm_synthesis';
+    patchedContent: string;
+    localModelUsed: boolean;
+    reminder?: string;
+  }> {
+    const { skillContent, driftReason, workspaceRoot = process.cwd(), allowCloudFallback = false, forceDeterministic = false } = input;
+    const localLock = LocalModelLock.getInstance();
+    const isModelLocked = localLock.isLocked();
+    const localEndpoint = process.env.OLLAMA_LOCAL_BASE_URL || 'http://127.0.0.1:11434';
+    let localReady = false;
+
+    if (!forceDeterministic && !isModelLocked) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 600);
+        const res = await fetch(`${localEndpoint}/api/tags`, { signal: controller.signal });
+        clearTimeout(timer);
+        localReady = res.ok;
+      } catch {
+        localReady = false;
+      }
+    }
+
+    if (localReady) {
+      try {
+        const { executeSkill } = await import('../tools/execute-skill.js');
+        const res = await executeSkill({
+          skill: 'skill-writer',
+          input: `Improve this skill to resolve drift: ${driftReason}\n\nContent:\n${skillContent}`,
+          workspace_root: workspaceRoot,
+        });
+
+        if (res.success && (res.content || res.response)) {
+          return {
+            success: true,
+            remediationType: 'llm_synthesis',
+            patchedContent: res.content || res.response || skillContent,
+            localModelUsed: true,
+          };
+        }
+      } catch {}
+    } else if (allowCloudFallback) {
+      try {
+        const { executeSkill } = await import('../tools/execute-skill.js');
+        const res = await executeSkill({
+          skill: 'skill-writer',
+          input: `Improve this skill to resolve drift: ${driftReason}\n\nContent:\n${skillContent}`,
+          workspace_root: workspaceRoot,
+        });
+
+        if (res.success && (res.content || res.response)) {
+          return {
+            success: true,
+            remediationType: 'llm_synthesis',
+            patchedContent: res.content || res.response || skillContent,
+            localModelUsed: false,
+          };
+        }
+      } catch {}
+    }
+
+    // Deterministic fallback remediation via template
+    const patched = skillContent.startsWith('---')
+      ? skillContent
+      : `---\nname: agent-skill\ndescription: Remediated agent skill for ${driftReason}.\n---\n${skillContent}\n\n## When to Use\nUse when performing related workspace tasks.\n\n## Limitations\nSee documentation for boundaries.\n\n## Output format\n1. Summary\n2. Changes Made\n3. Validation Results\n4. Open Gaps\n`;
+
+    const reminder = !localReady
+      ? 'Notice: Local model not detected or busy. Call again with allowCloudFallback: true to run LLM synthesis.'
+      : undefined;
+
+    return {
+      success: true,
+      remediationType: 'deterministic_template',
+      patchedContent: patched,
+      localModelUsed: false,
+      reminder,
+    };
+  }
+}
+
+export interface SkillWriterRuleMatch {
+  compliant: boolean;
+  missingSections: string[];
+  missingKeywords: string[];
+  driftSuggestions: string[];
+}
+
+/**
+ * Deterministically checks skill files against skill-writer specifications
+ * without invoking any LLM, ensuring zero-latency structural checking.
+ */
+export function matchSkillWriterRules(skillContent: string, availableTools: string[] = []): SkillWriterRuleMatch {
+  const missingSections: string[] = [];
+  const missingKeywords: string[] = [];
+  const driftSuggestions: string[] = [];
+
+  // 1. YAML frontmatter check
+  const hasFrontmatter = /^---\s*\n([\s\S]*?)\n---/m.test(skillContent);
+  if (!hasFrontmatter) {
+    missingSections.push('frontmatter');
+  } else {
+    const frontmatterMatch = skillContent.match(/^---\s*\n([\s\S]*?)\n---/m);
+    const fm = frontmatterMatch ? frontmatterMatch[1] : '';
+    if (!/name:\s*[A-Za-z0-9_-]+/i.test(fm)) {
+      missingSections.push('frontmatter: name');
+    }
+    if (!/description:\s*.+/i.test(fm)) {
+      missingSections.push('frontmatter: description');
+    }
+  }
+
+  // 2. Required structural sections
+  if (!/##\s*When to Use/i.test(skillContent)) {
+    missingSections.push('## When to Use');
+  }
+  if (!/##\s*Limitations/i.test(skillContent)) {
+    missingSections.push('## Limitations');
+  }
+  if (!/##\s*Output format/i.test(skillContent)) {
+    missingSections.push('Output format contract');
+  }
+
+  // 3. Trigger & tool coverage checks
+  const lowerContent = skillContent.toLowerCase();
+  for (const tool of availableTools) {
+    if (!lowerContent.includes(tool.toLowerCase())) {
+      missingKeywords.push(tool);
+    }
+  }
+
+  if (missingSections.length > 0) {
+    driftSuggestions.push(`Align sections with skill-writer specification: missing ${missingSections.join(', ')}.`);
+  }
+
+  return {
+    compliant: missingSections.length === 0,
+    missingSections,
+    missingKeywords,
+    driftSuggestions,
+  };
+}
+
+/**
+ * Formats a compact markdown pill strictly under 300 characters to prevent
+ * chat context bloat while keeping the user informed of doc & skill drift.
+ */
+export function formatCompactDriftPill(input: {
+  docsCount: number;
+  skillsCount: number;
+  docSamples?: string[];
+  skillSamples?: string[];
+}): string {
+  const { docsCount, skillsCount, docSamples = [], skillSamples = [] } = input;
+  const docsText = docsCount > 0 ? `${docsCount} doc(s)` : '';
+  const skillsText = skillsCount > 0 ? `${skillsCount} skill(s)` : '';
+  const items = [docsText, skillsText].filter(Boolean).join(' & ');
+
+  const sampleDoc = docSamples[0] ? ` (${path.basename(docSamples[0])})` : '';
+  const sampleSkill = skillSamples[0] ? ` [${skillSamples[0]}]` : '';
+
+  const pill = `💡 **Memory Drift Alert**: ${items}${sampleDoc}${sampleSkill} drifted. Run \`manage_memory action:"audit_documentation"\` or \`"resolve_workspace_lock"\` to review.`;
+  return pill.slice(0, 299);
 }
