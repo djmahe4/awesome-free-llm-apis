@@ -220,3 +220,105 @@ export function classifyDiagramIntent(text: string): { name: string; keyword: st
   // Default to Flowchart
   return { name: 'Flowchart', keyword: 'flowchart', description: MERMAID_DIAGRAM_TYPES.Flowchart.description };
 }
+
+export type DocAudience = 'public' | 'dev';
+
+export interface DocAudienceResult {
+  audience: DocAudience;
+  recommendedDiagrams: string[];
+  rationale: string;
+}
+
+export interface DocSchematic {
+  filePath: string;
+  audience: DocAudience;
+  existingDiagrams: Array<{ keyword: string; name?: string; line: number }>;
+  missingDiagrams: Array<{ name: string; keyword: string; reason: string }>;
+  summary: string;
+}
+
+/**
+ * Classifies documentation files from an SDLC perspective into 'public' vs 'dev'.
+ * Public docs emphasize UX flow, getting started, and overall architecture.
+ * Dev docs emphasize contracts, protocols, internal state lifecycles, and AST/symbol relationships.
+ */
+export function classifyDocAudience(filePath: string, content: string): DocAudienceResult {
+  const normPath = filePath.replace(/\\/g, '/').toLowerCase();
+  const lowerContent = content.toLowerCase();
+
+  // Pattern checks for public-facing docs
+  const isPublicPath =
+    normPath.endsWith('readme.md') ||
+    normPath.includes('/setup.md') ||
+    normPath.endsWith('setup.md') ||
+    normPath.includes('/contributing.md') ||
+    normPath.endsWith('contributing.md') ||
+    normPath.includes('agentic-prompts.md') ||
+    normPath.includes('guide.md') ||
+    normPath.includes('quickstart') ||
+    normPath.includes('getting-started');
+
+  // Pattern checks for developer/internal docs
+  const isDevPath =
+    normPath.includes('mcp-development.md') ||
+    normPath.includes('gemini.md') ||
+    normPath.includes('agents.md') ||
+    normPath.includes('/adr/') ||
+    normPath.includes('internal') ||
+    normPath.includes('architecture.md') ||
+    normPath.includes('contributing_dev.md');
+
+  // Content keywords
+  const publicSignals = (lowerContent.match(/\b(user|install|getting started|overview|quickstart|workflow|prompt|public api|journey)\b/g) || []).length;
+  const devSignals = (lowerContent.match(/\b(ipc|handshake|ast-grep|contract|fsm|protocol|state machine|packet|socket|schema|table|symbol|lifecycle)\b/g) || []).length;
+
+  if (isDevPath || (devSignals > publicSignals && !isPublicPath)) {
+    return {
+      audience: 'dev',
+      recommendedDiagrams: ['sequenceDiagram', 'classDiagram', 'stateDiagram-v2', 'packet-beta', 'erDiagram'],
+      rationale: 'Developer-facing document modeling protocol handshakes, internal lifecycles, and interface contracts.',
+    };
+  }
+
+  return {
+    audience: 'public',
+    recommendedDiagrams: ['flowchart', 'journey', 'C4Context', 'gantt', 'architecture-beta'],
+    rationale: 'Public-facing document emphasizing onboarding, user journeys, workflows, and system context.',
+  };
+}
+
+/**
+ * Generates a concise documentation schematic deterministically without requiring an LLM.
+ */
+export function generateDocSchematic(filePath: string, content: string): DocSchematic {
+  const audienceInfo = classifyDocAudience(filePath, content);
+  const rawBlocks = extractMermaidBlocks(content);
+  const existingDiagrams = rawBlocks.map(b => ({
+    keyword: b.detectedKeyword || 'unknown',
+    name: b.diagramName,
+    line: b.line,
+  }));
+
+  const missingDiagrams: Array<{ name: string; keyword: string; reason: string }> = [];
+
+  // Check if doc mentions architectures, protocols, or lifecycles but has no matching diagrams
+  const discussesArchitecture = /(architecture|lifecycle|workflow|routing|pipeline|protocol|handshake|state machine)/i.test(content);
+  if (discussesArchitecture && existingDiagrams.length === 0) {
+    const suggested = classifyDiagramIntent(content);
+    missingDiagrams.push({
+      name: suggested.name,
+      keyword: suggested.keyword,
+      reason: `Document discusses ${suggested.keyword} concepts without visual architectural representation.`,
+    });
+  }
+
+  const summary = `[${audienceInfo.audience.toUpperCase()}] ${filePath}: ${existingDiagrams.length} diagram(s) found; ${missingDiagrams.length} recommended.`;
+
+  return {
+    filePath,
+    audience: audienceInfo.audience,
+    existingDiagrams,
+    missingDiagrams,
+    summary,
+  };
+}
