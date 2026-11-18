@@ -495,7 +495,7 @@ export class LLMExecutor {
         sanitizedRequest.model = modelId;
 
         if (context.estimatedTokens === undefined) {
-            const promptTokens = this.calculateTokens(context.request.messages);
+            const promptTokens = this.calculateTokens(sanitizedRequest.messages || context.request.messages);
             context.estimatedTokens = promptTokens;
         }
 

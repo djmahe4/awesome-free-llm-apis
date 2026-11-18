@@ -44,4 +44,28 @@ describe('normalizeConversationTurns', () => {
         expect(normalized.length).toBe(4);
         expect(normalized.map(m => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
     });
+
+    it('preserves multi-modal array content when merging consecutive same-role turns', () => {
+        const msgs: Message[] = [
+            { role: 'user', content: [{ type: 'text', text: 'Analyze this image:' }] },
+            { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }] },
+        ];
+        const normalized = normalizeConversationTurns(msgs);
+        expect(normalized.length).toBe(1);
+        expect(Array.isArray(normalized[0].content)).toBe(true);
+        expect(normalized[0].content.length).toBe(2);
+        expect(normalized[0].content[0].type).toBe('text');
+        expect(normalized[0].content[1].type).toBe('image_url');
+    });
+
+    it('respects ensureUserTerminal: false for assistant-prefill or few-shot completions', () => {
+        const msgs: Message[] = [
+            { role: 'user', content: 'Translate to French: Hello' },
+            { role: 'assistant', content: 'Bonjour' },
+        ];
+        const normalized = normalizeConversationTurns(msgs, { ensureUserTerminal: false });
+        expect(normalized.length).toBe(2);
+        expect(normalized[normalized.length - 1].role).toBe('assistant');
+        expect(normalized[normalized.length - 1].content).toBe('Bonjour');
+    });
 });

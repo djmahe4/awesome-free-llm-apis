@@ -129,7 +129,13 @@ export async function scanCodingAgentContextFiles(
     await addFile(match[1]);
   }
 
-  // Subproject directory discovery (e.g. `(quant-blm)`, `ctf-katana/agent`)
+  const SKIP_SCAN_DIRS = new Set([
+    'node_modules', '.git', 'dist', 'build', '.venv', 'venv', '.cache', 'coverage',
+    'docs', 'documentation', 'site', 'specs', 'man', 'manual', 'wiki', 'notes', '.github', '.agents',
+    'temp', 'tmp',
+  ]);
+
+  // Subproject directory & path discovery (e.g. `(quant-blm)`, `ctf-katana/agent/judge`)
   const slugCandidates = new Set<string>();
   const parenthesized = /\(([\w.-]+)\)/g;
   for (const match of referenceText.matchAll(parenthesized)) {
@@ -139,15 +145,28 @@ export async function scanCodingAgentContextFiles(
   for (const match of referenceText.matchAll(pathLike)) {
     slugCandidates.add(match[1].replace(/\\/g, '/'));
   }
-  // Also standalone words that could name top-level directories
-  for (const word of referenceText.split(/[\s,();'"`]+/)) {
-    if (word.length >= 3 && /^[\w.-]+$/.test(word)) slugCandidates.add(word);
-  }
+
+  // Also discover immediate workspace subproject directories mentioned in the reference text
+  const escRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  try {
+    const topEntries = await fs.readdir(root, { withFileTypes: true });
+    for (const entry of topEntries) {
+      if (entry.isDirectory() && !SKIP_SCAN_DIRS.has(entry.name.toLowerCase())) {
+        const re = new RegExp(`(?<![\\w.-])${escRegex(entry.name)}(?![\\w.-])`, 'i');
+        if (re.test(referenceText)) {
+          slugCandidates.add(entry.name);
+        }
+      }
+    }
+  } catch {}
 
   for (const slug of slugCandidates) {
     if (files.size >= 100) break;
     const candidatePath = path.resolve(root, slug);
     if (!isInside(candidatePath)) continue;
+
+    const baseName = path.basename(candidatePath).toLowerCase();
+    if (SKIP_SCAN_DIRS.has(baseName)) continue;
 
     // Check if slug itself or with an extension is a file
     for (const ext of ['', '.ts', '.tsx', '.js', '.py', '.go', '.rs', '.json', '.c', '.cpp', '.h']) {
@@ -159,9 +178,11 @@ export async function scanCodingAgentContextFiles(
           await addFile(realFile);
           // Also scan the containing directory to discover sibling modules (e.g. propose.py next to judge.py)
           const dir = path.dirname(realFile);
-          for (const rel of await scanCodeFiles(dir, 50)) {
-            if (files.size >= 100) break;
-            await addFile(path.resolve(dir, rel));
+          if (!SKIP_SCAN_DIRS.has(path.basename(dir).toLowerCase())) {
+            for (const rel of await scanCodeFiles(dir, 50)) {
+              if (files.size >= 100) break;
+              await addFile(path.resolve(dir, rel));
+            }
           }
         }
       }
@@ -170,6 +191,7 @@ export async function scanCodingAgentContextFiles(
     // Check if slug is a directory
     const realDir = await fs.realpath(candidatePath).catch(() => null);
     if (realDir && isInside(realDir)) {
+      if (SKIP_SCAN_DIRS.has(path.basename(realDir).toLowerCase())) continue;
       const stat = await fs.stat(realDir).catch(() => null);
       if (stat?.isDirectory()) {
         for (const rel of await scanCodeFiles(realDir, 50)) {
@@ -180,25 +202,20 @@ export async function scanCodingAgentContextFiles(
     }
   }
 
-  // Module stem matching: if words in reference text match base names of files in scanned subdirs
+  // Module stem priority: files matching keywords or stems in referenceText appear first
   const words = new Set(
     referenceText
       .toLowerCase()
       .split(/[\s,();'"`/\\:]+/)
       .filter(w => w.length >= 3 && /^[\w-]+$/.test(w))
   );
-  if (words.size > 0 && files.size < 100) {
-    // Check files already discovered to see if their names match
-    const currentList = Array.from(files);
-    for (const f of currentList) {
-      const stem = path.parse(f).name.toLowerCase();
-      if (words.has(stem)) {
-        // Boosted priority, already in files
-      }
-    }
-  }
 
-  return Array.from(files).sort();
+  return Array.from(files).sort((a, b) => {
+    const aMatch = words.has(path.parse(a).name.toLowerCase()) ? 0 : 1;
+    const bMatch = words.has(path.parse(b).name.toLowerCase()) ? 0 : 1;
+    if (aMatch !== bMatch) return aMatch - bMatch;
+    return a.localeCompare(b);
+  });
 }
 
 // ── Main Handler ──────────────────────────────────────────────────────────────
