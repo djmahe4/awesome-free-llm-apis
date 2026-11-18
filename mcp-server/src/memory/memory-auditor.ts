@@ -5,6 +5,7 @@ import { getDiskSymbolDb, type DiskSymbolDb } from './disk-symbol-db.js';
 import { memoryManager } from './index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
 import { extractMermaidBlocks, classifyDiagramIntent, MERMAID_DIAGRAM_TYPES } from './mermaid-classifier.js';
+import { auditAndPromoteSafePractices, type SafePracticesAuditResult } from './safe-practices.js';
 
 export interface FileAuditCorrection {
   nodeId?: string;
@@ -89,8 +90,10 @@ export interface DocAuditReport {
   docDrift: {
     brokenSymbolReferences: Array<{ filePath: string; symbol: string; line: number }>;
     missingArchitectureDocs: Array<{ module: string; suggestedDiagram: string }>;
+    skillDrift?: Array<{ skillFile: string; brokenSymbol: string; reason: string }>;
   };
   suggestedActions: Array<{ action: string; reason: string; payload?: any }>;
+  safePractices?: SafePracticesAuditResult;
   hypothesis?: {
     summary: string;
     confidence: number;
@@ -413,10 +416,29 @@ export class MemoryAuditor {
               action: 'wiki_write',
               reason: `Resolve broken link [[${sym}]] in ${relPath}`,
             });
+            if (relPath.endsWith('.md') && (relPath.includes('skill') || relPath.includes('SKILL') || relPath.includes('AGENTS'))) {
+              if (!report.docDrift.skillDrift) report.docDrift.skillDrift = [];
+              report.docDrift.skillDrift.push({
+                skillFile: relPath,
+                brokenSymbol: sym,
+                reason: `Skill or agent instruction references undefined symbol ${sym}`,
+              });
+            }
           }
         }
       }
     }
+
+    // 3. Promote Safe Practices in AGENTS.md
+    try {
+      report.safePractices = await auditAndPromoteSafePractices(workspace_root);
+      if (report.safePractices.updated) {
+        report.suggestedActions.push({
+          action: 'safe_practices_updated',
+          reason: `Appended safe practices (${report.safePractices.practicesAppended.join(', ')}) to ${report.safePractices.filePath}`,
+        });
+      }
+    } catch {}
 
     if (hypothesize && report.docDrift.missingArchitectureDocs.length > 0) {
       report.hypothesis = {
