@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import { existsSync, readdirSync, realpathSync, statSync } from 'fs';
 import path from 'path';
 import { findAgentsMdPath } from '../utils/agents-md-locator.js';
+import { WorkspaceLockManager } from '../memory/workspace-lock.js';
 
 /**
  * Helper utilities that can be spied on in tests.
@@ -197,6 +198,16 @@ export async function initWorkspace(workspaceRoot: string): Promise<boolean> {
     console.error(existingContent !== null
       ? `[free-llm-mcp] Prepended auto-generated template to existing .agents/AGENTS.md (human content preserved).`
       : `[free-llm-mcp] Created .agents/AGENTS.md in your workspace. This file guides how the AI assistant understands your project. Edit it to customize behavior.`);
+
+    // Acquire workspace lock & preload skill-writer into the workspace
+    try {
+      const lockManager = WorkspaceLockManager.getInstance();
+      await lockManager.acquireLock(resolvedPath);
+      await lockManager.preloadSkillWriter(resolvedPath);
+    } catch (lockErr) {
+      console.warn('[free-llm-mcp] Notice: Could not acquire workspace lock or preload skill-writer:', (lockErr as Error)?.message || lockErr);
+    }
+
     return true;
   } catch (err) {
     // Fallback to ~/.free-llm-mcp/agents-config.json when workspace is read-only
