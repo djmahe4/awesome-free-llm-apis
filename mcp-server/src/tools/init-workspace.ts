@@ -4,6 +4,8 @@ import { promises as fs } from 'fs';
 import { existsSync, readdirSync, realpathSync, statSync } from 'fs';
 import path from 'path';
 import { findAgentsMdPath } from '../utils/agents-md-locator.js';
+import { WorkspaceLockManager } from '../memory/workspace-lock.js';
+import { DocsSchemaManager } from '../memory/docs-schema-manager.js';
 
 /**
  * Helper utilities that can be spied on in tests.
@@ -174,6 +176,13 @@ export async function initWorkspace(workspaceRoot: string): Promise<boolean> {
 - **ADR Location**: .free-llm-mcp/wiki/adr/
 - **Persona**: auto | coder | researcher | marketer | seo | student
 
+## Documentation Maintenance
+- **Code-to-Docs Traceability**: Maintain \`.free-llm-mcp/docs-schema.yaml\` linking code modules to reference docs.
+- **Architectural Diagrams**: All architecture and subsystem documentation must include valid Mermaid diagrams (\`flowchart TD\`, \`sequenceDiagram\`, \`stateDiagram-v2\`) with zero semicolons.
+- **Skill Navigation & Line Budget**: Keep skill instructions (\`SKILL.md\`) within the 250-line limit; link to \`references/\` via Progressive Disclosure tables rather than duplicating inline schemas.
+- **Audit & Verification**: Run \`manage_memory\` with \`audit_documentation\` and \`audit_file\` to verify contract headings, symbol references, and diagram presence before merging.
+- **Workspace Lock**: Confirm code-to-docs mappings via \`resolve_workspace_lock\` for uninitialized workspaces before proceeding.
+
 ## Token Budget
 - **Max context per session**: 32000 tokens
 - **Surgical reading**: enabled
@@ -197,6 +206,23 @@ export async function initWorkspace(workspaceRoot: string): Promise<boolean> {
     console.error(existingContent !== null
       ? `[free-llm-mcp] Prepended auto-generated template to existing .agents/AGENTS.md (human content preserved).`
       : `[free-llm-mcp] Created .agents/AGENTS.md in your workspace. This file guides how the AI assistant understands your project. Edit it to customize behavior.`);
+
+    // Acquire workspace lock, preload skill-writer, and ensure code-to-docs schema
+    try {
+      const lockManager = WorkspaceLockManager.getInstance();
+      await lockManager.acquireLock(resolvedPath);
+      await lockManager.preloadSkillWriter(resolvedPath);
+
+      const schemaManager = DocsSchemaManager.getInstance();
+      const existingSchema = await schemaManager.loadSchema(resolvedPath);
+      if (!existingSchema) {
+        const suggestedSchema = await schemaManager.generateSuggestedSchema(resolvedPath, false);
+        await schemaManager.saveSchema(resolvedPath, suggestedSchema);
+      }
+    } catch (lockErr) {
+      console.warn('[free-llm-mcp] Notice: Could not acquire workspace lock, preload skill-writer, or init docs-schema:', (lockErr as Error)?.message || lockErr);
+    }
+
     return true;
   } catch (err) {
     // Fallback to ~/.free-llm-mcp/agents-config.json when workspace is read-only

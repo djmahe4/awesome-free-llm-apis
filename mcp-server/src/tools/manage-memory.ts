@@ -5,6 +5,12 @@ import { quantumCompressWithAnchors } from '../utils/quantum-compression.js';
 import type { ProductivityMemory } from '../memory/productivity.js';
 import { MemoryAuditor, type FileAuditCorrection, type DocAuditCorrection } from '../memory/memory-auditor.js';
 import { TaskDecomposer } from '../memory/task-decomposer.js';
+import { WorkspaceLockManager } from '../memory/workspace-lock.js';
+import { DocsSchemaManager, type DocsSchema } from '../memory/docs-schema-manager.js';
+import { generateDocSchematic } from '../memory/mermaid-classifier.js';
+import { LocalModelLock } from '../utils/local-model-lock.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 /**
  * Classifies a new task's urgency/importance for the Eisenhower matrix.
@@ -75,7 +81,8 @@ export interface ManageMemoryInput {
         | 'eisenhower_add' | 'eisenhower_list' | 'eisenhower_complete'
         | 'pomodoro_start' | 'pomodoro_stop' | 'pomodoro_list'
         | 'adr_write' | 'adr_list'
-        | 'audit_file' | 'audit_documentation' | 'decompose_task';
+        | 'audit_file' | 'audit_documentation' | 'decompose_task'
+        | 'resolve_workspace_lock';
     workspace_root?: string;
     filePaths?: string[];
     candidateFiles?: string[];
@@ -86,6 +93,10 @@ export interface ManageMemoryInput {
     applyFeedback?: {
         corrections: Array<FileAuditCorrection | DocAuditCorrection>;
     };
+    /** @internal Auto-resolve workspace lock during audit if repo context not yet extracted */
+    autoResolveLock?: boolean;
+    /** @internal Custom schema to record during resolve_workspace_lock */
+    schema?: any;
     query?: string;
     limit?: number;
     title?: string;
@@ -184,6 +195,27 @@ export async function manageMemory(input: ManageMemoryInput) {
         case 'audit_file': {
             if (!workspaceRoot) throw new Error('audit_file requires `workspace_root`.');
             if (!input.filePaths || input.filePaths.length === 0) throw new Error('audit_file requires non-empty `filePaths`.');
+
+            // Verify workspace context and lock state. If no context has been extracted yet,
+            // pause gracefully and request confirmation without throwing an exception.
+            const lockManager = WorkspaceLockManager.getInstance();
+            const contextCheck = await lockManager.ensureWorkspaceContext(workspaceRoot, {
+                allowLocalModel: true,
+                autoResolve: Boolean((input as any).autoResolveLock),
+            });
+            if (contextCheck.locked && contextCheck.paused) {
+                return {
+                    status: 'paused',
+                    locked: true,
+                    paused: true,
+                    message: contextCheck.message,
+                    schema: contextCheck.schema,
+                    lockState: contextCheck.lockState,
+                    suggestedAction: 'resolve_workspace_lock',
+                    details: 'Workspace lock active: repository context and docs-schema.yaml must be confirmed before proceeding. Call manage_memory with action:"resolve_workspace_lock" to confirm or update the suggested schema.',
+                };
+            }
+
             const auditor = new MemoryAuditor();
             return await auditor.auditFile({
                 workspace_root: workspaceRoot,
@@ -197,6 +229,27 @@ export async function manageMemory(input: ManageMemoryInput) {
         case 'audit_documentation': {
             if (!workspaceRoot) throw new Error('audit_documentation requires `workspace_root`.');
             if (!input.filePaths || input.filePaths.length === 0) throw new Error('audit_documentation requires non-empty `filePaths`.');
+
+            // Verify workspace context and lock state. If no context has been extracted yet,
+            // pause gracefully and request confirmation without throwing an exception.
+            const lockManager = WorkspaceLockManager.getInstance();
+            const contextCheck = await lockManager.ensureWorkspaceContext(workspaceRoot, {
+                allowLocalModel: true,
+                autoResolve: Boolean((input as any).autoResolveLock),
+            });
+            if (contextCheck.locked && contextCheck.paused) {
+                return {
+                    status: 'paused',
+                    locked: true,
+                    paused: true,
+                    message: contextCheck.message,
+                    schema: contextCheck.schema,
+                    lockState: contextCheck.lockState,
+                    suggestedAction: 'resolve_workspace_lock',
+                    details: 'Workspace lock active: repository context and docs-schema.yaml must be confirmed before proceeding. Call manage_memory with action:"resolve_workspace_lock" to confirm or update the suggested schema.',
+                };
+            }
+
             const auditor = new MemoryAuditor();
             return await auditor.auditDocumentation({
                 workspace_root: workspaceRoot,
@@ -210,7 +263,7 @@ export async function manageMemory(input: ManageMemoryInput) {
         case 'decompose_task': {
             if (!workspaceRoot) throw new Error('decompose_task requires `workspace_root`.');
             const targetGoal = task || query || content;
-            if (!targetGoal) throw new Error('decompose_task requires `task`, `query`, or `content` specifying the goal to decompose.');
+            if (!targetGoal) throw new Error('decompose_task requires `task` specifying the goal to decompose.');
             const decomposer = new TaskDecomposer();
             return await decomposer.decomposeTask({
                 goal: targetGoal,
@@ -355,6 +408,108 @@ export async function manageMemory(input: ManageMemoryInput) {
                     total_found: allResults.length,
                     ...(wasTruncated ? { note: `Truncated to ${results.length} results (${currentTokens} tokens) to prevent context overflow.` } : {})
                 }
+            };
+        }
+        case 'resolve_workspace_lock': {
+            const targetRoot = workspaceRoot || process.cwd();
+            const lockManager = WorkspaceLockManager.getInstance();
+            const schemaManager = DocsSchemaManager.getInstance();
+
+            // 1. Load, accept user override, or generate docs schema
+            let schema = (input as any).schema || await schemaManager.loadSchema(targetRoot);
+            if (!schema) {
+                schema = await schemaManager.generateSuggestedSchema(targetRoot, true);
+            }
+            const schemaPath = await schemaManager.saveSchema(targetRoot, schema);
+
+            // Preload skill-writer into the workspace folder
+            await lockManager.preloadSkillWriter(targetRoot);
+
+            // Scan documentation files for schematics
+            const schematics: any[] = [];
+            async function scanDocs(dir: string, depth = 0): Promise<void> {
+                if (depth > 3) return;
+                try {
+                    const entries = await fs.readdir(dir, { withFileTypes: true });
+                    for (const entry of entries) {
+                        const full = path.join(dir, entry.name);
+                        const rel = path.relative(targetRoot, full);
+                        if (entry.isDirectory()) {
+                            if (!['node_modules', '.git', 'dist', 'build', '.free-llm-mcp'].includes(entry.name)) {
+                                await scanDocs(full, depth + 1);
+                            }
+                        } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+                            try {
+                                const content = await fs.readFile(full, 'utf-8');
+                                const schematic = generateDocSchematic(rel, content);
+                                schematics.push(schematic);
+                            } catch {}
+                        }
+                    }
+                } catch {}
+            }
+
+            await scanDocs(targetRoot);
+
+            // Suggested skills based on workspace context
+            const suggestedSkills = ['skill-writer'];
+            try {
+                if (await fs.stat(path.join(targetRoot, 'package.json')).then(() => true).catch(() => false)) {
+                    suggestedSkills.push('nodejs-backend-patterns', 'clean-code');
+                }
+                if (await fs.stat(path.join(targetRoot, 'pyproject.toml')).then(() => true).catch(() => false) ||
+                    await fs.stat(path.join(targetRoot, 'requirements.txt')).then(() => true).catch(() => false)) {
+                    suggestedSkills.push('python-pro', 'fastapi-pro');
+                }
+            } catch {}
+
+            // Check local model availability & lock status
+            const localLock = LocalModelLock.getInstance();
+            const isModelLocked = localLock.isLocked();
+            const localModelEndpoint = process.env.OLLAMA_LOCAL_BASE_URL || 'http://127.0.0.1:11434';
+            let localModelReady = false;
+
+            if (!isModelLocked) {
+                try {
+                    const controller = new AbortController();
+                    const timer = setTimeout(() => controller.abort(), 800);
+                    const res = await fetch(`${localModelEndpoint}/api/tags`, { signal: controller.signal });
+                    clearTimeout(timer);
+                    localModelReady = res.ok;
+                } catch {
+                    localModelReady = false;
+                }
+            }
+
+            // Resolve the lock file
+            const resolvedState = await lockManager.resolveLock(targetRoot, {
+                resolvedBy: 'manage_memory:resolve_workspace_lock',
+                docsSchematic: schema.codeDocsMapping,
+                suggestedSkills,
+            });
+
+            const localModelStatus = {
+                ready: localModelReady,
+                busy: isModelLocked,
+                endpoint: localModelEndpoint,
+            };
+
+            const reminder = !localModelReady
+                ? 'Notice: Local model not detected or currently busy with concurrent tasks. For LLM-assisted audit or remediation, run manage_memory with action:"audit_documentation" or "audit_file" with hypothesize:true.'
+                : undefined;
+
+            return {
+                success: true,
+                locked: false,
+                lockId: resolvedState.lockId,
+                schemaPath,
+                schema,
+                codeDocsMapping: schema.codeDocsMapping,
+                schematics,
+                suggestedSkills,
+                localModelStatus,
+                reminder,
+                summary: `Workspace lock resolved. Saved docs-schema.yaml with ${schema.codeDocsMapping.length} code-to-docs mappings. ${schematics.length} documentation file(s) schematized. Skills suggested: ${suggestedSkills.join(', ')}.`,
             };
         }
         default:
