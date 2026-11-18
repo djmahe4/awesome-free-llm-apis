@@ -4,9 +4,10 @@ import { KnowledgeRuleLoader, type ExtractedKnowledgeNode } from './knowledge-bu
 import { getDiskSymbolDb, type DiskSymbolDb } from './disk-symbol-db.js';
 import { memoryManager } from './index.js';
 import { WorkspaceScanner } from '../cache/workspace.js';
-import { extractMermaidBlocks, classifyDiagramIntent, MERMAID_DIAGRAM_TYPES } from './mermaid-classifier.js';
+import { extractMermaidBlocks, classifyDiagramIntent, sanitizeMermaidCode, MERMAID_DIAGRAM_TYPES } from './mermaid-classifier.js';
 import { auditAndPromoteSafePractices, type SafePracticesAuditResult } from './safe-practices.js';
 import { LocalModelLock } from '../utils/local-model-lock.js';
+import { extractDynamicWorkspaceContext } from './workspace-context.js';
 
 export interface FileAuditCorrection {
   nodeId?: string;
@@ -283,7 +284,8 @@ export class MemoryAuditor {
     if (hypothesize && (report.commentAudit.missingContracts.length > 0 || report.graphDrift.missingNodes.length > 0)) {
       try {
         const { useFreeLLM } = await import('../tools/use-free-llm.js');
-        const prompt = `You are a contract verification specialist. Review these audited symbols and hypothesize contracts or missing specs:\n\n${JSON.stringify({
+        const wsContext = await extractDynamicWorkspaceContext(workspace_root);
+        const prompt = `You are a contract verification specialist for "${wsContext.name}" (${wsContext.description}). Review these audited symbols and hypothesize contracts or missing specs:\n\n${JSON.stringify({
           missingContracts: report.commentAudit.missingContracts.slice(0, 5),
           missingNodes: report.graphDrift.missingNodes.slice(0, 5),
         }, null, 2)}\n\nReply with ONLY a JSON object: {"summary": string, "confidence": number, "uncertainties": string[], "suggestedCommentUpdates": [{"symbol": string, "comment": string, "filePath": string}], "suggestedWikiUpdates": [{"page": string, "content": string}]}`;
@@ -450,11 +452,40 @@ export class MemoryAuditor {
 
       try {
         const { useFreeLLM } = await import('../tools/use-free-llm.js');
-        const prompt = `You are a software architecture documentation specialist.
-Review these documentation modules missing architectural diagrams:
-${JSON.stringify(report.docDrift.missingArchitectureDocs, null, 2)}
 
-For each module, generate a concise, valid Mermaid diagram corresponding to its suggested diagram type.
+        // Extract real content snippets from the audited documents to ground the diagram synthesis in actual repository context
+        const docContexts = await Promise.all(
+          report.docDrift.missingArchitectureDocs.slice(0, 3).map(async (d) => {
+            let snippet = '';
+            try {
+              const full = path.isAbsolute(d.module) ? d.module : path.join(workspace_root, d.module);
+              const raw = await fs.readFile(full, 'utf-8');
+              snippet = raw.slice(0, 1000).replace(/\r\n/g, '\n');
+            } catch {}
+            return {
+              filePath: d.module,
+              suggestedDiagram: d.suggestedDiagram,
+              contentSnippet: snippet,
+            };
+          })
+        );
+
+        const wsContext = await extractDynamicWorkspaceContext(workspace_root);
+        const prompt = `You are a software architecture documentation specialist for the workspace "${wsContext.name}" (${wsContext.description}).
+Workspace summary: ${wsContext.contextSummary}
+
+Review these documentation modules and their actual content snippets:
+${JSON.stringify(docContexts, null, 2)}
+
+For each module, generate a concise, syntactically valid Mermaid diagram that accurately models the actual concepts, protocols, components, or user flows described in the snippet.
+Do not use generic placeholder participant names (e.g. do NOT use "User->>WorkflowEngine: Initiate Process"). Use the real components, modules, or actors mentioned in the document and workspace context.
+
+Strict Mermaid Syntax Rules:
+- The first line must be the diagram header with NO trailing punctuation/semicolon (e.g. "flowchart TD" or "sequenceDiagram", NEVER "graph TD;" or "sequenceDiagram;").
+- In flowchart/graph diagrams: use "A -->|Label| B" for labeled transitions (never "A --> B: Label;").
+- In flowchart/graph diagrams: quote labels containing spaces or special characters (e.g. Node["Label (Detail)"]).
+- Do NOT use semicolons at the end of statements.
+
 Reply with ONLY a JSON object:
 {
   "summary": string,
@@ -466,7 +497,7 @@ Reply with ONLY a JSON object:
 
         const res = await useFreeLLM({
           messages: [
-            { role: 'system', content: 'You are an expert architecture documentation generator. Output ONLY JSON.' },
+            { role: 'system', content: 'You are an expert architecture documentation generator grounded in the codebase. Output ONLY JSON.' },
             { role: 'user', content: prompt }
           ],
           isOnePass: true,
@@ -478,12 +509,13 @@ Reply with ONLY a JSON object:
         if (match) {
           const parsed = JSON.parse(match[0]);
           if (Array.isArray(parsed.diagrams) && parsed.diagrams.length > 0) {
-            llmEdits = parsed.diagrams.map((d: any) => ({
-              filePath: d.filePath,
-              content: String(d.mermaidCode).includes('```mermaid')
-                ? d.mermaidCode
-                : `\`\`\`mermaid\n${String(d.mermaidCode).trim()}\n\`\`\``,
-            }));
+            llmEdits = parsed.diagrams.map((d: any) => {
+              const sanitized = sanitizeMermaidCode(String(d.mermaidCode || ''));
+              return {
+                filePath: d.filePath,
+                content: `\`\`\`mermaid\n${sanitized}\n\`\`\``,
+              };
+            });
             hypothesisSummary = parsed.summary || hypothesisSummary;
             confidence = typeof parsed.confidence === 'number' ? parsed.confidence : confidence;
           }
@@ -544,10 +576,12 @@ Reply with ONLY a JSON object:
     if (localReady) {
       try {
         const { useFreeLLM } = await import('../tools/use-free-llm.js');
+        const wsContext = await extractDynamicWorkspaceContext(workspaceRoot);
+        const repoContext = `Target workspace: "${wsContext.name}" (${wsContext.description}). Available components/tools: ${wsContext.keyComponents.join(', ') || 'standard workspace tools'}.`;
         const res = await useFreeLLM({
           messages: [
-            { role: 'system', content: 'You are an expert agent skill author adhering to the Agent Skills specification. Output ONLY the remediated markdown file.' },
-            { role: 'user', content: `Improve this agent skill to resolve drift: ${driftReason}\n\nExisting Content:\n${skillContent}` }
+            { role: 'system', content: 'You are an expert agent skill author adhering to the Agent Skills specification and grounded in the target workspace context and tools. Output ONLY the remediated markdown file.' },
+            { role: 'user', content: `${repoContext}\n\nImprove this agent skill to resolve drift: ${driftReason}\n\nExisting Content:\n${skillContent}\n\nGround the examples, limitations, and output format in the actual tools and workflows of "${wsContext.name}" (${wsContext.keyComponents.slice(0, 5).join(', ') || 'workspace tools'}) rather than generic unrelated placeholders.` }
           ],
           isOnePass: true,
           offline_only: true,
