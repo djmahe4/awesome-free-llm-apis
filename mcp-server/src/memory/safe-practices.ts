@@ -91,7 +91,9 @@ export async function auditAndPromoteSafePractices(workspaceRoot: string): Promi
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
       await fs.writeFile(targetPath, existingContent ? (existingContent.trimEnd() + blockToAppend) : blockToAppend.trimStart(), 'utf-8');
       updated = true;
-    } catch {}
+    } catch (err) {
+      console.warn(`[safe-practices] Failed to write updated practices to ${targetPath}:`, (err as Error)?.message || err);
+    }
   }
 
   return {

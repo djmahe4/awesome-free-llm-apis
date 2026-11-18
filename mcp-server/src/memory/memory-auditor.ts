@@ -438,7 +438,9 @@ export class MemoryAuditor {
           reason: `Appended safe practices (${report.safePractices.practicesAppended.join(', ')}) to ${report.safePractices.filePath}`,
         });
       }
-    } catch {}
+    } catch (err) {
+      console.warn('[memory-auditor] Failed to audit and promote safe practices:', (err as Error)?.message || err);
+    }
 
     if (hypothesize && report.docDrift.missingArchitectureDocs.length > 0) {
       report.hypothesis = {

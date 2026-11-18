@@ -39,7 +39,7 @@ export class TaskDecomposer {
 
   /**
    * Computes graph centrality / heavy nodes in the workspace repository.
-   * High fan-in nodes (> 3 incoming references/calls) represent high-risk breaking points.
+   * High fan-in nodes (fanIn >= 2 incoming references/calls) represent high-risk breaking points.
    */
   public async identifyHeavyNodes(
     workspaceRoot: string,
@@ -161,7 +161,8 @@ export class TaskDecomposer {
     ];
     if (heavyNodes.length > 0) {
       const topHeavy = heavyNodes[0];
-      suggestedVerification.unshift(`npx vitest run --testNamePattern="${topHeavy.symbol}"`);
+      const safeSymbol = topHeavy.symbol.replace(/["\\$`]/g, '');
+      suggestedVerification.unshift(`npx vitest run --testNamePattern="${safeSymbol}"`);
     }
 
     return {
