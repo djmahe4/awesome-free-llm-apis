@@ -145,3 +145,61 @@ export function isUserConfused(text?: string): boolean {
 
     return false;
 }
+
+/**
+ * Merges two content fields, preserving multi-modal array parts (e.g. image_url, files)
+ * rather than flattening them to strings.
+ */
+function mergeMessageContent(a: any, b: any): any {
+    if (Array.isArray(a) || Array.isArray(b)) {
+        const toParts = (val: any) => {
+            if (Array.isArray(val)) return val;
+            if (typeof val === 'string') return [{ type: 'text', text: val }];
+            if (val && typeof val === 'object') return [val];
+            return [{ type: 'text', text: String(val ?? '') }];
+        };
+        return [...toParts(a), ...toParts(b)];
+    }
+    const prevText = typeof a === 'string' ? a : getMessageContent(a);
+    const curText = typeof b === 'string' ? b : getMessageContent(b);
+    return `${prevText}\n\n${curText}`;
+}
+
+export interface NormalizeTurnsOptions {
+    /** When true (default), appends a user prompt if the conversation terminates on an assistant message. */
+    ensureUserTerminal?: boolean;
+}
+
+/**
+ * Normalizes a list of messages to satisfy frontier provider multi-turn constraints:
+ * 1. Merges consecutive messages with the same role (preserving multi-modal parts).
+ * 2. Optionally ensures the final non-system turn ends with a user role (prompting completion).
+ */
+export function normalizeConversationTurns(messages: Message[], options: NormalizeTurnsOptions = {}): Message[] {
+    if (!messages || messages.length === 0) return [];
+
+    const { ensureUserTerminal = true } = options;
+    const systemMsgs = messages.filter(m => m.role === 'system');
+    const nonSystemMsgs = messages.filter(m => m.role !== 'system');
+
+    if (nonSystemMsgs.length === 0) {
+        return ensureUserTerminal ? [...systemMsgs, { role: 'user', content: 'Continue' }] : [...systemMsgs];
+    }
+
+    const merged: Message[] = [];
+    for (const msg of nonSystemMsgs) {
+        if (merged.length > 0 && merged[merged.length - 1].role === msg.role) {
+            const prev = merged[merged.length - 1];
+            prev.content = mergeMessageContent(prev.content, msg.content);
+        } else {
+            merged.push({ ...msg });
+        }
+    }
+
+    // Ensure last non-system message is from 'user' if required
+    if (ensureUserTerminal && merged.length > 0 && merged[merged.length - 1].role === 'assistant') {
+        merged.push({ role: 'user', content: 'Please proceed with the requested subtask or provide the next execution response.' });
+    }
+
+    return [...systemMsgs, ...merged];
+}

@@ -4,7 +4,7 @@ import { getSharedEncoder } from './tiktoken.js';
 import type { Message, ChatResponse } from '../providers/types.js';
 import { ProviderRegistry } from '../providers/registry.js';
 import { TaskType, type PipelineContext } from '../pipeline/middleware.js';
-import { getMessageContent, prependToMessageContent } from './MessageUtils.js';
+import { getMessageContent, prependToMessageContent, normalizeConversationTurns } from './MessageUtils.js';
 import { Sanitizer } from './Sanitizer.js';
 import { calculateModelWeightedMaxTokens } from './model-tokens.js';
 import { providerLockManager } from './ProviderLockManager.js';
@@ -487,6 +487,7 @@ export class LLMExecutor {
         // Privacy hardening: redact sensitive values before outbound provider call.
         if (sanitizedRequest.messages) {
             sanitizedRequest.messages = Sanitizer.sanitizeObject(sanitizedRequest.messages);
+            sanitizedRequest.messages = normalizeConversationTurns(sanitizedRequest.messages);
         }
         sanitizedRequest.user = sanitizedRequest.user ? Sanitizer.sanitize(String(sanitizedRequest.user)) : sanitizedRequest.user;
 
@@ -494,7 +495,7 @@ export class LLMExecutor {
         sanitizedRequest.model = modelId;
 
         if (context.estimatedTokens === undefined) {
-            const promptTokens = this.calculateTokens(context.request.messages);
+            const promptTokens = this.calculateTokens(sanitizedRequest.messages || context.request.messages);
             context.estimatedTokens = promptTokens;
         }
 

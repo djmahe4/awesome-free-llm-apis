@@ -113,6 +113,7 @@ export async function scanCodingAgentContextFiles(
   };
 
   for (const target of targetFiles) {
+    await addFile(target);
     const targetPath = path.resolve(root, target);
     if (!isInside(targetPath)) continue;
     const directory = await fs.realpath(path.dirname(targetPath)).catch(() => null);
@@ -127,7 +128,94 @@ export async function scanCodingAgentContextFiles(
     if (files.size >= 100) break;
     await addFile(match[1]);
   }
-  return Array.from(files).sort();
+
+  const SKIP_SCAN_DIRS = new Set([
+    'node_modules', '.git', 'dist', 'build', '.venv', 'venv', '.cache', 'coverage',
+    'docs', 'documentation', 'site', 'specs', 'man', 'manual', 'wiki', 'notes', '.github', '.agents',
+    'temp', 'tmp',
+  ]);
+
+  // Subproject directory & path discovery (e.g. `(quant-blm)`, `ctf-katana/agent/judge`)
+  const slugCandidates = new Set<string>();
+  const parenthesized = /\(([\w.-]+)\)/g;
+  for (const match of referenceText.matchAll(parenthesized)) {
+    slugCandidates.add(match[1]);
+  }
+  const pathLike = /(?:^|[\s("'`])((?:[\w.-]+[/\\])+[\w.-]+)(?=$|[\s)"'`,;:])/gm;
+  for (const match of referenceText.matchAll(pathLike)) {
+    slugCandidates.add(match[1].replace(/\\/g, '/'));
+  }
+
+  // Also discover immediate workspace subproject directories mentioned in the reference text
+  const escRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  try {
+    const topEntries = await fs.readdir(root, { withFileTypes: true });
+    for (const entry of topEntries) {
+      if (entry.isDirectory() && !SKIP_SCAN_DIRS.has(entry.name.toLowerCase())) {
+        const re = new RegExp(`(?<![\\w.-])${escRegex(entry.name)}(?![\\w.-])`, 'i');
+        if (re.test(referenceText)) {
+          slugCandidates.add(entry.name);
+        }
+      }
+    }
+  } catch {}
+
+  for (const slug of slugCandidates) {
+    if (files.size >= 100) break;
+    const candidatePath = path.resolve(root, slug);
+    if (!isInside(candidatePath)) continue;
+
+    const baseName = path.basename(candidatePath).toLowerCase();
+    if (SKIP_SCAN_DIRS.has(baseName)) continue;
+
+    // Check if slug itself or with an extension is a file
+    for (const ext of ['', '.ts', '.tsx', '.js', '.py', '.go', '.rs', '.json', '.c', '.cpp', '.h']) {
+      const targetWithExt = ext ? `${candidatePath}${ext}` : candidatePath;
+      const realFile = await fs.realpath(targetWithExt).catch(() => null);
+      if (realFile && isInside(realFile)) {
+        const st = await fs.stat(realFile).catch(() => null);
+        if (st?.isFile()) {
+          await addFile(realFile);
+          // Also scan the containing directory to discover sibling modules (e.g. propose.py next to judge.py)
+          const dir = path.dirname(realFile);
+          if (!SKIP_SCAN_DIRS.has(path.basename(dir).toLowerCase())) {
+            for (const rel of await scanCodeFiles(dir, 50)) {
+              if (files.size >= 100) break;
+              await addFile(path.resolve(dir, rel));
+            }
+          }
+        }
+      }
+    }
+
+    // Check if slug is a directory
+    const realDir = await fs.realpath(candidatePath).catch(() => null);
+    if (realDir && isInside(realDir)) {
+      if (SKIP_SCAN_DIRS.has(path.basename(realDir).toLowerCase())) continue;
+      const stat = await fs.stat(realDir).catch(() => null);
+      if (stat?.isDirectory()) {
+        for (const rel of await scanCodeFiles(realDir, 50)) {
+          if (files.size >= 100) break;
+          await addFile(path.resolve(realDir, rel));
+        }
+      }
+    }
+  }
+
+  // Module stem priority: files matching keywords or stems in referenceText appear first
+  const words = new Set(
+    referenceText
+      .toLowerCase()
+      .split(/[\s,();'"`/\\:]+/)
+      .filter(w => w.length >= 3 && /^[\w-]+$/.test(w))
+  );
+
+  return Array.from(files).sort((a, b) => {
+    const aMatch = words.has(path.parse(a).name.toLowerCase()) ? 0 : 1;
+    const bMatch = words.has(path.parse(b).name.toLowerCase()) ? 0 : 1;
+    if (aMatch !== bMatch) return aMatch - bMatch;
+    return a.localeCompare(b);
+  });
 }
 
 // ── Main Handler ──────────────────────────────────────────────────────────────

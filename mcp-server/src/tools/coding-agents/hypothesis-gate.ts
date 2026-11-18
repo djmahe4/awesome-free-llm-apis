@@ -98,7 +98,34 @@ const COMMON_EXTERNAL_OR_STDLIB_SYMBOLS = new Set([
 
   'rdpcap', 'wrpcap', 'pcapreader', 'pcapwriter', 'hexdump',
 
+  // C / POSIX standard library & system calls
+  'fgets', 'gets', 'puts', 'printf', 'sprintf', 'snprintf', 'fprintf', 'scanf', 'sscanf', 'fscanf',
+  'malloc', 'calloc', 'realloc', 'free', 'alloca',
+  'memcpy', 'memmove', 'memset', 'memcmp',
+  'strcpy', 'strncpy', 'strcat', 'strncat', 'strcmp', 'strncmp', 'strlen', 'strdup', 'strndup', 'strtok', 'strstr', 'strchr',
+  'lseek', 'ioctl', 'mmap', 'munmap', 'mprotect',
+  'fork', 'vfork', 'clone', 'execve', 'execl', 'execvp', 'system', 'popen', 'pclose',
+  'bind', 'listen', 'accept', 'connect', 'send', 'recv', 'sendto', 'recvfrom',
+  'main', 'exit', '_exit', 'abort', 'assert', 'errno', 'perror',
+  'pthread_create', 'pthread_join', 'pthread_mutex_lock', 'pthread_mutex_unlock',
+  'ptrace', 'seccomp', 'prctl', 'unshare', 'setns', 'chroot',
+
 ]);
+
+const COMMON_CHALLENGE_OR_TARGET_SYMBOLS = new Set([
+  'win', 'do_stuff', 'vuln', 'target', 'victim', 'chall', 'challenge',
+  'get_flag', 'print_flag', 'give_flag', 'shell', 'spawn_shell', 'backdoor',
+]);
+
+function isChallengeOrTargetSymbol(goal: string, name: string): boolean {
+  const lower = name.toLowerCase();
+  if (COMMON_CHALLENGE_OR_TARGET_SYMBOLS.has(lower)) {
+    if (/\b(?:ctf|challenge|binary|exploit|payload|disassembly|decompil|vulnerab|sink|gadget|pwn|target)\b/i.test(goal)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 
 
@@ -252,7 +279,7 @@ export function deriveHypotheses(input: DeriveInput): Hypothesis[] {
 
     const lower = name.toLowerCase();
 
-    if (!/^[A-Za-z_$][\w$]*$/.test(name) || name.length < 3 || NOT_NAMES.has(lower) || COMMON_EXTERNAL_OR_STDLIB_SYMBOLS.has(lower) || isSchemaOrEnvironmentName(input.goal, name)) continue;
+    if (!/^[A-Za-z_$][\w$]*$/.test(name) || name.length < 3 || NOT_NAMES.has(lower) || COMMON_EXTERNAL_OR_STDLIB_SYMBOLS.has(lower) || isSchemaOrEnvironmentName(input.goal, name) || isChallengeOrTargetSymbol(input.goal, name)) continue;
 
     if (asksToCreate(input.goal, name) || asksToImport(input.goal, name)) continue;
 

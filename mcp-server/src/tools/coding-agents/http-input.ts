@@ -25,7 +25,7 @@ export function normalizeCodingAgentsHttpInput(
     input: {
       ...b,
       goal: b.goal ?? '',
-      workspaceRoot: b.workspaceRoot ?? defaultWorkspaceRoot,
+      workspaceRoot: b.workspaceRoot ?? b.workspace_root ?? defaultWorkspaceRoot,
       dryRun: b.dryRun ?? true,
       topKFiles: b.topKFiles ?? 5,
       verifyLspDiagnostics: b.verifyLspDiagnostics ?? true,

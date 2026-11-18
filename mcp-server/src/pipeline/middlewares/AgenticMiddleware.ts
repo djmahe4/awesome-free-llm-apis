@@ -943,6 +943,7 @@ async function executeSingleSubtask(
             }
         } catch (err) {
             console.error(`[AgenticMiddleware] Subtask execution crashed: ${err}`);
+            (context as any)._subtaskError = err instanceof Error ? err.message : String(err);
             return false;
         }
 
@@ -1137,7 +1138,8 @@ async function continueQueueInBackground(
 
             const responseContent = getResponseContent(clonedCtx);
             if (!success || !responseContent) {
-                await logChatTurn(sessionId, { role: 'error', tool: 'Agentic Subtask (background)', content: `Failed: ${taskNode.task}` });
+                const failureDetail = (clonedCtx as any)._subtaskError ? ` (Reason: ${(clonedCtx as any)._subtaskError})` : '';
+                await logChatTurn(sessionId, { role: 'error', tool: 'Agentic Subtask (background)', content: `Failed: ${taskNode.task}${failureDetail}` });
                 if (!q.promptId) q.promptId = Math.random().toString(36).substring(2, 8).toUpperCase();
                 q.paused = true;
                 q.pauseReason = 'failed';
@@ -1693,7 +1695,8 @@ export class AgenticMiddleware implements Middleware {
 
                 if (!success || !responseContent) {
                     // Log subtask failure
-                    await logChatTurn(sessionId, { role: 'error', tool: 'Agentic Subtask', content: `Failed: ${currentTask}` });
+                    const failureDetail = (context as any)._subtaskError ? ` (Reason: ${(context as any)._subtaskError})` : '';
+                    await logChatTurn(sessionId, { role: 'error', tool: 'Agentic Subtask', content: `Failed: ${currentTask}${failureDetail}` });
                     if (!q.promptId) {
                         q.promptId = Math.random().toString(36).substring(2, 8).toUpperCase();
                     }
