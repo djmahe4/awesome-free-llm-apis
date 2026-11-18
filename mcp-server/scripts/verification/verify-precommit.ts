@@ -512,13 +512,17 @@ async function main() {
   console.log('\n6. Verifying package security vulnerabilities (npm audit)...');
   let currentBranch = '';
   try {
-    currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: mcpDir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
-  } catch {}
+    currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: mcpDir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  } catch (err: any) {
+    console.warn(`[verify-precommit] Could not determine git branch (${err?.message || err}). Defaulting to protected branch assumptions.`);
+    currentBranch = 'unknown';
+  }
 
-  const isMainBranch = currentBranch === 'main' || currentBranch === 'master';
-  if (process.env.SKIP_AUDIT === '1') {
-    if (isMainBranch) {
-      console.error('✗ Security Audit Policy Violation: SKIP_AUDIT=1 is strictly prohibited on the default branch (main).');
+  // Fail-closed security check: treat unknown, detached HEAD, or blank branches as protected
+  const isProtectedBranch = !currentBranch || currentBranch === 'unknown' || currentBranch === 'HEAD' || currentBranch === 'main' || currentBranch === 'master';
+  if (process.env.SKIP_AUDIT?.trim() === '1') {
+    if (isProtectedBranch) {
+      console.error(`✗ Security Audit Policy Violation: SKIP_AUDIT=1 is strictly prohibited on default or indeterminate branch ('${currentBranch}').`);
       process.exit(1);
     }
     console.warn(`⚠ Notice: SKIP_AUDIT=1 set on feature branch '${currentBranch}'. Skipping live npm audit gate.`);
