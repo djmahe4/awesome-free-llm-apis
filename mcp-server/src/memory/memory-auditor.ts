@@ -656,7 +656,7 @@ Reply with ONLY a JSON object:
     }
 
     const reminder = !localReady && !llmPatched
-      ? 'Notice: Local model not detected or busy. For LLM synthesis, call manage_memory action:"audit_documentation" with hypothesize: true and allowCloudFallback: true.'
+      ? 'Notice: Local model not detected or busy. For LLM synthesis, ensure Ollama is running or call manage_memory action:"audit_documentation" with hypothesize: true.'
       : undefined;
 
     return {

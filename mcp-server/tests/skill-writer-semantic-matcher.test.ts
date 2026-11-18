@@ -68,7 +68,7 @@ Just some random text without frontmatter or contracts.
     expect(result.success).toBe(true);
     expect(result.remediationType).toBe('deterministic_template');
     if (!result.localModelUsed) {
-      expect(result.reminder).toContain('allowCloudFallback: true');
+      expect(result.reminder).toContain('hypothesize: true');
     }
   });
 
