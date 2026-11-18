@@ -47,3 +47,17 @@ For all active development, PR review cycles, and release maintenance:
 
 ## Skip Patterns (files to never index)
 - node_modules/, .git/, dist/, build/
+
+## Safe Practices
+
+
+### TypeScript / JavaScript Safe Practices
+- **Linting & Formatting**: Follow ESLint with `@typescript-eslint`, Prettier, and `eslint-plugin-jsdoc`.
+- **Comment Contracts**: Exported and public functions require written contracts (`@contract`, `@pre`, `@post`, `@throws`, `@returns`).
+- **File Headers**: New source files must contain a top-level descriptive file header.
+- **Hygiene**: No commented-out code; no unowned `TODO` or `FIXME` comments in production code.
+
+### General Engineering Guidelines
+- **Verification**: Run local pre-commit checks (`npm run verify:precommit` or relevant test suites) before committing.
+- **Atomic Commits**: Commit changes with conventional commit prefixes (`feat:`, `fix:`, `chore:`, `docs:`).
+- **Graph & Contract Fidelity**: Avoid changing exported signatures without reviewing dependent nodes in `DiskSymbolDb`.

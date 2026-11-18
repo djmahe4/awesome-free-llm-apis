@@ -4,6 +4,7 @@ import { ContextManager } from '../utils/ContextManager.js';
 import { quantumCompressWithAnchors } from '../utils/quantum-compression.js';
 import type { ProductivityMemory } from '../memory/productivity.js';
 import { MemoryAuditor, type FileAuditCorrection, type DocAuditCorrection } from '../memory/memory-auditor.js';
+import { TaskDecomposer } from '../memory/task-decomposer.js';
 
 /**
  * Classifies a new task's urgency/importance for the Eisenhower matrix.
@@ -74,9 +75,11 @@ export interface ManageMemoryInput {
         | 'eisenhower_add' | 'eisenhower_list' | 'eisenhower_complete'
         | 'pomodoro_start' | 'pomodoro_stop' | 'pomodoro_list'
         | 'adr_write' | 'adr_list'
-        | 'audit_file' | 'audit_documentation';
+        | 'audit_file' | 'audit_documentation' | 'decompose_task';
     workspace_root?: string;
     filePaths?: string[];
+    candidateFiles?: string[];
+    maxSubtasks?: number;
     includeTests?: boolean;
     hypothesize?: boolean;
     compareGraph?: boolean;
@@ -202,6 +205,18 @@ export async function manageMemory(input: ManageMemoryInput) {
                 hypothesize: input.hypothesize,
                 compareGraph: input.compareGraph,
                 applyFeedback: input.applyFeedback as any,
+            });
+        }
+        case 'decompose_task': {
+            if (!workspaceRoot) throw new Error('decompose_task requires `workspace_root`.');
+            const targetGoal = task || query || content;
+            if (!targetGoal) throw new Error('decompose_task requires `task`, `query`, or `content` specifying the goal to decompose.');
+            const decomposer = new TaskDecomposer();
+            return await decomposer.decomposeTask({
+                goal: targetGoal,
+                workspace_root: workspaceRoot,
+                candidateFiles: input.candidateFiles || input.filePaths,
+                maxSubtasks: input.maxSubtasks,
             });
         }
         case 'eisenhower_list': {

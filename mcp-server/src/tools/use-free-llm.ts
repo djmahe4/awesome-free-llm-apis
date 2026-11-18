@@ -630,13 +630,15 @@ export async function useFreeLLM(input: UseFreeLLMInput): Promise<ChatResponse> 
     }
   }
 
-  // Hint injection for planning / architectural prompts
-  const { extractMemoryHint } = await import('../middleware/memory-hint.js');
-  const userTextForHint = messages.filter(m => m.role === 'user').map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
-  const hint = extractMemoryHint(userTextForHint);
-  if (hint && hint.actions && hint.actions.length > 0) {
-    const hintSystemMsg = `[MEMORY PROMOTION NOTE]: Before answering, consider whether manage_memory actions ${hint.actions.map(a => `"${a}"`).join(' and ')} are relevant (${hint.reason}).`;
-    messages.unshift({ role: 'system', content: hintSystemMsg });
+  // Hint injection for planning / architectural prompts (skipped for structured one-pass calls e.g. task decomposition, JSON planners)
+  if (!input.isOnePass) {
+    const { extractMemoryHint } = await import('../middleware/memory-hint.js');
+    const userTextForHint = messages.filter(m => m.role === 'user').map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
+    const hint = extractMemoryHint(userTextForHint);
+    if (hint && hint.actions && hint.actions.length > 0) {
+      const hintSystemMsg = `[MEMORY PROMOTION NOTE]: Before answering, consider whether manage_memory actions ${hint.actions.map(a => `"${a}"`).join(' and ')} are relevant (${hint.reason}).`;
+      messages.unshift({ role: 'system', content: hintSystemMsg });
+    }
   }
 
   // v1.0.4 Resolution Pass: Resolve file, artifact, ctx7, pdf references in user messages.
