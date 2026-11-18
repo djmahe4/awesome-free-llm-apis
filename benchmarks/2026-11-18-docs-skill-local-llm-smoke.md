@@ -1,7 +1,7 @@
 # Local LLM Docs & Skill Drift Recommendations Benchmark
 
 **Date:** 2026-11-18T07:56:19.526Z
-**Target Repository:** `awesome-free-llm-apis` (`C:\Users\mahes\OneDrive\Desktop\Python-Projects\awesome-free-llm-apis`)
+**Target Repository:** `awesome-free-llm-apis` 
 **Runtime:** Node.js + Ollama Local Model Acceleration
 **Local Model:** `qwen2.5-coder:7b` (under `LocalModelLock` VRAM Guard)
 

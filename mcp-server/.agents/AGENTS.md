@@ -41,6 +41,33 @@ For all active development, PR review cycles, and release maintenance:
    - Run the pre-commit verification pipeline (`npm run verify:precommit`).
    - Push to remotes using `BypassSandbox: true` to satisfy network requirements.
 
+## Documentation Maintenance & Code-to-Docs Alignment
+
+To ensure continuous maintainability and prevent documentation drift across active development:
+
+1. **Code-to-Docs Schema Map (`.free-llm-mcp/docs-schema.yaml`)**:
+   - Every core tool and subsystem module must map to a dedicated reference doc under `mcp-server/docs/skill/references/`.
+   - Never remove or orphan existing mappings. All additions to `src/tools/` or `src/memory/` must register their matching documentation.
+
+2. **Architectural Visualization Guarantee**:
+   - Subsystem, workflow, and protocol documentation must include syntactically valid Mermaid diagrams.
+   - Use explicit diagram orientations (`flowchart TD`, `sequenceDiagram`, `stateDiagram-v2`). Never use bare `flowchart` without orientation, and never append trailing semicolons.
+
+3. **Skill Navigation Layer & Token Footprint**:
+   - `SKILL.md` must serve strictly as a concise navigation layer (target budget ≤ 250 lines, ~1,200 tokens).
+   - Use Progressive Disclosure navigation tables (`| Task / Tool | Reference Path | When to Read |`) pointing to `references/` instead of duplicating inline parameter schemas.
+   - Guard against unstructured reference dumping at the bottom of markdown files.
+
+4. **Required Contract Headings in Agent Skills**:
+   - All agent skills must maintain mandatory sections: `## When to Use`, `## Limitations`, and `## Output format contract`.
+
+5. **Non-Failing Workspace Lock Enforcement**:
+   - When introducing unextracted workspace context, tools pause gracefully rather than throwing exceptions.
+   - Confirm and clear locks via `manage_memory` with `action: 'resolve_workspace_lock'`.
+
+6. **Pre-Commit Quality & Audit Checks**:
+   - Execute `manage_memory` with `action: 'audit_documentation'` and `audit_file` with `hypothesize: true` to catch missing contracts and diagrams.
+
 ## Token Budget
 - **Max context per session**: 32000 tokens
 - **Surgical reading**: enabled
