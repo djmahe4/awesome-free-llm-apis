@@ -52,8 +52,8 @@ const TOOLS = [
     id: 'manage_memory', label: 'manage_memory', icon: '🧠',
     tag: 'Memory',
     fields: [
-      { id: 'action',         label: 'Action', type: 'select', options: ['search','list','stats','clear','wiki_search','wiki_write','wiki_list','wiki_read','node_add','node_link','node_list','node_get','node_review','graph_query','adr_write','adr_list','eisenhower_add','eisenhower_list','eisenhower_complete','pomodoro_start','pomodoro_stop','pomodoro_list','audit_file','audit_documentation','decompose_task'] },
-      { id: 'workspace_root', label: 'Workspace Root', type: 'text', placeholder: 'C:/path/to/workspace', showFor: ['audit_file','audit_documentation','decompose_task'] },
+      { id: 'action',         label: 'Action', type: 'select', options: ['search','list','stats','clear','wiki_search','wiki_write','wiki_list','wiki_read','node_add','node_link','node_list','node_get','node_review','graph_query','adr_write','adr_list','eisenhower_add','eisenhower_list','eisenhower_complete','pomodoro_start','pomodoro_stop','pomodoro_list','audit_file','audit_documentation','decompose_task','resolve_workspace_lock'] },
+      { id: 'workspace_root', label: 'Workspace Root', type: 'text', placeholder: 'C:/path/to/workspace', showFor: ['audit_file','audit_documentation','decompose_task','resolve_workspace_lock'] },
       { id: 'filePaths',      label: 'File Paths (comma-separated)', type: 'text', placeholder: 'src/server.ts, docs/index.md', showFor: ['audit_file','audit_documentation'] },
       { id: 'candidateFiles', label: 'Candidate Files (comma-separated)', type: 'text', placeholder: 'src/auth.ts, src/server.ts', showFor: ['decompose_task'] },
       { id: 'maxSubtasks',    label: 'Max Subtasks', type: 'number', placeholder: '10', showFor: ['decompose_task'] },

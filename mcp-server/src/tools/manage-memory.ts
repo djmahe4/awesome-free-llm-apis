@@ -5,6 +5,11 @@ import { quantumCompressWithAnchors } from '../utils/quantum-compression.js';
 import type { ProductivityMemory } from '../memory/productivity.js';
 import { MemoryAuditor, type FileAuditCorrection, type DocAuditCorrection } from '../memory/memory-auditor.js';
 import { TaskDecomposer } from '../memory/task-decomposer.js';
+import { WorkspaceLockManager } from '../memory/workspace-lock.js';
+import { generateDocSchematic } from '../memory/mermaid-classifier.js';
+import { LocalModelLock } from '../utils/local-model-lock.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 /**
  * Classifies a new task's urgency/importance for the Eisenhower matrix.
@@ -75,7 +80,8 @@ export interface ManageMemoryInput {
         | 'eisenhower_add' | 'eisenhower_list' | 'eisenhower_complete'
         | 'pomodoro_start' | 'pomodoro_stop' | 'pomodoro_list'
         | 'adr_write' | 'adr_list'
-        | 'audit_file' | 'audit_documentation' | 'decompose_task';
+        | 'audit_file' | 'audit_documentation' | 'decompose_task'
+        | 'resolve_workspace_lock';
     workspace_root?: string;
     filePaths?: string[];
     candidateFiles?: string[];
@@ -355,6 +361,97 @@ export async function manageMemory(input: ManageMemoryInput) {
                     total_found: allResults.length,
                     ...(wasTruncated ? { note: `Truncated to ${results.length} results (${currentTokens} tokens) to prevent context overflow.` } : {})
                 }
+            };
+        }
+        case 'resolve_workspace_lock': {
+            const targetRoot = workspaceRoot || process.cwd();
+            const lockManager = WorkspaceLockManager.getInstance();
+
+            // Scan documentation files for schematics
+            const schematics: any[] = [];
+            async function scanDocs(dir: string, depth = 0): Promise<void> {
+                if (depth > 3) return;
+                try {
+                    const entries = await fs.readdir(dir, { withFileTypes: true });
+                    for (const entry of entries) {
+                        const full = path.join(dir, entry.name);
+                        const rel = path.relative(targetRoot, full);
+                        if (entry.isDirectory()) {
+                            if (!['node_modules', '.git', 'dist', 'build', '.free-llm-mcp'].includes(entry.name)) {
+                                await scanDocs(full, depth + 1);
+                            }
+                        } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+                            try {
+                                const content = await fs.readFile(full, 'utf-8');
+                                const schematic = generateDocSchematic(rel, content);
+                                schematics.push(schematic);
+                            } catch {}
+                        }
+                    }
+                } catch {}
+            }
+
+            await scanDocs(targetRoot);
+
+            // Suggested skills based on workspace context
+            const suggestedSkills = ['skill-writer'];
+            try {
+                if (await fs.stat(path.join(targetRoot, 'package.json')).then(() => true).catch(() => false)) {
+                    suggestedSkills.push('nodejs-backend-patterns', 'clean-code');
+                }
+                if (await fs.stat(path.join(targetRoot, 'pyproject.toml')).then(() => true).catch(() => false) ||
+                    await fs.stat(path.join(targetRoot, 'requirements.txt')).then(() => true).catch(() => false)) {
+                    suggestedSkills.push('python-pro', 'fastapi-pro');
+                }
+            } catch {}
+
+            // Preload skill-writer into the workspace folder
+            await lockManager.preloadSkillWriter(targetRoot);
+
+            // Check local model availability & lock status
+            const localLock = LocalModelLock.getInstance();
+            const isModelLocked = localLock.isLocked();
+            const localModelEndpoint = process.env.OLLAMA_LOCAL_BASE_URL || 'http://127.0.0.1:11434';
+            let localModelReady = false;
+
+            if (!isModelLocked) {
+                try {
+                    const controller = new AbortController();
+                    const timer = setTimeout(() => controller.abort(), 800);
+                    const res = await fetch(`${localModelEndpoint}/api/tags`, { signal: controller.signal });
+                    clearTimeout(timer);
+                    localModelReady = res.ok;
+                } catch {
+                    localModelReady = false;
+                }
+            }
+
+            // Resolve the lock file
+            const resolvedState = await lockManager.resolveLock(targetRoot, {
+                resolvedBy: 'manage_memory:resolve_workspace_lock',
+                docsSchematic: schematics,
+                suggestedSkills,
+            });
+
+            const localModelStatus = {
+                ready: localModelReady,
+                busy: isModelLocked,
+                endpoint: localModelEndpoint,
+            };
+
+            const reminder = !localModelReady
+                ? 'Notice: Local model not detected or currently busy with concurrent tasks. Call again with allowCloudFallback: true to invoke LLM synthesis.'
+                : undefined;
+
+            return {
+                success: true,
+                locked: false,
+                lockId: resolvedState.lockId,
+                schematics,
+                suggestedSkills,
+                localModelStatus,
+                reminder,
+                summary: `Workspace lock resolved. ${schematics.length} documentation file(s) schematized. Skills suggested: ${suggestedSkills.join(', ')}.`,
             };
         }
         default:
