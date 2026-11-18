@@ -39,6 +39,12 @@ export interface ExecuteSkillInput {
   source?: 'agentic-awesome' | 'hermes';
   /** Repo-relative directory (under workspace_root) holding prompt.md + skill.yaml. */
   skillDir?: string;
+  /** @internal Run directly on local Ollama model under LocalModelLock */
+  offline_only?: boolean;
+  /** @internal Maximum completion tokens (defaults to 2048 for skill execution instead of 512) */
+  max_tokens?: number;
+  /** @internal Enable Blackboard DAG tracking for multi-step deliverable iteration */
+  useBlackboard?: boolean;
 }
 
 export interface ExecuteSkillResult {
@@ -189,7 +195,7 @@ export async function executeSkill(input: ExecuteSkillInput): Promise<ExecuteSki
  * Execute a prompt using a specific local skill's instructions and reference files.
  */
 async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkillResult> {
-  const { skill, input: userPrompt, model, workspace_root, sessionId, source, skillDir } = input;
+  const { skill, input: userPrompt, model, workspace_root, sessionId, source, skillDir, offline_only } = input;
 
   // 1. Path traversal security guard
   if (!skill || !/^[a-zA-Z0-9_\-\.]+$/.test(skill) || skill.includes('..')) {
@@ -219,7 +225,11 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
             const descMatch = yamlRaw.match(/^\s*description:\s*(.+)$/m);
             if (descMatch) systemMessage += `\n## Skill Description\n${descMatch[1].trim()}\n`;
           }
-          return await executeWithSystemPrompt(systemMessage, userPrompt, model, workspace_root, sessionId, skill);
+          return await executeWithSystemPrompt(systemMessage, userPrompt, model, workspace_root, sessionId, skill, {
+            offline_only,
+            max_tokens: input.max_tokens,
+            useBlackboard: input.useBlackboard,
+          });
         } catch (error: any) {
           return { success: false, error: error?.message || 'Unknown error occurred during repo-style skill execution.' };
         }
@@ -256,7 +266,11 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
     // returns ExecuteSkillResult" holds for the Hermes path too.
     if (hermesContent) {
       try {
-        return await executeWithSystemPrompt(hermesContent, userPrompt, model, workspace_root, sessionId, skill);
+        return await executeWithSystemPrompt(hermesContent, userPrompt, model, workspace_root, sessionId, skill, {
+          offline_only,
+          max_tokens: input.max_tokens,
+          useBlackboard: input.useBlackboard,
+        });
       } catch (error: any) {
         return { success: false, error: error?.message || 'Unknown error occurred during Hermes skill execution.' };
       }
@@ -336,7 +350,11 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
     }
 
     // 7. Invoke useFreeLLM with stateless custom messages
-    return await executeWithSystemPrompt(systemMessage, userPrompt, model, workspace_root, sessionId, skill);
+    return await executeWithSystemPrompt(systemMessage, userPrompt, model, workspace_root, sessionId, skill, {
+      offline_only,
+      max_tokens: input.max_tokens,
+      useBlackboard: input.useBlackboard,
+    });
 
   } catch (error: any) {
     return {
@@ -351,6 +369,7 @@ async function executeSkillInner(input: ExecuteSkillInput): Promise<ExecuteSkill
  * path (HERMES_ADAPTER_NOTE + skill content, see executeSkill's step 2):
  * invoke useFreeLLM with the assembled system prompt, then record a wiki note
  * on success so future runs of this skill surface past pitfalls.
+ * Supports Blackboard DAG persistence to iteratively append findings without token overflow.
  */
 async function executeWithSystemPrompt(
   systemMessage: string,
@@ -358,7 +377,12 @@ async function executeWithSystemPrompt(
   model: string | undefined,
   workspace_root: string | undefined,
   sessionId: string | undefined,
-  skillLabel: string
+  skillLabel: string,
+  options?: {
+    offline_only?: boolean;
+    max_tokens?: number;
+    useBlackboard?: boolean;
+  }
 ): Promise<ExecuteSkillResult> {
   // Cyber-classified skill invocations get routed with taskType:'cyber' so
   // the free-provider router's existing TaskType.Cyber-ranked model list
@@ -366,6 +390,7 @@ async function executeWithSystemPrompt(
   // never set taskType at all) actually applies to skill-driven prompts,
   // not just cyber_tool's own direct coach path.
   const isCyberTask = CYBER_TERMS_REGEX.test(skillLabel) || CYBER_TERMS_REGEX.test(userPrompt);
+  const tokenBudget = options?.max_tokens || 2048;
 
   const result = await useFreeLLM({
     model,
@@ -373,10 +398,12 @@ async function executeWithSystemPrompt(
       { role: 'system', content: systemMessage },
       { role: 'user', content: userPrompt }
     ],
+    max_tokens: tokenBudget,
     workspace_root,
     sessionId,
     agentic: false, // Disable auto-enrichment to prevent double-enrichment and token waste
     isOnePass: true,
+    offline_only: options?.offline_only,
     taskType: isCyberTask ? TaskType.Cyber : undefined
   });
 
@@ -385,7 +412,93 @@ async function executeWithSystemPrompt(
     return { success: false, error: 'No response was generated by the model.' };
   }
 
-  const md = toMarkdownResponse(responseText);
+  let md = toMarkdownResponse(responseText);
+
+  // Blackboard DAG Orchestration: if context is heavy or deliverables need iterative appending
+  const shouldTrackBlackboard = options?.useBlackboard || skillLabel === 'skill-writer';
+  if (shouldTrackBlackboard && workspace_root) {
+    try {
+      const wsHash = await workspaceScanner.getWorkspaceHash(workspace_root);
+      const dag = memoryManager.getDag(wsHash, workspace_root);
+
+      const rootNode = await dag.addNode({
+        type: 'text',
+        content: `Skill Execution Blackboard: ${skillLabel}\nPrompt: ${userPrompt.slice(0, 300)}`,
+        tags: ['blackboard', 'skill-execution', skillLabel],
+        confidence: 1.0,
+      });
+
+      const mainNode = await dag.addNode({
+        type: 'text',
+        content: md,
+        tags: ['blackboard', skillLabel, 'initial-synthesis'],
+        confidence: 0.9,
+      });
+      await dag.addEdge(rootNode.id, mainNode.id, 'delivers');
+
+      // Check if required structural sections were omitted due to context weight
+      const hasLimitations = /#+\s*[^a-zA-Z\n]*\bLimitations\b/i.test(md);
+      const hasOutputFormat = /#+\s*[^a-zA-Z\n]*\bOutput format\b/i.test(md);
+
+      if (!hasLimitations) {
+        const limPrompt = `Based on the skill instructions and context, synthesize a clear, comprehensive "## Limitations" section for "${skillLabel}". Output ONLY markdown starting with "## Limitations".`;
+        const limRes = await useFreeLLM({
+          model,
+          messages: [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: limPrompt }
+          ],
+          max_tokens: 1024,
+          workspace_root,
+          sessionId,
+          agentic: false,
+          isOnePass: true,
+          offline_only: options?.offline_only,
+        });
+        const limText = limRes?.choices?.[0]?.message?.content?.trim();
+        if (limText) {
+          const limNode = await dag.addNode({
+            type: 'text',
+            content: limText,
+            tags: ['blackboard', skillLabel, 'limitations-remediation'],
+            confidence: 0.95,
+          });
+          await dag.addEdge(rootNode.id, limNode.id, 'appends_finding');
+          md += `\n\n${limText}`;
+        }
+      }
+
+      if (!hasOutputFormat) {
+        const ofPrompt = `Based on the skill instructions and context, synthesize a strict "## Output format contract" section for "${skillLabel}". Output ONLY markdown starting with "## Output format contract".`;
+        const ofRes = await useFreeLLM({
+          model,
+          messages: [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: ofPrompt }
+          ],
+          max_tokens: 1024,
+          workspace_root,
+          sessionId,
+          agentic: false,
+          isOnePass: true,
+          offline_only: options?.offline_only,
+        });
+        const ofText = ofRes?.choices?.[0]?.message?.content?.trim();
+        if (ofText) {
+          const ofNode = await dag.addNode({
+            type: 'text',
+            content: ofText,
+            tags: ['blackboard', skillLabel, 'output-format-remediation'],
+            confidence: 0.95,
+          });
+          await dag.addEdge(rootNode.id, ofNode.id, 'appends_finding');
+          md += `\n\n${ofText}`;
+        }
+      }
+    } catch (dagErr: any) {
+      console.error(`[execute-skill] Blackboard DAG iteration note:`, dagErr.message);
+    }
+  }
 
   // Record that this skill/pattern ran successfully, for future pitfall lookups.
   try {

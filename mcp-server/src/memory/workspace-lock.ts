@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { getMcpDir } from '../utils/mcp-home.js';
+import { DocsSchemaManager, type DocsSchema } from './docs-schema-manager.js';
 
 export interface WorkspaceLockResolution {
   resolvedBy: string;
@@ -96,6 +97,74 @@ export class WorkspaceLockManager {
     await fs.writeFile(tmpFile, JSON.stringify(state, null, 2), 'utf-8');
     await fs.rename(tmpFile, lockPath);
     return state;
+  }
+
+  /**
+   * Ensures that an existing workspace has its repository context and docs-schema.yaml recorded.
+   * If not yet extracted, triggers the workspace lock, preloads skill-writer, and uses the local
+   * model to suggest the preferred code-to-docs mapping in .yaml.
+   * Does NOT fail tools: returns a paused status with resumable context.
+   */
+  public async ensureWorkspaceContext(
+    workspaceRoot: string,
+    options?: { allowLocalModel?: boolean; autoResolve?: boolean }
+  ): Promise<{
+    locked: boolean;
+    paused: boolean;
+    schema: DocsSchema | null;
+    lockState: WorkspaceLockState;
+    message: string;
+  }> {
+    const schemaManager = DocsSchemaManager.getInstance();
+    let schema = await schemaManager.loadSchema(workspaceRoot);
+
+    if (!schema) {
+      // 1. Acquire workspace lock because repo context / docs schema not yet extracted
+      const lockState = await this.acquireLock(workspaceRoot);
+
+      // 2. Preload skill-writer locally
+      await this.preloadSkillWriter(workspaceRoot);
+
+      // 3. Generate suggested schema from local model / workspace scanner
+      schema = await schemaManager.generateSuggestedSchema(workspaceRoot, options?.allowLocalModel ?? true);
+
+      if (options?.autoResolve) {
+        // Save schema to .yaml
+        await schemaManager.saveSchema(workspaceRoot, schema);
+        // Clear/resolve lock
+        const resolvedLock = await this.resolveLock(workspaceRoot, {
+          resolvedBy: 'auto_schema_init',
+          docsSchematic: schema.codeDocsMapping,
+          suggestedSkills: ['skill-writer'],
+        });
+        return {
+          locked: false,
+          paused: false,
+          schema,
+          lockState: resolvedLock,
+          message: 'Workspace context and docs-schema.yaml initialized successfully. Lock cleared.',
+        };
+      } else {
+        // Report paused state rather than failing
+        return {
+          locked: true,
+          paused: true,
+          schema,
+          lockState,
+          message: 'Workspace lock active: docs-schema.yaml and repo context required. Call resolve_workspace_lock to confirm and continue.',
+        };
+      }
+    }
+
+    const currentLock = await this.getLockState(workspaceRoot);
+    const isCurrentlyLocked = Boolean(currentLock?.locked);
+    return {
+      locked: isCurrentlyLocked,
+      paused: isCurrentlyLocked,
+      schema,
+      lockState: currentLock || { locked: false, workspaceRoot },
+      message: isCurrentlyLocked ? 'Workspace is currently locked.' : 'Workspace context active.',
+    };
   }
 
   /**

@@ -71,4 +71,56 @@ Just some random text without frontmatter or contracts.
       expect(result.reminder).toContain('allowCloudFallback: true');
     }
   });
+
+  it('detects excessive line length, token footprint, and reference dump anti-patterns', () => {
+    const lines = [
+      '---',
+      'name: bloated-skill',
+      'description: Demonstrates bloated skill anti-pattern',
+      '---',
+      '# Bloated Skill',
+      '## When to Use\nUse for testing.',
+      '## Limitations\nNone.',
+      '## Output format\n1. Output',
+      ...Array(300).fill('Some verbose explanation line that takes up unnecessary space in context.'),
+      '## Deep Dives & References',
+      '- [Tool A](references/tool_a.md)',
+      '- [Tool B](references/tool_b.md)',
+    ];
+    const bloatedSkill = lines.join('\n');
+
+    const res = matchSkillWriterRules(bloatedSkill, [], { maxLines: 250 });
+    expect(res.compliant).toBe(false);
+    expect(res.excessiveLength).toBe(true);
+    expect(res.unstructuredReferenceDump).toBe(true);
+    expect(res.lineCount).toBeGreaterThan(300);
+    expect(res.tokenOptimization?.estimatedTokens).toBeGreaterThan(2000);
+    expect(res.tokenOptimization?.potentialSavingsTokens).toBeGreaterThan(500);
+    expect(res.driftSuggestions.some(s => s.includes('exceeds recommended budget'))).toBe(true);
+    expect(res.driftSuggestions.some(s => s.includes('Unstructured reference list'))).toBe(true);
+  });
+
+  it('identifies inline tool documentation duplication and provides token savings suggestions', () => {
+    const skillWithDuplication = `---
+name: duplicate-docs-skill
+description: Duplicates reference documentation inline
+---
+# Duplicate Docs Skill
+## When to Use
+Use when testing.
+## Limitations
+None.
+## Output format
+1. Output
+
+### cyber_tool
+${Array(20).fill('Parameter detail line explaining security actions in depth.').join('\n')}
+
+See [cyber_tool](references/cyber_tool.md).
+`;
+
+    const res = matchSkillWriterRules(skillWithDuplication, ['cyber_tool']);
+    expect(res.tokenOptimization?.suggestions.some(s => s.includes('cyber_tool'))).toBe(true);
+    expect(res.referencedFiles).toContain('cyber_tool.md');
+  });
 });

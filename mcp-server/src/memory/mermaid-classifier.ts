@@ -218,7 +218,7 @@ export function classifyDiagramIntent(text: string): { name: string; keyword: st
     return { name: 'Kanban', keyword: 'kanban', description: MERMAID_DIAGRAM_TYPES.Kanban.description };
   }
   // Default to Flowchart
-  return { name: 'Flowchart', keyword: 'flowchart', description: MERMAID_DIAGRAM_TYPES.Flowchart.description };
+  return { name: 'Flowchart', keyword: 'flowchart TD', description: MERMAID_DIAGRAM_TYPES.Flowchart.description };
 }
 
 export type DocAudience = 'public' | 'dev';
@@ -323,6 +323,9 @@ export function sanitizeMermaidCode(mermaidCode: string): string {
     if (!isHeaderParsed) {
       // Clean header line: remove trailing semicolons, colons, or punctuation
       let header = trimmed.replace(/[;:]+\s*$/, '').trim();
+      if (/^flowchart\s*$/i.test(header)) {
+        header = 'flowchart TD';
+      }
       if (/^(graph|flowchart)\b/i.test(header)) {
         isFlowchart = true;
       }

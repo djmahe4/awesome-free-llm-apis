@@ -8,6 +8,7 @@ import { extractMermaidBlocks, classifyDiagramIntent, sanitizeMermaidCode, MERMA
 import { auditAndPromoteSafePractices, type SafePracticesAuditResult } from './safe-practices.js';
 import { LocalModelLock } from '../utils/local-model-lock.js';
 import { extractDynamicWorkspaceContext } from './workspace-context.js';
+import { DocsSchemaManager, type SchemaAuditResult } from './docs-schema-manager.js';
 
 export interface FileAuditCorrection {
   nodeId?: string;
@@ -93,8 +94,10 @@ export interface DocAuditReport {
     brokenSymbolReferences: Array<{ filePath: string; symbol: string; line: number }>;
     missingArchitectureDocs: Array<{ module: string; suggestedDiagram: string }>;
     skillDrift?: Array<{ skillFile: string; brokenSymbol: string; reason: string }>;
+    schemaViolations?: Array<{ codePath: string; docPath: string; type: string; reason: string }>;
   };
   suggestedActions: Array<{ action: string; reason: string; payload?: any }>;
+  schemaAudit?: SchemaAuditResult;
   safePractices?: SafePracticesAuditResult;
   hypothesis?: {
     summary: string;
@@ -445,6 +448,26 @@ export class MemoryAuditor {
       console.warn('[memory-auditor] Failed to audit and promote safe practices:', (err as Error)?.message || err);
     }
 
+    // 4. Cross-reference against recorded code-to-docs schema if present
+    try {
+      const schemaManager = DocsSchemaManager.getInstance();
+      const schemaRes = await schemaManager.auditAgainstSchema(workspace_root);
+      if (schemaRes.schemaFound) {
+        report.schemaAudit = schemaRes;
+        if (schemaRes.violations.length > 0) {
+          report.docDrift.schemaViolations = schemaRes.violations.map(v => ({
+            codePath: v.codePath,
+            docPath: v.docPath,
+            type: v.type,
+            reason: v.reason,
+          }));
+          report.suggestedActions.push(...schemaRes.suggestedFixes);
+        }
+      }
+    } catch (err) {
+      console.warn('[memory-auditor] Failed to audit against docs-schema.yaml:', (err as Error)?.message || err);
+    }
+
     if (hypothesize && report.docDrift.missingArchitectureDocs.length > 0) {
       let llmEdits: Array<{ filePath: string; content: string }> | null = null;
       let hypothesisSummary = `Identified ${report.docDrift.missingArchitectureDocs.length} documentation modules missing architectural diagrams.`;
@@ -453,14 +476,15 @@ export class MemoryAuditor {
       try {
         const { useFreeLLM } = await import('../tools/use-free-llm.js');
 
-        // Extract real content snippets from the audited documents to ground the diagram synthesis in actual repository context
+        // Extract real content snippets from all audited documents to ground the diagram synthesis in actual repository context
+        const candidateDocs = report.docDrift.missingArchitectureDocs;
         const docContexts = await Promise.all(
-          report.docDrift.missingArchitectureDocs.slice(0, 3).map(async (d) => {
+          candidateDocs.map(async (d) => {
             let snippet = '';
             try {
               const full = path.isAbsolute(d.module) ? d.module : path.join(workspace_root, d.module);
               const raw = await fs.readFile(full, 'utf-8');
-              snippet = raw.slice(0, 1000).replace(/\r\n/g, '\n');
+              snippet = raw.slice(0, 3500).replace(/\r\n/g, '\n');
             } catch {}
             return {
               filePath: d.module,
@@ -525,10 +549,14 @@ Reply with ONLY a JSON object:
       report.hypothesis = {
         summary: hypothesisSummary,
         confidence,
-        suggestedEdits: llmEdits || report.docDrift.missingArchitectureDocs.map(d => ({
-          filePath: d.module,
-          content: `\`\`\`mermaid\n${classifyDiagramIntent(d.module).keyword}\n  %% Suggested diagram for ${d.module}\n\`\`\``,
-        })),
+        suggestedEdits: llmEdits || report.docDrift.missingArchitectureDocs.map(d => {
+          const intent = classifyDiagramIntent(d.module);
+          const kw = intent.keyword.startsWith('flowchart') && !intent.keyword.includes(' ') ? `${intent.keyword} TD` : intent.keyword;
+          return {
+            filePath: d.module,
+            content: `\`\`\`mermaid\n${kw}\n  %% Suggested diagram for ${d.module}\n\`\`\``,
+          };
+        }),
       };
     }
 
@@ -612,42 +640,41 @@ Reply with ONLY a JSON object:
       } catch {}
     }
 
-    if (llmPatched) {
-      return {
-        success: true,
-        remediationType: 'llm_synthesis',
-        patchedContent: llmPatched,
-        localModelUsed: usedLocal,
-      };
-    }
-
-    // Deterministic fallback remediation via template
-    let patched = skillContent;
+    // Post-process patched content: ensure all mandatory sections are present
+    let patched = llmPatched || skillContent;
     if (!patched.startsWith('---')) {
       patched = `---\nname: agent-skill\ndescription: Remediated agent skill for ${driftReason}.\n---\n${patched}`;
     }
-    if (!/##\s*When to Use/i.test(patched)) {
+    if (!/#+\s*[^a-zA-Z\n]*\bWhen to Use\b/i.test(patched)) {
       patched += '\n\n## When to Use\nUse when performing related workspace tasks.';
     }
-    if (!/##\s*Limitations/i.test(patched)) {
-      patched += '\n\n## Limitations\nSee documentation for boundaries.';
+    if (!/#+\s*[^a-zA-Z\n]*\bLimitations\b/i.test(patched)) {
+      patched += '\n\n## Limitations\nSee documentation for operational boundaries and rate limits.';
     }
-    if (!/##\s*Output format/i.test(patched)) {
-      patched += '\n\n## Output format\n1. Summary\n2. Changes Made\n3. Validation Results\n4. Open Gaps\n';
+    if (!/#+\s*[^a-zA-Z\n]*\bOutput format\b/i.test(patched)) {
+      patched += '\n\n## Output format contract\n1. Summary\n2. Changes Made\n3. Validation Results\n4. Open Gaps\n';
     }
 
-    const reminder = !localReady
+    const reminder = !localReady && !llmPatched
       ? 'Notice: Local model not detected or busy. For LLM synthesis, call manage_memory action:"audit_documentation" with hypothesize: true and allowCloudFallback: true.'
       : undefined;
 
     return {
       success: true,
-      remediationType: 'deterministic_template',
+      remediationType: llmPatched ? 'llm_synthesis' : 'deterministic_template',
       patchedContent: patched,
-      localModelUsed: false,
+      localModelUsed: usedLocal,
       reminder,
     };
   }
+}
+
+export interface TokenOptimizationReport {
+  estimatedTokens: number;
+  recommendedBudgetTokens: number;
+  potentialSavingsTokens: number;
+  savingsPercentage: number;
+  suggestions: string[];
 }
 
 export interface SkillWriterRuleMatch {
@@ -655,16 +682,33 @@ export interface SkillWriterRuleMatch {
   missingSections: string[];
   missingKeywords: string[];
   driftSuggestions: string[];
+  lineCount?: number;
+  excessiveLength?: boolean;
+  unstructuredReferenceDump?: boolean;
+  referencedFiles?: string[];
+  unreferencedFiles?: string[];
+  tokenOptimization?: TokenOptimizationReport;
 }
 
 /**
  * Deterministically checks skill files against skill-writer specifications
  * without invoking any LLM, ensuring zero-latency structural checking.
+ * Enforces frontmatter, required sections, trigger coverage, line count budgets (<250 lines),
+ * progressive disclosure reference structures, and token optimization recommendations.
  */
-export function matchSkillWriterRules(skillContent: string, availableTools: string[] = []): SkillWriterRuleMatch {
+export function matchSkillWriterRules(
+  skillContent: string,
+  availableTools: string[] = [],
+  options?: { maxLines?: number; knownReferenceFiles?: string[] }
+): SkillWriterRuleMatch {
   const missingSections: string[] = [];
   const missingKeywords: string[] = [];
   const driftSuggestions: string[] = [];
+  const tokenSuggestions: string[] = [];
+
+  const maxLines = options?.maxLines ?? 250;
+  const lineCount = skillContent.split('\n').length;
+  const excessiveLength = lineCount > maxLines;
 
   // 1. YAML frontmatter check
   const hasFrontmatter = /^---\s*\n([\s\S]*?)\n---/m.test(skillContent);
@@ -681,14 +725,14 @@ export function matchSkillWriterRules(skillContent: string, availableTools: stri
     }
   }
 
-  // 2. Required structural sections
-  if (!/##\s*When to Use/i.test(skillContent)) {
+  // 2. Required structural sections (allows optional emojis/badges)
+  if (!/#+\s*[^a-zA-Z\n]*\bWhen to Use\b/i.test(skillContent)) {
     missingSections.push('## When to Use');
   }
-  if (!/##\s*Limitations/i.test(skillContent)) {
+  if (!/#+\s*[^a-zA-Z\n]*\bLimitations\b/i.test(skillContent)) {
     missingSections.push('## Limitations');
   }
-  if (!/##\s*Output format/i.test(skillContent)) {
+  if (!/#+\s*[^a-zA-Z\n]*\bOutput format\b/i.test(skillContent)) {
     missingSections.push('Output format contract');
   }
 
@@ -700,15 +744,91 @@ export function matchSkillWriterRules(skillContent: string, availableTools: stri
     }
   }
 
+  // 4. Excessive line budget check (Agent Skills Design Principles)
+  if (excessiveLength) {
+    driftSuggestions.push(
+      `Skill length (${lineCount} lines) exceeds recommended budget of ${maxLines} lines. Decompose monolithic sections into modular references under references/ to avoid context window bloat and generation failure.`
+    );
+  }
+
+  // 5. References & Progressive Disclosure Analysis
+  const referencedFiles = Array.from(
+    new Set(Array.from(skillContent.matchAll(/references\/([a-zA-Z0-9_.-]+\.md)/gi)).map(m => m[1]))
+  );
+
+  // Check for unstructured reference link dump at end of file
+  const hasRefLinkDump = /(?:##\s*[^a-zA-Z\n]*(?:References|Per-Tool Reference|Deep Dives)[\s\S]*?)(?:-\s*\[.*?\]\(references\/[^\)]+\)[\s\S]*)$/i.test(skillContent);
+  const hasActionableRefTable = /\|[^\n]+\|[^\n]+\|[\s\S]*?references\//i.test(skillContent);
+  const unstructuredReferenceDump = hasRefLinkDump && !hasActionableRefTable;
+  if (unstructuredReferenceDump) {
+    driftSuggestions.push(
+      'Unstructured reference list detected at end of file. Replace flat link lists with an actionable progressive disclosure table (| Task / Capability | Reference Path |).'
+    );
+    tokenSuggestions.push(
+      'Replace end-of-file link dump with an actionable progressive disclosure navigation matrix to allow targeted reference loading.'
+    );
+  }
+
+  // Check for inline tool documentation duplication against referenced files
+  for (const ref of referencedFiles) {
+    const toolBase = ref.replace(/\.md$/, '');
+    const toolSectionRegex = new RegExp(`###\\s*\`?${toolBase}\`?[\\s\\S]*?(?=\\n###|\\n##|$)`, 'i');
+    const match = skillContent.match(toolSectionRegex);
+    if (match && match[0].split('\n').length > 15) {
+      tokenSuggestions.push(
+        `Tool "${toolBase}" has verbose inline documentation (${match[0].split('\n').length} lines) in SKILL.md while references/${ref} exists. Delegate detailed parameters to references/${ref}.`
+      );
+    }
+  }
+
+  // Check for orphaned/unreferenced reference files in workspace if provided
+  let unreferencedFiles: string[] | undefined;
+  if (options?.knownReferenceFiles && options.knownReferenceFiles.length > 0) {
+    unreferencedFiles = options.knownReferenceFiles.filter(f => !referencedFiles.includes(path.basename(f)));
+    if (unreferencedFiles.length > 0) {
+      driftSuggestions.push(
+        `Found ${unreferencedFiles.length} unreferenced documentation file(s) in references/: ${unreferencedFiles.slice(0, 5).join(', ')}. Link them in navigation tables or archive.`
+      );
+    }
+  }
+
+  // 6. Token Footprint & Optimization Budgeting
+  const estimatedTokens = Math.round(skillContent.length / 3.8);
+  const recommendedBudgetTokens = 1200;
+  const potentialSavingsTokens = Math.max(0, estimatedTokens - recommendedBudgetTokens);
+  const savingsPercentage = Math.round((potentialSavingsTokens / Math.max(1, estimatedTokens)) * 100);
+
+  if (estimatedTokens > 2000) {
+    tokenSuggestions.push(
+      `Estimated token footprint (~${estimatedTokens} tokens) is high for a base skill prompt. Target ~${recommendedBudgetTokens} tokens to save up to ${potentialSavingsTokens} tokens (~${savingsPercentage}%) per turn.`
+    );
+  }
+
+  const tokenOptimization: TokenOptimizationReport = {
+    estimatedTokens,
+    recommendedBudgetTokens,
+    potentialSavingsTokens,
+    savingsPercentage,
+    suggestions: tokenSuggestions,
+  };
+
   if (missingSections.length > 0) {
     driftSuggestions.push(`Align sections with skill-writer specification: missing ${missingSections.join(', ')}.`);
   }
 
+  const compliant = missingSections.length === 0 && !excessiveLength && !unstructuredReferenceDump;
+
   return {
-    compliant: missingSections.length === 0,
+    compliant,
     missingSections,
     missingKeywords,
     driftSuggestions,
+    lineCount,
+    excessiveLength,
+    unstructuredReferenceDump,
+    referencedFiles,
+    unreferencedFiles,
+    tokenOptimization,
   };
 }
 
