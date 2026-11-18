@@ -166,11 +166,11 @@ export function identifyDiagramType(block: string): { name: string; keyword: str
  */
 export function classifyDiagramIntent(text: string): { name: string; keyword: string; description: string } {
   const lower = text.toLowerCase();
-  if (lower.includes('state') || lower.includes('lifecycle') || lower.includes('fsm') || lower.includes('transition')) {
-    return { name: 'State Diagram', keyword: 'stateDiagram-v2', description: MERMAID_DIAGRAM_TYPES['State Diagram'].description };
-  }
   if (lower.includes('sequence') || lower.includes('handshake') || lower.includes('oauth') || lower.includes('rpc') || lower.includes('api call')) {
     return { name: 'Sequence Diagram', keyword: 'sequenceDiagram', description: MERMAID_DIAGRAM_TYPES['Sequence Diagram'].description };
+  }
+  if (lower.includes('state') || lower.includes('fsm') || lower.includes('transition') || (lower.includes('lifecycle') && !lower.includes('api'))) {
+    return { name: 'State Diagram', keyword: 'stateDiagram-v2', description: MERMAID_DIAGRAM_TYPES['State Diagram'].description };
   }
   if (lower.includes('class') || lower.includes('inherit') || lower.includes('oop') || lower.includes('interface')) {
     return { name: 'Class Diagram', keyword: 'classDiagram', description: MERMAID_DIAGRAM_TYPES['Class Diagram'].description };
@@ -302,7 +302,7 @@ export function generateDocSchematic(filePath: string, content: string): DocSche
   const missingDiagrams: Array<{ name: string; keyword: string; reason: string }> = [];
 
   // Check if doc mentions architectures, protocols, or lifecycles but has no matching diagrams
-  const discussesArchitecture = /(architecture|lifecycle|workflow|routing|pipeline|protocol|handshake|state machine)/i.test(content);
+  const discussesArchitecture = /(architecture|lifecycle|workflow|routing|pipeline|protocol|handshake|state machine|schema|database|table|roadmap|schedule|journey|onboarding|network|packet|benchmark|latency|metric|prioritization|incident|postmortem|kanban|sprint)/i.test(content);
   if (discussesArchitecture && existingDiagrams.length === 0) {
     const suggested = classifyDiagramIntent(content);
     missingDiagrams.push({

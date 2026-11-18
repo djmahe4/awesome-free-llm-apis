@@ -49,7 +49,7 @@ describe('manage_memory: resolve_workspace_lock', () => {
     // Verify local model advisory is returned when local models are offline/unconfigured
     expect(res.localModelStatus).toBeDefined();
     if (!res.localModelStatus.ready) {
-      expect(res.reminder).toContain('allowCloudFallback: true');
+      expect(res.reminder).toContain('manage_memory');
     }
 
     // Verify workspace is actually unlocked in lock manager

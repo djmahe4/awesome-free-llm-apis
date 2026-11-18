@@ -444,10 +444,56 @@ export class MemoryAuditor {
     }
 
     if (hypothesize && report.docDrift.missingArchitectureDocs.length > 0) {
+      let llmEdits: Array<{ filePath: string; content: string }> | null = null;
+      let hypothesisSummary = `Identified ${report.docDrift.missingArchitectureDocs.length} documentation modules missing architectural diagrams.`;
+      let confidence = 0.85;
+
+      try {
+        const { useFreeLLM } = await import('../tools/use-free-llm.js');
+        const prompt = `You are a software architecture documentation specialist.
+Review these documentation modules missing architectural diagrams:
+${JSON.stringify(report.docDrift.missingArchitectureDocs, null, 2)}
+
+For each module, generate a concise, valid Mermaid diagram corresponding to its suggested diagram type.
+Reply with ONLY a JSON object:
+{
+  "summary": string,
+  "confidence": number,
+  "diagrams": [
+    { "filePath": string, "mermaidCode": string }
+  ]
+}`;
+
+        const res = await useFreeLLM({
+          messages: [
+            { role: 'system', content: 'You are an expert architecture documentation generator. Output ONLY JSON.' },
+            { role: 'user', content: prompt }
+          ],
+          isOnePass: true,
+          offline_only: true,
+        });
+
+        const raw = res?.choices?.[0]?.message?.content || (res as any)?.content || '';
+        const match = String(raw).match(/\{[\s\S]*\}/);
+        if (match) {
+          const parsed = JSON.parse(match[0]);
+          if (Array.isArray(parsed.diagrams) && parsed.diagrams.length > 0) {
+            llmEdits = parsed.diagrams.map((d: any) => ({
+              filePath: d.filePath,
+              content: String(d.mermaidCode).includes('```mermaid')
+                ? d.mermaidCode
+                : `\`\`\`mermaid\n${String(d.mermaidCode).trim()}\n\`\`\``,
+            }));
+            hypothesisSummary = parsed.summary || hypothesisSummary;
+            confidence = typeof parsed.confidence === 'number' ? parsed.confidence : confidence;
+          }
+        }
+      } catch {}
+
       report.hypothesis = {
-        summary: `Identified ${report.docDrift.missingArchitectureDocs.length} documentation modules missing architectural diagrams.`,
-        confidence: 0.85,
-        suggestedEdits: report.docDrift.missingArchitectureDocs.map(d => ({
+        summary: hypothesisSummary,
+        confidence,
+        suggestedEdits: llmEdits || report.docDrift.missingArchitectureDocs.map(d => ({
           filePath: d.module,
           content: `\`\`\`mermaid\n${classifyDiagramIntent(d.module).keyword}\n  %% Suggested diagram for ${d.module}\n\`\`\``,
         })),
@@ -491,51 +537,73 @@ export class MemoryAuditor {
       }
     }
 
+    let llmPatched: string | null = null;
+    let usedLocal = false;
+
+    // Try local model first if ready
     if (localReady) {
       try {
-        const { executeSkill } = await import('../tools/execute-skill.js');
-        const res = await executeSkill({
-          skill: 'skill-writer',
-          input: `Improve this skill to resolve drift: ${driftReason}\n\nContent:\n${skillContent}`,
-          workspace_root: workspaceRoot,
+        const { useFreeLLM } = await import('../tools/use-free-llm.js');
+        const res = await useFreeLLM({
+          messages: [
+            { role: 'system', content: 'You are an expert agent skill author adhering to the Agent Skills specification. Output ONLY the remediated markdown file.' },
+            { role: 'user', content: `Improve this agent skill to resolve drift: ${driftReason}\n\nExisting Content:\n${skillContent}` }
+          ],
+          isOnePass: true,
+          offline_only: true,
         });
 
-        if (res.success && (res.content || res.response)) {
-          return {
-            success: true,
-            remediationType: 'llm_synthesis',
-            patchedContent: res.content || res.response || skillContent,
-            localModelUsed: true,
-          };
-        }
-      } catch {}
-    } else if (allowCloudFallback) {
-      try {
-        const { executeSkill } = await import('../tools/execute-skill.js');
-        const res = await executeSkill({
-          skill: 'skill-writer',
-          input: `Improve this skill to resolve drift: ${driftReason}\n\nContent:\n${skillContent}`,
-          workspace_root: workspaceRoot,
-        });
-
-        if (res.success && (res.content || res.response)) {
-          return {
-            success: true,
-            remediationType: 'llm_synthesis',
-            patchedContent: res.content || res.response || skillContent,
-            localModelUsed: false,
-          };
+        const raw = res?.choices?.[0]?.message?.content || (res as any)?.content || '';
+        if (raw && raw.length > 20) {
+          llmPatched = raw;
+          usedLocal = true;
         }
       } catch {}
     }
 
+    // Fall back to cloud model if local failed or was unready, and allowCloudFallback is true
+    if (!llmPatched && allowCloudFallback) {
+      try {
+        const { executeSkill } = await import('../tools/execute-skill.js');
+        const res = await executeSkill({
+          skill: 'skill-writer',
+          input: `Improve this skill to resolve drift: ${driftReason}\n\nContent:\n${skillContent}`,
+          workspace_root: workspaceRoot,
+        });
+
+        if (res.success && (res.content || res.response)) {
+          llmPatched = res.content || res.response || null;
+          usedLocal = false;
+        }
+      } catch {}
+    }
+
+    if (llmPatched) {
+      return {
+        success: true,
+        remediationType: 'llm_synthesis',
+        patchedContent: llmPatched,
+        localModelUsed: usedLocal,
+      };
+    }
+
     // Deterministic fallback remediation via template
-    const patched = skillContent.startsWith('---')
-      ? skillContent
-      : `---\nname: agent-skill\ndescription: Remediated agent skill for ${driftReason}.\n---\n${skillContent}\n\n## When to Use\nUse when performing related workspace tasks.\n\n## Limitations\nSee documentation for boundaries.\n\n## Output format\n1. Summary\n2. Changes Made\n3. Validation Results\n4. Open Gaps\n`;
+    let patched = skillContent;
+    if (!patched.startsWith('---')) {
+      patched = `---\nname: agent-skill\ndescription: Remediated agent skill for ${driftReason}.\n---\n${patched}`;
+    }
+    if (!/##\s*When to Use/i.test(patched)) {
+      patched += '\n\n## When to Use\nUse when performing related workspace tasks.';
+    }
+    if (!/##\s*Limitations/i.test(patched)) {
+      patched += '\n\n## Limitations\nSee documentation for boundaries.';
+    }
+    if (!/##\s*Output format/i.test(patched)) {
+      patched += '\n\n## Output format\n1. Summary\n2. Changes Made\n3. Validation Results\n4. Open Gaps\n';
+    }
 
     const reminder = !localReady
-      ? 'Notice: Local model not detected or busy. Call again with allowCloudFallback: true to run LLM synthesis.'
+      ? 'Notice: Local model not detected or busy. For LLM synthesis, call manage_memory action:"audit_documentation" with hypothesize: true and allowCloudFallback: true.'
       : undefined;
 
     return {

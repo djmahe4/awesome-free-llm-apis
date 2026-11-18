@@ -440,7 +440,7 @@ export async function manageMemory(input: ManageMemoryInput) {
             };
 
             const reminder = !localModelReady
-                ? 'Notice: Local model not detected or currently busy with concurrent tasks. Call again with allowCloudFallback: true to invoke LLM synthesis.'
+                ? 'Notice: Local model not detected or currently busy with concurrent tasks. For LLM-assisted audit or remediation, run manage_memory with action:"audit_documentation" or "audit_file" with hypothesize:true.'
                 : undefined;
 
             return {
